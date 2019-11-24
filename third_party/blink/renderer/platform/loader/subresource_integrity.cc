@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <fstream>
+#include <iostream>
+
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 
 #include "base/stl_util.h"
 #include "third_party/blink/public/platform/web_crypto.h"
@@ -19,6 +24,26 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/boringssl/src/include/openssl/curve25519.h"
+
+#include "third_party/blink/renderer/platform/loader/fetch/console_logger.h"
+#include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/platform/web_content_settings_client.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/core/loader/previews_resource_loading_hints.h"
+#include "third_party/blink/renderer/core/loader/private/frame_client_hints_preferences_context.h"
+#include "third_party/blink/renderer/core/loader/subresource_filter.h"
+#include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
+#include "third_party/blink/renderer/platform/loader/cors/cors.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
+#include "third_party/blink/renderer/platform/weborigin/security_policy.h"
+#include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 
 namespace blink {
 
@@ -61,9 +86,15 @@ void SubresourceIntegrity::ReportInfo::AddConsoleErrorMessage(
   console_error_messages_.push_back(message);
 }
 
+void SubresourceIntegrity::ReportInfo::AddConsoleInfoMessage(
+    const String& message) {
+  console_info_messages_.push_back(message);
+}
+
 void SubresourceIntegrity::ReportInfo::Clear() {
   use_counts_.clear();
   console_error_messages_.clear();
+  console_info_messages_.clear();
 }
 
 bool SubresourceIntegrity::CheckSubresourceIntegrity(
@@ -78,11 +109,9 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(
             network::mojom::FetchResponseType::kError);
   if (!resource.GetResponse().IsCorsSameOrigin()) {
     report_info.AddConsoleErrorMessage(
-        "Subresource Integrity: The resource '" + resource_url.ElidedString() +
-        "' has an integrity attribute, but the resource "
-        "requires the request to be CORS enabled to check "
-        "the integrity, and it is not. The resource has been "
-        "blocked because the integrity cannot be enforced.");
+        "{\"url\": \"" + resource_url.ElidedString() +"\", \"origin\": \"integrity cors error\", \"error\": \"Subresource Integrity: The resource " + resource_url.ElidedString() + " " +
+        "has an integrity attribute, but the resource requires the request to be CORS enabled to check the integrity, " +
+        "and it is not. The resource has been blocked because the integrity cannot be enforced.\"}");
     report_info.AddUseCount(ReportInfo::UseCounterFeature::
                                 kSRIElementIntegrityAttributeButIneligible);
     return false;
@@ -100,15 +129,18 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(
     size_t size,
     const KURL& resource_url,
     ReportInfo& report_info) {
-  if (integrity_metadata.IsEmpty())
+
+  if (integrity_metadata.IsEmpty()){
     return true;
+  }
 
   IntegrityMetadataSet metadata_set;
   IntegrityParseResult integrity_parse_result = ParseIntegrityAttribute(
       integrity_metadata, features, metadata_set, &report_info);
-  if (integrity_parse_result != kIntegrityParseValidResult)
+  if (integrity_parse_result != kIntegrityParseValidResult){
     return true;
-  // TODO(vogelheim): crbug.com/753349, figure out how deal with Ed25519
+  }
+  // TODO(vogelheim): lo, figure out how deal with Ed25519
   //                  checking here.
   String integrity_header;
   return CheckSubresourceIntegrityImpl(
@@ -116,80 +148,89 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(
 }
 
 bool SubresourceIntegrity::CheckSubresourceIntegrityImpl(
-    const IntegrityMetadataSet& metadata_set,
-    const char* content,
-    size_t size,
-    const KURL& resource_url,
-    const String integrity_header,
-    ReportInfo& report_info) {
-  if (!metadata_set.size())
-    return true;
+        const IntegrityMetadataSet &metadata_set,
+        const char *content,
+        size_t size,
+        const KURL &resource_url,
+        const String integrity_header,
+        ReportInfo &report_info) {
 
-  // Check any of the "strongest" integrity constraints.
-  IntegrityAlgorithm max_algorithm = FindBestAlgorithm(metadata_set);
-  CheckFunction checker = GetCheckFunctionForAlgorithm(max_algorithm);
-  bool report_ed25519 = max_algorithm == IntegrityAlgorithm::kEd25519;
-  if (report_ed25519) {
-    report_info.AddUseCount(ReportInfo::UseCounterFeature::kSRISignatureCheck);
-  }
-  for (const IntegrityMetadata& metadata : metadata_set) {
-    if (metadata.Algorithm() == max_algorithm &&
-        (*checker)(metadata, content, size, integrity_header)) {
-      report_info.AddUseCount(ReportInfo::UseCounterFeature::
-                                  kSRIElementWithMatchingIntegrityAttribute);
-      if (report_ed25519) {
-        report_info.AddUseCount(
-            ReportInfo::UseCounterFeature::kSRISignatureSuccess);
-      }
-      return true;
+	report_info.AddConsoleInfoMessage(
+			"{\"url\": \"" + resource_url.ElidedString() + "\", \"origin\": \"integrity check\"}");
+
+    if (!metadata_set.size()){
+        return true;
     }
-  }
 
-  // If we arrive here, none of the "strongest" constaints have validated
-  // the data we received. Report this fact.
-  DigestValue digest;
-  if (ComputeDigest(kHashAlgorithmSha256, content, size, digest)) {
-    // This message exposes the digest of the resource to the console.
-    // Because this is only to the console, that's okay for now, but we
-    // need to be very careful not to expose this in exceptions or
-    // JavaScript, otherwise it risks exposing information about the
-    // resource cross-origin.
-    report_info.AddConsoleErrorMessage(
-        "Failed to find a valid digest in the 'integrity' attribute for "
-        "resource '" +
-        resource_url.ElidedString() + "' with computed SHA-256 integrity '" +
-        Base64Encode(digest) + "'. The resource has been blocked.");
-  } else {
-    report_info.AddConsoleErrorMessage(
-        "There was an error computing an integrity value for resource '" +
-        resource_url.ElidedString() + "'. The resource has been blocked.");
-  }
-  report_info.AddUseCount(ReportInfo::UseCounterFeature::
-                              kSRIElementWithNonMatchingIntegrityAttribute);
-  return false;
+    // Check any of the "strongest" integrity constraints.
+    IntegrityAlgorithm max_algorithm = FindBestAlgorithm(metadata_set);
+    CheckFunction checker = GetCheckFunctionForAlgorithm(max_algorithm);
+    bool report_ed25519 = max_algorithm == IntegrityAlgorithm::kEd25519;
+    if (report_ed25519) {
+        report_info.AddUseCount(ReportInfo::UseCounterFeature::kSRISignatureCheck);
+    }
+    for (const IntegrityMetadata &metadata : metadata_set) {
+        if (metadata.Algorithm() == max_algorithm &&
+            (*checker)(metadata, content, size, integrity_header)) {
+            report_info.AddUseCount(ReportInfo::UseCounterFeature::
+                                    kSRIElementWithMatchingIntegrityAttribute);
+            if (report_ed25519) {
+                report_info.AddUseCount(
+                        ReportInfo::UseCounterFeature::kSRISignatureSuccess);
+            }
+			report_info.AddConsoleInfoMessage(
+					"{\"url\": \"" + resource_url.ElidedString() +
+					"\", \"origin\": \"integrity success\"}");
+            return true;
+        }
+    }
+
+    // If we arrive here, none of the "strongest" constaints have validated
+    // the data we received. Report this fact.
+    DigestValue digest;
+    if (ComputeDigest(kHashAlgorithmSha256, content, size, digest)) {
+        // This message exposes the digest of the resource to the console.
+        // Because this is only to the console, that's okay for now, but we
+        // need to be very careful not to expose this in exceptions or
+        // JavaScript, otherwise it risks exposing information about the
+        // resource cross-origin.
+        report_info.AddConsoleErrorMessage(
+                "{\"origin\": \"integrity error\", \"url\": \"" + resource_url.ElidedString() + "\", \"digest\": \"" +
+                Base64Encode(digest) + "\", \"error\": \"Failed to find a valid digest in the integrity attribute for " +
+                "resource '" + resource_url.ElidedString() + "' with computed SHA-256 integrity '" +
+                Base64Encode(digest) + "'. The resource has been blocked.\"}");
+    } else {
+        report_info.AddConsoleErrorMessage(
+                "{\"origin\": \"integrity error\", \"url\": \"" + resource_url.ElidedString() + "\", \"digest\": \"" +
+                Base64Encode(digest) + "\", \"error\": \"There was an error computing an integrity value for resource " +
+                resource_url.ElidedString() + ". The resource has been blocked.\"}");
+    }
+    report_info.AddUseCount(ReportInfo::UseCounterFeature::
+                            kSRIElementWithNonMatchingIntegrityAttribute);
+    return false;
 }
 
 IntegrityAlgorithm SubresourceIntegrity::FindBestAlgorithm(
-    const IntegrityMetadataSet& metadata_set) {
-  // Find the "strongest" algorithm in the set. (This relies on
-  // IntegrityAlgorithm declaration order matching the "strongest" order, so
-  // make the compiler check this assumption first.)
-  static_assert(IntegrityAlgorithm::kSha256 < IntegrityAlgorithm::kSha384 &&
-                    IntegrityAlgorithm::kSha384 < IntegrityAlgorithm::kSha512 &&
-                    IntegrityAlgorithm::kSha512 < IntegrityAlgorithm::kEd25519,
-                "IntegrityAlgorithm enum order should match the priority "
-                "of the integrity algorithms.");
+        const IntegrityMetadataSet &metadata_set) {
+    // Find the "strongest" algorithm in the set. (This relies on
+    // IntegrityAlgorithm declaration order matching the "strongest" order, so
+    // make the compiler check this assumption first.)
+    static_assert(IntegrityAlgorithm::kSha256 < IntegrityAlgorithm::kSha384 &&
+                  IntegrityAlgorithm::kSha384 < IntegrityAlgorithm::kSha512 &&
+                  IntegrityAlgorithm::kSha512 < IntegrityAlgorithm::kEd25519,
+                  "IntegrityAlgorithm enum order should match the priority "
+                  "of the integrity algorithms.");
 
-  // metadata_set is non-empty, so we are guaranteed to always have a result.
-  // This is effectively an implemenation of std::max_element (C++17).
-  DCHECK(!metadata_set.IsEmpty());
-  auto iter = metadata_set.begin();
-  IntegrityAlgorithm max_algorithm = iter->second;
-  ++iter;
-  for (; iter != metadata_set.end(); ++iter) {
-    max_algorithm = std::max(iter->second, max_algorithm);
-  }
-  return max_algorithm;
+    // metadata_set is non-empty, so we are guaranteed to always have a result.
+    // This is effectively an implemenation of std::max_element (C++17).
+    DCHECK(!metadata_set.IsEmpty());
+    auto iter = metadata_set.begin();
+    IntegrityAlgorithm max_algorithm = iter->second;
+    ++iter;
+    for (; iter != metadata_set.end(); ++iter) {
+        max_algorithm = std::max(iter->second, max_algorithm);
+    }
+    return max_algorithm;
 }
 
 SubresourceIntegrity::CheckFunction
@@ -435,9 +476,9 @@ SubresourceIntegrity::ParseIntegrityAttribute(
       SkipUntil<UChar, IsASCIISpace>(position, end);
       if (report_info) {
         report_info->AddConsoleErrorMessage(
-            "Error parsing 'integrity' attribute ('" + attribute +
+            "{\"error\": \"integrity error wrong algorithm\", \"error\": \"Error parsing 'integrity' attribute ('" + attribute +
             "'). The specified hash algorithm must be one of "
-            "'sha256', 'sha384', or 'sha512'.");
+            "'sha256', 'sha384', or 'sha512'.\"}");
         report_info->AddUseCount(
             ReportInfo::UseCounterFeature::
                 kSRIElementWithUnparsableIntegrityAttribute);
@@ -450,10 +491,10 @@ SubresourceIntegrity::ParseIntegrityAttribute(
       SkipUntil<UChar, IsASCIISpace>(position, end);
       if (report_info) {
         report_info->AddConsoleErrorMessage(
-            "Error parsing 'integrity' attribute ('" + attribute +
+            "{\"origin\": \"integrity error wrong algorithm\", \"error\": \"Error parsing 'integrity' attribute ('" + attribute +
             "'). The hash algorithm must be one of 'sha256', "
             "'sha384', or 'sha512', followed by a '-' "
-            "character.");
+            "character.\"}");
         report_info->AddUseCount(
             ReportInfo::UseCounterFeature::
                 kSRIElementWithUnparsableIntegrityAttribute);
@@ -468,8 +509,8 @@ SubresourceIntegrity::ParseIntegrityAttribute(
       SkipUntil<UChar, IsASCIISpace>(position, end);
       if (report_info) {
         report_info->AddConsoleErrorMessage(
-            "Error parsing 'integrity' attribute ('" + attribute +
-            "'). The digest must be a valid, base64-encoded value.");
+            "{\"origin\": \"integrity attribute content not valid\", \"error\": \"Error parsing integrity attribute '" + attribute +
+            "'. The digest must be a valid, base64-encoded value.\"}");
         report_info->AddUseCount(
             ReportInfo::UseCounterFeature::
                 kSRIElementWithUnparsableIntegrityAttribute);
@@ -486,8 +527,8 @@ SubresourceIntegrity::ParseIntegrityAttribute(
       SkipWhile<UChar, IsValueCharacter>(position, end);
       if (begin != position && report_info) {
         report_info->AddConsoleErrorMessage(
-            "Ignoring unrecogized 'integrity' attribute option '" +
-            String(begin, static_cast<wtf_size_t>(position - begin)) + "'.");
+                "{\"origin\": \"integrity attribute content not valid\", \"error\": \"Ignoring unrecogized integrity"
+                " attribute option '" + String(begin, static_cast<wtf_size_t>(position - begin)) + "'.\"}");
       }
     }
 

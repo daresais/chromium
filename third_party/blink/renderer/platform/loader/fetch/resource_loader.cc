@@ -1114,7 +1114,7 @@ void ResourceLoader::DidFinishLoadingFirstPartInMultipart() {
 
   fetcher_->HandleLoaderFinish(resource_.Get(), base::TimeTicks(),
                                ResourceFetcher::kDidFinishFirstPartInMultipart,
-                               0, false, {});
+                               0, false, {}, fetcher_->GetConsoleLogger());
 }
 
 void ResourceLoader::DidFinishLoading(
@@ -1160,7 +1160,7 @@ void ResourceLoader::DidFinishLoading(
   fetcher_->HandleLoaderFinish(
       resource_.Get(), response_end, ResourceFetcher::kDidFinishLoading,
       inflight_keepalive_bytes_, should_report_corb_blocking,
-      cors_preflight_timing_info);
+      cors_preflight_timing_info, fetcher_->GetConsoleLogger());
 }
 
 void ResourceLoader::DidFail(const WebURLError& error,

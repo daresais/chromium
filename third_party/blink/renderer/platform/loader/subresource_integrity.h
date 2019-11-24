@@ -11,11 +11,13 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/blink/renderer/platform/loader/fetch/console_logger.h"
 
 namespace blink {
 
 class KURL;
 class Resource;
+class ConsoleMessage;
 
 class PLATFORM_EXPORT SubresourceIntegrity final {
   STATIC_ONLY(SubresourceIntegrity);
@@ -36,16 +38,21 @@ class PLATFORM_EXPORT SubresourceIntegrity final {
 
     void AddUseCount(UseCounterFeature);
     void AddConsoleErrorMessage(const String&);
+    void AddConsoleInfoMessage(const String&);
     void Clear();
 
     const Vector<UseCounterFeature>& UseCounts() const { return use_counts_; }
     const Vector<String>& ConsoleErrorMessages() const {
       return console_error_messages_;
     }
+    const Vector<String>& ConsoleInfoMessages() const {
+      return console_info_messages_;
+    }
 
    private:
     Vector<UseCounterFeature> use_counts_;
     Vector<String> console_error_messages_;
+    Vector<String> console_info_messages_;
   };
 
   enum IntegrityParseResult {

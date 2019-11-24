@@ -23,3 +23,5 @@ ciopfs
 /mac_files
 
 !/util/LASTCHANGE.dummy
+/default/
+/cmake.debug.linux.x86_64/
