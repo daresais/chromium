@@ -18,10 +18,11 @@ class CrostiniShelfContextMenu : public LauncherContextMenu {
 
   // LauncherContextMenu:
   void GetMenuModel(GetMenuModelCallback callback) override;
+  bool IsCommandIdEnabled(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
-  void BuildMenu(ui::SimpleMenuModel* menu_model);
+  bool IsUninstallable() const;
 
   DISALLOW_COPY_AND_ASSIGN(CrostiniShelfContextMenu);
 };

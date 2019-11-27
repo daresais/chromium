@@ -12,12 +12,13 @@ import static org.chromium.chrome.browser.util.UrlConstants.NTP_URL;
 import static org.chromium.content_public.browser.test.util.CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL;
 import static org.chromium.content_public.browser.test.util.CriteriaHelper.DEFAULT_POLLING_INTERVAL;
 
-import android.support.annotation.Nullable;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.espresso.Espresso;
 import android.support.test.espresso.action.ViewActions;
 import android.support.test.espresso.contrib.RecyclerViewActions;
 import android.support.test.espresso.matcher.ViewMatchers;
+
+import androidx.annotation.Nullable;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -34,14 +35,17 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.compositor.animation.CompositorAnimator;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.tab.TabFeatureUtilities;
+import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.WebContentsUtils;
@@ -59,7 +63,8 @@ import java.util.List;
         "enable-features=" + ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID + "<Study,"
                 + ChromeFeatureList.TAB_TO_GTS_ANIMATION + "<Study",
         "force-fieldtrials=Study/Group"})
-@Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
+@Restriction(
+        {UiRestriction.RESTRICTION_TYPE_PHONE, Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE})
 public class StartSurfaceLayoutPerfTest {
     private static final String TAG = "SSLayoutPerfTest";
     private static final String BASE_PARAMS = "force-fieldtrial-params="
@@ -83,7 +88,7 @@ public class StartSurfaceLayoutPerfTest {
     private int mTabNumCap;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         FeatureUtilities.setGridTabSwitcherEnabledForTesting(true);
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mActivityTestRule.startMainActivityFromLauncher();
@@ -92,7 +97,7 @@ public class StartSurfaceLayoutPerfTest {
         assertTrue(layout instanceof StartSurfaceLayout);
         mStartSurfaceLayout = (StartSurfaceLayout) layout;
         mUrl = mTestServer.getURL("/chrome/test/data/android/navigate/simple.html");
-        mRepeat = 3;
+        mRepeat = 1;
         mWaitingTime = 0;
         mTabNumCap = 3;
 
@@ -102,7 +107,13 @@ public class StartSurfaceLayoutPerfTest {
             mWaitingTime = 1000;
             mTabNumCap = 0;
         }
-        assertTrue(FeatureUtilities.isTabToGtsAnimationEnabled());
+        assertTrue(TabFeatureUtilities.isTabToGtsAnimationEnabled());
+
+        CriteriaHelper.pollUiThread(Criteria.equals(true,
+                mActivityTestRule.getActivity()
+                        .getTabModelSelector()
+                        .getTabModelFilterProvider()
+                        .getCurrentTabModelFilter()::isTabModelRestored));
     }
 
     @Test
@@ -185,7 +196,7 @@ public class StartSurfaceLayoutPerfTest {
      * @param url The URL to load. Skip loading when null, but the thumbnail for the NTP might not
      *            be saved.
      */
-    private void prepareTabs(int numTabs, @Nullable String url) throws InterruptedException {
+    private void prepareTabs(int numTabs, @Nullable String url) {
         assertTrue(numTabs >= 1);
         assertEquals(1, mActivityTestRule.getActivity().getTabModelSelector().getTotalTabCount());
         // Only run the full size when doing local perf tests.
@@ -201,12 +212,44 @@ public class StartSurfaceLayoutPerfTest {
                                       .getTabModelSelector()
                                       .getCurrentModel()
                                       .getTabAt(i);
+
+            boolean fixPendingReadbacks = mActivityTestRule.getActivity()
+                                                  .getTabContentManager()
+                                                  .getPendingReadbacksForTesting()
+                    != 0;
+
+            // When there are pending readbacks due to detached Tabs, try to fix it by switching
+            // back to that tab.
+            if (fixPendingReadbacks) {
+                int lastIndex = i;
+                // clang-format off
+                TestThreadUtils.runOnUiThreadBlocking(() ->
+                        mActivityTestRule.getActivity().getCurrentTabModel().setIndex(
+                                lastIndex, TabSelectionType.FROM_USER)
+                );
+                // clang-format on
+            }
             checkThumbnailsExist(previousTab);
+            if (fixPendingReadbacks) {
+                int currentIndex = i + 1;
+                // clang-format off
+                TestThreadUtils.runOnUiThreadBlocking(() ->
+                        mActivityTestRule.getActivity().getCurrentTabModel().setIndex(
+                                currentIndex, TabSelectionType.FROM_USER)
+                );
+                // clang-format on
+            }
         }
         ChromeTabUtils.waitForTabPageLoaded(mActivityTestRule.getActivity().getActivityTab(), null,
                 null, WAIT_TIMEOUT_SECONDS * 10);
         assertEquals(
                 numTabs, mActivityTestRule.getActivity().getTabModelSelector().getTotalTabCount());
+
+        // clang-format off
+        CriteriaHelper.pollUiThread(Criteria.equals(0, () ->
+            mActivityTestRule.getActivity().getTabContentManager().getPendingReadbacksForTesting()
+        ));
+        // clang-format on
     }
 
     private void reportTabToGridPerf(String fromUrl, String description)
@@ -244,7 +287,7 @@ public class StartSurfaceLayoutPerfTest {
             // Make sure the fading animation is done.
             Thread.sleep(1000);
             TestThreadUtils.runOnUiThreadBlocking(
-                    () -> { startSurface.getGridController().onBackPressed(); });
+                    () -> { startSurface.getController().onBackPressed(); });
             Thread.sleep(1000);
             CriteriaHelper.pollInstrumentationThread(()
                                                              -> !mActivityTestRule.getActivity()

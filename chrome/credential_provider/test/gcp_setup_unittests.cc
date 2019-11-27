@@ -8,6 +8,7 @@
 #include <lmerr.h>
 #include <objbase.h>
 #include <unknwn.h>
+#include <wrl/client.h>
 
 #include <memory>
 
@@ -158,7 +159,7 @@ void GcpSetupTest::ExpectCredentialProviderToBeRegistered(
   // Make sure eventlog source is registered.
   base::win::RegKey el_key(
       HKEY_LOCAL_MACHINE,
-      L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\GCP",
+      L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\GCPW",
       KEY_READ);
   EXPECT_EQ(registered, el_key.Valid());
 
@@ -348,10 +349,10 @@ TEST_F(GcpSetupTest, LaunchGcpAfterInstall) {
 
   locked_file.Close();
 
-  CComPtr<IGaiaCredentialProvider> provider;
+  Microsoft::WRL::ComPtr<IGaiaCredentialProvider> provider;
   ASSERT_EQ(S_OK,
             CComCreator<CComObject<CGaiaCredentialProvider>>::CreateInstance(
-                nullptr, IID_IGaiaCredentialProvider, (void**)&provider));
+                nullptr, IID_PPV_ARGS(&provider)));
 
   // Make sure newer version exists and old version is gone.
   ExpectAllFilesToExist(true, product_version());

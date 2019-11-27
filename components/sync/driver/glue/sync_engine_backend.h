@@ -35,11 +35,21 @@ namespace syncer {
 class ModelTypeController;
 class SyncEngineImpl;
 
+namespace syncable {
+
+class NigoriHandlerProxy;
+
+}  // namespace syncable
+
 class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
                           public base::trace_event::MemoryDumpProvider,
                           public SyncManager::Observer,
                           public TypeDebugInfoObserver {
  public:
+  using AllNodesCallback =
+      base::OnceCallback<void(const ModelType,
+                              std::unique_ptr<base::ListValue>)>;
+
   SyncEngineBackend(const std::string& name,
                     const base::FilePath& sync_data_folder,
                     const base::WeakPtr<SyncEngineImpl>& host);
@@ -106,8 +116,11 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   // Called to set the passphrase for encryption.
   void DoSetEncryptionPassphrase(const std::string& passphrase);
 
-  // Called to decrypt the pending keys.
+  // Called to decrypt the pending keys using user-entered passphrases.
   void DoSetDecryptionPassphrase(const std::string& passphrase);
+
+  // Called to decrypt the pending keys using trusted vault keys.
+  void DoAddTrustedVaultDecryptionKeys(const std::vector<std::string>& keys);
 
   // Called to turn on encryption of all sync data as well as
   // reencrypt everything.
@@ -115,10 +128,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
 
   // Ask the syncer to check for updates for the specified types.
   void DoRefreshTypes(ModelTypeSet types);
-
-  // Invoked if we failed to download the necessary control types at startup.
-  // Invokes SyncEngine::HandleControlTypesDownloadRetry.
-  void OnControlTypesDownloadRetry();
 
   // Called to perform tasks which require the control data to be downloaded.
   // This includes refreshing encryption, etc.
@@ -141,7 +150,6 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   void DoFinishConfigureDataTypes(
       ModelTypeSet types_to_config,
       const base::Callback<void(ModelTypeSet, ModelTypeSet)>& ready_task);
-  void DoRetryConfiguration(const base::Closure& retry_callback);
 
   // Set the base request context to use when making HTTP calls.
   // This method will add a reference to the context to persist it
@@ -173,6 +181,9 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   // Notify about change in client id.
   void DoOnInvalidatorClientIdChange(const std::string& client_id);
 
+  // Returns a ListValue representing Nigori node.
+  void GetNigoriNodeForDebugging(AllNodesCallback callback);
+
   bool HasUnsyncedItemsForTest() const;
 
  private:
@@ -190,6 +201,8 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   // This must be called from the thread on which SaveChanges is intended to
   // be run on; the host's |registrar_->sync_thread()|.
   void StartSavingChanges();
+
+  void LoadAndConnectNigoriController();
 
   // Name used for debugging.
   const std::string name_;
@@ -218,11 +231,13 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   // Should outlive |sync_manager_|.
   std::unique_ptr<SyncEncryptionHandler> sync_encryption_handler_;
 
+  std::unique_ptr<syncable::NigoriHandlerProxy> nigori_handler_proxy_;
+
   // The top-level syncapi entry point.  Lives on the sync thread.
   std::unique_ptr<SyncManager> sync_manager_;
 
   // Required for |nigori_controller_| LoadModels().
-  std::string authenticated_account_id_;
+  CoreAccountId authenticated_account_id_;
 
   // Initialized in OnInitializationComplete() iff USS implementation of Nigori
   // is enabled.
@@ -234,12 +249,11 @@ class SyncEngineBackend : public base::RefCountedThreadSafe<SyncEngineBackend>,
   WeakHandle<JsBackend> js_backend_;
   WeakHandle<DataTypeDebugInfoListener> debug_info_listener_;
 
-  // These signals allow us to send requests to shut down the HttpBridgeFactory
-  // and ServerConnectionManager without having to wait for those classes to
-  // finish initializing first.
+  // This signal allows us to send requests to shut down the
+  // ServerConnectionManager without having to wait for it to finish
+  // initializing first.
   //
-  // See comments in SyncEngineBackend::ShutdownOnUIThread() for more details.
-  CancelationSignal release_request_context_signal_;
+  // See comment in ShutdownOnUIThread() for more details.
   CancelationSignal stop_syncing_signal_;
 
   // Set when we've been asked to forward sync protocol events to the frontend.

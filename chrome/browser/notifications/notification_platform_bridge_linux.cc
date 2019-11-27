@@ -15,6 +15,7 @@
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
+#include "base/environment.h"
 #include "base/files/file_path_watcher.h"
 #include "base/files/file_util.h"
 #include "base/i18n/number_formatting.h"
@@ -31,7 +32,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/notifications/notification_display_service_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/shell_integration_linux.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -39,6 +40,8 @@
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -466,7 +469,7 @@ class NotificationPlatformBridgeLinuxImpl
           ConnectionInitializationStatusCode::MISSING_REQUIRED_CAPABILITIES);
       return;
     }
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(
             &NotificationPlatformBridgeLinuxImpl::SetBodyImagesSupported, this,
@@ -487,6 +490,8 @@ class NotificationPlatformBridgeLinuxImpl
       server_version_ = base::Version(server_version);
     }
 
+    DCHECK(!connect_signals_in_progress_);
+    connect_signals_in_progress_ = true;
     connected_signals_barrier_ = base::BarrierClosure(
         2, base::Bind(&NotificationPlatformBridgeLinuxImpl::
                           OnConnectionInitializationFinishedOnTaskRunner,
@@ -505,6 +510,12 @@ class NotificationPlatformBridgeLinuxImpl
   }
 
   void CleanUpOnTaskRunner() {
+    if (connect_signals_in_progress_) {
+      // Connecting to a signal is still in progress. Defer cleanup task.
+      should_cleanup_on_signal_connected_ = true;
+      return;
+    }
+
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
     if (bus_)
       bus_->ShutdownAndBlock();
@@ -647,8 +658,7 @@ class NotificationPlatformBridgeLinuxImpl
       actions.push_back(kDefaultButtonId);
       actions.push_back("Activate");
       // Always add a settings button for web notifications.
-      if (notification_type != NotificationHandler::Type::EXTENSION &&
-          notification_type != NotificationHandler::Type::SEND_TAB_TO_SELF) {
+      if (notification->should_show_settings_button()) {
         actions.push_back(kSettingsButtonId);
         actions.push_back(
             l10n_util::GetStringUTF8(IDS_NOTIFICATION_BUTTON_SETTINGS));
@@ -682,8 +692,7 @@ class NotificationPlatformBridgeLinuxImpl
     }
 
     std::unique_ptr<base::Environment> env = base::Environment::Create();
-    base::FilePath desktop_file(
-        shell_integration_linux::GetDesktopName(env.get()));
+    base::FilePath desktop_file(chrome::GetDesktopName(env.get()));
     const char kDesktopFileSuffix[] = ".desktop";
     DCHECK(base::EndsWith(desktop_file.value(), kDesktopFileSuffix,
                           base::CompareCase::SENSITIVE));
@@ -764,7 +773,7 @@ class NotificationPlatformBridgeLinuxImpl
       if (data->profile_id == profile_id && data->is_incognito == incognito)
         displayed.insert(data->notification_id);
     }
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(std::move(callback), std::move(displayed), true));
   }
@@ -803,7 +812,7 @@ class NotificationPlatformBridgeLinuxImpl
                                     const base::Optional<int>& action_index,
                                     const base::Optional<bool>& by_user) {
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
-    base::PostTaskWithTraits(
+    base::PostTask(
         location, {content::BrowserThread::UI},
         base::BindOnce(ForwardNotificationOperationOnUiThread, operation,
                        data->notification_type, data->origin_url,
@@ -889,12 +898,21 @@ class NotificationPlatformBridgeLinuxImpl
         "Notifications.Linux.BridgeInitializationStatus",
         static_cast<int>(status),
         static_cast<int>(ConnectionInitializationStatusCode::NUM_ITEMS));
-    base::PostTaskWithTraits(
+    bool success = status == ConnectionInitializationStatusCode::SUCCESS;
+
+    // Note: Not all code paths set connect_signals_in_progress_ to true!
+    connect_signals_in_progress_ = false;
+    if (should_cleanup_on_signal_connected_) {
+      // Mark as fail, so that observers don't think we're initialized.
+      success = false;
+      CleanUpOnTaskRunner();
+    }
+
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&NotificationPlatformBridgeLinuxImpl::
                            OnConnectionInitializationFinishedOnUiThread,
-                       this,
-                       status == ConnectionInitializationStatusCode::SUCCESS));
+                       this, success));
   }
 
   void OnSignalConnected(const std::string& interface_name,
@@ -994,6 +1012,13 @@ class NotificationPlatformBridgeLinuxImpl
   base::Version server_version_;
 
   base::Closure connected_signals_barrier_;
+
+  // Whether ConnectToSignal() is in progress.
+  bool connect_signals_in_progress_ = false;
+
+  // Calling CleanUp() while ConnectToSignal() is in progress leads to a crash.
+  // This flag is used to defer the cleanup task until signals are connected.
+  bool should_cleanup_on_signal_connected_ = false;
 
   scoped_refptr<base::RefCountedMemory> product_logo_png_bytes_;
   std::unique_ptr<ResourceFile> product_logo_file_;

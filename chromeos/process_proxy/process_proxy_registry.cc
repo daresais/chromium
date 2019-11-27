@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/lazy_task_runner.h"
 
@@ -100,8 +100,8 @@ bool ProcessProxyRegistry::OpenProcess(const base::CommandLine& cmdline,
   // closed, which is done before this object goes away.
   if (!proxy->StartWatchingOutput(
           watcher_thread_->task_runner(), GetTaskRunner(),
-          base::Bind(&ProcessProxyRegistry::OnProcessOutput,
-                     base::Unretained(this), *id))) {
+          base::BindRepeating(&ProcessProxyRegistry::OnProcessOutput,
+                              base::Unretained(this), *id))) {
     proxy->Close();
     return false;
   }
@@ -185,7 +185,7 @@ bool ProcessProxyRegistry::EnsureWatcherThreadStarted() {
   //    spinning a new thread.
   watcher_thread_.reset(new base::Thread(kWatcherThreadName));
   return watcher_thread_->StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
 }
 
 base::ProcessHandle ProcessProxyRegistry::GetProcessHandleForTesting(

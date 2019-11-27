@@ -20,12 +20,16 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import android.content.res.ColorStateList;
-import android.support.annotation.Nullable;
 import android.view.View;
+
+import androidx.annotation.Nullable;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -37,9 +41,11 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ThemeColorProvider;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -48,8 +54,9 @@ import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorImpl;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabSelectionType;
-import org.chromium.chrome.browser.tasks.tabgroup.TabGroupModelFilter;
+import org.chromium.chrome.browser.tasks.tab_groups.TabGroupModelFilter;
 import org.chromium.chrome.browser.toolbar.bottom.BottomControlsCoordinator;
+import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -63,6 +70,9 @@ import java.util.List;
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class TabGroupUiMediatorUnitTest {
+    @Rule
+    public TestRule mProcessor = new Features.JUnitProcessor();
+
     private static final int TAB1_ID = 456;
     private static final int TAB2_ID = 789;
     private static final int TAB3_ID = 123;
@@ -96,6 +106,8 @@ public class TabGroupUiMediatorUnitTest {
     TabModelFilterProvider mTabModelFilterProvider;
     @Mock
     TabGroupModelFilter mTabGroupModelFilter;
+    @Mock
+    TabGridDialogMediator.DialogController mTabGridDialogController;
     @Captor
     ArgumentCaptor<TabModelObserver> mTabModelObserverArgumentCaptor;
     @Captor
@@ -106,10 +118,12 @@ public class TabGroupUiMediatorUnitTest {
     ArgumentCaptor<ThemeColorProvider.ThemeColorObserver> mThemeColorObserverArgumentCaptor;
     @Captor
     ArgumentCaptor<ThemeColorProvider.TintObserver> mTintObserverArgumentCaptor;
+    @Captor
+    ArgumentCaptor<TabGroupModelFilter.Observer> mTabGroupModelFilterObserverArgumentCaptor;
 
-    private Tab mTab1;
-    private Tab mTab2;
-    private Tab mTab3;
+    private TabImpl mTab1;
+    private TabImpl mTab2;
+    private TabImpl mTab3;
     private List<Tab> mTabGroup1;
     private List<Tab> mTabGroup2;
     private PropertyModel mModel;
@@ -117,15 +131,15 @@ public class TabGroupUiMediatorUnitTest {
     private InOrder mResetHandlerInOrder;
     private InOrder mVisibilityControllerInOrder;
 
-    private Tab prepareTab(int tabId, int rootId) {
-        Tab tab = mock(Tab.class);
+    private TabImpl prepareTab(int tabId, int rootId) {
+        TabImpl tab = mock(TabImpl.class);
         doReturn(tabId).when(tab).getId();
         doReturn(rootId).when(tab).getRootId();
         return tab;
     }
 
     private TabModel prepareIncognitoTabModel() {
-        Tab newTab = prepareTab(TAB4_ID, TAB4_ID);
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
         List<Tab> tabs = new ArrayList<>(Arrays.asList(newTab));
         doReturn(tabs).when(mTabGroupModelFilter).getRelatedTabList(TAB4_ID);
         TabModel incognitoTabModel = mock(TabModel.class);
@@ -159,7 +173,8 @@ public class TabGroupUiMediatorUnitTest {
         }
 
         mTabGroupUiMediator = new TabGroupUiMediator(mVisibilityController, mResetHandler, mModel,
-                mTabModelSelector, mTabCreatorManager, mOverviewModeBehavior, mThemeColorProvider);
+                mTabModelSelector, mTabCreatorManager, mOverviewModeBehavior, mThemeColorProvider,
+                mTabGridDialogController);
 
         if (currentTab == null) {
             verifyNeverReset();
@@ -233,6 +248,11 @@ public class TabGroupUiMediatorUnitTest {
                 .addTabModelFilterObserver(mTabModelObserverArgumentCaptor.capture());
 
         doReturn(mTabGroupModelFilter).when(mTabModelFilterProvider).getCurrentTabModelFilter();
+        doReturn(mTabGroupModelFilter).when(mTabModelFilterProvider).getTabModelFilter(true);
+        doReturn(mTabGroupModelFilter).when(mTabModelFilterProvider).getTabModelFilter(false);
+        doNothing()
+                .when(mTabGroupModelFilter)
+                .addTabGroupObserver(mTabGroupModelFilterObserverArgumentCaptor.capture());
 
         // Set up OverviewModeBehavior
         doNothing()
@@ -283,7 +303,11 @@ public class TabGroupUiMediatorUnitTest {
     }
 
     @Test
+    // clang-format off
+    @Features.EnableFeatures({ChromeFeatureList.TAB_GROUPS_ANDROID,
+            ChromeFeatureList.TAB_GROUPS_UI_IMPROVEMENTS_ANDROID})
     public void onClickExpand() {
+        // clang-format on
         initAndAssertProperties(mTab2);
 
         View.OnClickListener listener =
@@ -327,7 +351,7 @@ public class TabGroupUiMediatorUnitTest {
         initAndAssertProperties(mTab2);
 
         // Mock that tab 1 is not a single tab.
-        Tab newTab = prepareTab(TAB4_ID, TAB4_ID);
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
         List<Tab> tabs = new ArrayList<>(Arrays.asList(mTab1, newTab));
         doReturn(tabs).when(mTabGroupModelFilter).getRelatedTabList(TAB1_ID);
 
@@ -377,6 +401,8 @@ public class TabGroupUiMediatorUnitTest {
         verifyNeverReset();
     }
 
+    // TODO(988199): Ignore this test until we have a conclusion from the attached bug.
+    @Ignore
     @Test
     public void tabClosure_LastTabInGroup_GroupUiVisible() {
         initAndAssertProperties(mTab2);
@@ -400,7 +426,7 @@ public class TabGroupUiMediatorUnitTest {
     public void tabAddition_SingleTab() {
         initAndAssertProperties(mTab1);
 
-        Tab newTab = prepareTab(TAB4_ID, TAB4_ID);
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
         List<Tab> tabs = new ArrayList<>(Arrays.asList(newTab));
         doReturn(tabs).when(mTabGroupModelFilter).getRelatedTabList(TAB4_ID);
 
@@ -415,7 +441,7 @@ public class TabGroupUiMediatorUnitTest {
     public void tabAddition_TabGroup_NoRefresh() {
         initAndAssertProperties(mTab2);
 
-        Tab newTab = prepareTab(TAB4_ID, TAB4_ID);
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
         mTabGroup2.add(newTab);
         doReturn(mTabGroup1).when(mTabGroupModelFilter).getRelatedTabList(TAB4_ID);
 
@@ -430,7 +456,7 @@ public class TabGroupUiMediatorUnitTest {
     public void tabAddition_TabGroup_Refresh() {
         initAndAssertProperties(mTab2);
 
-        Tab newTab = prepareTab(TAB4_ID, TAB4_ID);
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
         mTabGroup2.add(newTab);
         doReturn(mTabGroup2).when(mTabGroupModelFilter).getRelatedTabList(TAB4_ID);
 
@@ -475,6 +501,68 @@ public class TabGroupUiMediatorUnitTest {
         mTabModelObserverArgumentCaptor.getValue().restoreCompleted();
 
         mVisibilityControllerInOrder.verify(mVisibilityController).setBottomControlsVisible(true);
+    }
+
+    @Test
+    public void tabClosureUndone_UiVisible_NotShowingOverviewMode() {
+        // Assume mTab2 is selected, and it has related tabs mTab2 and mTab3.
+        initAndAssertProperties(mTab2);
+        // OverviewMode is hiding by default.
+        assertThat(mTabGroupUiMediator.getIsShowingOverViewModeForTesting(), equalTo(false));
+
+        // Simulate that another member of this group, newTab, is being undone from closure.
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
+        doReturn(new ArrayList<>(Arrays.asList(mTab2, mTab3, newTab)))
+                .when(mTabGroupModelFilter)
+                .getRelatedTabList(TAB4_ID);
+
+        mTabModelObserverArgumentCaptor.getValue().tabClosureUndone(newTab);
+
+        // Since the strip is already visible, no resetting.
+        mVisibilityControllerInOrder.verify(mVisibilityController, never())
+                .setBottomControlsVisible(anyBoolean());
+    }
+
+    @Test
+    public void tabClosureUndone_UiNotVisible_NotShowingOverviewMode() {
+        // Assume mTab1 is selected. Since mTab1 is now a single tab, the strip is invisible.
+        initAndAssertProperties(mTab1);
+        // OverviewMode is hiding by default.
+        assertThat(mTabGroupUiMediator.getIsShowingOverViewModeForTesting(), equalTo(false));
+
+        // Simulate that newTab which was a tab in the same group as mTab1 is being undone from
+        // closure.
+        TabImpl newTab = prepareTab(TAB4_ID, TAB4_ID);
+        doReturn(new ArrayList<>(Arrays.asList(mTab1, newTab)))
+                .when(mTabGroupModelFilter)
+                .getRelatedTabList(TAB4_ID);
+
+        mTabModelObserverArgumentCaptor.getValue().tabClosureUndone(newTab);
+
+        // Strip should reset to be visible.
+        mVisibilityControllerInOrder.verify(mVisibilityController)
+                .setBottomControlsVisible(eq(true));
+    }
+
+    @Test
+    public void tabClosureUndone_UiNotVisible_ShowingOverviewMode() {
+        // Assume mTab1 is selected.
+        initAndAssertProperties(mTab1);
+        // OverviewMode is hiding by default.
+        assertThat(mTabGroupUiMediator.getIsShowingOverViewModeForTesting(), equalTo(false));
+
+        // Simulate the overview mode is showing, which hides the strip.
+        mOverviewModeObserverArgumentCaptor.getValue().onOverviewModeStartedShowing(true);
+        assertThat(mTabGroupUiMediator.getIsShowingOverViewModeForTesting(), equalTo(true));
+        mVisibilityControllerInOrder.verify(mVisibilityController).setBottomControlsVisible(false);
+
+        // Simulate that we undo a group closure of {mTab2, mTab3}.
+        mTabModelObserverArgumentCaptor.getValue().tabClosureUndone(mTab3);
+        mTabModelObserverArgumentCaptor.getValue().tabClosureUndone(mTab2);
+
+        // Since overview mode is showing, we should not show strip.
+        mVisibilityControllerInOrder.verify(mVisibilityController, never())
+                .setBottomControlsVisible(anyBoolean());
     }
 
     @Test
@@ -559,6 +647,24 @@ public class TabGroupUiMediatorUnitTest {
     }
 
     @Test
+    public void backButtonPress_ShouldHandle() {
+        initAndAssertProperties(mTab1);
+        doReturn(true).when(mTabGridDialogController).handleBackPressed();
+
+        assertThat(mTabGroupUiMediator.onBackPressed(), equalTo(true));
+        verify(mTabGridDialogController).handleBackPressed();
+    }
+
+    @Test
+    public void backButtonPress_ShouldNotHandle() {
+        initAndAssertProperties(mTab1);
+        doReturn(false).when(mTabGridDialogController).handleBackPressed();
+
+        assertThat(mTabGroupUiMediator.onBackPressed(), equalTo(false));
+        verify(mTabGridDialogController).handleBackPressed();
+    }
+
+    @Test
     public void destroy() {
         initAndAssertProperties(mTab1);
 
@@ -572,5 +678,16 @@ public class TabGroupUiMediatorUnitTest {
                 .removeThemeColorObserver(mThemeColorObserverArgumentCaptor.capture());
         verify(mThemeColorProvider).removeTintObserver(mTintObserverArgumentCaptor.capture());
         verify(mTabModelSelector).removeObserver(mTabModelSelectorObserverArgumentCaptor.capture());
+    }
+
+    @Test
+    public void uiNotVisibleAfterDragCurrentTabOutOfGroup() {
+        initAndAssertProperties(mTab3);
+
+        List<Tab> tabs = new ArrayList<>(Arrays.asList(mTab3));
+        doReturn(tabs).when(mTabGroupModelFilter).getRelatedTabList(TAB3_ID);
+        mTabGroupModelFilterObserverArgumentCaptor.getValue().didMoveTabOutOfGroup(mTab3, 1);
+
+        verifyResetStrip(false, null);
     }
 }

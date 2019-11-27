@@ -6,6 +6,8 @@
 
 #include "chrome/common/net/safe_search_util.h"
 #include "components/variations/net/variations_http_headers.h"
+#include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/common/extension_urls.h"
@@ -58,7 +60,7 @@ void GoogleURLLoaderThrottle::WillStartRequest(
 
 void GoogleURLLoaderThrottle::WillRedirectRequest(
     net::RedirectInfo* redirect_info,
-    const network::ResourceResponseHead& response_head,
+    const network::mojom::URLResponseHead& response_head,
     bool* /* defer */,
     std::vector<std::string>* to_be_removed_headers,
     net::HttpRequestHeaders* modified_headers) {
@@ -93,7 +95,7 @@ void GoogleURLLoaderThrottle::WillRedirectRequest(
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 void GoogleURLLoaderThrottle::WillProcessResponse(
     const GURL& response_url,
-    network::ResourceResponseHead* response_head,
+    network::mojom::URLResponseHead* response_head,
     bool* defer) {
   // Built-in additional protection for the chrome web store origin.
   GURL webstore_url(extension_urls::GetWebstoreLaunchURL());

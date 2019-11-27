@@ -25,6 +25,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "url/gurl.h"
 
@@ -41,6 +42,8 @@ constexpr char XrBrowserTestBase::kVrConfigPathEnvVar[];
 constexpr char XrBrowserTestBase::kVrConfigPathVal[];
 constexpr char XrBrowserTestBase::kVrLogPathEnvVar[];
 constexpr char XrBrowserTestBase::kVrLogPathVal[];
+constexpr char XrBrowserTestBase::kOpenXrConfigPathEnvVar[];
+constexpr char XrBrowserTestBase::kOpenXrConfigPathVal[];
 constexpr char XrBrowserTestBase::kTestFileDir[];
 constexpr char XrBrowserTestBase::kSwitchIgnoreRuntimeRequirements[];
 const std::vector<std::string> XrBrowserTestBase::kRequiredTestSwitches{
@@ -135,11 +138,26 @@ void XrBrowserTestBase::SetUp() {
       env_->SetVar(kVrLogPathEnvVar, MakeExecutableRelative(kVrLogPathVal)))
       << "Failed to set OpenVR log location environment variable";
 
+  // Set the environment variable to use the mock OpenXR client.
+  // If the kOpenXrConfigPathEnvVar environment variable is set, the OpenXR
+  // loader will look for the OpenXR runtime specified in that json file. The
+  // json file contains the path to the runtime, relative to the json file
+  // itself. Otherwise, the OpenXR loader loads the active OpenXR runtime
+  // installed on the system, which is specified by a registry key.
+  ASSERT_TRUE(env_->SetVar(kOpenXrConfigPathEnvVar,
+                           MakeExecutableRelative(kOpenXrConfigPathVal)))
+      << "Failed to set OpenXR JSON location environment variable";
+
   // Set any command line flags that subclasses have set, e.g. enabling WebVR
   // and OpenVR support.
   for (const auto& switch_string : append_switches_) {
     cmd_line->AppendSwitch(switch_string);
   }
+
+  for (const auto& blink_feature : enable_blink_features_) {
+    cmd_line->AppendSwitchASCII(switches::kEnableBlinkFeatures, blink_feature);
+  }
+
   scoped_feature_list_.InitWithFeatures(enable_features_, disable_features_);
 
   InProcessBrowserTest::SetUp();
@@ -156,32 +174,6 @@ void XrBrowserTestBase::TearDown() {
 
 XrBrowserTestBase::RuntimeType XrBrowserTestBase::GetRuntimeType() const {
   return XrBrowserTestBase::RuntimeType::RUNTIME_NONE;
-}
-
-device::XrAxisType XrBrowserTestBase::GetPrimaryAxisType() const {
-  auto runtime = GetRuntimeType();
-  switch (runtime) {
-    case XrBrowserTestBase::RuntimeType::RUNTIME_OPENVR:
-      return device::XrAxisType::kTrackpad;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_WMR:
-      return device::XrAxisType::kJoystick;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_NONE:
-      return device::XrAxisType::kNone;
-  }
-  NOTREACHED();
-}
-
-device::XrAxisType XrBrowserTestBase::GetSecondaryAxisType() const {
-  auto runtime = GetRuntimeType();
-  switch (runtime) {
-    case XrBrowserTestBase::RuntimeType::RUNTIME_OPENVR:
-      return device::XrAxisType::kJoystick;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_WMR:
-      return device::XrAxisType::kTrackpad;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_NONE:
-      return device::XrAxisType::kNone;
-  }
-  NOTREACHED();
 }
 
 GURL XrBrowserTestBase::GetFileUrlForHtmlTestFile(
@@ -220,6 +212,13 @@ void XrBrowserTestBase::LoadUrlAndAwaitInitialization(const GURL& url) {
                                     kPollTimeoutMedium,
                                     GetCurrentWebContents()))
       << "Timed out waiting for JavaScript test initialization.";
+
+#if defined(OS_WIN)
+  // Now that the browser is opened and has focus, keep track of this window so
+  // that we can restore the proper focus after entering each session. This is
+  // required for WMR tests that create multiple sessions to work properly.
+  hwnd_ = GetForegroundWindow();
+#endif
 }
 
 void XrBrowserTestBase::RunJavaScriptOrFail(

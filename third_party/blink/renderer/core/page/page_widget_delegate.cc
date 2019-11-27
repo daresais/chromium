@@ -40,8 +40,8 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/validation_message_client.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -49,10 +49,15 @@ void PageWidgetDelegate::Animate(Page& page,
                                  base::TimeTicks monotonic_frame_begin_time) {
   page.GetAutoscrollController().Animate();
   page.Animator().ServiceScriptedAnimations(monotonic_frame_begin_time);
+  // The ValidationMessage overlay manages its own internal Page that isn't
+  // hooked up the normal BeginMainFrame flow, so we manually tick its
+  // animations here.
+  page.GetValidationMessageClient().ServiceScriptedAnimations(
+      monotonic_frame_begin_time);
 }
 
 void PageWidgetDelegate::PostAnimate(Page& page) {
-  page.Animator().RunPostAnimationFrameCallbacks();
+  page.Animator().PostAnimate();
 }
 
 void PageWidgetDelegate::UpdateLifecycle(
@@ -137,8 +142,8 @@ WebInputEventResult PageWidgetDelegate::HandleInputEvent(
     case WebInputEvent::kMouseUp:
       if (!root || !root->View())
         return WebInputEventResult::kHandledSuppressed;
-      handler.HandleMouseUp(*root, static_cast<const WebMouseEvent&>(event));
-      return WebInputEventResult::kHandledSystem;
+      return handler.HandleMouseUp(*root,
+                                   static_cast<const WebMouseEvent&>(event));
     case WebInputEvent::kMouseWheel:
       if (!root || !root->View())
         return WebInputEventResult::kNotHandled;
@@ -234,11 +239,13 @@ void PageWidgetEventHandler::HandleMouseDown(LocalFrame& main_frame,
   main_frame.GetEventHandler().HandleMousePressEvent(transformed_event);
 }
 
-void PageWidgetEventHandler::HandleMouseUp(LocalFrame& main_frame,
-                                           const WebMouseEvent& event) {
+WebInputEventResult PageWidgetEventHandler::HandleMouseUp(
+    LocalFrame& main_frame,
+    const WebMouseEvent& event) {
   WebMouseEvent transformed_event =
       TransformWebMouseEvent(main_frame.View(), event);
-  main_frame.GetEventHandler().HandleMouseReleaseEvent(transformed_event);
+  return main_frame.GetEventHandler().HandleMouseReleaseEvent(
+      transformed_event);
 }
 
 WebInputEventResult PageWidgetEventHandler::HandleMouseWheel(

@@ -19,6 +19,8 @@
 #include "content/public/test/web_contents_tester.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom.h"
 #include "ui/base/page_transition_types.h"
 
@@ -58,6 +60,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   // Overrides to avoid establishing Mojo connection with renderer process.
   int DownloadImage(const GURL& url,
                     bool is_favicon,
+                    uint32_t preferred_size,
                     uint32_t max_bitmap_size,
                     bool bypass_cache,
                     ImageDownloadCallback callback) override;
@@ -151,7 +154,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                                  int history_length) override;
 
   // Records that this was called and returns and empty vector.
-  std::vector<blink::mojom::PauseSubresourceLoadingHandlePtr>
+  std::vector<mojo::Remote<blink::mojom::PauseSubresourceLoadingHandle>>
   PauseSubresourceLoading() override;
 
   bool GetPauseSubresourceLoadingCalled() override;
@@ -162,6 +165,12 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
 
   void SetLastActiveTime(base::TimeTicks last_active_time) override;
 
+  void SetIsConnectedToBluetoothDevice(
+      bool is_connected_to_bluetooth_device) override;
+
+  // Override IsConnectedToBluetoothDevice() to allow using the mocked value.
+  bool IsConnectedToBluetoothDevice() override;
+
   base::UnguessableToken GetAudioGroupId() override;
 
  protected:
@@ -170,20 +179,20 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
 
  private:
   // WebContentsImpl overrides
-  void CreateNewWindow(
+  RenderFrameHostDelegate* CreateNewWindow(
       RenderFrameHost* opener,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
       const mojom::CreateNewWindowParams& params,
+      bool is_new_browsing_instance,
       bool has_user_gesture,
       SessionStorageNamespace* session_storage_namespace) override;
   void CreateNewWidget(int32_t render_process_id,
                        int32_t route_id,
-                       mojom::WidgetPtr widget) override;
+                       mojo::PendingRemote<mojom::Widget> widget,
+                       RenderViewHostImpl* render_view_host) override;
   void CreateNewFullscreenWidget(int32_t render_process_id,
                                  int32_t route_id,
-                                 mojom::WidgetPtr widget) override;
+                                 mojo::PendingRemote<mojom::Widget> widget,
+                                 RenderViewHostImpl* render_view_host) override;
   void ShowCreatedWindow(int process_id,
                          int route_id,
                          WindowOpenDisposition disposition,
@@ -213,6 +222,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   base::Optional<base::string16> title_;
   bool pause_subresource_loading_called_;
   base::UnguessableToken audio_group_id_;
+  bool is_connected_to_bluetooth_device_;
 };
 
 }  // namespace content

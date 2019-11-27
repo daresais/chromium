@@ -1,18 +1,17 @@
 {
   "sandbox": {
     "features": [
+      "hub",
       "isolated-persistent-storage",
-      "deprecated-shell",
-      "system-temp",
-      "deprecated-ambient-replace-as-executable"
+      "isolated-temp"
     ],
     "services": [
       "fuchsia.deprecatedtimezone.Timezone",
       "fuchsia.device.NameProvider",
       "fuchsia.fonts.Provider",
       "fuchsia.logger.LogSink",
+      "fuchsia.media.Audio",
       "fuchsia.net.NameLookup",
-      "fuchsia.net.SocketProvider",
       "fuchsia.netstack.Netstack",
       "fuchsia.posix.socket.Provider",
       "fuchsia.process.Launcher",

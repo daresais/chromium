@@ -24,6 +24,7 @@
 #include "extensions/browser/extension_creator.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_protocols.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/sandboxed_unpacker.h"
 #include "extensions/browser/scoped_ignore_content_verifier_for_test.h"
@@ -44,6 +45,17 @@ class ProcessManager;
 // Base class for extension browser tests. Provides utilities for loading,
 // unloading, and installing extensions.
 class ExtensionBrowserTest : virtual public InProcessBrowserTest {
+ public:
+  // Different types of extension's lazy background contexts used in some tests.
+  enum class ContextType {
+    // A non-persistent background page/JS based extension.
+    kEventPage,
+    // A Service Worker based extension.
+    kServiceWorker,
+    // An extension with a persistent background page.
+    kPersistentBackground,
+  };
+
  protected:
   // Flags used to configure how the tests are run.
   enum Flags {
@@ -79,6 +91,10 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
     return ExtensionSystem::Get(profile())->extension_service();
   }
 
+  ExtensionRegistry* extension_registry() {
+    return ExtensionRegistry::Get(profile());
+  }
+
   const std::string& last_loaded_extension_id() {
     return observer_->last_loaded_extension_id();
   }
@@ -97,6 +113,11 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
   // verification; this should be overridden by derived tests which care
   // about install verification.
   virtual bool ShouldEnableInstallVerification();
+
+  // Returns the path of the directory from which to serve resources when they
+  // are prefixed with "_test_resources/".
+  // The default is chrome/test/data/extensions/.
+  virtual base::FilePath GetTestResourcesParentDir();
 
   static const Extension* GetExtensionByPath(const ExtensionSet& extensions,
                                              const base::FilePath& path);

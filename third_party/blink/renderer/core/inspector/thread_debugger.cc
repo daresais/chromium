@@ -29,7 +29,6 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -190,7 +189,7 @@ bool ThreadDebugger::formatAccessorsAsProperties(v8::Local<v8::Value> value) {
 }
 
 double ThreadDebugger::currentTimeMS() {
-  return WTF::CurrentTimeMS();
+  return base::Time::Now().ToDoubleT() * 1000.0;
 }
 
 bool ThreadDebugger::isInspectableHeapObject(v8::Local<v8::Object> object) {

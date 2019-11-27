@@ -16,12 +16,12 @@
 #include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/common/file_system/file_system_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserContext;
@@ -190,7 +190,7 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
 
   // Temporary storage to pass information back from callbacks.

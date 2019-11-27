@@ -38,15 +38,15 @@ namespace gcm {
 // Identity observer only has actual work to do when the user is actually signed
 // in. It ensures that account tracker is taking
 class GCMProfileService::IdentityObserver
-    : public identity::IdentityManager::Observer {
+    : public signin::IdentityManager::Observer {
  public:
   IdentityObserver(
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       GCMDriver* driver);
   ~IdentityObserver() override;
 
-  // identity::IdentityManager::Observer:
+  // signin::IdentityManager::Observer:
   void OnPrimaryAccountSet(
       const CoreAccountInfo& primary_account_info) override;
   void OnPrimaryAccountCleared(
@@ -57,12 +57,12 @@ class GCMProfileService::IdentityObserver
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   GCMDriver* driver_;
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
   std::unique_ptr<GCMAccountTracker> gcm_account_tracker_;
 
   // The account ID that this service is responsible for. Empty when the service
   // is not running.
-  std::string account_id_;
+  CoreAccountId account_id_;
 
   base::WeakPtrFactory<GCMProfileService::IdentityObserver> weak_ptr_factory_{
       this};
@@ -71,7 +71,7 @@ class GCMProfileService::IdentityObserver
 };
 
 GCMProfileService::IdentityObserver::IdentityObserver(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     GCMDriver* driver)
     : driver_(driver), identity_manager_(identity_manager) {
@@ -100,7 +100,7 @@ void GCMProfileService::IdentityObserver::OnPrimaryAccountSet(
 
 void GCMProfileService::IdentityObserver::OnPrimaryAccountCleared(
     const CoreAccountInfo& previous_primary_account_info) {
-  account_id_.clear();
+  account_id_ = CoreAccountId();
 
   // Still need to notify GCMDriver for UMA purpose.
   driver_->OnSignedOut();
@@ -144,15 +144,15 @@ GCMProfileService::GCMProfileService(
 GCMProfileService::GCMProfileService(
     PrefService* prefs,
     base::FilePath path,
-    base::RepeatingCallback<
-        void(base::WeakPtr<GCMProfileService>,
-             network::mojom::ProxyResolvingSocketFactoryRequest)>
+    base::RepeatingCallback<void(
+        base::WeakPtr<GCMProfileService>,
+        mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
         get_socket_factory_callback,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     network::NetworkConnectionTracker* network_connection_tracker,
     version_info::Channel channel,
     const std::string& product_category_for_subtypes,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     std::unique_ptr<GCMClientFactory> gcm_client_factory,
     const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,

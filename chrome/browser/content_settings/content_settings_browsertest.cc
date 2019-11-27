@@ -70,7 +70,7 @@ CannedBrowsingDataCookieHelper* GetSiteSettingsCookieContainer(
     Browser* browser) {
   TabSpecificContentSettings* settings =
       TabSpecificContentSettings::FromWebContents(
-          browser->tab_strip_model()->GetWebContentsAt(0));
+          browser->tab_strip_model()->GetActiveWebContents());
   return settings->allowed_local_shared_objects().cookies();
 }
 
@@ -78,7 +78,7 @@ CannedBrowsingDataCookieHelper* GetSiteSettingsBlockedCookieContainer(
     Browser* browser) {
   TabSpecificContentSettings* settings =
       TabSpecificContentSettings::FromWebContents(
-          browser->tab_strip_model()->GetWebContentsAt(0));
+          browser->tab_strip_model()->GetActiveWebContents());
   return settings->blocked_local_shared_objects().cookies();
 }
 
@@ -93,6 +93,25 @@ net::CookieList ExtractCookies(CannedBrowsingDataCookieHelper* container) {
   CHECK(got_result);
   return result;
 }
+
+class CookieChangeObserver : public content::WebContentsObserver {
+ public:
+  explicit CookieChangeObserver(content::WebContents* web_contents)
+      : content::WebContentsObserver(web_contents) {}
+  ~CookieChangeObserver() override {}
+
+  void Wait() { run_loop_.Run(); }
+
+  void OnCookieChange(const GURL& url,
+                      const GURL& first_party_url,
+                      const net::CanonicalCookie& cookie,
+                      bool blocked_by_policy) override {
+    run_loop_.Quit();
+  }
+
+ private:
+  base::RunLoop run_loop_;
+};
 
 class MockWebContentsLoadFailObserver : public content::WebContentsObserver {
  public:
@@ -469,6 +488,70 @@ IN_PROC_BROWSER_TEST_P(CookieSettingsTest, BlockCookiesAlsoBlocksCacheStorage) {
   }
 }
 
+IN_PROC_BROWSER_TEST_P(CookieSettingsTest, BlockCookiesAlsoBlocksIndexedDB) {
+  ui_test_utils::NavigateToURL(browser(), GetPageURL());
+  content_settings::CookieSettings* settings =
+      CookieSettingsFactory::GetForProfile(browser()->profile()).get();
+  settings->SetCookieSetting(GetPageURL(), CONTENT_SETTING_BLOCK);
+
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  const char kBaseScript[] =
+      "(async function() {"
+      "  const name = `%s`;"
+      "  function wrap(req) {"
+      "    return new Promise((resolve, reject) => {"
+      "      req.onerror = function() { reject(req.error); };"
+      "      req.onsuccess = function() { resolve(); };"
+      "    });"
+      "  }"
+      "  try {"
+      "    let promiselike = indexedDB.%s%s;"
+      "    if (typeof promiselike.then !== 'undefined') {"
+      "      await promiselike;"
+      "    }"
+      "    await wrap(promiselike);"
+      "  } catch(e) {"
+      "    return `${name} - ${e.toString()}`;"
+      "  }"
+      "  return `${name} - success`;"
+      "}())";
+
+  struct TestOp {
+    const char* cmd;
+    const char* args;
+  };
+
+  const TestOp kTestOps[] = {
+      {.cmd = "open", .args = "('foo', 1)"},
+      {.cmd = "deleteDatabase", .args = "('foo')"},
+  };
+
+  const char kBaseExpected[] =
+      "%s - UnknownError: The user denied permission to access the database.";
+
+  for (auto& op : kTestOps) {
+    EXPECT_EQ(
+        base::StringPrintf(kBaseExpected, op.cmd),
+        EvalJs(tab, base::StringPrintf(kBaseScript, op.cmd, op.cmd, op.args)));
+  }
+
+  const TestOp kPromiseTestOps[] = {
+      {.cmd = "databases", .args = "()"},
+  };
+
+  const char kPromiseBaseExpected[] =
+      "%s - UnknownError: Failed to execute '%s' on 'IDBFactory': The user "
+      "denied permission to access the database.";
+
+  for (auto& op : kPromiseTestOps) {
+    EXPECT_EQ(
+        base::StringPrintf(kPromiseBaseExpected, op.cmd, op.cmd),
+        EvalJs(tab, base::StringPrintf(kBaseScript, op.cmd, op.cmd, op.args)));
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(
     /* no prefix */,
     CookieSettingsTest,
@@ -532,8 +615,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectLoopCookies) {
 
   ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&observer));
 
-  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
-      IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
+  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)
+                  ->IsContentBlocked(ContentSettingsType::COOKIES));
 }
 
 // TODO(jww): This should be removed after strict secure cookies is enabled for
@@ -579,7 +662,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, ContentSettingsBlockDataURLs) {
   GURL url("data:text/html,<title>Data URL</title><script>alert(1)</script>");
 
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+      ->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT,
                                  CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -588,8 +671,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, ContentSettingsBlockDataURLs) {
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_EQ(base::UTF8ToUTF16("Data URL"), web_contents->GetTitle());
 
-  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
-      IsContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)
+                  ->IsContentBlocked(ContentSettingsType::JAVASCRIPT));
 }
 
 // Tests that if redirect across origins occurs, the new process still gets the
@@ -613,8 +696,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectCrossOrigin) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
-      IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
+  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)
+                  ->IsContentBlocked(ContentSettingsType::COOKIES));
 }
 
 class ContentSettingsWorkerModulesBrowserTest : public ContentSettingsTest {
@@ -737,7 +820,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsWorkerModulesBrowserTest,
   content_settings_map->SetWebsiteSettingCustomScope(
       ContentSettingsPattern::FromURLNoWildcard(http_url),
       ContentSettingsPattern::FromURLNoWildcard(module_url),
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(),
+      ContentSettingsType::JAVASCRIPT, std::string(),
       std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
 
   content::WebContents* web_contents =
@@ -754,7 +837,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsWorkerModulesBrowserTest,
   // The import must be blocked.
   ui_test_utils::WaitForViewVisibility(
       browser(), VIEW_ID_CONTENT_SETTING_JAVASCRIPT, true);
-  EXPECT_TRUE(tab_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+  EXPECT_TRUE(tab_settings->IsContentBlocked(ContentSettingsType::JAVASCRIPT));
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
@@ -811,13 +894,16 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsWorkerModulesBrowserTest, CookieStore) {
       browser()->tab_strip_model()->GetActiveWebContents(), kClientScript);
   EXPECT_EQ(true, result2);
 
-  // Set a cookie, see that it's reported.
-  content::EvalJsResult result3 =
-      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
-                      "requestCookieSet('first')");
-  EXPECT_EQ("set executed for first", result3);
-
   {
+    CookieChangeObserver observer(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    // Set a cookie, see that it's reported.
+    content::EvalJsResult result3 =
+        content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        "requestCookieSet('first')");
+    EXPECT_EQ("set executed for first", result3);
+    observer.Wait();
+
     CannedBrowsingDataCookieHelper* accepted =
         GetSiteSettingsCookieContainer(browser());
     CannedBrowsingDataCookieHelper* blocked =
@@ -828,16 +914,19 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsWorkerModulesBrowserTest, CookieStore) {
     EXPECT_THAT(accepted_cookies, net::MatchesCookieLine("first=value"));
   }
 
-  // Now set with cookies blocked.
-  content_settings::CookieSettings* settings =
-      CookieSettingsFactory::GetForProfile(browser()->profile()).get();
-  settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
-  content::EvalJsResult result4 =
-      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
-                      "requestCookieSet('second')");
-  EXPECT_EQ("set executed for second", result4);
-
   {
+    CookieChangeObserver observer(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    // Now set with cookies blocked.
+    content_settings::CookieSettings* settings =
+        CookieSettingsFactory::GetForProfile(browser()->profile()).get();
+    settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
+    content::EvalJsResult result4 =
+        content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        "requestCookieSet('second')");
+    EXPECT_EQ("set executed for second", result4);
+    observer.Wait();
+
     CannedBrowsingDataCookieHelper* accepted =
         GetSiteSettingsCookieContainer(browser());
     CannedBrowsingDataCookieHelper* blocked =
@@ -896,8 +985,8 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
 
     EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
     EXPECT_EQ(!expect_loaded,
-              TabSpecificContentSettings::FromWebContents(web_contents)->
-                  IsContentBlocked(CONTENT_SETTINGS_TYPE_PLUGINS));
+              TabSpecificContentSettings::FromWebContents(web_contents)
+                  ->IsContentBlocked(ContentSettingsType::PLUGINS));
   }
 
   void RunJavaScriptBlockedTest(const char* path,
@@ -939,8 +1028,8 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
     }
 
     EXPECT_EQ(expect_is_javascript_content_blocked,
-              tab_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT));
-    EXPECT_FALSE(tab_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_PLUGINS));
+              tab_settings->IsContentBlocked(ContentSettingsType::JAVASCRIPT));
+    EXPECT_FALSE(tab_settings->IsContentBlocked(ContentSettingsType::PLUGINS));
   }
 
  private:
@@ -953,7 +1042,7 @@ class PepperContentSettingsSpecialCasesPluginsBlockedTest
   void SetUpOnMainThread() override {
     PepperContentSettingsSpecialCasesTest::SetUpOnMainThread();
     HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-        ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+        ->SetDefaultContentSetting(ContentSettingsType::PLUGINS,
                                    CONTENT_SETTING_BLOCK);
   }
 };
@@ -967,10 +1056,10 @@ class PepperContentSettingsSpecialCasesJavaScriptBlockedTest
     HostContentSettingsMap* content_settings_map =
         HostContentSettingsMapFactory::GetForProfile(browser()->profile());
     content_settings_map->SetContentSettingDefaultScope(
-        server_root, server_root, CONTENT_SETTINGS_TYPE_PLUGINS, std::string(),
+        server_root, server_root, ContentSettingsType::PLUGINS, std::string(),
         CONTENT_SETTING_ALLOW);
     content_settings_map->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
+        ContentSettingsType::JAVASCRIPT, CONTENT_SETTING_BLOCK);
   }
 };
 
@@ -980,7 +1069,7 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesTest, Flash) {
   GURL server_root = https_server_.GetURL("/");
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetContentSettingDefaultScope(server_root, server_root,
-                                      CONTENT_SETTINGS_TYPE_PLUGINS,
+                                      ContentSettingsType::PLUGINS,
                                       std::string(), CONTENT_SETTING_ALLOW);
 
   RunLoadPepperPluginTest(content::kFlashPluginSwfMimeType, true);

@@ -35,7 +35,7 @@
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_service_manager_context.h"
 #include "net/cert/x509_certificate.h"
 #include "net/test/cert_test_util.h"
@@ -144,12 +144,17 @@ class SessionControllerClientImplTest : public testing::Test {
 
   // Add and log in a user to the session.
   void UserAddedToSession(const AccountId& account_id) {
-    user_manager()->AddUser(account_id);
+    const user_manager::User* user = user_manager()->AddUser(account_id);
     session_manager_.CreateSession(
         account_id,
         chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
             account_id.GetUserEmail()),
         false);
+
+    // Simulate that user profile is loaded.
+    CreateTestingProfile(user);
+    session_manager_.NotifyUserProfileLoaded(account_id);
+
     session_manager_.SetSessionState(SessionState::ACTIVE);
   }
 
@@ -185,7 +190,7 @@ class SessionControllerClientImplTest : public testing::Test {
     return profile;
   }
 
-  content::TestBrowserThreadBundle threads_;
+  content::BrowserTaskEnvironment task_environment_;
   content::TestServiceManagerContext context_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
   std::unique_ptr<AssistantClient> assistant_client_;
@@ -322,9 +327,7 @@ TEST_F(SessionControllerClientImplTest,
   net::CertificateList certificates;
   certificates.push_back(
       net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem"));
-  service->OnPolicyProvidedCertsChanged(
-      certificates /* all_server_and_authority_certs */,
-      certificates /* trust_anchors */);
+  service->SetPolicyTrustAnchorsForTesting(/*trust_anchors=*/certificates);
   EXPECT_TRUE(service->has_policy_certificates());
   EXPECT_EQ(ash::AddUserSessionPolicy::ERROR_NOT_ALLOWED_PRIMARY_USER,
             SessionControllerClientImpl::GetAddUserSessionPolicy());
@@ -464,12 +467,6 @@ TEST_F(SessionControllerClientImplTest, SupervisedUser) {
       chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
           "child@test.com"),
       false);
-  session_manager_.SetSessionState(SessionState::ACTIVE);
-
-  // The session controller received session info and user session.
-  EXPECT_LT(0u, session_controller.last_user_session()->session_id);
-  EXPECT_EQ(user_manager::USER_TYPE_SUPERVISED,
-            session_controller.last_user_session()->user_info.type);
 
   // Simulate profile creation after login.
   TestingProfile* user_profile = CreateTestingProfile(user);
@@ -482,8 +479,15 @@ TEST_F(SessionControllerClientImplTest, SupervisedUser) {
                    "parent2@test.com");
 
   // Simulate the notification that the profile is ready.
-  client.OnLoginUserProfilePrepared(user_profile);
-  base::RunLoop().RunUntilIdle();  // For PostTask and mojo interface.
+  session_manager_.NotifyUserProfileLoaded(account_id);
+
+  // User session could only be made active after user profile is loaded.
+  session_manager_.SetSessionState(SessionState::ACTIVE);
+
+  // The session controller received session info and user session.
+  EXPECT_LT(0u, session_controller.last_user_session()->session_id);
+  EXPECT_EQ(user_manager::USER_TYPE_SUPERVISED,
+            session_controller.last_user_session()->user_info.type);
 
   // The custodians were sent over the mojo interface.
   EXPECT_EQ("parent1@test.com",
@@ -515,11 +519,13 @@ TEST_F(SessionControllerClientImplTest, UserPrefsChange) {
       chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
           account_id.GetUserEmail()),
       false);
-  session_manager_.SetSessionState(SessionState::ACTIVE);
 
   // Simulate the notification that the profile is ready.
   TestingProfile* const user_profile = CreateTestingProfile(user);
-  client.OnLoginUserProfilePrepared(user_profile);
+  session_manager_.NotifyUserProfileLoaded(account_id);
+
+  // User session could only be made active after user profile is loaded.
+  session_manager_.SetSessionState(SessionState::ACTIVE);
 
   // Manipulate user prefs and verify SessionController is updated.
   PrefService* const user_prefs = user_profile->GetPrefs();

@@ -84,11 +84,8 @@ async function setUpFileEntrySet(volume) {
 async function openFileDialogClickOkButton(
     volume, name, useBrowserOpen = false) {
   const okButton = '.button-panel button.ok:enabled';
-  if (volume !== 'drive' ||
-      await sendTestMessage({name: 'getDriveFsEnabled'}) === 'true') {
-    await sendTestMessage(
-        {name: 'expectFileTask', fileNames: [name], openType: 'open'});
-  }
+  await sendTestMessage(
+      {name: 'expectFileTask', fileNames: [name], openType: 'open'});
   let closer = clickOpenFileDialogButton.bind(null, name, okButton);
 
   const entrySet = await setUpFileEntrySet(volume);
@@ -114,11 +111,8 @@ async function openFileDialogClickOkButton(
 async function saveFileDialogClickOkButton(volume, name) {
   const caller = getCaller();
 
-  if (volume !== 'drive' ||
-      await sendTestMessage({name: 'getDriveFsEnabled'}) === 'true') {
-    await sendTestMessage(
-        {name: 'expectFileTask', fileNames: [name], openType: 'saveAs'});
-  }
+  await sendTestMessage(
+      {name: 'expectFileTask', fileNames: [name], openType: 'saveAs'});
 
   let closer = async (appId) => {
     const okButton = '.button-panel button.ok:enabled';
@@ -222,6 +216,25 @@ async function openFileDialogSendEscapeKey(volume, name) {
 }
 
 /**
+ * Tests for display:none status of feedback panels in Files app.
+ *
+ * @param {string} type Type of dialog to open.
+ */
+async function checkFeedbackDisplayHidden(type) {
+  // Open dialog of the specified 'type'.
+  chrome.fileSystem.chooseEntry({type: type}, (entry) => {});
+  const appId = await remoteCall.waitForWindow('dialog#');
+
+  // Wait to finish initial load.
+  await remoteCall.waitFor('isFileManagerLoaded', appId, true);
+  // Check the display style of the feedback panels container.
+  const element = await remoteCall.waitForElementStyles(
+      appId, ['.files-feedback-panels'], ['display']);
+  // Check that CSS display style is 'none'.
+  chrome.test.assertTrue(element.styles['display'] === 'none');
+}
+
+/**
  * Test file present in Downloads.
  * @{!string}
  */
@@ -274,6 +287,20 @@ testcase.openFileDialogCancelDownloads = () => {
  */
 testcase.openFileDialogEscapeDownloads = () => {
   return openFileDialogSendEscapeKey('downloads', TEST_LOCAL_FILE);
+};
+
+/**
+ * Tests the feedback panels are hidden when using an open file dialog.
+ */
+testcase.openFileDialogPanelsDisabled = () => {
+  return checkFeedbackDisplayHidden('openFile');
+};
+
+/**
+ * Tests the feedback panels are hidden when using a save file dialog.
+ */
+testcase.saveFileDialogPanelsDisabled = () => {
+  return checkFeedbackDisplayHidden('saveFile');
 };
 
 /**
@@ -342,11 +369,7 @@ testcase.openFileDialogDriveFromBrowser = async () => {
   const url = new URL(
       await openFileDialogClickOkButton('drive', TEST_DRIVE_FILE, true));
 
-  const isDriveFsEnabled =
-      await sendTestMessage({name: 'getDriveFsEnabled'}) === 'true';
-
-  chrome.test.assertEq(
-      url.protocol, isDriveFsEnabled ? 'file:' : 'externalfile:');
+  chrome.test.assertEq(url.protocol, 'file:');
   chrome.test.assertTrue(
       url.pathname.endsWith(`/root/${TEST_DRIVE_FILE}`), url.pathname);
 };
@@ -459,12 +482,20 @@ testcase.openFileDialogFileListShowContextMenu = async () => {
   chrome.fileSystem.chooseEntry({type: 'openFile'}, (entry) => {});
   const appId = await remoteCall.waitForWindow('dialog#');
 
-  // Wait for files to be displayed.
-  await remoteCall.waitForFiles(
-      appId, TestEntryInfo.getExpectedRows(BASIC_LOCAL_ENTRY_SET));
-
   // Wait to finish initial load.
   await remoteCall.waitFor('isFileManagerLoaded', appId, true);
+
+  // Wait for files to be displayed.
+  const expectedRows = [
+    ['Play files', '--', 'Folder'],
+    ['Downloads', '--', 'Folder'],
+    ['Linux files', '--', 'Folder'],
+  ];
+  await remoteCall.waitForFiles(
+      appId, expectedRows, {ignoreLastModifiedTime: true});
+
+  // Navigate to Downloads folder.
+  await remoteCall.navigateWithDirectoryTree(appId, '/Downloads', 'My files');
 
   // Right-click "photos" folder to show context menu.
   await remoteCall.waitAndRightClick(appId, '#file-list [file-name="photos"]');

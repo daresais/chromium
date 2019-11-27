@@ -5,6 +5,7 @@
 #include "ash/system/message_center/unified_message_list_view.h"
 
 #include "ash/public/cpp/ash_features.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/message_center/message_center_style.h"
 #include "ash/system/message_center/notification_swipe_control_view.h"
 #include "ash/system/message_center/unified_message_center_view.h"
@@ -34,6 +35,20 @@ constexpr base::TimeDelta kClearAllStackedAnimationDuration =
     base::TimeDelta::FromMilliseconds(40);
 constexpr base::TimeDelta kClearAllVisibleAnimationDuration =
     base::TimeDelta::FromMilliseconds(160);
+
+// Comparator function for sorting the notifications in the order that they are
+// displayed in the UnifiedMessageListView.
+// Currently the ordering rule is very simple (subject to change):
+//     1. All pinned notifications are displayed first.
+//     2. Otherwise, display in order of most recent timestamp.
+bool CompareNotifications(message_center::Notification* n1,
+                          message_center::Notification* n2) {
+  if (n1->pinned() && !n2->pinned())
+    return true;
+  if (!n1->pinned() && n2->pinned())
+    return false;
+  return message_center::CompareTimestampSerial()(n1, n2);
+}
 
 }  // namespace
 
@@ -90,7 +105,9 @@ class UnifiedMessageListView::MessageViewContainer
         is_bottom ? views::NullBorder()
                   : views::CreateSolidSidedBorder(
                         0, 0, kUnifiedNotificationSeparatorThickness, 0,
-                        kUnifiedNotificationSeparatorColor));
+                        AshColorProvider::Get()->GetContentLayerColor(
+                            AshColorProvider::ContentLayerType::kSeparator,
+                            AshColorProvider::AshColorMode::kLight)));
     const int top_radius = is_top ? kUnifiedTrayCornerRadius : 0;
     const int bottom_radius = is_bottom ? kUnifiedTrayCornerRadius : 0;
     message_view_->UpdateCornerRadius(top_radius, bottom_radius);
@@ -235,7 +252,7 @@ UnifiedMessageListView::~UnifiedMessageListView() {
 
 void UnifiedMessageListView::Init() {
   bool is_latest = true;
-  for (auto* notification : MessageCenter::Get()->GetVisibleNotifications()) {
+  for (auto* notification : GetSortedVisibleNotifications()) {
     auto* view =
         new MessageViewContainer(CreateMessageView(*notification), this);
     view->LoadExpandedState(model_, is_latest);
@@ -266,12 +283,23 @@ void UnifiedMessageListView::ClearAllWithAnimation() {
     StartAnimation();
 }
 
-int UnifiedMessageListView::CountNotificationsAboveY(int y_offset) const {
-  const auto it = std::find_if(children().cbegin(), children().cend(),
-                               [y_offset](const views::View* v) {
-                                 return v->bounds().bottom() > y_offset;
-                               });
-  return std::distance(children().cbegin(), it);
+std::vector<Notification*> UnifiedMessageListView::GetNotificationsAboveY(
+    int y_offset) const {
+  std::vector<Notification*> notifications;
+  for (views::View* view : children()) {
+    int bottom_limit =
+        features::IsUnifiedMessageCenterRefactorEnabled()
+            ? view->bounds().y() + kNotificationIconStackThreshold
+            : view->bounds().bottom();
+    if (bottom_limit <= y_offset) {
+      Notification* notification =
+          MessageCenter::Get()->FindVisibleNotificationById(
+              AsMVC(view)->GetNotificationId());
+      if (notification)
+        notifications.insert(notifications.begin(), notification);
+    }
+  }
+  return notifications;
 }
 
 int UnifiedMessageListView::GetTotalNotificationCount() const {
@@ -343,10 +371,28 @@ void UnifiedMessageListView::OnNotificationAdded(const std::string& id) {
   // Collapse all notifications before adding new one.
   CollapseAllNotifications();
 
+  // Find the correct index to insert the new notification based on the sorted
+  // order.
+  auto child_views = children();
+  size_t index_to_insert = child_views.size();
+  for (size_t i = 0; i < child_views.size(); ++i) {
+    MessageViewContainer* message_view =
+        static_cast<MessageViewContainer*>(child_views[i]);
+    auto* child_notification =
+        MessageCenter::Get()->FindVisibleNotificationById(
+            message_view->GetNotificationId());
+    if (!child_notification)
+      break;
+
+    if (!CompareNotifications(notification, child_notification)) {
+      index_to_insert = i;
+      break;
+    }
+  }
+
   auto* view = CreateMessageView(*notification);
-  // Expand the latest notification.
   view->SetExpanded(view->IsAutoExpandingAllowed());
-  AddChildView(new MessageViewContainer(view, this));
+  AddChildViewAt(new MessageViewContainer(view, this), index_to_insert);
   UpdateBorders();
   ResetBounds();
 }
@@ -451,8 +497,9 @@ MessageView* UnifiedMessageListView::CreateMessageView(
   return view;
 }
 
-int UnifiedMessageListView::GetStackedNotificationCount() const {
-  return message_center_view_->GetStackedNotificationCount();
+std::vector<message_center::Notification*>
+UnifiedMessageListView::GetStackedNotifications() const {
+  return message_center_view_->GetStackedNotifications();
 }
 
 // static
@@ -588,7 +635,7 @@ void UnifiedMessageListView::UpdateClearAllAnimation() {
     view->set_is_removed();
 
   if (state_ == State::CLEAR_ALL_STACKED) {
-    if (view && GetStackedNotificationCount() > 0) {
+    if (view && GetStackedNotifications().size() > 0) {
       DeleteRemovedNotifications();
       UpdateBounds();
       start_height_ = ideal_height_;
@@ -620,6 +667,17 @@ double UnifiedMessageListView::GetCurrentValue() const {
                                         ? gfx::Tween::EASE_IN
                                         : gfx::Tween::FAST_OUT_SLOW_IN,
                                     animation_->GetCurrentValue());
+}
+
+std::vector<message_center::Notification*>
+UnifiedMessageListView::GetSortedVisibleNotifications() const {
+  auto visible_notifications = MessageCenter::Get()->GetVisibleNotifications();
+  std::vector<Notification*> sorted_notifications;
+  std::copy(visible_notifications.begin(), visible_notifications.end(),
+            std::back_inserter(sorted_notifications));
+  std::sort(sorted_notifications.begin(), sorted_notifications.end(),
+            CompareNotifications);
+  return sorted_notifications;
 }
 
 }  // namespace ash

@@ -18,8 +18,8 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.send_tab_to_self.SendTabToSelfMetrics.SendTabToSelfShareClickResult;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.BottomSheetContent;
+import org.chromium.chrome.browser.tab.TabImpl;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContent;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.ui.widget.Toast;
 
@@ -37,7 +37,7 @@ public class DevicePickerBottomSheetContent implements BottomSheetContent, OnIte
     public DevicePickerBottomSheetContent(ChromeActivity activity, NavigationEntry entry) {
         mActivity = activity;
         mAdapter = new DevicePickerBottomSheetAdapter(
-                activity.getActivityTabProvider().get().getProfile());
+                ((TabImpl) activity.getActivityTabProvider().get()).getProfile());
         mEntry = entry;
 
         createToolbarView();
@@ -87,14 +87,7 @@ public class DevicePickerBottomSheetContent implements BottomSheetContent, OnIte
 
     @Override
     public int getPriority() {
-        return BottomSheet.ContentPriority.HIGH;
-    }
-
-    @Override
-    public boolean wrapContentEnabled() {
-        // Return true to have the bottom sheet only open as far as it needs to display the
-        // list of devices and nothing beyond that.
-        return true;
+        return BottomSheetContent.ContentPriority.HIGH;
     }
 
     @Override
@@ -105,9 +98,16 @@ public class DevicePickerBottomSheetContent implements BottomSheetContent, OnIte
     }
 
     @Override
-    public boolean isPeekStateEnabled() {
-        // Return false to ensure that the entire bottom sheet is shown.
-        return false;
+    public int getPeekHeight() {
+        // Return DISABLED to ensure that the entire bottom sheet is shown.
+        return BottomSheetContent.HeightMode.DISABLED;
+    }
+
+    @Override
+    public float getFullHeightRatio() {
+        // Return WRAP_CONTENT to have the bottom sheet only open as far as it needs to display the
+        // list of devices and nothing beyond that.
+        return BottomSheetContent.HeightMode.WRAP_CONTENT;
     }
 
     @Override
@@ -137,8 +137,8 @@ public class DevicePickerBottomSheetContent implements BottomSheetContent, OnIte
         TargetDeviceInfo targetDeviceInfo = mAdapter.getItem(position);
 
         Tab tab = mActivity.getActivityTabProvider().get();
-        SendTabToSelfAndroidBridge.addEntry(tab.getProfile(), mEntry.getUrl(), mEntry.getTitle(),
-                mEntry.getTimestamp(), targetDeviceInfo.cacheGuid);
+        SendTabToSelfAndroidBridge.addEntry(((TabImpl) tab).getProfile(), mEntry.getUrl(),
+                mEntry.getTitle(), mEntry.getTimestamp(), targetDeviceInfo.cacheGuid);
 
         Resources res = mActivity.getResources();
         String toastMessage =

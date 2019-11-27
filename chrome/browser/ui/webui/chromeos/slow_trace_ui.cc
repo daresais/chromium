@@ -33,16 +33,18 @@ std::string SlowTraceSource::GetSource() {
 }
 
 void SlowTraceSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   int trace_id = 0;
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path = content::URLDataSource::URLToRequestPath(url);
   size_t pos = path.find('#');
   TracingManager* manager = TracingManager::Get();
   if (!manager ||
       pos == std::string::npos ||
       !base::StringToInt(path.substr(pos + 1), &trace_id)) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
   manager->GetTraceData(trace_id,

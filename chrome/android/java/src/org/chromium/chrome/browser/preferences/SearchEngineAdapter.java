@@ -6,9 +6,6 @@ package org.chromium.chrome.browser.preferences;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.os.Build;
-import android.support.annotation.IntDef;
-import android.support.annotation.StringRes;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
@@ -24,9 +21,12 @@ import android.widget.BaseAdapter;
 import android.widget.RadioButton;
 import android.widget.TextView;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.StringRes;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ContentSettingsType;
@@ -56,7 +56,7 @@ import java.util.List;
 public class SearchEngineAdapter extends BaseAdapter
         implements TemplateUrlService.LoadListener, TemplateUrlService.TemplateUrlServiceObserver,
                 OnClickListener {
-    private static final String TAG = "cr_SearchEngines";
+    private static final String TAG = "SearchEngines";
 
     private static final int VIEW_TYPE_ITEM = 0;
     private static final int VIEW_TYPE_DIVIDER = 1;
@@ -201,8 +201,9 @@ public class SearchEngineAdapter extends BaseAdapter
         }
 
         if (mSelectedSearchEnginePosition == -1) {
-            throw new IllegalStateException(
-                    "Default search engine index did not match any available search engines.");
+            throw new IllegalStateException("Default search engine, "
+                    + defaultSearchEngineTemplateUrl
+                    + ", index did not match any available search engines.");
         }
 
         mInitialEnginePosition = mSelectedSearchEnginePosition;
@@ -364,18 +365,8 @@ public class SearchEngineAdapter extends BaseAdapter
         view.setOnClickListener(this);
         view.setTag(position);
 
-        // TODO(finnur): There's a tinting bug in the AppCompat lib (see http://crbug.com/474695),
-        // which causes the first radiobox to always appear selected, even if it is not. It is being
-        // addressed, but in the meantime we should use the native RadioButton instead.
-        RadioButton radioButton = (RadioButton) view.findViewById(R.id.radiobutton);
-        // On Lollipop this removes the redundant animation ring on selection but on older versions
-        // it would cause the radio button to disappear.
-        // TODO(finnur): Remove the encompassing if statement once we go back to using the AppCompat
-        // control.
+        RadioButton radioButton = view.findViewById(R.id.radiobutton);
         final boolean selected = position == mSelectedSearchEnginePosition;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            radioButton.setBackgroundResource(0);
-        }
         radioButton.setChecked(selected);
 
         TextView description = (TextView) view.findViewById(R.id.name);
@@ -476,7 +467,7 @@ public class SearchEngineAdapter extends BaseAdapter
         if (linkBeingShown == R.string.search_engine_system_location_disabled) {
             mContext.startActivity(LocationUtils.getInstance().getSystemLocationSettingsIntent());
         } else {
-            PreferencesLauncher.launchSettingsPageCompat(mContext, SingleWebsitePreferences.class,
+            PreferencesLauncher.launchSettingsPage(mContext, SingleWebsitePreferences.class,
                     SingleWebsitePreferences.createFragmentArgsForSite(url));
         }
     }
@@ -507,12 +498,12 @@ public class SearchEngineAdapter extends BaseAdapter
                 new PermissionInfo(PermissionInfo.Type.NOTIFICATION, url, null, false);
         boolean notificationsAllowed = settings.getContentSetting() == ContentSettingValues.ALLOW
                 && WebsitePreferenceBridge.isPermissionControlledByDSE(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS, url, false);
+                        ContentSettingsType.NOTIFICATIONS, url, false);
 
         settings = new PermissionInfo(PermissionInfo.Type.GEOLOCATION, url, null, false);
         boolean locationAllowed = settings.getContentSetting() == ContentSettingValues.ALLOW
                 && WebsitePreferenceBridge.isPermissionControlledByDSE(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION, url, false);
+                        ContentSettingsType.GEOLOCATION, url, false);
 
         boolean systemLocationAllowed =
                 LocationUtils.getInstance().isSystemLocationSettingEnabled();

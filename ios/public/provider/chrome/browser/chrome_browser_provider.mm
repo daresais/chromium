@@ -68,8 +68,17 @@ std::string ChromeBrowserProvider::GetRiskData() {
   return std::string();
 }
 
-UITextField<TextFieldStyling>* ChromeBrowserProvider::CreateStyledTextField(
-    CGRect frame) const {
+void ChromeBrowserProvider::AddSerializableData(
+    web::SerializableUserDataManager* user_data_manager,
+    web::WebState* web_state) {}
+
+bool ChromeBrowserProvider::ShouldBlockUrlDuringRestore(
+    const GURL& url,
+    web::WebState* web_state) {
+  return false;
+}
+
+UITextField* ChromeBrowserProvider::CreateStyledTextField() const {
   return nil;
 }
 
@@ -97,10 +106,6 @@ OmahaServiceProvider* ChromeBrowserProvider::GetOmahaServiceProvider() const {
 }
 
 UserFeedbackProvider* ChromeBrowserProvider::GetUserFeedbackProvider() const {
-  return nullptr;
-}
-
-SpecialUserProvider* ChromeBrowserProvider::GetSpecialUserProvider() const {
   return nullptr;
 }
 

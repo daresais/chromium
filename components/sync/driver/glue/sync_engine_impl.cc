@@ -16,6 +16,7 @@
 #include "components/invalidation/impl/invalidation_switches.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
+#include "components/sync/base/bind_to_task_runner.h"
 #include "components/sync/base/invalidation_helper.h"
 #include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/glue/sync_engine_backend.h"
@@ -118,6 +119,17 @@ void SyncEngineImpl::SetDecryptionPassphrase(const std::string& passphrase) {
                                 backend_, passphrase));
 }
 
+void SyncEngineImpl::AddTrustedVaultDecryptionKeys(
+    const std::vector<std::string>& keys,
+    base::OnceClosure done_cb) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  sync_task_runner_->PostTaskAndReply(
+      FROM_HERE,
+      base::BindOnce(&SyncEngineBackend::DoAddTrustedVaultDecryptionKeys,
+                     backend_, keys),
+      std::move(done_cb));
+}
+
 void SyncEngineImpl::StopSyncingForShutdown() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
@@ -156,7 +168,11 @@ void SyncEngineImpl::Shutdown(ShutdownReason reason) {
   sync_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&SyncEngineBackend::DoShutdown, backend_, reason));
-  backend_ = nullptr;
+
+  // Ensure that |backend_| destroyed inside Sync sequence, not inside current
+  // one.
+  sync_task_runner_->ReleaseSoon(FROM_HERE, std::move(backend_));
+  DCHECK(!backend_);
   registrar_ = nullptr;
 }
 
@@ -283,12 +299,7 @@ void SyncEngineImpl::FinishConfigureDataTypesOnFrontendLoop(
   if (invalidator_) {
     ModelTypeSet invalidation_enabled_types(enabled_types);
 #if defined(OS_ANDROID)
-    // TODO(melandory): On Android, we should call
-    // SetInvalidationsForSessionsEnabled(falls) on start-up when feature is
-    // enabled. Once it's dome remove checking of the feature from here.
-    if (base::FeatureList::IsEnabled(
-            invalidation::switches::kFCMInvalidations) &&
-        !sessions_invalidation_enabled_) {
+    if (!sessions_invalidation_enabled_) {
       invalidation_enabled_types.Remove(syncer::SESSIONS);
       invalidation_enabled_types.Remove(syncer::FAVICON_IMAGES);
       invalidation_enabled_types.Remove(syncer::FAVICON_TRACKING);
@@ -310,7 +321,8 @@ void SyncEngineImpl::HandleInitializationSuccessOnFrontendLoop(
     std::unique_ptr<ModelTypeConnector> model_type_connector,
     const std::string& cache_guid,
     const std::string& birthday,
-    const std::string& bag_of_chips) {
+    const std::string& bag_of_chips,
+    const std::string& last_keystore_key) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   model_type_connector_ = std::move(model_type_connector);
@@ -328,7 +340,7 @@ void SyncEngineImpl::HandleInitializationSuccessOnFrontendLoop(
 
   host_->OnEngineInitialized(initial_types, js_backend, debug_info_listener,
                              cache_guid, birthday, bag_of_chips,
-                             /*success=*/true);
+                             last_keystore_key, /*success=*/true);
 }
 
 void SyncEngineImpl::HandleInitializationFailureOnFrontendLoop() {
@@ -337,17 +349,19 @@ void SyncEngineImpl::HandleInitializationFailureOnFrontendLoop() {
                              WeakHandle<DataTypeDebugInfoListener>(),
                              /*cache_guid=*/"",
                              /*birthday=*/"", /*bag_of_chips=*/"",
+                             /*last_keystore_key=*/"",
                              /*success=*/false);
 }
 
 void SyncEngineImpl::HandleSyncCycleCompletedOnFrontendLoop(
-    const SyncCycleSnapshot& snapshot) {
+    const SyncCycleSnapshot& snapshot,
+    const std::string& last_keystore_key) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Process any changes to the datatypes we're syncing.
   // TODO(sync): add support for removing types.
   if (IsInitialized()) {
-    host_->OnSyncCycleCompleted(snapshot);
+    host_->OnSyncCycleCompleted(snapshot, last_keystore_key);
   }
 }
 
@@ -444,6 +458,14 @@ void SyncEngineImpl::SetInvalidationsForSessionsEnabled(bool enabled) {
   bool success = invalidator_->UpdateRegisteredInvalidationIds(
       this, ModelTypeSetToObjectIdSet(enabled_for_invalidation));
   DCHECK(success);
+}
+
+void SyncEngineImpl::GetNigoriNodeForDebugging(AllNodesCallback callback) {
+  DCHECK(backend_);
+  sync_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&SyncEngineBackend::GetNigoriNodeForDebugging, backend_,
+                     BindToCurrentSequence(std::move(callback))));
 }
 
 void SyncEngineImpl::OnInvalidatorClientIdChange(const std::string& client_id) {

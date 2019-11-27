@@ -6,7 +6,6 @@
 
 #include "ui/gfx/animation/animation_container.h"
 #include "ui/views/animation/compositor_animation_runner.h"
-#include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -69,8 +68,8 @@ void AnimationDelegateViews::UpdateAnimationRunner() {
   if (container_->has_custom_animation_runner())
     return;
 
-  container_->SetAnimationRunner(std::make_unique<CompositorAnimationRunner>(
-      view_->GetWidget()->GetCompositor()));
+  container_->SetAnimationRunner(
+      std::make_unique<CompositorAnimationRunner>(view_->GetWidget()));
 }
 
 }  // namespace views

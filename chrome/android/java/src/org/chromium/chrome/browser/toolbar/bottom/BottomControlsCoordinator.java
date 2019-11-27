@@ -4,20 +4,23 @@
 
 package org.chromium.chrome.browser.toolbar.bottom;
 
-import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.View.OnLongClickListener;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 
+import androidx.annotation.Nullable;
+
+import org.chromium.base.ObservableSupplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ThemeColorProvider;
-import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.compositor.layouts.ToolbarSwipeLayout;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.tasks.tab_management.TabGroupUi;
 import org.chromium.chrome.browser.tasks.tab_management.TabManagementModuleProvider;
@@ -26,7 +29,7 @@ import org.chromium.chrome.browser.toolbar.MenuButton;
 import org.chromium.chrome.browser.toolbar.TabCountProvider;
 import org.chromium.chrome.browser.toolbar.bottom.BottomControlsViewBinder.ViewHolder;
 import org.chromium.chrome.browser.ui.ImmersiveModeManager;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuButtonHelper;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -68,7 +71,9 @@ public class BottomControlsCoordinator {
      */
     public BottomControlsCoordinator(ChromeFullscreenManager fullscreenManager, ViewStub stub,
             ActivityTabProvider tabProvider, OnClickListener homeButtonListener,
-            OnClickListener searchAcceleratorListener, OnClickListener shareButtonListener,
+            OnClickListener searchAcceleratorListener,
+            ObservableSupplier<OnClickListener> shareButtonListenerSupplier,
+            OnLongClickListener tabSwitcherLongclickListener,
             ThemeColorProvider themeColorProvider) {
         final ScrollingBottomViewResourceFrameLayout root =
                 (ScrollingBottomViewResourceFrameLayout) stub.inflate();
@@ -97,13 +102,16 @@ public class BottomControlsCoordinator {
                 root.getResources().getDimensionPixelOffset(bottomToolbarHeightWithShadowId));
 
         if (TabManagementModuleProvider.getDelegate() != null
-                && FeatureUtilities.isTabGroupsAndroidEnabled()) {
+                && FeatureUtilities.isTabGroupsAndroidEnabled()
+                && !(FeatureUtilities.isDuetTabStripIntegrationAndroidEnabled()
+                        && FeatureUtilities.isBottomToolbarEnabled())) {
             mTabGroupUi = TabManagementModuleProvider.getDelegate().createTabGroupUi(
                     root.findViewById(R.id.bottom_container_slot), themeColorProvider);
         } else {
             mBottomToolbarCoordinator = new BottomToolbarCoordinator(
                     root.findViewById(R.id.bottom_toolbar_stub), tabProvider, homeButtonListener,
-                    searchAcceleratorListener, shareButtonListener, themeColorProvider);
+                    searchAcceleratorListener, shareButtonListenerSupplier,
+                    tabSwitcherLongclickListener, themeColorProvider);
         }
     }
 
@@ -149,7 +157,8 @@ public class BottomControlsCoordinator {
             mBottomToolbarCoordinator.initializeWithNative(tabSwitcherListener, newTabClickListener,
                     closeTabsClickListener, menuButtonHelper, overviewModeBehavior,
                     tabCountProvider, incognitoStateProvider, topToolbarRoot);
-            mMediator.setToolbarSwipeHandler(layoutManager.getToolbarSwipeHandler());
+            mMediator.setToolbarSwipeHandler(
+                    layoutManager.createToolbarSwipeHandler(/* supportSwipeDown = */ false));
         }
 
         if (mTabGroupUi != null) {
@@ -203,6 +212,14 @@ public class BottomControlsCoordinator {
             return mBottomToolbarCoordinator.getMenuButtonWrapper();
         }
         return null;
+    }
+
+    /**
+     * Handles system back press action if needed.
+     * @return Whether or not the back press event is consumed here.
+     */
+    public boolean onBackPressed() {
+        return mTabGroupUi != null && mTabGroupUi.onBackPressed();
     }
 
     /**

@@ -38,11 +38,8 @@ class TestExtensionDir {
   // .crx. Multiple calls to Pack() will produce extensions with the same ID.
   base::FilePath Pack();
 
-  // The same as Pack() but allows the caller to provide a private key.
-  base::FilePath PackWithPem(base::StringPiece pem);
-
   // Returns the path to the unpacked directory.
-  base::FilePath UnpackedPath();
+  base::FilePath UnpackedPath() const;
 
  private:
   // Stores files that make up the extension.

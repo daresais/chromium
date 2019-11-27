@@ -5,22 +5,23 @@
 #ifndef CHROME_BROWSER_UI_WEB_APPLICATIONS_APP_BROWSER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_WEB_APPLICATIONS_APP_BROWSER_CONTROLLER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/image/image_skia.h"
 
 class Browser;
 
-namespace gfx {
-class ImageSkia;
-}
-
 namespace web_app {
+
+class WebAppBrowserController;
 
 // Returns true if |app_url| and |page_url| are the same origin. To avoid
 // breaking Hosted Apps and Bookmark Apps that might redirect to sites in the
@@ -34,6 +35,9 @@ class AppBrowserController : public TabStripModelObserver,
  public:
   ~AppBrowserController() override;
 
+  static std::unique_ptr<AppBrowserController> MaybeCreateWebAppController(
+      Browser* browser);
+
   // Returns whether |browser| uses the experimental hosted app experience.
   // Convenience wrapper for checking IsForExperimentalWebAppBrowser() on
   // |browser|'s HostedAppBrowserController if it exists.
@@ -45,18 +49,32 @@ class AppBrowserController : public TabStripModelObserver,
   // Returns whether this controller was created for an installed PWA.
   virtual bool IsHostedApp() const;
 
-  virtual base::Optional<std::string> GetAppId() const = 0;
-
   // Returns true if the associated Hosted App is for a PWA.
   virtual bool CreatedForInstalledPwa() const;
 
-  // Whether the browser being controlled should be currently showing the
-  // toolbar.
-  virtual bool ShouldShowToolbar() const = 0;
+  // Whether the custom tab bar should be visible.
+  virtual bool ShouldShowCustomTabBar() const;
 
-  // Returns true if the hosted app buttons should be shown in the frame for
-  // this BrowserView.
-  virtual bool ShouldShowHostedAppButtonContainer() const = 0;
+  // Whether the browser should include the tab strip.
+  virtual bool has_tab_strip() const;
+
+  // Whether the browser toolbar is present.
+  // Note: web app windows have their browser toolbar inline in their titlebar.
+  virtual bool HasTitlebarToolbar() const;
+
+  // Whether to show app origin text in the titlebar toolbar.
+  virtual bool HasTitlebarAppOriginText() const;
+
+  // Whether to show content settings in the titlebar toolbar.
+  virtual bool HasTitlebarContentSettings() const;
+
+#if defined(OS_CHROMEOS)
+  // Whether to use the Terminal System App menu rather than the default menu.
+  virtual bool UseTitlebarTerminalSystemAppMenu() const;
+#endif
+
+  // Whether to show the Back and Refresh buttons in the web app toolbar.
+  virtual bool HasMinimalUiButtons() const = 0;
 
   // Returns the app icon for the window to use in the task list.
   virtual gfx::ImageSkia GetWindowAppIcon() const = 0;
@@ -83,6 +101,9 @@ class AppBrowserController : public TabStripModelObserver,
   // Determines whether the specified url is 'inside' the app |this| controls.
   virtual bool IsUrlInAppScope(const GURL& url) const = 0;
 
+  // Safe downcast:
+  virtual WebAppBrowserController* AsWebAppBrowserController();
+
   virtual bool CanUninstall() const;
 
   virtual void Uninstall();
@@ -91,13 +112,20 @@ class AppBrowserController : public TabStripModelObserver,
   // the lifetime of HostedAppBrowserController).
   virtual bool IsInstalled() const;
 
-  // Updates the location bar visibility based on whether it should be
+  // Updates the custom tab bar's visibility based on whether it should be
   // currently visible or not. If |animate| is set, the change will be
   // animated.
-  void UpdateToolbarVisibility(bool animate) const;
+  void UpdateCustomTabBarVisibility(bool animate) const;
 
   // Returns true if this controller is for a System Web App.
   bool IsForSystemWebApp() const;
+
+  // Returns true if AppId is non-null
+  bool HasAppId() const { return app_id_.has_value(); }
+
+  // Returns AppId if it is defined, otherwise DCHECK.
+  // Should check HasAppId() before calling if unsure
+  const AppId& GetAppId() const { return app_id_.value(); }
 
   Browser* browser() const { return browser_; }
 
@@ -116,7 +144,8 @@ class AppBrowserController : public TabStripModelObserver,
       const TabStripSelectionChange& selection) override;
 
  protected:
-  explicit AppBrowserController(Browser* browser);
+  explicit AppBrowserController(Browser* browser,
+                                base::Optional<web_app::AppId> app_id);
 
   // Called once the app browser controller has determined its initial url.
   virtual void OnReceivedInitialURL() {}
@@ -125,12 +154,18 @@ class AppBrowserController : public TabStripModelObserver,
   virtual void OnTabInserted(content::WebContents* contents);
   virtual void OnTabRemoved(content::WebContents* contents);
 
+  // Gets the icon to use if the app icon is not available.
+  gfx::ImageSkia GetFallbackAppIcon() const;
+
  private:
   // Sets the url that the app browser controller was created with.
   void SetInitialURL(const GURL& initial_url);
 
+  const base::Optional<AppId> app_id_;
   Browser* const browser_;
   GURL initial_url_;
+
+  const bool has_tab_strip_;
 
   DISALLOW_COPY_AND_ASSIGN(AppBrowserController);
 };

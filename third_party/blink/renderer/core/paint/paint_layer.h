@@ -296,15 +296,13 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   }
 
   // The physical offset from this PaintLayer to its ContainingLayer.
-  // Does not include any scroll offset of the ContainingLayer.
-  PhysicalOffset Location() const {
+  // Does not include any scroll offset of the ContainingLayer. Also does not
+  // include offsets for positioned elements.
+  const PhysicalOffset& LocationWithoutPositionOffset() const {
 #if DCHECK_IS_ON()
     DCHECK(!needs_position_update_);
 #endif
-    PhysicalOffset location = location_;
-    if (GetLayoutObject().IsInFlowPositioned())
-      location += GetLayoutObject().OffsetForInFlowPosition();
-    return location;
+    return location_without_position_offset_;
   }
 
   LayoutSize ScrolledContentOffset() const;
@@ -345,8 +343,6 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   }
 
   void UpdateTransformationMatrix();
-  PaintLayer* RenderingContextRoot();
-  const PaintLayer* RenderingContextRoot() const;
 
   bool IsStackingContextWithNegativeZOrderChildren() const {
     DCHECK(!stacking_node_ || GetLayoutObject().StyleRef().IsStackingContext());
@@ -589,6 +585,9 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   static void MapPointInPaintInvalidationContainerToBacking(
       const LayoutBoxModelObject& paint_invalidation_container,
       PhysicalOffset&);
+  static void MapQuadInPaintInvalidationContainerToBacking(
+      const LayoutBoxModelObject& paint_invalidation_container,
+      FloatQuad&);
 
   bool PaintsWithTransparency(GlobalPaintFlags global_paint_flags) const {
     return IsTransparent() && !PaintsIntoOwnBacking(global_paint_flags);
@@ -748,7 +747,6 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   }
 
   struct AncestorDependentCompositingInputs {
-   public:
     const PaintLayer* opacity_ancestor = nullptr;
     const PaintLayer* transform_ancestor = nullptr;
     const PaintLayer* filter_ancestor = nullptr;
@@ -776,6 +774,11 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
     // clipping logic.
     const PaintLayer* clip_parent = nullptr;
 
+    // Nearest layer that has layout containment applied to its LayoutObject.
+    // Squashing is disallowed across contain layout boundaries to provide
+    // better isolation.
+    const PaintLayer* nearest_contained_layout_layer = nullptr;
+
     // These two boxes do not include any applicable scroll offset of the
     // root PaintLayer.
     IntRect clipped_absolute_bounding_box;
@@ -783,7 +786,6 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
 
     const LayoutBoxModelObject* clipping_container = nullptr;
 
-    bool is_under_video = false;
     bool is_under_position_sticky = false;
   };
   void SetNeedsVisualOverflowRecalc();
@@ -853,14 +855,15 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   const PaintLayer* ClipParent() const {
     return GetAncestorDependentCompositingInputs().clip_parent;
   }
+  const PaintLayer* NearestContainedLayoutLayer() const {
+    return GetAncestorDependentCompositingInputs()
+        .nearest_contained_layout_layer;
+  }
   const PaintLayer* ClipPathAncestor() const {
     return GetAncestorDependentCompositingInputs().clip_path_ancestor;
   }
   const PaintLayer* MaskAncestor() const {
     return GetAncestorDependentCompositingInputs().mask_ancestor;
-  }
-  bool IsUnderVideo() const {
-    return GetAncestorDependentCompositingInputs().is_under_video;
   }
   bool HasDescendantWithClipPath() const {
     DCHECK(!needs_descendant_dependent_flags_update_);
@@ -883,9 +886,10 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
     return has_self_painting_layer_descendant_;
   }
 
-  // See PaintLayerStackingNode::layer_to_overlay_scrollbars_painting_after_.
-  bool NeedsReorderOverlayScrollbars() const {
-    return needs_reorder_overlay_scrollbars_;
+  // See
+  // PaintLayerStackingNode::layer_to_overlay_overflow_controls_painting_after_.
+  bool NeedsReorderOverlayOverflowControls() const {
+    return needs_reorder_overlay_overflow_controls_;
   }
 
   // Returns true if there is a descendant with blend-mode that is
@@ -948,10 +952,6 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
 
   void DidUpdateScrollsOverflow();
 
-  PhysicalRect PaintingExtent(const PaintLayer* root_layer,
-                              const PhysicalOffset& sub_pixel_accumulation,
-                              GlobalPaintFlags);
-
   void AppendSingleFragmentIgnoringPagination(
       PaintLayerFragments&,
       const PaintLayer* root_layer,
@@ -988,7 +988,11 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
       const PhysicalOffset& sub_pixel_accumulation,
       GlobalPaintFlags = kGlobalPaintNormalPhase);
 
-  bool NeedsRepaint() const { return needs_repaint_; }
+  bool SelfNeedsRepaint() const { return self_needs_repaint_; }
+  bool DescendantNeedsRepaint() const { return descendant_needs_repaint_; }
+  bool SelfOrDescendantNeedsRepaint() const {
+    return self_needs_repaint_ || descendant_needs_repaint_;
+  }
   void SetNeedsRepaint();
   void ClearNeedsRepaintRecursively();
 
@@ -1118,6 +1122,11 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
     return needs_visual_overflow_recalc_;
   }
 
+  PhysicalOffset OffsetForInFlowRelPosition() const {
+    return rare_data_ ? rare_data_->offset_for_in_flow_rel_position
+                      : PhysicalOffset();
+  }
+
  private:
   void SetNeedsCompositingInputsUpdateInternal();
 
@@ -1154,14 +1163,16 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
                            const HitTestRecursionData& recursion_data,
                            bool applied_transform,
                            HitTestingTransformState* = nullptr,
-                           double* z_offset = nullptr);
+                           double* z_offset = nullptr,
+                           bool check_resizer_only = false);
   PaintLayer* HitTestLayerByApplyingTransform(
       PaintLayer* root_layer,
       PaintLayer* container_layer,
       HitTestResult&,
       const HitTestRecursionData& recursion_data,
-      HitTestingTransformState* = nullptr,
-      double* z_offset = nullptr,
+      HitTestingTransformState*,
+      double* z_offset,
+      bool check_resizer_only,
       const PhysicalOffset& translation_offset = PhysicalOffset());
   PaintLayer* HitTestChildren(
       PaintLayerIteration,
@@ -1197,6 +1208,7 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
                                                  const HitTestRecursionData&,
                                                  HitTestingTransformState*,
                                                  double* z_offset,
+                                                 bool check_resizer_only,
                                                  ShouldRespectOverflowClipType);
   bool HitTestClippedOutByClipPath(PaintLayer* root_layer,
                                    const HitTestLocation&) const;
@@ -1234,7 +1246,7 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   void UpdatePaginationRecursive(bool needs_pagination_update = false);
   void ClearPaginationRecursive();
 
-  void SetNeedsRepaintInternal();
+  void SetSelfNeedsRepaint();
   void MarkCompositingContainerChainForNeedsRepaint();
 
   PaintLayerRareData& EnsureRareData() {
@@ -1279,8 +1291,8 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   // PaintLayerPaintOrderIterator.
   PaintLayerStackingNode* StackingNode() const { return stacking_node_.get(); }
 
-  void SetNeedsReorderOverlayScrollbars(bool b) {
-    needs_reorder_overlay_scrollbars_ = b;
+  void SetNeedsReorderOverlayOverflowControls(bool b) {
+    needs_reorder_overlay_overflow_controls_ = b;
   }
 
   // Self-painting layer is an optimization where we avoid the heavy Layer
@@ -1322,7 +1334,8 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   // graphics layer this Layer will be assigned.
   unsigned lost_grouped_mapping_ : 1;
 
-  unsigned needs_repaint_ : 1;
+  unsigned self_needs_repaint_ : 1;
+  unsigned descendant_needs_repaint_ : 1;
   unsigned previous_paint_result_ : 1;  // PaintResult
   static_assert(kMaxPaintResult <= 2,
                 "Should update number of bits of previous_paint_result_");
@@ -1362,7 +1375,7 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
 
   unsigned has_self_painting_layer_descendant_ : 1;
 
-  unsigned needs_reorder_overlay_scrollbars_ : 1;
+  unsigned needs_reorder_overlay_overflow_controls_ : 1;
 
 #if DCHECK_IS_ON()
   mutable unsigned layer_list_mutation_allowed_ : 1;
@@ -1376,8 +1389,9 @@ class CORE_EXPORT PaintLayer : public DisplayItemClient {
   PaintLayer* first_;
   PaintLayer* last_;
 
-  // Our (x,y) coordinates are in our containing layer's coordinate space.
-  PhysicalOffset location_;
+  // Our (x,y) coordinates are in our containing layer's coordinate space,
+  // excluding positioning offset and scroll.
+  PhysicalOffset location_without_position_offset_;
 
   // The layer's size.
   //

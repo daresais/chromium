@@ -138,10 +138,24 @@ const char* GetAsString(PointerType type) {
   }
 }
 
+std::unique_ptr<base::DictionaryValue> GenerateTouchPoint(
+    const TouchEvent& event) {
+  std::unique_ptr<base::DictionaryValue> point(new base::DictionaryValue());
+  point->SetInteger("x", event.x);
+  point->SetInteger("y", event.y);
+  point->SetDouble("radiusX", event.radiusX);
+  point->SetDouble("radiusY", event.radiusY);
+  point->SetDouble("rotationAngle", event.rotationAngle);
+  point->SetDouble("force", event.force);
+  point->SetInteger("id", event.id);
+  return point;
+}
+
 }  // namespace
 
 WebViewImpl::WebViewImpl(const std::string& id,
                          const bool w3c_compliant,
+                         const WebViewImpl* parent,
                          const BrowserInfo* browser_info,
                          std::unique_ptr<DevToolsClient> client,
                          const DeviceMetrics* device_metrics,
@@ -151,15 +165,11 @@ WebViewImpl::WebViewImpl(const std::string& id,
       browser_info_(browser_info),
       is_locked_(false),
       is_detached_(false),
-      parent_(nullptr),
+      parent_(parent),
       client_(std::move(client)),
       dom_tracker_(new DomTracker(client_.get())),
       frame_tracker_(new FrameTracker(client_.get(), this, browser_info)),
       dialog_manager_(new JavaScriptDialogManager(client_.get(), browser_info)),
-      navigation_tracker_(PageLoadStrategy::Create(page_load_strategy,
-                                                   client_.get(),
-                                                   browser_info,
-                                                   dialog_manager_.get())),
       mobile_emulation_override_manager_(
           new MobileEmulationOverrideManager(client_.get(), device_metrics)),
       geolocation_override_manager_(
@@ -172,9 +182,16 @@ WebViewImpl::WebViewImpl(const std::string& id,
   // Page.setDownloadBehavior. This is handled by the
   // DownloadDirectoryOverrideManager, which is only instantiated
   // in headless chrome.
-  if (browser_info->browser_name == "headless chrome")
+  if (browser_info->is_headless)
     download_directory_override_manager_ =
         std::make_unique<DownloadDirectoryOverrideManager>(client_.get());
+  // Child WebViews should not have their own navigation_tracker, but defer
+  // all related calls to their parent. All WebViews must have either parent_
+  // or navigation_tracker_
+  if (!parent_)
+    navigation_tracker_ = std::unique_ptr<PageLoadStrategy>(
+        PageLoadStrategy::Create(page_load_strategy, client_.get(), this,
+                                 browser_info, dialog_manager_.get()));
   client_->SetOwner(this);
 }
 
@@ -182,16 +199,27 @@ WebViewImpl::~WebViewImpl() {}
 
 WebViewImpl* WebViewImpl::CreateChild(const std::string& session_id,
                                       const std::string& target_id) const {
-  DevToolsClientImpl* parent_client =
-      static_cast<DevToolsClientImpl*>(client_.get());
+  // While there may be a deep hierarchy of WebViewImpl instances, the
+  // hierarchy for DevToolsClientImpl is flat - there's a root which
+  // sends/receives over the socket, and all child sessions are considered
+  // its children (one level deep at most).
+  DevToolsClientImpl* root_client =
+      static_cast<DevToolsClientImpl*>(client_.get())->GetRootClient();
   std::unique_ptr<DevToolsClient> child_client(
-      std::make_unique<DevToolsClientImpl>(parent_client, session_id));
-  WebViewImpl* child = new WebViewImpl(target_id, w3c_compliant_, browser_info_,
-                                       std::move(child_client), nullptr,
-                                       navigation_tracker_->IsNonBlocking()
-                                           ? PageLoadStrategy::kNone
-                                           : PageLoadStrategy::kNormal);
-  child->parent_ = this;
+      std::make_unique<DevToolsClientImpl>(root_client, session_id));
+  WebViewImpl* child = new WebViewImpl(
+      target_id, w3c_compliant_, this, browser_info_, std::move(child_client),
+      nullptr,
+      IsNonBlocking() ? PageLoadStrategy::kNone : PageLoadStrategy::kNormal);
+  if (!IsNonBlocking()) {
+    // Find Navigation Tracker for the top of the WebViewImpl hierarchy
+    const WebViewImpl* currentView = this;
+    while (currentView->parent_)
+      currentView = currentView->parent_;
+    PageLoadStrategy* pls = currentView->navigation_tracker_.get();
+    NavigationTracker* nt = static_cast<NavigationTracker*>(pls);
+    child->client_->AddListener(static_cast<DevToolsEventListener*>(nt));
+  }
   return child;
 }
 
@@ -240,7 +268,7 @@ Status WebViewImpl::Load(const std::string& url, const Timeout* timeout) {
     return Status(kUnknownError, "unsupported protocol");
   base::DictionaryValue params;
   params.SetString("url", url);
-  if (navigation_tracker_->IsNonBlocking()) {
+  if (IsNonBlocking()) {
     // With non-bloakcing navigation tracker, the previous navigation might
     // still be in progress, and this can cause the new navigate command to be
     // ignored on Chrome v63 and above. Stop previous navigation first.
@@ -274,6 +302,13 @@ Status WebViewImpl::Resume(const Timeout* timeout) {
 Status WebViewImpl::SendCommand(const std::string& cmd,
                                 const base::DictionaryValue& params) {
   return client_->SendCommand(cmd, params);
+}
+
+Status WebViewImpl::SendCommandFromWebSocket(
+    const std::string& cmd,
+    const base::DictionaryValue& params,
+    const int client_cmd_id) {
+  return client_->SendCommandFromWebSocket(cmd, params, client_cmd_id);
 }
 
 Status WebViewImpl::SendCommandAndGetResult(
@@ -511,10 +546,12 @@ Status WebViewImpl::DispatchTouchEventsForMouseEvents(
 }
 
 Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
-                                        const std::string& frame) {
+                                        const std::string& frame,
+                                        bool async_dispatch_events) {
   if (mobile_emulation_override_manager_->IsEmulatingTouch())
     return DispatchTouchEventsForMouseEvents(events, frame);
 
+  Status status(kOk);
   for (auto it = events.begin(); it != events.end(); ++it) {
     base::DictionaryValue params;
     params.SetString("type", GetAsString(it->type));
@@ -525,43 +562,82 @@ Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
     params.SetInteger("buttons", it->buttons);
     params.SetInteger("clickCount", it->click_count);
     params.SetString("pointerType", GetAsString(it->pointer_type));
-    Status status = client_->SendCommand("Input.dispatchMouseEvent", params);
+
+    if (async_dispatch_events) {
+      status = client_->SendCommandAndIgnoreResponse("Input.dispatchMouseEvent",
+                                                     params);
+    } else {
+      status = client_->SendCommand("Input.dispatchMouseEvent", params);
+    }
+
     if (status.IsError())
       return status;
   }
-  return Status(kOk);
+  return status;
 }
 
-Status WebViewImpl::DispatchTouchEvent(const TouchEvent& event) {
+Status WebViewImpl::DispatchTouchEvent(const TouchEvent& event,
+                                       bool async_dispatch_events) {
   base::DictionaryValue params;
   std::string type = GetAsString(event.type);
   params.SetString("type", type);
   std::unique_ptr<base::ListValue> point_list(new base::ListValue);
+  Status status(kOk);
   if (type == "touchStart" || type == "touchMove") {
-    std::unique_ptr<base::DictionaryValue> point(new base::DictionaryValue());
-    point->SetInteger("x", event.x);
-    point->SetInteger("y", event.y);
-    point->SetDouble("radiusX", event.radiusX);
-    point->SetDouble("radiusY", event.radiusY);
-    point->SetDouble("rotationAngle", event.rotationAngle);
-    point->SetDouble("force", event.force);
-    point->SetInteger("id", event.id);
+    std::unique_ptr<base::DictionaryValue> point = GenerateTouchPoint(event);
     point_list->Append(std::move(point));
   }
   params.Set("touchPoints", std::move(point_list));
-  return client_->SendCommand("Input.dispatchTouchEvent", params);
+  if (async_dispatch_events) {
+    status = client_->SendCommandAndIgnoreResponse("Input.dispatchTouchEvent",
+                                                   params);
+  } else {
+    status = client_->SendCommand("Input.dispatchTouchEvent", params);
+  }
+  return status;
 }
 
-Status WebViewImpl::DispatchTouchEvents(const std::list<TouchEvent>& events) {
+Status WebViewImpl::DispatchTouchEvents(const std::list<TouchEvent>& events,
+                                        bool async_dispatch_events) {
   for (auto it = events.begin(); it != events.end(); ++it) {
-    Status status = DispatchTouchEvent(*it);
+    Status status = DispatchTouchEvent(*it, async_dispatch_events);
     if (status.IsError())
       return status;
   }
   return Status(kOk);
 }
 
-Status WebViewImpl::DispatchKeyEvents(const std::list<KeyEvent>& events) {
+Status WebViewImpl::DispatchTouchEventWithMultiPoints(
+    const std::list<TouchEvent>& events,
+    bool async_dispatch_events) {
+  if (events.size() == 0)
+    return Status(kOk);
+
+  base::DictionaryValue params;
+  std::unique_ptr<base::ListValue> point_list(new base::ListValue);
+  Status status(kOk);
+  for (auto it = events.begin(); it != events.end(); ++it) {
+    std::string type = GetAsString(it->type);
+    if (!type.empty())
+      params.SetString("type", type);
+    if (type == "touchStart" || type == "touchMove") {
+      std::unique_ptr<base::DictionaryValue> point = GenerateTouchPoint(*it);
+      point_list->Append(std::move(point));
+    }
+  }
+  params.Set("touchPoints", std::move(point_list));
+  if (async_dispatch_events) {
+    status = client_->SendCommandAndIgnoreResponse("Input.dispatchTouchEvent",
+                                                   params);
+  } else {
+    status = client_->SendCommand("Input.dispatchTouchEvent", params);
+  }
+  return Status(kOk);
+}
+
+Status WebViewImpl::DispatchKeyEvents(const std::list<KeyEvent>& events,
+                                      bool async_dispatch_events) {
+  Status status(kOk);
   for (auto it = events.begin(); it != events.end(); ++it) {
     base::DictionaryValue params;
     params.SetString("type", GetAsString(it->type));
@@ -597,11 +673,18 @@ Status WebViewImpl::DispatchKeyEvents(const std::list<KeyEvent>& events) {
       else
         params.SetInteger("location", it->location);
     }
-    Status status = client_->SendCommand("Input.dispatchKeyEvent", params);
+
+    if (async_dispatch_events) {
+      status = client_->SendCommandAndIgnoreResponse("Input.dispatchKeyEvent",
+                                                     params);
+    } else {
+      status = client_->SendCommand("Input.dispatchKeyEvent", params);
+    }
+
     if (status.IsError())
       return status;
   }
-  return Status(kOk);
+  return status;
 }
 
 Status WebViewImpl::GetCookies(std::unique_ptr<base::ListValue>* cookies,
@@ -676,6 +759,10 @@ Status WebViewImpl::AddCookie(const std::string& name,
 Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
                                               const Timeout& timeout,
                                               bool stop_load_on_timeout) {
+  // This function should not be called for child WebViews
+  if (parent_ != nullptr)
+    return Status(kUnsupportedOperation,
+                  "Call WaitForPendingNavigations only on the parent WebView");
   VLOG(0) << "Waiting for pending navigations...";
   const auto not_pending_navigation =
       base::Bind(&WebViewImpl::IsNotPendingNavigation, base::Unretained(this),
@@ -703,9 +790,12 @@ Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
 
 Status WebViewImpl::IsPendingNavigation(const std::string& frame_id,
                                         const Timeout* timeout,
-                                        bool* is_pending) {
-  return
-      navigation_tracker_->IsPendingNavigation(frame_id, timeout, is_pending);
+                                        bool* is_pending) const {
+  if (navigation_tracker_)
+    return navigation_tracker_->IsPendingNavigation(frame_id, timeout,
+                                                    is_pending);
+  else
+    return parent_->IsPendingNavigation(frame_id, timeout, is_pending);
 }
 
 JavaScriptDialogManager* WebViewImpl::GetJavaScriptDialogManager() {
@@ -1033,6 +1123,10 @@ Status WebViewImpl::CallAsyncFunctionInternal(
   }
 }
 
+void WebViewImpl::ClearNavigationState(const std::string& new_frame_id) {
+  navigation_tracker_->ClearState(new_frame_id);
+}
+
 Status WebViewImpl::IsNotPendingNavigation(const std::string& frame_id,
                                            const Timeout* timeout,
                                            bool* is_not_pending) {
@@ -1042,11 +1136,23 @@ Status WebViewImpl::IsNotPendingNavigation(const std::string& frame_id,
   if (status.IsError())
     return status;
   // An alert may block the pending navigation.
-  if (dialog_manager_->IsDialogOpen())
-    return Status(kUnexpectedAlertOpen);
+  if (dialog_manager_->IsDialogOpen()) {
+    std::string alert_text;
+    status = dialog_manager_->GetDialogMessage(&alert_text);
+    if (status.IsError())
+      return Status(kUnexpectedAlertOpen);
+    return Status(kUnexpectedAlertOpen, "{Alert text : " + alert_text + "}");
+  }
 
   *is_not_pending = !is_pending;
   return Status(kOk);
+}
+
+bool WebViewImpl::IsNonBlocking() const {
+  if (navigation_tracker_)
+    return navigation_tracker_->IsNonBlocking();
+  else
+    return parent_->IsNonBlocking();
 }
 
 bool WebViewImpl::IsOOPIF(const std::string& frame_id) {

@@ -17,7 +17,6 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -27,6 +26,8 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/launch_service/launch_service.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
@@ -52,8 +53,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog_tab_helper.h"
 #include "chrome/browser/ui/search/local_ntp_test_utils.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
@@ -115,6 +114,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/ui_base_features.h"
@@ -549,9 +549,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ThirtyFourTabs) {
   // for the algorithm to decide how many processes to create.
   const int kExpectedProcessCount =
 #if defined(ARCH_CPU_64_BITS)
-      17;
+      12;
 #else
-      25;
+      17;
 #endif
   if (base::SysInfo::AmountOfPhysicalMemoryMB() >= 2048) {
     EXPECT_GE(CountRenderProcessHosts(), kExpectedProcessCount);
@@ -887,11 +887,19 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, BeforeUnloadVsBeforeReload) {
   alert->native_dialog()->AcceptAppModalDialog();
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserTest, NewTabFromLinkOpensInGroup) {
-  ASSERT_TRUE(embedded_test_server()->Start());
+class BrowserTestWithTabGroupsEnabled : public BrowserTest {
+ public:
+  BrowserTestWithTabGroupsEnabled() {
+    feature_list_.InitAndEnableFeature(features::kTabGroups);
+  }
 
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kTabGroups);
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(BrowserTestWithTabGroupsEnabled,
+                       NewTabFromLinkOpensInGroup) {
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Add a grouped tab.
   TabStripModel* const model = browser()->tab_strip_model();
@@ -911,6 +919,30 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NewTabFromLinkOpensInGroup) {
   // It should have inherited the tab group from the first tab.
   EXPECT_EQ(group_id, browser()->tab_strip_model()->GetTabGroupForTab(1));
 }
+
+IN_PROC_BROWSER_TEST_F(BrowserTestWithTabGroupsEnabled,
+                       TargetBlankLinkOpensInGroup) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Add a grouped tab.
+  TabStripModel* const model = browser()->tab_strip_model();
+  ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL(
+                     "/frame_tree/anchor_to_same_site_location.html"));
+  const TabGroupId group_id = model->AddToNewGroup({0});
+
+  // Click a target=_blank link.
+  WebContents* const contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(ExecuteScript(
+      contents, "simulateClick(\"test-anchor-with-blank-target\", {})"));
+
+  // The new tab should have inherited the tab group from the first tab.
+  EXPECT_EQ(group_id, browser()->tab_strip_model()->GetTabGroupForTab(1));
+}
+
+// TODO(crbug.com/997344): Test the above two scenarios with implicitly-created
+// links, if still applicable.
 
 // BeforeUnloadAtQuitWithTwoWindows is a regression test for
 // http://crbug.com/11842. It opens two windows, one of which has a
@@ -961,9 +993,9 @@ IN_PROC_BROWSER_TEST_F(BeforeUnloadAtQuitWithTwoWindows,
   content::PrepContentsForBeforeUnloadTest(contents);
 
   // Open a second browser window at about:blank.
-  ui_test_utils::BrowserAddedObserver browser_added_observer;
   chrome::NewEmptyWindow(browser()->profile());
-  Browser* second_window = browser_added_observer.WaitForSingleNewBrowser();
+  Browser* second_window = BrowserList::GetInstance()->GetLastActive();
+  EXPECT_NE(second_window, browser());
   ui_test_utils::NavigateToURL(second_window, GURL(url::kAboutBlankURL));
 
   // Tell the application to quit. IDC_EXIT calls AttemptUserExit, which on
@@ -1299,8 +1331,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
   EXPECT_EQ(expected_tabs, browser()->tab_strip_model()->count());
 }
 
+// Overscroll is only enabled on Aura platforms currently, and even then only
+// when a specific feature (OverscrollHistoryNavigation) is enabled.
+#if defined(USE_AURA)
 IN_PROC_BROWSER_TEST_F(BrowserTest, OverscrollEnabledInRegularWindows) {
-  ASSERT_TRUE(browser()->is_type_tabbed());
+  ASSERT_TRUE(browser()->is_type_normal());
   EXPECT_TRUE(browser()->CanOverscrollContent());
 }
 
@@ -1317,6 +1352,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OverscrollDisabledInDevToolsWindows) {
   ASSERT_EQ(dev_tools_browser->app_name(), DevToolsWindow::kDevToolsApp);
   EXPECT_FALSE(dev_tools_browser->CanOverscrollContent());
 }
+#endif
 
 // Open an app window and the dev tools window and ensure that the location
 // bar settings are correct.
@@ -1328,11 +1364,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ShouldShowLocationBar) {
   const Extension* extension_app = GetExtension();
 
   // Launch it in a window, as AppLauncherHandler::HandleLaunchApp() would.
-  WebContents* app_window = OpenApplication(
-      AppLaunchParams(browser()->profile(), extension_app->id(),
-                      extensions::LaunchContainer::kLaunchContainerWindow,
-                      WindowOpenDisposition::NEW_WINDOW,
-                      extensions::AppLaunchSource::kSourceTest));
+  WebContents* app_window =
+      apps::LaunchService::Get(browser()->profile())
+          ->OpenApplication(apps::AppLaunchParams(
+              extension_app->id(),
+              apps::mojom::LaunchContainer::kLaunchContainerWindow,
+              WindowOpenDisposition::NEW_WINDOW,
+              apps::mojom::AppLaunchSource::kSourceTest));
   ASSERT_TRUE(app_window);
 
   DevToolsWindow* devtools_window =
@@ -1498,11 +1536,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   ASSERT_TRUE(extension_app);
 
   // Launch it in a window, as AppLauncherHandler::HandleLaunchApp() would.
-  WebContents* app_window = OpenApplication(
-      AppLaunchParams(browser()->profile(), extension_app->id(),
-                      extensions::LaunchContainer::kLaunchContainerWindow,
-                      WindowOpenDisposition::NEW_WINDOW,
-                      extensions::AppLaunchSource::kSourceTest));
+  WebContents* app_window =
+      apps::LaunchService::Get(browser()->profile())
+          ->OpenApplication(apps::AppLaunchParams(
+              extension_app->id(),
+              apps::mojom::LaunchContainer::kLaunchContainerWindow,
+              WindowOpenDisposition::NEW_WINDOW,
+              apps::mojom::AppLaunchSource::kSourceTest));
   ASSERT_TRUE(app_window);
 
   // Apps launched in a window from the NTP have an extensions tab helper with
@@ -1524,7 +1564,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   ASSERT_TRUE(new_browser);
   ASSERT_TRUE(new_browser != browser());
 
-  EXPECT_TRUE(new_browser->is_app());
+  EXPECT_TRUE(new_browser->is_type_app());
 
   // The browser's app name should include the extension's id.
   std::string app_name = new_browser->app_name_;
@@ -1536,22 +1576,30 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
 // Makes sure the browser doesn't crash when
 // set_show_state(ui::SHOW_STATE_MAXIMIZED) has been invoked.
 IN_PROC_BROWSER_TEST_F(BrowserTest, StartMaximized) {
-  Browser::Type types[] = {Browser::TYPE_TABBED, Browser::TYPE_POPUP};
-  for (size_t i = 0; i < base::size(types); ++i) {
-    Browser::CreateParams params(types[i], browser()->profile(), true);
-    params.initial_show_state = ui::SHOW_STATE_MAXIMIZED;
-    AddBlankTabAndShow(new Browser(params));
+  Browser::CreateParams params[] = {
+      Browser::CreateParams(Browser::TYPE_NORMAL, browser()->profile(), true),
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true),
+      Browser::CreateParams::CreateForApp("app_name", true, gfx::Rect(),
+                                          browser()->profile(), true),
+      Browser::CreateParams::CreateForDevTools(browser()->profile())};
+  for (size_t i = 0; i < base::size(params); ++i) {
+    params[i].initial_show_state = ui::SHOW_STATE_MAXIMIZED;
+    AddBlankTabAndShow(new Browser(params[i]));
   }
 }
 
 // Makes sure the browser doesn't crash when
 // set_show_state(ui::SHOW_STATE_MINIMIZED) has been invoked.
 IN_PROC_BROWSER_TEST_F(BrowserTest, StartMinimized) {
-  Browser::Type types[] = {Browser::TYPE_TABBED, Browser::TYPE_POPUP};
-  for (size_t i = 0; i < base::size(types); ++i) {
-    Browser::CreateParams params(types[i], browser()->profile(), true);
-    params.initial_show_state = ui::SHOW_STATE_MINIMIZED;
-    AddBlankTabAndShow(new Browser(params));
+  Browser::CreateParams params[] = {
+      Browser::CreateParams(Browser::TYPE_NORMAL, browser()->profile(), true),
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true),
+      Browser::CreateParams::CreateForApp("app_name", true, gfx::Rect(),
+                                          browser()->profile(), true),
+      Browser::CreateParams::CreateForDevTools(browser()->profile())};
+  for (size_t i = 0; i < base::size(params); ++i) {
+    params[i].initial_show_state = ui::SHOW_STATE_MINIMIZED;
+    AddBlankTabAndShow(new Browser(params[i]));
   }
 }
 
@@ -2164,9 +2212,7 @@ IN_PROC_BROWSER_TEST_F(RunInBackgroundTest, RunInBackgroundBasicTest) {
   CloseBrowserSynchronously(browser());
   EXPECT_EQ(0u, chrome::GetTotalBrowserCount());
 
-  ui_test_utils::BrowserAddedObserver browser_added_observer;
   chrome::NewEmptyWindow(profile);
-  browser_added_observer.WaitForSingleNewBrowser();
 
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
 }
@@ -2196,9 +2242,7 @@ IN_PROC_BROWSER_TEST_F(NoStartupWindowTest, NoStartupWindowBasicTest) {
   EXPECT_EQ(0u, chrome::GetTotalBrowserCount());
 
   // Starting a browser window should work just fine.
-  ui_test_utils::BrowserAddedObserver browser_added_observer;
   CreateBrowser(ProfileManager::GetActiveUserProfile());
-  browser_added_observer.WaitForSingleNewBrowser();
 
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
 }
@@ -2215,9 +2259,7 @@ IN_PROC_BROWSER_TEST_F(NoStartupWindowTest, DontInitSessionServiceForApps) {
       session_service->GetBaseSessionServiceForTest();
   ASSERT_FALSE(ProcessedAnyCommands(base_session_service));
 
-  ui_test_utils::BrowserAddedObserver browser_added_observer;
   CreateBrowserForApp("blah", profile);
-  browser_added_observer.WaitForSingleNewBrowser();
 
   ASSERT_FALSE(ProcessedAnyCommands(base_session_service));
 }
@@ -2240,7 +2282,7 @@ IN_PROC_BROWSER_TEST_F(AppModeTest, EnableAppModeTest) {
   // Test that an application browser window loads correctly.
 
   // Verify the browser is in application mode.
-  EXPECT_TRUE(browser()->is_app());
+  EXPECT_TRUE(browser()->is_type_app());
 }
 
 // Confirm chrome://version contains some expected content.
@@ -2682,9 +2724,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ChangeDisplayMode) {
                      browser()->tab_strip_model()->GetActiveWebContents());
 
   Profile* profile = ProfileManager::GetActiveUserProfile();
-  ui_test_utils::BrowserAddedObserver browser_added_observer;
   Browser* app_browser = CreateBrowserForApp("blah", profile);
-  browser_added_observer.WaitForSingleNewBrowser();
   auto* app_contents = app_browser->tab_strip_model()->GetActiveWebContents();
   CheckDisplayModeMQ(ASCIIToUTF16("standalone"), app_contents);
 
@@ -2806,7 +2846,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DialogsDropFullscreen) {
 
   // Simulate the tab requesting fullscreen.
   browser_as_wc_delegate->EnterFullscreenModeForTab(
-      tab, GURL(), blink::WebFullscreenOptions());
+      tab, GURL(), blink::mojom::FullscreenOptions());
   EXPECT_TRUE(browser_as_wc_delegate->IsFullscreenForTabOrPending(tab));
 
   // The tab gets a modal dialog.
@@ -2831,9 +2871,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DialogsAllowedInFullscreenWithinTabMode) {
       static_cast<web_modal::WebContentsModalDialogManagerDelegate*>(browser());
 
   // Simulate a screen-captured tab requesting fullscreen.
-  tab->IncrementCapturerCount(gfx::Size(1280, 720));
+  tab->IncrementCapturerCount(gfx::Size(1280, 720), /* stay_hidden */ false);
   browser_as_wc_delegate->EnterFullscreenModeForTab(
-      tab, GURL(), blink::WebFullscreenOptions());
+      tab, GURL(), blink::mojom::FullscreenOptions());
   EXPECT_TRUE(browser_as_wc_delegate->IsFullscreenForTabOrPending(tab));
 
   // The tab gets a modal dialog.
@@ -2843,7 +2883,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DialogsAllowedInFullscreenWithinTabMode) {
   EXPECT_TRUE(browser_as_wc_delegate->IsFullscreenForTabOrPending(tab));
 
   browser_as_dialog_delegate->SetWebContentsBlocked(tab, false);
-  tab->DecrementCapturerCount();
+  tab->DecrementCapturerCount(/* stay_hidden */ false);
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserTest, CountIncognitoWindows) {

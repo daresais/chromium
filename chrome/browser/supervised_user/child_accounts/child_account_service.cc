@@ -12,6 +12,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/supervised_user/child_accounts/permission_request_creator_apiary.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
@@ -99,7 +100,7 @@ void ChildAccountService::Init() {
   // If we're already signed in, check the account immediately just to be sure.
   // (We might have missed an update before registering as an observer.)
   base::Optional<AccountInfo> primary_account_info =
-      identity_manager_->FindExtendedAccountInfoForAccount(
+      identity_manager_->FindExtendedAccountInfoForAccountWithRefreshToken(
           identity_manager_->GetPrimaryAccountInfo());
 
   if (primary_account_info.has_value())
@@ -126,7 +127,7 @@ void ChildAccountService::AddChildStatusReceivedCallback(
 }
 
 ChildAccountService::AuthState ChildAccountService::GetGoogleAuthState() {
-  identity::AccountsInCookieJarInfo accounts_in_cookie_jar_info =
+  signin::AccountsInCookieJarInfo accounts_in_cookie_jar_info =
       identity_manager_->GetAccountsInCookieJar();
   if (!accounts_in_cookie_jar_info.accounts_are_fresh)
     return AuthState::PENDING;
@@ -215,7 +216,7 @@ bool ChildAccountService::SetActive(bool active) {
   // Trigger a sync reconfig to enable/disable the right SU data types.
   // The logic to do this lives in the SupervisedUserSyncModelTypeController.
   // TODO(crbug.com/946473): Get rid of this hack and instead call
-  // ReadyForStartChanged from the controller.
+  // DataTypePreconditionChanged from the controller.
   syncer::SyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
   if (sync_service->GetUserSettings()->IsFirstSetupComplete()) {
@@ -257,7 +258,7 @@ void ChildAccountService::OnExtendedAccountInfoUpdated(
     return;
   }
 
-  std::string auth_account_id = identity_manager_->GetPrimaryAccountId();
+  CoreAccountId auth_account_id = identity_manager_->GetPrimaryAccountId();
   if (info.account_id != auth_account_id)
     return;
 
@@ -305,7 +306,7 @@ void ChildAccountService::OnFailure(FamilyInfoFetcher::ErrorCode error) {
 }
 
 void ChildAccountService::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   google_auth_state_observers_.Notify();
 }

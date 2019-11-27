@@ -105,7 +105,8 @@ WaylandWindow::~WaylandWindow() {
   }
 
   PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
-  connection_->RemoveWindow(GetWidget());
+  if (surface_)
+    connection_->wayland_window_manager()->RemoveWindow(GetWidget());
 
   if (parent_window_)
     parent_window_->set_child_window(nullptr);
@@ -138,6 +139,8 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {
   wl_surface_set_user_data(surface_.get(), this);
   AddSurfaceListener();
 
+  connection_->wayland_window_manager()->AddWindow(GetWidget(), this);
+
   ui::PlatformWindowType ui_window_type = properties.type;
   switch (ui_window_type) {
     case ui::PlatformWindowType::kMenu:
@@ -145,7 +148,11 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {
       parent_window_ = GetParentWindow(properties.parent_widget);
 
       // Popups need to know their scale earlier to position themselves.
-      DCHECK(parent_window_);
+      if (!parent_window_) {
+        LOG(ERROR) << "Failed to get a parent window for this popup";
+        return false;
+      }
+
       SetBufferScale(parent_window_->buffer_scale_, false);
       ui_scale_ = parent_window_->ui_scale_;
 
@@ -159,13 +166,19 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {
       is_tooltip_ = true;
       break;
     case ui::PlatformWindowType::kWindow:
+    case ui::PlatformWindowType::kBubble:
+    case ui::PlatformWindowType::kDrag:
+      // TODO(msisov): Figure out what kind of surface we need to create for
+      // bubble and drag windows.
       CreateXdgSurface();
       break;
   }
 
+  if (xdg_surface_ && !properties.wm_class_class.empty())
+    xdg_surface_->SetAppId(properties.wm_class_class);
+
   connection_->ScheduleFlush();
 
-  connection_->AddWindow(GetWidget(), this);
   PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
   delegate_->OnAcceleratedWidgetAvailable(GetWidget());
 
@@ -249,31 +262,38 @@ void WaylandWindow::CreateXdgSurface() {
 void WaylandWindow::CreateAndShowTooltipSubSurface() {
   // Since Aura does not not provide a reference parent window, needed by
   // Wayland, we get the current focused window to place and show the tooltips.
-  parent_window_ = connection_->GetCurrentFocusedWindow();
+  auto* parent_window =
+      connection_->wayland_window_manager()->GetCurrentFocusedWindow();
 
   // Tooltip creation is an async operation. By the time Aura actually creates
   // the tooltip, it is possible that the user has already moved the
   // mouse/pointer out of the window that triggered the tooptip. In this case,
-  // parent_window_ is NULL.
-  if (!parent_window_) {
-    Hide();
+  // parent_window is NULL.
+  if (!parent_window)
     return;
-  }
 
-  if (!tooltip_subsurface_) {
-    wl_subcompositor* subcompositor = connection_->subcompositor();
-    DCHECK(subcompositor);
-    tooltip_subsurface_.reset(wl_subcompositor_get_subsurface(
-        subcompositor, surface_.get(), parent_window_->surface()));
-  }
+  wl_subcompositor* subcompositor = connection_->subcompositor();
+  DCHECK(subcompositor);
+  tooltip_subsurface_.reset(wl_subcompositor_get_subsurface(
+      subcompositor, surface_.get(), parent_window->surface()));
+
+  // Chromium positions tooltip windows in screen coordinates, but Wayland
+  // requires them to be in local surface coordinates aka relative to parent
+  // window.
+  const auto parent_bounds_dip =
+      gfx::ScaleToRoundedRect(parent_window->GetBounds(), 1.0 / ui_scale_);
+  auto new_bounds_dip =
+      TranslateBoundsToParentCoordinates(bounds_px_, parent_bounds_dip);
+  auto bounds_px =
+      gfx::ScaleToRoundedRect(new_bounds_dip, ui_scale_ / buffer_scale_);
 
   DCHECK(tooltip_subsurface_);
   // Convert position to DIP.
   wl_subsurface_set_position(tooltip_subsurface_.get(),
-                             bounds_px_.x() / buffer_scale_,
-                             bounds_px_.y() / buffer_scale_);
+                             bounds_px.x() / buffer_scale_,
+                             bounds_px.y() / buffer_scale_);
   wl_subsurface_set_desync(tooltip_subsurface_.get());
-  wl_surface_commit(parent_window_->surface());
+  wl_surface_commit(parent_window->surface());
   connection_->ScheduleFlush();
 }
 
@@ -284,7 +304,6 @@ void WaylandWindow::ApplyPendingBounds() {
 
   SetBoundsDip(pending_bounds_dip_);
   xdg_surface_->SetWindowGeometry(pending_bounds_dip_);
-  xdg_surface_->AckConfigure();
   pending_bounds_dip_ = gfx::Rect();
   connection_->ScheduleFlush();
 
@@ -293,9 +312,19 @@ void WaylandWindow::ApplyPendingBounds() {
   MaybeUpdateOpaqueRegion();
 }
 
+void WaylandWindow::SetPointerFocus(bool focus) {
+  has_pointer_focus_ = focus;
+
+  // Whenever the window gets the pointer focus back, we must reinitialize the
+  // cursor. Otherwise, it is invalidated whenever the pointer leaves the
+  // surface and is not restored by the Wayland compositor.
+  if (has_pointer_focus_ && bitmap_)
+    connection_->SetCursorBitmap(bitmap_->bitmaps(), bitmap_->hotspot());
+}
+
 void WaylandWindow::DispatchHostWindowDragMovement(
     int hittest,
-    const gfx::Point& pointer_location) {
+    const gfx::Point& pointer_location_in_px) {
   DCHECK(xdg_surface_);
 
   connection_->ResetPointerFlags();
@@ -316,7 +345,7 @@ void WaylandWindow::StartDrag(const ui::OSExchangeData& data,
   connection_->StartDrag(data, operation);
 }
 
-void WaylandWindow::Show() {
+void WaylandWindow::Show(bool inactive) {
   if (!is_tooltip_)  // Tooltip windows should not get keyboard focus
     set_keyboard_focus(true);
 
@@ -343,8 +372,8 @@ void WaylandWindow::Show() {
 }
 
 void WaylandWindow::Hide() {
-  if (is_tooltip_) {
-    parent_window_ = nullptr;
+  if (!is_tooltip_) {
+    tooltip_subsurface_.reset();
   } else {
     if (child_window_)
       child_window_->Hide();
@@ -361,21 +390,18 @@ void WaylandWindow::Hide() {
 }
 
 void WaylandWindow::Close() {
-  NOTIMPLEMENTED();
+  delegate_->OnClosed();
+}
+
+bool WaylandWindow::IsVisible() const {
+  // X and Windows return true if the window is minimized. For consistency, do
+  // the same.
+  return (!!xdg_surface_ || !!xdg_popup_) || IsMinimized();
 }
 
 void WaylandWindow::PrepareForShutdown() {}
 
 void WaylandWindow::SetBounds(const gfx::Rect& bounds_px) {
-  // TODO(crbug.com/958314): figure out if this return is legitimate.
-  //
-  // The X11 implementation says that even if the pixel bounds didn't change, we
-  // still need to forward this call to the delegate, and that the device scale
-  // factor may have changed which effectively changes the bounds.  Perhaps we
-  // need to do the same here.
-  //
-  // After this is resolved, update test expectations for calls to
-  // delegate's OnBoundsChanged.
   if (bounds_px_ == bounds_px)
     return;
   bounds_px_ = bounds_px;
@@ -491,6 +517,17 @@ void WaylandWindow::Deactivate() {
   NOTIMPLEMENTED_LOG_ONCE();
 }
 
+void WaylandWindow::SetUseNativeFrame(bool use_native_frame) {
+  // See comment below in ShouldUseNativeFrame.
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+bool WaylandWindow::ShouldUseNativeFrame() const {
+  // This depends on availability of XDG-Decoration protocol extension.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
 void WaylandWindow::SetCursor(PlatformCursor cursor) {
   scoped_refptr<BitmapCursorOzone> bitmap =
       BitmapCursorFactoryOzone::GetBitmapCursor(cursor);
@@ -520,6 +557,37 @@ void WaylandWindow::SetRestoredBoundsInPixels(const gfx::Rect& bounds_px) {
 
 gfx::Rect WaylandWindow::GetRestoredBoundsInPixels() const {
   return restored_bounds_px_;
+}
+
+bool WaylandWindow::ShouldWindowContentsBeTransparent() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
+void WaylandWindow::SetAspectRatio(const gfx::SizeF& aspect_ratio) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WaylandWindow::SetWindowIcons(const gfx::ImageSkia& window_icon,
+                                   const gfx::ImageSkia& app_icon) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WaylandWindow::SizeConstraintsChanged() {
+  // Size constraints only make sense for normal windows.
+  if (!xdg_surface_)
+    return;
+
+  DCHECK(delegate_);
+  auto min_size = delegate_->GetMinimumSizeForWindow();
+  auto max_size = delegate_->GetMaximumSizeForWindow();
+
+  if (min_size.has_value())
+    xdg_surface_->SetMinSize(min_size->width(), min_size->height());
+  if (max_size.has_value())
+    xdg_surface_->SetMaxSize(max_size->width(), max_size->height());
+
+  connection_->ScheduleFlush();
 }
 
 bool WaylandWindow::CanDispatchEvent(const PlatformEvent& event) {
@@ -566,7 +634,8 @@ uint32_t WaylandWindow::DispatchEvent(const PlatformEvent& native_event) {
     // Parent window of the main menu window is not a popup, but rather an
     // xdg surface.
     DCHECK(!parent_window_->xdg_popup() && parent_window_->xdg_surface());
-    WaylandWindow* window = connection_->GetCurrentFocusedWindow();
+    auto* window =
+        connection_->wayland_window_manager()->GetCurrentFocusedWindow();
     if (window) {
       ConvertEventLocationToTargetWindowLocation(GetBounds().origin(),
                                                  window->GetBounds().origin(),
@@ -659,6 +728,8 @@ void WaylandWindow::HandleSurfaceConfigure(int32_t width,
 
     delegate_->OnWindowStateChanged(state_);
   }
+
+  ApplyPendingBounds();
 
   if (did_active_change)
     delegate_->OnActivationChanged(is_active_);
@@ -803,7 +874,8 @@ void WaylandWindow::MaybeTriggerPendingStateChange() {
 
 WaylandWindow* WaylandWindow::GetParentWindow(
     gfx::AcceleratedWidget parent_widget) {
-  WaylandWindow* parent_window = connection_->GetWindow(parent_widget);
+  auto* parent_window =
+      connection_->wayland_window_manager()->GetWindow(parent_widget);
 
   // If propagated parent has already had a child, it means that |this| is a
   // submenu of a 3-dot menu. In aura, the parent of a 3-dot menu and its
@@ -817,8 +889,12 @@ WaylandWindow* WaylandWindow::GetParentWindow(
   if (parent_window && parent_window->child_window_)
     return parent_window->child_window_;
   if (!parent_window)
-    return connection_->GetCurrentFocusedWindow();
+    return connection_->wayland_window_manager()->GetCurrentFocusedWindow();
   return parent_window;
+}
+
+WaylandWindow* WaylandWindow::GetRootParentWindow() {
+  return parent_window_ ? parent_window_->GetRootParentWindow() : this;
 }
 
 WmMoveResizeHandler* WaylandWindow::AsWmMoveResizeHandler() {
@@ -874,7 +950,8 @@ void WaylandWindow::RemoveEnteredOutputId(struct wl_output* output) {
 void WaylandWindow::UpdateCursorPositionFromEvent(
     std::unique_ptr<Event> event) {
   DCHECK(event->IsLocatedEvent());
-  auto* window = connection_->GetCurrentFocusedWindow();
+  auto* window =
+      connection_->wayland_window_manager()->GetCurrentFocusedWindow();
   // This is a tricky part. Initially, Wayland sends events to surfaces the
   // events are targeted for. But, in order to fulfill Chromium's assumptions
   // about event targets, some of the events are rerouted and their locations

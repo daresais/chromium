@@ -10,6 +10,8 @@
 #include "ash/public/cpp/app_menu_constants.h"
 #include "ash/public/cpp/shelf_item.h"
 #include "base/bind_helpers.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/chromeos/crostini/crostini_manager.h"
 #include "chrome/browser/chromeos/crostini/crostini_registry_service.h"
 #include "chrome/browser/chromeos/crostini/crostini_registry_service_factory.h"
@@ -52,11 +54,6 @@ CrostiniShelfContextMenu::~CrostiniShelfContextMenu() = default;
 
 void CrostiniShelfContextMenu::GetMenuModel(GetMenuModelCallback callback) {
   auto menu_model = std::make_unique<ui::SimpleMenuModel>(this);
-  BuildMenu(menu_model.get());
-  std::move(callback).Run(std::move(menu_model));
-}
-
-void CrostiniShelfContextMenu::BuildMenu(ui::SimpleMenuModel* menu_model) {
   const crostini::CrostiniRegistryService* registry_service =
       crostini::CrostiniRegistryServiceFactory::GetForProfile(
           controller()->profile());
@@ -67,22 +64,27 @@ void CrostiniShelfContextMenu::BuildMenu(ui::SimpleMenuModel* menu_model) {
   // allow the user to pin them and open new windows. Otherwise this window is
   // not associated with an app.
   if (registration) {
-    AddPinMenu(menu_model);
-    AddContextMenuOption(menu_model, ash::MENU_NEW_WINDOW,
+    AddPinMenu(menu_model.get());
+    AddContextMenuOption(menu_model.get(), ash::MENU_NEW_WINDOW,
                          IDS_APP_LIST_NEW_WINDOW);
   }
 
   if (item().id.app_id == crostini::kCrostiniTerminalId &&
       crostini::IsCrostiniRunning(controller()->profile())) {
-    AddContextMenuOption(menu_model, ash::STOP_APP,
+    AddContextMenuOption(menu_model.get(), ash::STOP_APP,
                          IDS_CROSTINI_SHUT_DOWN_LINUX_MENU_ITEM);
   }
 
+  if (IsUninstallable()) {
+    AddContextMenuOption(menu_model.get(), ash::UNINSTALL,
+                         IDS_APP_LIST_UNINSTALL_ITEM);
+  }
+
   if (controller()->IsOpen(item().id)) {
-    AddContextMenuOption(menu_model, ash::MENU_CLOSE,
+    AddContextMenuOption(menu_model.get(), ash::MENU_CLOSE,
                          IDS_LAUNCHER_CONTEXT_MENU_CLOSE);
   } else {
-    AddContextMenuOption(menu_model, ash::MENU_OPEN_NEW,
+    AddContextMenuOption(menu_model.get(), ash::MENU_OPEN_NEW,
                          IDS_APP_CONTEXT_MENU_ACTIVATE_ARC);
   }
 
@@ -92,42 +94,62 @@ void CrostiniShelfContextMenu::BuildMenu(ui::SimpleMenuModel* menu_model) {
   // look better when scaled to match the display density.
   if (ShouldShowDisplayDensityMenuItem(registration, display_id())) {
     if (registration->IsScaled()) {
-      AddContextMenuOption(menu_model, ash::CROSTINI_USE_HIGH_DENSITY,
+      AddContextMenuOption(menu_model.get(), ash::CROSTINI_USE_HIGH_DENSITY,
                            IDS_CROSTINI_USE_HIGH_DENSITY);
     } else {
-      AddContextMenuOption(menu_model, ash::CROSTINI_USE_LOW_DENSITY,
+      AddContextMenuOption(menu_model.get(), ash::CROSTINI_USE_LOW_DENSITY,
                            IDS_CROSTINI_USE_LOW_DENSITY);
     }
   }
+  std::move(callback).Run(std::move(menu_model));
+}
+
+bool CrostiniShelfContextMenu::IsCommandIdEnabled(int command_id) const {
+  if (command_id == ash::UNINSTALL)
+    return IsUninstallable();
+  if (command_id == ash::STOP_APP &&
+      item().id.app_id == crostini::kCrostiniTerminalId) {
+    return crostini::IsCrostiniRunning(controller()->profile());
+  }
+  return LauncherContextMenu::IsCommandIdEnabled(command_id);
 }
 
 void CrostiniShelfContextMenu::ExecuteCommand(int command_id, int event_flags) {
-  if (ExecuteCommonCommand(command_id, event_flags))
-    return;
-
-  if (command_id == ash::STOP_APP) {
-    if (item().id.app_id == crostini::kCrostiniTerminalId) {
-      crostini::CrostiniManager::GetForProfile(controller()->profile())
-          ->StopVm(crostini::kCrostiniDefaultVmName, base::DoNothing());
+  switch (command_id) {
+    case ash::UNINSTALL: {
+      DCHECK_NE(item().id.app_id, crostini::kCrostiniTerminalId);
+      apps::AppServiceProxy* proxy =
+          apps::AppServiceProxyFactory::GetForProfile(controller()->profile());
+      DCHECK(proxy);
+      proxy->Uninstall(item().id.app_id, nullptr /* parent_window */);
+      return;
     }
-    return;
+    case ash::STOP_APP:
+      if (item().id.app_id == crostini::kCrostiniTerminalId) {
+        crostini::CrostiniManager::GetForProfile(controller()->profile())
+            ->StopVm(crostini::kCrostiniDefaultVmName, base::DoNothing());
+      }
+      return;
+    case ash::MENU_NEW_WINDOW:
+      crostini::LaunchCrostiniApp(controller()->profile(), item().id.app_id,
+                                  display_id());
+      return;
+    case ash::CROSTINI_USE_LOW_DENSITY:
+    case ash::CROSTINI_USE_HIGH_DENSITY: {
+      crostini::CrostiniRegistryService* registry_service =
+          crostini::CrostiniRegistryServiceFactory::GetForProfile(
+              controller()->profile());
+      const bool scaled = command_id == ash::CROSTINI_USE_LOW_DENSITY;
+      registry_service->SetAppScaled(item().id.app_id, scaled);
+      if (controller()->IsOpen(item().id))
+        CrostiniAppRestartView::Show(item().id, display_id());
+      return;
+    }
+    default:
+      ExecuteCommonCommand(command_id, event_flags);
   }
+}
 
-  if (command_id == ash::MENU_NEW_WINDOW) {
-    crostini::LaunchCrostiniApp(controller()->profile(), item().id.app_id,
-                                display_id());
-    return;
-  }
-  if (command_id == ash::CROSTINI_USE_LOW_DENSITY ||
-      command_id == ash::CROSTINI_USE_HIGH_DENSITY) {
-    crostini::CrostiniRegistryService* registry_service =
-        crostini::CrostiniRegistryServiceFactory::GetForProfile(
-            controller()->profile());
-    bool scaled = command_id == ash::CROSTINI_USE_LOW_DENSITY;
-    registry_service->SetAppScaled(item().id.app_id, scaled);
-    if (controller()->IsOpen(item().id))
-      CrostiniAppRestartView::Show(item().id, display_id());
-    return;
-  }
-  NOTREACHED();
+bool CrostiniShelfContextMenu::IsUninstallable() const {
+  return crostini::IsUninstallable(controller()->profile(), item().id.app_id);
 }

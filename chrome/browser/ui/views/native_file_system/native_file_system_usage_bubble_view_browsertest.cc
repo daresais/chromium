@@ -21,6 +21,7 @@ class NativeFileSystemUsageBubbleViewTest : public DialogBrowserTest {
 
   void ShowUi(const std::string& name) override {
     NativeFileSystemUsageBubbleView::Usage usage;
+    url::Origin origin = kTestOrigin;
     if (name == "SingleWritableFile") {
       usage.writable_files.emplace_back(
           FILE_PATH_LITERAL("/foo/bar/Shapes.sketch"));
@@ -54,6 +55,23 @@ class NativeFileSystemUsageBubbleViewTest : public DialogBrowserTest {
       usage.readable_directories.emplace_back(
           FILE_PATH_LITERAL("/baz/My Project"));
       usage.readable_directories.emplace_back(FILE_PATH_LITERAL("/baz/Assets"));
+    } else if (name == "ReadableAndWritableFolders") {
+      usage.readable_directories.emplace_back(
+          FILE_PATH_LITERAL("/foo/bar/Images"));
+      usage.readable_directories.emplace_back(
+          FILE_PATH_LITERAL("/baz/My Project"));
+      usage.readable_directories.emplace_back(FILE_PATH_LITERAL("/baz/Assets"));
+      usage.writable_directories.emplace_back(FILE_PATH_LITERAL("/baz/Assets"));
+      usage.writable_directories.emplace_back(
+          FILE_PATH_LITERAL("/la/asdf/Processing"));
+      usage.writable_directories.emplace_back(FILE_PATH_LITERAL("/baz/Images"));
+    } else if (name == "LongOrigin") {
+      usage.writable_files.emplace_back(
+          FILE_PATH_LITERAL("/foo/bar/Shapes.sketch"));
+      usage.writable_files.emplace_back(FILE_PATH_LITERAL("/bla/README.txt"));
+      origin = url::Origin::Create(GURL(
+          "https://"
+          "some-really-long-origin-chrome-test-foo-bar-sample.appspot.com"));
     } else if (name == "default") {
       usage.readable_directories.emplace_back(
           FILE_PATH_LITERAL("/home/me/Images"));
@@ -71,7 +89,7 @@ class NativeFileSystemUsageBubbleViewTest : public DialogBrowserTest {
     }
 
     NativeFileSystemUsageBubbleView::ShowBubble(
-        browser()->tab_strip_model()->GetActiveWebContents(), kTestOrigin,
+        browser()->tab_strip_model()->GetActiveWebContents(), origin,
         std::move(usage));
   }
 
@@ -117,5 +135,15 @@ IN_PROC_BROWSER_TEST_F(NativeFileSystemUsageBubbleViewTest,
 
 IN_PROC_BROWSER_TEST_F(NativeFileSystemUsageBubbleViewTest,
                        InvokeUi_MultipleReadableFolders) {
+  ShowAndVerifyUi();
+}
+
+IN_PROC_BROWSER_TEST_F(NativeFileSystemUsageBubbleViewTest,
+                       InvokeUi_ReadableAndWritableFolders) {
+  ShowAndVerifyUi();
+}
+
+IN_PROC_BROWSER_TEST_F(NativeFileSystemUsageBubbleViewTest,
+                       InvokeUi_LongOrigin) {
   ShowAndVerifyUi();
 }

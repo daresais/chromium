@@ -31,6 +31,7 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/download/public/common/download_item.h"
+#include "components/safe_browsing/buildflags.h"
 #include "content/public/browser/download_item_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
@@ -225,8 +226,13 @@ bool DownloadItemModel::MightBeMalicious() const {
     case download::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
     case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
     case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE:
+    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS:
+    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING:
+    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK:
       return true;
 
+    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE:
     case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
     case download::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
@@ -252,6 +258,7 @@ bool DownloadItemModel::IsMalicious() const {
     case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
     case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
     case download::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
+    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS:
       return true;
 
     case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
@@ -266,6 +273,10 @@ bool DownloadItemModel::IsMalicious() const {
     case download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
     case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
     case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE:
+    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING:
+    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK:
+    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE:
       return false;
   }
   NOTREACHED();
@@ -273,7 +284,7 @@ bool DownloadItemModel::IsMalicious() const {
 }
 
 bool DownloadItemModel::ShouldAllowDownloadFeedback() const {
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   if (!IsDangerous())
     return false;
   return safe_browsing::DownloadFeedbackService::IsEnabledForDownload(
@@ -291,13 +302,13 @@ bool DownloadItemModel::ShouldRemoveFromShelfWhenComplete() const {
       if (IsDangerous())
         return false;
 
-      // If the download is an extension, temporary, or will be opened
+      // If the download is a trusted extension, temporary, or will be opened
       // automatically, then it should be removed from the shelf on completion.
       // TODO(asanka): The logic for deciding opening behavior should be in a
       //               central location. http://crbug.com/167702
-      return (download_crx_util::IsExtensionDownload(*download_) ||
-              download_->IsTemporary() ||
-              download_->GetOpenWhenComplete() ||
+      return (download_crx_util::IsTrustedExtensionDownload(profile(),
+                                                            *download_) ||
+              download_->IsTemporary() || download_->GetOpenWhenComplete() ||
               download_->ShouldOpenFileBasedOnExtension());
 
     case DownloadItem::COMPLETE:
@@ -321,7 +332,7 @@ bool DownloadItemModel::ShouldRemoveFromShelfWhenComplete() const {
 
 bool DownloadItemModel::ShouldShowDownloadStartedAnimation() const {
   return !download_->IsSavePackageDownload() &&
-      !download_crx_util::IsExtensionDownload(*download_);
+         !download_crx_util::IsTrustedExtensionDownload(profile(), *download_);
 }
 
 bool DownloadItemModel::ShouldShowInShelf() const {
@@ -621,7 +632,7 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
 // 2. Download verdict is uncommon, and
 // 3. Download URL is not empty, and
 // 4. User is not in incognito mode.
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
       if (GetDangerType() == download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT &&
           !GetURL().is_empty() && !profile()->IsOffTheRecord()) {
         safe_browsing::SafeBrowsingService* sb_service =
@@ -651,7 +662,7 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
       download_->ValidateDangerousDownload();
       break;
     case DownloadCommands::LEARN_MORE_SCANNING: {
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
       using safe_browsing::DownloadProtectionService;
 
       safe_browsing::SafeBrowsingService* sb_service =
@@ -694,3 +705,14 @@ std::string DownloadItemModel::GetMimeType() const {
 bool DownloadItemModel::IsExtensionDownload() const {
   return download_crx_util::IsExtensionDownload(*download_);
 }
+
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+void DownloadItemModel::CompleteSafeBrowsingScan() {
+  ChromeDownloadManagerDelegate::SafeBrowsingState* state =
+      static_cast<ChromeDownloadManagerDelegate::SafeBrowsingState*>(
+          download_->GetUserData(
+              &ChromeDownloadManagerDelegate::SafeBrowsingState::
+                  kSafeBrowsingUserDataKey));
+  state->CompleteDownload();
+}
+#endif

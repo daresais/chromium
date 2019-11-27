@@ -6,6 +6,8 @@ package org.chromium.chrome.browser.browserservices.trustedwebactivityui.splashs
 
 import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
 
+import static androidx.browser.trusted.TrustedWebActivityIntentBuilder.EXTRA_SPLASH_SCREEN_PARAMS;
+
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -13,13 +15,16 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.customtabs.TrustedWebUtils;
-import android.support.customtabs.TrustedWebUtils.SplashScreenParamKey;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
-import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
+import androidx.browser.customtabs.TrustedWebUtils;
+import androidx.browser.trusted.TrustedWebActivityIntentBuilder;
+import androidx.browser.trusted.splashscreens.SplashScreenParamKey;
+
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
+import org.chromium.chrome.browser.browserservices.trustedwebactivityui.TwaFinishHandler;
 import org.chromium.chrome.browser.customtabs.TranslucentCustomTabActivity;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.InflationObserver;
@@ -62,20 +67,26 @@ import javax.inject.Inject;
  */
 public class TwaSplashController
         implements InflationObserver, SplashDelegate, SplashscreenObserver {
+
+    // TODO(pshmakov): move this to AndroidX.
+    private static final String KEY_SHOWN_IN_CLIENT =
+            "androidx.browser.trusted.KEY_SPLASH_SCREEN_SHOWN_IN_CLIENT";
+
     private final SplashController mSplashController;
     private final Activity mActivity;
     private final ActivityWindowAndroid mActivityWindowAndroid;
     private final ActivityLifecycleDispatcher mLifecycleDispatcher;
     private final ScreenOrientationProvider mScreenOrientationProvider;
     private final SplashImageHolder mSplashImageCache;
-    private final CustomTabIntentDataProvider mIntentDataProvider;
+    private final BrowserServicesIntentDataProvider mIntentDataProvider;
+    private final TwaFinishHandler mFinishHandler;
 
     @Inject
     public TwaSplashController(SplashController splashController, Activity activity,
             ActivityWindowAndroid activityWindowAndroid,
             ActivityLifecycleDispatcher lifecycleDispatcher,
             ScreenOrientationProvider screenOrientationProvider, SplashImageHolder splashImageCache,
-            CustomTabIntentDataProvider intentDataProvider) {
+            BrowserServicesIntentDataProvider intentDataProvider, TwaFinishHandler finishHandler) {
         mSplashController = splashController;
         mActivity = activity;
         mActivityWindowAndroid = activityWindowAndroid;
@@ -83,11 +94,13 @@ public class TwaSplashController
         mScreenOrientationProvider = screenOrientationProvider;
         mSplashImageCache = splashImageCache;
         mIntentDataProvider = intentDataProvider;
+        mFinishHandler = finishHandler;
 
         long splashHideAnimationDurationMs = IntentUtils.safeGetInt(
                 getSplashScreenParamsFromIntent(), SplashScreenParamKey.FADE_OUT_DURATION_MS, 0);
+        boolean isWindowInitiallyTranslucent = mActivity instanceof TranslucentCustomTabActivity;
         mSplashController.setConfig(
-                this, true /* isWindowInitiallyTranslucent */, splashHideAnimationDurationMs);
+                this, isWindowInitiallyTranslucent, splashHideAnimationDurationMs);
 
         mSplashController.addObserver(this);
         lifecycleDispatcher.register(this);
@@ -97,6 +110,11 @@ public class TwaSplashController
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.O) {
             mScreenOrientationProvider.delayOrientationRequests(mActivityWindowAndroid);
         }
+
+        // If the client's activity is opaque, finishing the activities one after another may lead
+        // to bottom activity showing itself in a short flash. The problem can be solved by bottom
+        // activity killing the whole task.
+        mFinishHandler.setShouldAttemptFinishingTask(true);
     }
 
     @Override
@@ -116,6 +134,7 @@ public class TwaSplashController
     @Override
     public void onSplashHidden(Tab tab, @SplashController.SplashHidesReason int reason,
             long startTimestamp, long endTimestamp) {
+        mFinishHandler.setShouldAttemptFinishingTask(false);
         mLifecycleDispatcher.unregister(this); // Unregister to get gc-ed
     }
 
@@ -167,8 +186,7 @@ public class TwaSplashController
     }
 
     private Bundle getSplashScreenParamsFromIntent() {
-        return mIntentDataProvider.getIntent().getBundleExtra(
-                TrustedWebUtils.EXTRA_SPLASH_SCREEN_PARAMS);
+        return mIntentDataProvider.getIntent().getBundleExtra(EXTRA_SPLASH_SCREEN_PARAMS);
     }
 
     /**
@@ -177,9 +195,8 @@ public class TwaSplashController
     public static boolean intentIsForTwaWithSplashScreen(Intent intent) {
         boolean isTrustedWebActivity = IntentUtils.safeGetBooleanExtra(
                 intent, TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, false);
-        boolean requestsSplashScreen = IntentUtils.safeGetParcelableExtra(
-                                               intent, TrustedWebUtils.EXTRA_SPLASH_SCREEN_PARAMS)
-                != null;
+        boolean requestsSplashScreen =
+                IntentUtils.safeGetParcelableExtra(intent, EXTRA_SPLASH_SCREEN_PARAMS) != null;
         return isTrustedWebActivity && requestsSplashScreen;
     }
 
@@ -192,7 +209,18 @@ public class TwaSplashController
     public static boolean handleIntent(Activity activity, Intent intent) {
         if (!intentIsForTwaWithSplashScreen(intent)) return false;
 
-        intent.setClassName(activity, TranslucentCustomTabActivity.class.getName());
+        Bundle params = IntentUtils.safeGetBundleExtra(
+                intent, TrustedWebActivityIntentBuilder.EXTRA_SPLASH_SCREEN_PARAMS);
+        boolean shownInClient = IntentUtils.safeGetBoolean(params, KEY_SHOWN_IN_CLIENT, true);
+        // shownInClient is "true" by default for the following reasons:
+        // - For compatibility with older clients which don't use this bundle key.
+        // - Because getting "false" when it should be "true" leads to more severe visual glitches,
+        // than vice versa.
+        if (shownInClient) {
+            // If splash screen was shown in client, we must launch a translucent activity to
+            // ensure smooth transition.
+            intent.setClassName(activity, TranslucentCustomTabActivity.class.getName());
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
         activity.startActivity(intent);
         activity.overridePendingTransition(0, 0);

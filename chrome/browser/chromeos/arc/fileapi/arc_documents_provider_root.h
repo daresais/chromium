@@ -19,9 +19,9 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_file_system_operation_runner.h"
-#include "components/arc/common/file_system.mojom.h"
-#include "storage/browser/fileapi/async_file_util.h"
-#include "storage/browser/fileapi/watcher_manager.h"
+#include "components/arc/mojom/file_system.mojom.h"
+#include "storage/browser/file_system/async_file_util.h"
+#include "storage/browser/file_system/watcher_manager.h"
 
 class GURL;
 
@@ -375,7 +375,7 @@ class ArcDocumentsProviderRoot : public ArcFileSystemOperationRunner::Observer {
 
   uint64_t next_watcher_request_id_ = 1;
 
-  base::WeakPtrFactory<ArcDocumentsProviderRoot> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcDocumentsProviderRoot> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcDocumentsProviderRoot);
 };

@@ -5,9 +5,11 @@
 #include "third_party/blink/renderer/modules/xr/xr_frame.h"
 
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
+#include "third_party/blink/renderer/modules/xr/xr_hit_test_source.h"
 #include "third_party/blink/renderer/modules/xr/xr_input_source.h"
 #include "third_party/blink/renderer/modules/xr/xr_reference_space.h"
 #include "third_party/blink/renderer/modules/xr/xr_session.h"
+#include "third_party/blink/renderer/modules/xr/xr_transient_input_hit_test_source.h"
 #include "third_party/blink/renderer/modules/xr/xr_view.h"
 #include "third_party/blink/renderer/modules/xr/xr_viewer_pose.h"
 #include "third_party/blink/renderer/modules/xr/xr_world_information.h"
@@ -25,6 +27,13 @@ const char kNonAnimationFrame[] =
     "XRSession.requestAnimationFrame callbacks.";
 
 const char kSessionMismatch[] = "XRSpace and XRFrame sessions do not match.";
+
+const char kCannotReportPoses[] =
+    "Poses cannot be given out for the current state.";
+
+const char kHitTestSourceUnavailable[] =
+    "Unable to obtain hit test results for specified hit test source. Ensure "
+    "that it was not already canceled.";
 
 }  // namespace
 
@@ -56,15 +65,25 @@ XRViewerPose* XRFrame::getViewerPose(XRReferenceSpace* reference_space,
     return nullptr;
   }
 
+  if (!session_->CanReportPoses()) {
+    exception_state.ThrowSecurityError(kCannotReportPoses);
+    return nullptr;
+  }
+
   session_->LogGetPose();
 
   std::unique_ptr<TransformationMatrix> pose =
-      reference_space->GetViewerPoseMatrix(base_pose_matrix_.get());
+      reference_space->SpaceFromViewerWithDefaultAndOffset(
+          mojo_from_viewer_.get());
   if (!pose) {
     return nullptr;
   }
 
   return MakeGarbageCollected<XRViewerPose>(session(), *pose);
+}
+
+XRAnchorSet* XRFrame::trackedAnchors() const {
+  return session_->trackedAnchors();
 }
 
 // Return an XRPose that has a transform mapping to space A from space B, while
@@ -80,6 +99,9 @@ XRPose* XRFrame::getPose(XRSpace* space_A,
   }
 
   if (!space_A || !space_B) {
+    DVLOG(2) << __func__
+             << " : space_A or space_B is null, space_A =" << space_A
+             << ", space_B = " << space_B;
     return nullptr;
   }
 
@@ -95,16 +117,52 @@ XRPose* XRFrame::getPose(XRSpace* space_A,
     return nullptr;
   }
 
-  return space_A->getPose(space_B, base_pose_matrix_.get());
+  if (!session_->CanReportPoses()) {
+    exception_state.ThrowSecurityError(kCannotReportPoses);
+    return nullptr;
+  }
+
+  return space_A->getPose(space_B, mojo_from_viewer_.get());
 }
 
-void XRFrame::SetBasePoseMatrix(const TransformationMatrix& base_pose_matrix) {
-  base_pose_matrix_ = std::make_unique<TransformationMatrix>(base_pose_matrix);
+void XRFrame::SetMojoFromViewer(const TransformationMatrix& mojo_from_viewer,
+                                bool emulated_position) {
+  mojo_from_viewer_ = std::make_unique<TransformationMatrix>(mojo_from_viewer);
+  emulated_position_ = emulated_position;
 }
 
 void XRFrame::Deactivate() {
   is_active_ = false;
   is_animation_frame_ = false;
+}
+
+HeapVector<Member<XRHitTestResult>> XRFrame::getHitTestResults(
+    XRHitTestSource* hit_test_source,
+    ExceptionState& exception_state) {
+  if (!hit_test_source ||
+      !session_->ValidateHitTestSourceExists(hit_test_source)) {
+    // This should only happen when hit test source was already canceled.
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kHitTestSourceUnavailable);
+    return {};
+  }
+
+  return hit_test_source->Results();
+}
+
+HeapVector<Member<XRTransientInputHitTestResult>>
+XRFrame::getHitTestResultsForTransientInput(
+    XRTransientInputHitTestSource* hit_test_source,
+    ExceptionState& exception_state) {
+  if (!hit_test_source ||
+      !session_->ValidateHitTestSourceExists(hit_test_source)) {
+    // This should only happen when hit test source was already canceled.
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kHitTestSourceUnavailable);
+    return {};
+  }
+
+  return hit_test_source->Results();
 }
 
 void XRFrame::Trace(blink::Visitor* visitor) {

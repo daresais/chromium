@@ -14,8 +14,9 @@
 #include "base/optional.h"
 #include "content/common/navigation_params.mojom.h"
 #include "content/public/browser/certificate_request_result_type.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 
 class GURL;
 
@@ -35,8 +36,7 @@ struct ResourceResponse;
 namespace content {
 class SignedExchangeEnvelope;
 class FrameTreeNode;
-class FileSelectListener;
-class NavigationHandleImpl;
+class NavigationHandle;
 class NavigationRequest;
 class NavigationThrottle;
 class RenderFrameHostImpl;
@@ -57,11 +57,6 @@ bool WillCreateURLLoaderFactory(
     bool is_download,
     mojo::PendingReceiver<network::mojom::URLLoaderFactory>*
         loader_factory_receiver);
-
-bool InterceptFileChooser(
-    RenderFrameHostImpl* rfh,
-    std::unique_ptr<content::FileSelectListener>* listener,
-    const blink::mojom::FileChooserParams& params);
 
 bool WillCreateURLLoaderFactoryForServiceWorker(
     RenderProcessHost* rph,
@@ -118,17 +113,17 @@ void OnRequestWillBeSentExtraInfo(
     int routing_id,
     const std::string& devtools_request_id,
     const net::CookieStatusList& request_cookie_list,
-    const std::vector<std::pair<std::string, std::string>>& request_headers);
+    const std::vector<network::mojom::HttpRawHeaderPairPtr>& request_headers);
 void OnResponseReceivedExtraInfo(
     int process_id,
     int routing_id,
     const std::string& devtools_request_id,
     const net::CookieAndLineStatusList& response_cookie_list,
-    const std::vector<std::pair<std::string, std::string>>& response_headers,
+    const std::vector<network::mojom::HttpRawHeaderPairPtr>& response_headers,
     const base::Optional<std::string>& response_headers_text);
 
 std::vector<std::unique_ptr<NavigationThrottle>> CreateNavigationThrottles(
-    NavigationHandleImpl* navigation_handle);
+    NavigationHandle* navigation_handle);
 
 // Asks any interested agents to handle the given certificate error. Returns
 // |true| if the error was handled, |false| otherwise.

@@ -107,7 +107,7 @@ std::unique_ptr<em::AppInstallReportLogEvent> CreateEvent(
 
 AppInstallEventLogger::AppInstallEventLogger(Delegate* delegate,
                                              Profile* profile)
-    : delegate_(delegate), profile_(profile), weak_factory_(this) {
+    : delegate_(delegate), profile_(profile) {
   if (!arc::IsArcAllowedForProfile(profile_)) {
     AddForSetOfPackages(
         GetPackagesFromPref(arc::prefs::kArcPushInstallAppsPending),
@@ -245,9 +245,8 @@ std::set<std::string> AppInstallEventLogger::GetPackagesFromPref(
 void AppInstallEventLogger::SetPref(const std::string& pref_name,
                                     const std::set<std::string>& packages) {
   base::Value value(base::Value::Type::LIST);
-  auto& list = value.GetList();
   for (const std::string& package : packages) {
-    list.push_back(base::Value(package));
+    value.Append(package);
   }
   profile_->GetPrefs()->Set(pref_name, value);
 }
@@ -303,8 +302,8 @@ void AppInstallEventLogger::EvaluatePolicy(const policy::PolicyMap& policy,
 void AppInstallEventLogger::AddForSetOfPackagesWithDiskSpaceInfo(
     const std::set<std::string>& packages,
     std::unique_ptr<em::AppInstallReportLogEvent> event) {
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&AddDiskSpaceInfoToEvent, std::move(event)),
       base::BindOnce(&AppInstallEventLogger::AddForSetOfPackages,
                      weak_factory_.GetWeakPtr(), packages));

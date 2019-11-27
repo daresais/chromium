@@ -17,11 +17,9 @@ HistoryBrowserTest.prototype = {
 
   browsePreload: 'chrome://history',
 
-  /** @override */
-  runAccessibilityChecks: false,
-
   extraLibraries: [
     ...PolymerTest.prototype.extraLibraries,
+    '../test_util.js',
     'test_util.js',
   ],
 
@@ -81,6 +79,20 @@ HistoryItemTest.prototype = {
 };
 
 TEST_F('HistoryItemTest', 'All', function() {
+  mocha.run();
+});
+
+function HistoryLinkClickTest() {}
+
+HistoryLinkClickTest.prototype = {
+  __proto__: HistoryBrowserTest.prototype,
+
+  extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    'link_click_test.js',
+  ]),
+};
+
+TEST_F('HistoryLinkClickTest', 'All', function() {
   mocha.run();
 });
 
@@ -188,7 +200,6 @@ HistorySyncedTabsTest.prototype = {
   __proto__: HistoryBrowserTest.prototype,
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
-    '../settings/test_util.js',
     'history_synced_tabs_test.js',
   ]),
 };
@@ -213,7 +224,13 @@ HistorySupervisedUserTest.prototype = {
   ]),
 };
 
-TEST_F('HistorySupervisedUserTest', 'All', function() {
+GEN('#if defined(OS_MACOSX)');
+GEN('#define MAYBE_AllTest DISABLED_AllTest');
+GEN('#else');
+GEN('#define MAYBE_AllTest AllTest');
+GEN('#endif');
+
+TEST_F('HistorySupervisedUserTest', 'MAYBE_AllTest', function() {
   mocha.run();
 });
 

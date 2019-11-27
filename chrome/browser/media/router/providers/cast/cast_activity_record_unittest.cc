@@ -26,8 +26,8 @@
 #include "chrome/common/media_router/test/test_helper.h"
 #include "components/cast_channel/cast_test_util.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "content/public/test/browser_task_environment.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -112,9 +112,9 @@ class CastActivityRecordTest : public testing::Test,
     MediaRoute route;
     route.set_media_route_id(kRouteId);
     route.set_media_sink_id(kSinkId);
-    record_.reset(new CastActivityRecord(
-        route, kAppId, &media_sink_service_, &message_handler_,
-        session_tracker_.get(), data_decoder_.get(), &manager_));
+    record_.reset(new CastActivityRecord(route, kAppId, &media_sink_service_,
+                                         &message_handler_,
+                                         session_tracker_.get(), &manager_));
 
     std::unique_ptr<CastSession> session =
         CastSession::From(sink_, ParseJson(R"({
@@ -155,7 +155,7 @@ class CastActivityRecordTest : public testing::Test,
 
   // Run any pending events and verify expectations associated with them.
   void RunUntilIdle() {
-    thread_bundle_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     testing::Mock::VerifyAndClearExpectations(&socket_service_);
     testing::Mock::VerifyAndClearExpectations(&message_handler_);
     testing::Mock::VerifyAndClearExpectations(&manager_);
@@ -175,15 +175,12 @@ class CastActivityRecordTest : public testing::Test,
 
   // TODO(crbug.com/954797): Factor out members also present in
   // CastActivityManagerTest.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   MediaSinkInternal sink_ = CreateCastSink(kChannelId);
-  service_manager::TestConnectorFactory connector_factory_;
   cast_channel::MockCastSocketService socket_service_{
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI})};
+      base::CreateSingleThreadTaskRunner({content::BrowserThread::UI})};
   cast_channel::MockCastMessageHandler message_handler_{&socket_service_};
-  std::unique_ptr<DataDecoder> data_decoder_ =
-      std::make_unique<DataDecoder>(connector_factory_.GetDefaultConnector());
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
   TestMediaSinkService media_sink_service_;
   std::unique_ptr<CastSessionTracker> session_tracker_;
   MockCastActivityManager manager_;

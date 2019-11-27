@@ -10,9 +10,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.support.annotation.DrawableRes;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.support.v4.util.ArraySet;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceFragmentCompat;
@@ -22,8 +19,12 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 
+import androidx.annotation.DrawableRes;
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.CollectionUtil;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -105,7 +106,7 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
 
             mParent.updateButtonState();
             mShouldAnnounceCounterResult = true;
-            PrefServiceBridge.getInstance().setBrowsingDataDeletionPreference(
+            BrowsingDataBridge.getInstance().setBrowsingDataDeletionPreference(
                     ClearBrowsingDataPreferences.getDataType(mOption), mParent.getPreferenceType(),
                     mCheckbox.isChecked());
             return true;
@@ -223,7 +224,7 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
     /**
      * @return All available {@link DialogOption} entries.
      */
-    protected final static Set<Integer> getAllOptions() {
+    protected static final Set<Integer> getAllOptions() {
         assert DialogOption.CLEAR_HISTORY == 0;
 
         Set<Integer> all = new ArraySet<>();
@@ -377,13 +378,13 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
     /**
      * Returns the list of supported {@link DialogOption}.
      */
-    abstract protected List<Integer> getDialogOptions();
+    protected abstract List<Integer> getDialogOptions();
 
     /**
      * Returns whether this preference page is a basic or advanced tab in order to use separate
      * preferences.
      */
-    abstract protected int getPreferenceType();
+    protected abstract int getPreferenceType();
 
     /**
      * Returns the Array of time periods. Options are displayed in the same order as they appear
@@ -418,7 +419,7 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
      * @return boolean Whether the given option should be preselected.
      */
     private boolean isOptionSelectedByDefault(@DialogOption int option) {
-        return PrefServiceBridge.getInstance().getBrowsingDataDeletionPreference(
+        return BrowsingDataBridge.getInstance().getBrowsingDataDeletionPreference(
                 getDataType(option), getPreferenceType());
     }
 
@@ -505,7 +506,7 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
                 item.setShouldAnnounceCounterResult(false);
             }
 
-            PrefServiceBridge.getInstance().setBrowsingDataDeletionTimePeriod(
+            BrowsingDataBridge.getInstance().setBrowsingDataDeletionTimePeriod(
                     getPreferenceType(), ((TimePeriodSpinnerOption) value).getTimePeriod());
             return true;
         }
@@ -540,9 +541,9 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
                     && !PrefServiceBridge.getInstance().getBoolean(
                                Pref.ALLOW_DELETING_BROWSER_HISTORY)) {
                 enabled = false;
-                PrefServiceBridge.getInstance().setBrowsingDataDeletionPreference(
+                BrowsingDataBridge.getInstance().setBrowsingDataDeletionPreference(
                         getDataType(DialogOption.CLEAR_HISTORY), ClearBrowsingDataTab.BASIC, false);
-                PrefServiceBridge.getInstance().setBrowsingDataDeletionPreference(
+                BrowsingDataBridge.getInstance().setBrowsingDataDeletionPreference(
                         getDataType(DialogOption.CLEAR_HISTORY), ClearBrowsingDataTab.ADVANCED,
                         false);
             }
@@ -564,7 +565,7 @@ public abstract class ClearBrowsingDataPreferences extends PreferenceFragmentCom
         SpinnerPreference spinner = (SpinnerPreference) findPreference(PREF_TIME_RANGE);
         TimePeriodSpinnerOption[] spinnerOptions = getTimePeriodSpinnerOptions();
         @TimePeriod
-        int selectedTimePeriod = PrefServiceBridge.getInstance().getBrowsingDataDeletionTimePeriod(
+        int selectedTimePeriod = BrowsingDataBridge.getInstance().getBrowsingDataDeletionTimePeriod(
                 getPreferenceType());
         int spinnerOptionIndex = -1;
         for (int i = 0; i < spinnerOptions.length; ++i) {

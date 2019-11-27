@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_process_singleton.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -17,16 +18,23 @@
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/downgrade/downgrade_manager.h"
+#endif
+
 class BrowserProcessImpl;
 class ChromeBrowserMainExtraParts;
 class StartupData;
-class HeapProfilerController;
 class PrefService;
 class Profile;
 class StartupBrowserCreator;
 class StartupTimeBomb;
 class ShutdownWatcherHelper;
 class WebUsbDetector;
+
+namespace base {
+class RunLoop;
+}
 
 namespace tracing {
 class TraceEventSystemStatsMonitor;
@@ -100,7 +108,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Starts recording of metrics. This can only be called after we have a file
   // thread.
-  void StartMetricsRecording();
+  static void StartMetricsRecording();
 
   // Record time from process startup to present time in an UMA histogram.
   void RecordBrowserStartupTime();
@@ -150,10 +158,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Parts are deleted in the inverse order they are added.
   std::vector<ChromeBrowserMainExtraParts*> chrome_extra_parts_;
 
-  // The controller schedules UMA heap profiles collections and forwarding down
-  // the reporting pipeline.
-  std::unique_ptr<HeapProfilerController> heap_profiler_controller_;
-
   // The system monitor instance, used by some subsystems to collect the system
   // metrics they need.
   std::unique_ptr<performance_monitor::SystemMonitor> system_monitor_;
@@ -191,6 +195,10 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Android's first run is done in Java instead of native. Chrome OS does not
   // use master preferences.
   std::unique_ptr<first_run::MasterPrefs> master_prefs_;
+#endif
+
+#if defined(OS_WIN)
+  downgrade::DowngradeManager downgrade_manager_;
 #endif
 
   Profile* profile_;

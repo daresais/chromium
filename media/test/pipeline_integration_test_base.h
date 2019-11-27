@@ -11,7 +11,7 @@
 #include "base/callback_forward.h"
 #include "base/hash/md5.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "media/audio/clockless_audio_sink.h"
 #include "media/audio/null_audio_sink.h"
 #include "media/base/demuxer.h"
@@ -45,11 +45,10 @@ extern const char kNullAudioHash[];
 
 class PipelineTestRendererFactory {
  public:
-  virtual ~PipelineTestRendererFactory() {}
+  virtual ~PipelineTestRendererFactory() = default;
+
   // Creates and returns a Renderer.
-  virtual std::unique_ptr<Renderer> CreateRenderer(
-      CreateVideoDecodersCB prepend_video_decoders_cb,
-      CreateAudioDecodersCB prepend_audio_decoders_cb) = 0;
+  virtual std::unique_ptr<Renderer> CreateRenderer() = 0;
 };
 
 // Integration tests for Pipeline. Real demuxers, real decoders, and
@@ -145,13 +144,12 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
     audio_play_delay_cb_ = std::move(cb);
   }
 
-  std::unique_ptr<Renderer> CreateRenderer(
-      CreateVideoDecodersCB prepend_video_decoders_cb,
-      CreateAudioDecodersCB prepend_audio_decoders_cb);
+  std::unique_ptr<Renderer> CreateRenderer();
+  void CreateRendererAsync(RendererCreatedCB renderer_created_cb);
 
  protected:
   NiceMock<MockMediaLog> media_log_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::MD5Context md5_context_;
   bool hashing_enabled_;
   bool clockless_playback_;
@@ -230,7 +228,8 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
   void OnError(PipelineStatus status) override;
   void OnEnded() override;
   MOCK_METHOD1(OnMetadata, void(const PipelineMetadata&));
-  MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
+  MOCK_METHOD2(OnBufferingStateChange,
+               void(BufferingState, BufferingStateChangeReason));
   MOCK_METHOD0(OnDurationChange, void());
   MOCK_METHOD2(OnAddTextTrack,
                void(const TextTrackConfig& config,
@@ -248,13 +247,16 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
  private:
   // Runs |run_loop| until it is explicitly Quit() by some part of the calling
   // test fixture or when an error occurs (by setting |on_error_closure_|). The
-  // |scoped_task_environment_| is RunUntilIdle() after the RunLoop finishes
+  // |task_environment_| is RunUntilIdle() after the RunLoop finishes
   // running, before returning to the caller.
   void RunUntilQuitOrError(base::RunLoop* run_loop);
 
   // Configures |on_ended_closure_| to quit |run_loop| and then calls
   // RunUntilQuitOrError() on it.
   void RunUntilQuitOrEndedOrError(base::RunLoop* run_loop);
+
+  CreateVideoDecodersCB prepend_video_decoders_cb_;
+  CreateAudioDecodersCB prepend_audio_decoders_cb_;
 
   base::OnceClosure on_ended_closure_;
   base::OnceClosure on_error_closure_;

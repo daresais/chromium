@@ -9,6 +9,7 @@
 
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
+#include "ash/assistant/ui/assistant_view_ids.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -89,12 +90,13 @@ class AssistantOptInContainer : public views::Button {
 
 AssistantOptInView::AssistantOptInView(AssistantViewDelegate* delegate)
     : delegate_(delegate) {
+  SetID(AssistantViewID::kOptInView);
   InitLayout();
-  delegate_->AddAssistantPrefsObserver(this);
+  AssistantState::Get()->AddObserver(this);
 }
 
 AssistantOptInView::~AssistantOptInView() {
-  delegate_->RemoveAssistantPrefsObserver(this);
+  AssistantState::Get()->RemoveObserver(this);
 }
 
 const char* AssistantOptInView::GetClassName() const {
@@ -114,7 +116,7 @@ void AssistantOptInView::ButtonPressed(views::Button* sender,
   delegate_->OnOptInButtonPressed();
 }
 
-void AssistantOptInView::OnAssistantConsentStatusUpdated(int consent_status) {
+void AssistantOptInView::OnAssistantConsentStatusChanged(int consent_status) {
   UpdateLabel(consent_status);
 }
 
@@ -124,7 +126,7 @@ void AssistantOptInView::InitLayout() {
           views::BoxLayout::Orientation::kHorizontal));
 
   layout_manager->set_cross_axis_alignment(
-      app_list_features::IsEmbeddedAssistantUIEnabled()
+      app_list_features::IsAssistantLauncherUIEnabled()
           ? views::BoxLayout::CrossAxisAlignment::kCenter
           : views::BoxLayout::CrossAxisAlignment::kEnd);
 
@@ -152,7 +154,8 @@ void AssistantOptInView::InitLayout() {
   container_->AddChildView(label_);
   container_->SetFocusForPlatform();
 
-  UpdateLabel(delegate_->GetConsentStatus());
+  UpdateLabel(AssistantState::Get()->consent_status().value_or(
+      chromeos::assistant::prefs::ConsentStatus::kUnknown));
 }
 
 void AssistantOptInView::UpdateLabel(int consent_status) {

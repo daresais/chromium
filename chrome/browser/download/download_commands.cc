@@ -20,12 +20,8 @@
 #include "chrome/browser/download/download_ui_model.h"
 #include "chrome/browser/image_decoder.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/common/google_util.h"
-#include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/url_util.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
@@ -94,7 +90,7 @@ class ImageClipboardCopyManager : public ImageDecoder::ImageRequest {
     // This method is called on the same thread as constructor (the UI thread).
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-    ui::ScopedClipboardWriter scw(ui::ClipboardType::kCopyPaste);
+    ui::ScopedClipboardWriter scw(ui::ClipboardBuffer::kCopyPaste);
     scw.Reset();
 
     if (!decoded_image.empty() && !decoded_image.isNull())
@@ -199,8 +195,8 @@ void DownloadCommands::CopyFileAsImageToClipboard() {
   base::FilePath file_path = model_->GetFullPath();
 
   if (!task_runner_) {
-    task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+    task_runner_ = base::CreateSequencedTaskRunner(
+        {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   }
   ImageClipboardCopyManager::Start(file_path, task_runner_.get());

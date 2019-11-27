@@ -38,7 +38,8 @@ PushMessageData* PushMessageData::Create(
             : message_data.GetAsArrayBuffer();
 
     return MakeGarbageCollected<PushMessageData>(
-        static_cast<const char*>(buffer->Data()), buffer->ByteLength());
+        static_cast<const char*>(buffer->Data()),
+        buffer->DeprecatedByteLengthAsUnsigned());
   }
 
   if (message_data.IsUSVString()) {
@@ -83,7 +84,7 @@ ScriptValue PushMessageData::json(ScriptState* script_state,
   if (exception_state.HadException())
     return ScriptValue();
 
-  return ScriptValue(script_state, parsed);
+  return ScriptValue(script_state->GetIsolate(), parsed);
 }
 
 String PushMessageData::text() const {

@@ -5,24 +5,24 @@
 package org.chromium.chrome.browser.preferences.sync;
 
 import android.content.Context;
-import android.preference.Preference;
-import android.preference.PreferenceFragment;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.support.v7.content.res.AppCompatResources;
+import android.support.v7.preference.Preference;
+import android.support.v7.preference.PreferenceViewHolder;
 import android.util.AttributeSet;
-import android.view.View;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.signin.DisplayableProfileData;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.signin.ProfileDataCache;
-import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninActivity;
 import org.chromium.chrome.browser.signin.SigninManager.SignInAllowedObserver;
 import org.chromium.chrome.browser.signin.SigninPromoController;
@@ -33,6 +33,7 @@ import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountsChangeObserver;
 import org.chromium.components.signin.ChromeSigninController;
+import org.chromium.components.signin.metrics.SigninAccessPoint;
 import org.chromium.components.sync.AndroidSyncSettings;
 
 import java.lang.annotation.Retention;
@@ -166,8 +167,8 @@ public class SignInPreference
             return;
         }
 
-        boolean personalizedPromoDismissed = ChromePreferenceManager.getInstance().readBoolean(
-                ChromePreferenceManager.SETTINGS_PERSONALIZED_SIGNIN_PROMO_DISMISSED, false);
+        boolean personalizedPromoDismissed = SharedPreferencesManager.getInstance().readBoolean(
+                ChromePreferenceKeys.SETTINGS_PERSONALIZED_SIGNIN_PROMO_DISMISSED, false);
         if (!mPersonalizedPromoEnabled || personalizedPromoDismissed) {
             setupGenericPromo();
             return;
@@ -266,20 +267,20 @@ public class SignInPreference
     }
 
     @Override
-    protected void onBindView(final View view) {
-        super.onBindView(view);
-        ViewUtils.setEnabledRecursive(view, mViewEnabled);
+    public void onBindViewHolder(PreferenceViewHolder holder) {
+        super.onBindViewHolder(holder);
+        ViewUtils.setEnabledRecursive(holder.itemView, mViewEnabled);
 
         if (mSigninPromoController == null) {
             return;
         }
 
         PersonalizedSigninPromoView signinPromoView =
-                view.findViewById(R.id.signin_promo_view_container);
+                (PersonalizedSigninPromoView) holder.findViewById(R.id.signin_promo_view_container);
         SigninPromoUtil.setupPromoViewFromCache(
                 mSigninPromoController, mProfileDataCache, signinPromoView, () -> {
-                    ChromePreferenceManager.getInstance().writeBoolean(
-                            ChromePreferenceManager.SETTINGS_PERSONALIZED_SIGNIN_PROMO_DISMISSED,
+                    SharedPreferencesManager.getInstance().writeBoolean(
+                            ChromePreferenceKeys.SETTINGS_PERSONALIZED_SIGNIN_PROMO_DISMISSED,
                             true);
                     update();
                 });

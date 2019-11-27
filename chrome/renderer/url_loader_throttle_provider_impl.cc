@@ -25,12 +25,11 @@
 #include "components/safe_browsing/features.h"
 #include "components/safe_browsing/renderer/renderer_url_loader_throttle.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -55,8 +54,9 @@ chrome::mojom::PrerenderCanceler* GetPrerenderCanceller(int render_frame_id) {
   if (!helper)
     return nullptr;
 
-  auto* canceler = new chrome::mojom::PrerenderCancelerPtr;
-  render_frame->GetRemoteInterfaces()->GetInterface(canceler);
+  auto* canceler = new mojo::Remote<chrome::mojom::PrerenderCanceler>;
+  render_frame->GetBrowserInterfaceBroker()->GetInterface(
+      canceler->BindNewPipeAndPassReceiver());
   base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, canceler);
   return canceler->get();
 }
@@ -73,12 +73,6 @@ CreateExtensionThrottleManager() {
 
 void SetExtensionThrottleManagerTestPolicy(
     extensions::ExtensionThrottleManager* extension_throttle_manager) {
-  // Requests issued within within |kUserGestureWindowMs| of a user gesture
-  // are also considered as user gestures (see
-  // resource_dispatcher_host_impl.cc), so these tests need to bypass the
-  // checking of the net::LOAD_MAYBE_USER_GESTURE load flag in the manager
-  // in order to test the throttling logic.
-  extension_throttle_manager->SetIgnoreUserGestureLoadFlagForTests(true);
   std::unique_ptr<net::BackoffEntry::Policy> policy(
       new net::BackoffEntry::Policy{
           // Number of initial errors (in sequence) to ignore before
@@ -112,20 +106,16 @@ void SetExtensionThrottleManagerTestPolicy(
 }  // namespace
 
 URLLoaderThrottleProviderImpl::URLLoaderThrottleProviderImpl(
+    blink::ThreadSafeBrowserInterfaceBrokerProxy* broker,
     content::URLLoaderThrottleProviderType type,
     ChromeContentRendererClient* chrome_content_renderer_client)
     : type_(type),
       chrome_content_renderer_client_(chrome_content_renderer_client) {
   DETACH_FROM_THREAD(thread_checker_);
-
-  content::RenderThread::Get()->GetConnector()->BindInterface(
-      content::mojom::kBrowserServiceName,
-      mojo::MakeRequest(&safe_browsing_info_));
-
+  broker->GetInterface(safe_browsing_remote_.InitWithNewPipeAndPassReceiver());
   if (data_reduction_proxy::params::IsEnabledWithNetworkService()) {
-    content::RenderThread::Get()->GetConnector()->BindInterface(
-        content::mojom::kBrowserServiceName,
-        mojo::MakeRequest(&data_reduction_proxy_info_));
+    broker->GetInterface(
+        data_reduction_proxy_remote_.InitWithNewPipeAndPassReceiver());
   }
 }
 
@@ -138,11 +128,13 @@ URLLoaderThrottleProviderImpl::URLLoaderThrottleProviderImpl(
     : type_(other.type_),
       chrome_content_renderer_client_(other.chrome_content_renderer_client_) {
   DETACH_FROM_THREAD(thread_checker_);
-  if (other.safe_browsing_)
-    other.safe_browsing_->Clone(mojo::MakeRequest(&safe_browsing_info_));
+  if (other.safe_browsing_) {
+    other.safe_browsing_->Clone(
+        safe_browsing_remote_.InitWithNewPipeAndPassReceiver());
+  }
   if (other.data_reduction_proxy_) {
     other.data_reduction_proxy_->Clone(
-        mojo::MakeRequest(&data_reduction_proxy_info_));
+        data_reduction_proxy_remote_.InitWithNewPipeAndPassReceiver());
   }
   // An ad_delay_factory_ is created, rather than cloning the existing one.
 }
@@ -150,21 +142,21 @@ URLLoaderThrottleProviderImpl::URLLoaderThrottleProviderImpl(
 std::unique_ptr<content::URLLoaderThrottleProvider>
 URLLoaderThrottleProviderImpl::Clone() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (safe_browsing_info_)
-    safe_browsing_.Bind(std::move(safe_browsing_info_));
-  if (data_reduction_proxy_info_)
-    data_reduction_proxy_.Bind(std::move(data_reduction_proxy_info_));
+  if (safe_browsing_remote_)
+    safe_browsing_.Bind(std::move(safe_browsing_remote_));
+  if (data_reduction_proxy_remote_)
+    data_reduction_proxy_.Bind(std::move(data_reduction_proxy_remote_));
   return base::WrapUnique(new URLLoaderThrottleProviderImpl(*this));
 }
 
-std::vector<std::unique_ptr<content::URLLoaderThrottle>>
+std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
 URLLoaderThrottleProviderImpl::CreateThrottles(
     int render_frame_id,
     const blink::WebURLRequest& request,
     content::ResourceType resource_type) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  std::vector<std::unique_ptr<content::URLLoaderThrottle>> throttles;
+  std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
 
   // Some throttles have already been added in the browser for frame resources.
   // Don't add them for frame requests.
@@ -174,8 +166,8 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
          type_ == content::URLLoaderThrottleProviderType::kFrame);
 
   if (data_reduction_proxy::params::IsEnabledWithNetworkService()) {
-    if (data_reduction_proxy_info_)
-      data_reduction_proxy_.Bind(std::move(data_reduction_proxy_info_));
+    if (data_reduction_proxy_remote_)
+      data_reduction_proxy_.Bind(std::move(data_reduction_proxy_remote_));
     if (!data_reduction_proxy_manager_) {
       data_reduction_proxy_manager_ = std::make_unique<
           data_reduction_proxy::DataReductionProxyThrottleManager>(
@@ -189,8 +181,8 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
   }
 
   if (!is_frame_resource) {
-    if (safe_browsing_info_)
-      safe_browsing_.Bind(std::move(safe_browsing_info_));
+    if (safe_browsing_remote_)
+      safe_browsing_.Bind(std::move(safe_browsing_remote_));
     throttles.push_back(
         std::make_unique<safe_browsing::RendererURLLoaderThrottle>(
             safe_browsing_.get(), render_frame_id));
@@ -249,7 +241,7 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
       SetExtensionThrottleManagerTestPolicy(extension_throttle_manager_.get());
     }
 
-    std::unique_ptr<content::URLLoaderThrottle> throttle =
+    std::unique_ptr<blink::URLLoaderThrottle> throttle =
         extension_throttle_manager_->MaybeCreateURLLoaderThrottle(request);
     if (throttle)
       throttles.push_back(std::move(throttle));
@@ -266,13 +258,10 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
           ->chromeos_listener()));
 #endif  // defined(OS_CHROMEOS)
 
-  if (subresource_redirect::ShouldForceEnableSubresourceRedirect() &&
-      resource_type == content::ResourceType::kImage &&
-      GURL(request.Url()).SchemeIs(url::kHttpsScheme)) {
-    throttles.push_back(
-        std::make_unique<
-            subresource_redirect::SubresourceRedirectURLLoaderThrottle>());
-  }
+  auto throttle = subresource_redirect::SubresourceRedirectURLLoaderThrottle::
+      MaybeCreateThrottle(request, resource_type);
+  if (throttle)
+    throttles.push_back(std::move(throttle));
 
   return throttles;
 }

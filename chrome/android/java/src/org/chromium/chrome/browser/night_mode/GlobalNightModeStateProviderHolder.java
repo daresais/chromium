@@ -4,15 +4,16 @@
 
 package org.chromium.chrome.browser.night_mode;
 
-import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatDelegate;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.CommandLine;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 
 /**
  * Holds an instance of {@link NightModeStateProvider} that provides night mode state for the entire
@@ -63,7 +64,8 @@ public class GlobalNightModeStateProviderHolder {
                 sInstance = new DummyNightModeStateProvider();
             } else {
                 sInstance = new GlobalNightModeStateController(SystemNightModeMonitor.getInstance(),
-                        ChromePreferenceManager.getInstance());
+                        PowerSavingModeMonitor.getInstance(),
+                        SharedPreferencesManager.getInstance());
             }
         }
         return sInstance;

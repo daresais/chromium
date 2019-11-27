@@ -79,7 +79,7 @@ public class WebappDirectoryManagerTest {
     private TestWebappDirectoryManager mWebappDirectoryManager;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContext = RuntimeEnvironment.application;
         ThreadUtils.setThreadAssertsDisabledForTesting(true);
         PathUtils.setPrivateDataDirectorySuffix("chrome");
@@ -93,7 +93,7 @@ public class WebappDirectoryManagerTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         FileUtils.recursivelyDeleteFile(mContext.getDataDir());
         FileUtils.recursivelyDeleteFile(mContext.getCodeCacheDir());
         FileUtils.recursivelyDeleteFile(mWebappDirectoryManager.getBaseWebappDirectory(mContext));
@@ -107,7 +107,7 @@ public class WebappDirectoryManagerTest {
                     @Override
                     public void onWebappDataStorageRetrieved(WebappDataStorage storage) {}
                 });
-        ShadowApplication.getInstance().runBackgroundTasks();
+        ShadowApplication.runBackgroundTasks();
     }
 
     @Test

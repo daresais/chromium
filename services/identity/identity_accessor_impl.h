@@ -7,28 +7,34 @@
 
 #include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
-#include "base/callback_list.h"
-#include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
-#include "google_apis/gaia/core_account_id.h"
-#include "services/identity/public/cpp/account_state.h"
 #include "services/identity/public/cpp/scope_set.h"
 #include "services/identity/public/mojom/identity_accessor.mojom.h"
 
-namespace identity {
+struct CoreAccountId;
+struct CoreAccountInfo;
+
+namespace signin {
 struct AccessTokenInfo;
+}
+
+namespace identity {
+struct AccountState;
 
 class IdentityAccessorImpl : public mojom::IdentityAccessor,
-                             public IdentityManager::Observer {
+                             public signin::IdentityManager::Observer {
  public:
-  explicit IdentityAccessorImpl(IdentityManager* identity_manager);
+  explicit IdentityAccessorImpl(signin::IdentityManager* identity_manager);
   ~IdentityAccessorImpl() override;
 
  private:
   // Map of outstanding access token requests.
   using AccessTokenFetchers =
-      std::map<base::UnguessableToken, std::unique_ptr<AccessTokenFetcher>>;
+      std::map<base::UnguessableToken,
+               std::unique_ptr<signin::AccessTokenFetcher>>;
 
   // Invoked after access token request completes (successful or not).
   // Completes the pending access token request by calling back the consumer.
@@ -37,7 +43,7 @@ class IdentityAccessorImpl : public mojom::IdentityAccessor,
       scoped_refptr<base::RefCountedData<bool>> is_callback_done,
       GetAccessTokenCallback consumer_callback,
       GoogleServiceAuthError error,
-      AccessTokenInfo access_token_info);
+      signin::AccessTokenInfo access_token_info);
 
   // mojom::IdentityAccessor:
   void GetPrimaryAccountInfo(GetPrimaryAccountInfoCallback callback) override;
@@ -48,19 +54,19 @@ class IdentityAccessorImpl : public mojom::IdentityAccessor,
                       const std::string& consumer_id,
                       GetAccessTokenCallback callback) override;
 
-  // IdentityManager::Observer:
+  // signin::IdentityManager::Observer:
   void OnRefreshTokenUpdatedForAccount(
       const CoreAccountInfo& account_info) override;
   void OnPrimaryAccountSet(const CoreAccountInfo& account_info) override;
 
   // Notified when there is a change in the state of the account
   // corresponding to |account_id|.
-  void OnAccountStateChange(const std::string& account_id);
+  void OnAccountStateChange(const CoreAccountId& account_id);
 
   // Gets the current state of the account represented by |account_info|.
   AccountState GetStateOfAccount(const CoreAccountInfo& account_info);
 
-  IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
 
   // The set of pending requests for access tokens.
   AccessTokenFetchers access_token_fetchers_;

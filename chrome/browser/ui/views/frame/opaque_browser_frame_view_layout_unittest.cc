@@ -97,7 +97,7 @@ class OpaqueBrowserFrameViewLayoutTest
   void SetUp() override {
     ChromeViewsTestBase::SetUp();
 
-    delegate_.reset(new TestLayoutDelegate);
+    delegate_ = std::make_unique<TestLayoutDelegate>();
     auto layout = std::make_unique<OpaqueBrowserFrameViewLayout>();
     layout->set_delegate(delegate_.get());
     layout->set_forced_window_caption_spacing_for_test(0);
@@ -400,7 +400,7 @@ TEST_P(OpaqueBrowserFrameViewLayoutTest, WindowWithTitleAndIcon) {
   ExpectWindowTitle();
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          OpaqueBrowserFrameViewLayoutTest,
                          ::testing::Values(false, true),
                          [](const testing::TestParamInfo<bool>& param_info) {

@@ -60,7 +60,7 @@ class BrowserAssociatedInterface {
       : internal_state_(new InternalState(impl)) {
     filter->AddAssociatedInterface(
         Interface::Name_,
-        base::Bind(&InternalState::BindRequest, internal_state_),
+        base::BindRepeating(&InternalState::BindRequest, internal_state_),
         base::BindOnce(&InternalState::ClearBindings, internal_state_));
   }
 
@@ -76,9 +76,8 @@ class BrowserAssociatedInterface {
 
     void ClearBindings() {
       if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-        base::PostTaskWithTraits(
-            FROM_HERE, {BrowserThread::IO},
-            base::BindOnce(&InternalState::ClearBindings, this));
+        base::PostTask(FROM_HERE, {BrowserThread::IO},
+                       base::BindOnce(&InternalState::ClearBindings, this));
         return;
       }
       bindings_.reset();

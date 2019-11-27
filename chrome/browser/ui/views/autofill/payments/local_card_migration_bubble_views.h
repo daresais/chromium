@@ -25,7 +25,6 @@ class LocalCardMigrationBubbleViews : public LocalCardMigrationBubble,
   // should be only one controller per tab after the initialization. It should
   // live even when bubble is gone.
   LocalCardMigrationBubbleViews(views::View* anchor_view,
-                                const gfx::Point& anchor_point,
                                 content::WebContents* web_contents,
                                 LocalCardMigrationBubbleController* controller);
 
@@ -38,8 +37,6 @@ class LocalCardMigrationBubbleViews : public LocalCardMigrationBubble,
   bool Accept() override;
   bool Cancel() override;
   bool Close() override;
-  int GetDialogButtons() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   gfx::Size CalculatePreferredSize() const override;
   void AddedToWidget() override;
   bool ShouldShowCloseButton() const override;

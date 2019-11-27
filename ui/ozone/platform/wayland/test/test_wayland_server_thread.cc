@@ -58,6 +58,8 @@ bool TestWaylandServerThread::Start(uint32_t shell_version) {
     return false;
   if (!compositor_.Initialize(display_.get()))
     return false;
+  if (!sub_compositor_.Initialize(display_.get()))
+    return false;
   if (!output_.Initialize(display_.get()))
     return false;
   if (!data_device_manager_.Initialize(display_.get()))
@@ -105,6 +107,12 @@ void TestWaylandServerThread::Resume() {
   if (display_)
     wl_display_flush_clients(display_.get());
   resume_event_.Signal();
+}
+
+MockWpPresentation* TestWaylandServerThread::EnsureWpPresentation() {
+  if (wp_presentation_.Initialize(display_.get()))
+    return &wp_presentation_;
+  return nullptr;
 }
 
 void TestWaylandServerThread::DoPause() {

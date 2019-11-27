@@ -29,7 +29,6 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_size.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_trusted_html.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
@@ -42,6 +41,7 @@
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/media/autoplay_policy.h"
@@ -105,7 +105,7 @@ constexpr int kMinWidthForOverlayPlayButton = 72;
 
 constexpr int kMinScrubbingMessageWidth = 300;
 
-const char* kStateCSSClasses[8] = {
+const char* const kStateCSSClasses[8] = {
     "state-no-source",                 // kNoSource
     "state-no-metadata",               // kNotLoaded
     "state-loading-metadata-paused",   // kLoadingMetadataPaused
@@ -601,9 +601,9 @@ void MediaControlsImpl::InitializeControls() {
 
 void MediaControlsImpl::PopulatePanel() {
   // Clear the panels.
-  panel_->setInnerHTML(StringOrTrustedHTML::FromString(""));
+  panel_->SetInnerHTMLFromString("");
   if (media_button_panel_)
-    media_button_panel_->setInnerHTML(StringOrTrustedHTML::FromString(""));
+    media_button_panel_->SetInnerHTMLFromString("");
 
   Element* button_panel = panel_;
   if (ShouldShowVideoControls()) {
@@ -736,35 +736,35 @@ void MediaControlsImpl::UpdateCSSClassFromState() {
     if (state == kNoSource) {
       // Check if the play button or overflow menu has the "disabled" attribute
       // set so we avoid unnecessarily resetting it.
-      if (!play_button_->hasAttribute(html_names::kDisabledAttr)) {
+      if (!play_button_->FastHasAttribute(html_names::kDisabledAttr)) {
         play_button_->setAttribute(html_names::kDisabledAttr, "");
         updated = true;
       }
 
       if (ShouldShowVideoControls() &&
-          !overflow_menu_->hasAttribute(html_names::kDisabledAttr)) {
+          !overflow_menu_->FastHasAttribute(html_names::kDisabledAttr)) {
         overflow_menu_->setAttribute(html_names::kDisabledAttr, "");
         updated = true;
       }
     } else {
-      if (play_button_->hasAttribute(html_names::kDisabledAttr)) {
+      if (play_button_->FastHasAttribute(html_names::kDisabledAttr)) {
         play_button_->removeAttribute(html_names::kDisabledAttr);
         updated = true;
       }
 
-      if (overflow_menu_->hasAttribute(html_names::kDisabledAttr)) {
+      if (overflow_menu_->FastHasAttribute(html_names::kDisabledAttr)) {
         overflow_menu_->removeAttribute(html_names::kDisabledAttr);
         updated = true;
       }
     }
 
     if (state == kNoSource || state == kNotLoaded) {
-      if (!timeline_->hasAttribute(html_names::kDisabledAttr)) {
+      if (!timeline_->FastHasAttribute(html_names::kDisabledAttr)) {
         timeline_->setAttribute(html_names::kDisabledAttr, "");
         updated = true;
       }
     } else {
-      if (timeline_->hasAttribute(html_names::kDisabledAttr)) {
+      if (timeline_->FastHasAttribute(html_names::kDisabledAttr)) {
         timeline_->removeAttribute(html_names::kDisabledAttr);
         updated = true;
       }
@@ -1195,7 +1195,7 @@ void MediaControlsImpl::ExitFullscreen() {
 
 bool MediaControlsImpl::IsFullscreenEnabled() const {
   return fullscreen_button_->IsWanted() &&
-         !fullscreen_button_->hasAttribute(html_names::kDisabledAttr);
+         !fullscreen_button_->FastHasAttribute(html_names::kDisabledAttr);
 }
 
 void MediaControlsImpl::RemotePlaybackStateChanged() {
@@ -1314,7 +1314,7 @@ void MediaControlsImpl::UpdateOverflowMenuWanted() const {
 
   // The overflow menu is always wanted if it has the "disabled" attr set.
   overflow_wanted = overflow_wanted ||
-                    overflow_menu_->hasAttribute(html_names::kDisabledAttr);
+                    overflow_menu_->FastHasAttribute(html_names::kDisabledAttr);
   overflow_menu_->SetDoesFit(overflow_wanted);
   overflow_menu_->SetIsWanted(overflow_wanted);
 
@@ -1464,7 +1464,7 @@ void MediaControlsImpl::DefaultEventHandler(Event& event) {
     ResetHideMediaControlsTimer();
   }
 
-  if (event.IsKeyboardEvent() &&
+  if (event.IsKeyboardEvent() && !event.defaultPrevented() &&
       !IsSpatialNavigationEnabled(GetDocument().GetFrame())) {
     const String& key = ToKeyboardEvent(event).key();
     if (key == "Enter" || ToKeyboardEvent(event).keyCode() == ' ') {
@@ -1905,6 +1905,9 @@ void MediaControlsImpl::NotifyElementSizeChanged(DOMRectReadOnly* new_size) {
 }
 
 void MediaControlsImpl::ElementSizeChangedTimerFired(TimerBase*) {
+  if (!MediaElement().isConnected())
+    return;
+
   ComputeWhichControlsFit();
 
   // Rerender timeline bar segments when size changed.
@@ -2007,7 +2010,7 @@ void MediaControlsImpl::UpdateActingAsAudioControls() {
 }
 
 bool MediaControlsImpl::ShouldShowAudioControls() const {
-  return (MediaElement().IsHTMLAudioElement() || is_acting_as_audio_controls_);
+  return IsA<HTMLAudioElement>(MediaElement()) || is_acting_as_audio_controls_;
 }
 
 bool MediaControlsImpl::ShouldShowVideoControls() const {

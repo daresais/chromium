@@ -32,6 +32,7 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
+#include "components/download/public/common/download_source.h"
 #include "ui/base/page_transition_types.h"
 #include "url/origin.h"
 
@@ -327,6 +328,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // Whether this download is a SavePackage download.
   virtual bool IsSavePackageDownload() const = 0;
 
+  // DownloadSource prompting this download.
+  virtual DownloadSource GetDownloadSource() const = 0;
+
   //    Destination State accessors --------------------------------------------
 
   // Full path to the downloaded or downloading file. This is the path to the
@@ -490,6 +494,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // interruptions.
   virtual void OnContentCheckCompleted(DownloadDangerType danger_type,
                                        DownloadInterruptReason reason) = 0;
+
+  // Called when async scanning completes with the given |danger_type|.
+  virtual void OnAsyncScanningCompleted(DownloadDangerType danger_type) = 0;
 
   // Mark the download to be auto-opened when completed.
   virtual void SetOpenWhenComplete(bool open) = 0;

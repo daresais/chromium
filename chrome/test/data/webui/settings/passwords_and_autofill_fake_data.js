@@ -167,6 +167,14 @@ class PasswordSectionElementFactory {
 
     // Create a passwords-section to use for testing.
     const passwordsSection = this.document.createElement('passwords-section');
+    passwordsSection.prefs = {
+      credentials_enable_service: {},
+      profile: {
+        password_manager_leak_detection: {
+          value: true,
+        }
+      },
+    };
     this.document.body.appendChild(passwordsSection);
     Polymer.dom.flush();
     return passwordsSection;
@@ -268,19 +276,19 @@ function TestAutofillManager() {
 
   // Holds the last callbacks so they can be called when needed.
   this.lastCallback = {
-    addAddressListChangedListener: null,
+    setPersonalDataManagerListener: null,
   };
 }
 
 TestAutofillManager.prototype = {
   /** @override */
-  addAddressListChangedListener: function(listener) {
+  setPersonalDataManagerListener: function(listener) {
     this.actual_.listeningAddresses++;
-    this.lastCallback.addAddressListChangedListener = listener;
+    this.lastCallback.setPersonalDataManagerListener = listener;
   },
 
   /** @override */
-  removeAddressListChangedListener: function(listener) {
+  removePersonalDataManagerListener: function(listener) {
     this.actual_.listeningAddresses--;
   },
 
@@ -324,19 +332,19 @@ function TestPaymentsManager() {
 
   // Holds the last callbacks so they can be called when needed.
   this.lastCallback = {
-    addCreditCardListChangedListener: null,
+    setPersonalDataManagerListener: null,
   };
 }
 
 TestPaymentsManager.prototype = {
   /** @override */
-  addCreditCardListChangedListener: function(listener) {
+  setPersonalDataManagerListener: function(listener) {
     this.actual_.listeningCreditCards++;
-    this.lastCallback.addCreditCardListChangedListener = listener;
+    this.lastCallback.setPersonalDataManagerListener = listener;
   },
 
   /** @override */
-  removeCreditCardListChangedListener: function(listener) {
+  removePersonalDataManagerListener: function(listener) {
     this.actual_.listeningCreditCards--;
   },
 

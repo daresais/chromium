@@ -23,7 +23,6 @@ const char kChromeUIAccessibilityHost[] = "accessibility";
 const char kChromeUIAppIconHost[] = "app-icon";
 const char kChromeUIAppIconURL[] = "chrome://app-icon/";
 const char kChromeUIAppLauncherPageHost[] = "apps";
-const char kChromeUIAppManagementHost[] = "app-management";
 const char kChromeUIAppsURL[] = "chrome://apps/";
 const char kChromeUIAutofillInternalsHost[] = "autofill-internals";
 const char kChromeUIBluetoothInternalsHost[] = "bluetooth-internals";
@@ -38,7 +37,6 @@ const char kChromeUIChromeURLsHost[] = "chrome-urls";
 const char kChromeUIChromeURLsURL[] = "chrome://chrome-urls/";
 const char kChromeUIComponentsHost[] = "components";
 const char kChromeUIConflictsHost[] = "conflicts";
-const char kChromeUIConflictsURL[] = "chrome://conflicts/";
 const char kChromeUIConstrainedHTMLTestURL[] = "chrome://constrained-test/";
 const char kChromeUIContentSettingsURL[] = "chrome://settings/content";
 const char kChromeUICrashHost[] = "crash";
@@ -57,6 +55,7 @@ const char kChromeUIDevToolsURL[] =
 const char kChromeUIDeviceLogHost[] = "device-log";
 const char kChromeUIDevicesHost[] = "devices";
 const char kChromeUIDevicesURL[] = "chrome://devices/";
+const char kChromeUIDevUiLoaderURL[] = "chrome://dev-ui-loader/";
 const char kChromeUIDomainReliabilityInternalsHost[] =
     "domain-reliability-internals";
 const char kChromeUIDownloadInternalsHost[] = "download-internals";
@@ -71,7 +70,6 @@ const char kChromeUIExtensionsURL[] = "chrome://extensions/";
 const char kChromeUIFaviconHost[] = "favicon";
 const char kChromeUIFaviconURL[] = "chrome://favicon/";
 const char kChromeUIFavicon2Host[] = "favicon2";
-const char kChromeUIFavicon2URL[] = "chrome://favicon2/";
 const char kChromeUIFileiconURL[] = "chrome://fileicon/";
 const char kChromeUIFlagsHost[] = "flags";
 const char kChromeUIFlagsURL[] = "chrome://flags/";
@@ -97,8 +95,6 @@ const char kChromeUIMdUserManagerHost[] = "md-user-manager";
 const char kChromeUIMdUserManagerUrl[] = "chrome://md-user-manager/";
 const char kChromeUIMediaEngagementHost[] = "media-engagement";
 const char kChromeUIMediaRouterInternalsHost[] = "media-router-internals";
-const char kChromeUIMediaRouterInternalsURL[] =
-    "chrome://media-router-internals/";
 const char kChromeUIMemoryInternalsHost[] = "memory-internals";
 const char kChromeUINTPTilesInternalsHost[] = "ntp-tiles-internals";
 const char kChromeUINaClHost[] = "nacl";
@@ -107,13 +103,14 @@ const char kChromeUINetInternalsHost[] = "net-internals";
 const char kChromeUINetInternalsURL[] = "chrome://net-internals/";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUINewTabIconHost[] = "ntpicon";
+const char kChromeUINewTabPageHost[] = "new-tab-page";
+const char kChromeUINewTabPageURL[] = "chrome://new-tab-page";
 const char kChromeUINewTabURL[] = "chrome://newtab/";
 const char kChromeUINotificationsInternalsHost[] = "notifications-internals";
 const char kChromeUIOmniboxHost[] = "omnibox";
 const char kChromeUIOmniboxURL[] = "chrome://omnibox/";
 const char kChromeUIPasswordManagerInternalsHost[] =
     "password-manager-internals";
-const char kChromeUIPhysicalWebHost[] = "physical-web";
 const char kChromeUIPolicyHost[] = "policy";
 const char kChromeUIPolicyURL[] = "chrome://policy/";
 const char kChromeUIPredictorsHost[] = "predictors";
@@ -160,13 +157,20 @@ const char kChromeUIThumbnailListHost[] = "thumbnails";
 const char kChromeUIThumbnailURL[] = "chrome://thumb/";
 const char kChromeUITranslateInternalsHost[] = "translate-internals";
 const char kChromeUIUkmHost[] = "ukm";
-const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIUsbInternalsHost[] = "usb-internals";
 const char kChromeUIUserActionsHost[] = "user-actions";
 const char kChromeUIVersionHost[] = "version";
 const char kChromeUIVersionURL[] = "chrome://version/";
+const char kChromeUIWebFooterExperimentHost[] = "web-footer-experiment";
+const char kChromeUIWebFooterExperimentURL[] =
+    "chrome://web-footer-experiment/";
 const char kChromeUIWelcomeHost[] = "welcome";
 const char kChromeUIWelcomeURL[] = "chrome://welcome/";
+
+#if defined(OS_WIN)
+// TODO(crbug.com/1003960): Remove when issue is resolved.
+const char kChromeUIWelcomeWin10Host[] = "welcome-win10";
+#endif  // defined(OS_WIN)
 
 #if defined(OS_ANDROID)
 const char kChromeUIExploreSitesInternalsHost[] = "explore-sites-internals";
@@ -186,6 +190,8 @@ const char kChromeUIWebApksHost[] = "webapks";
 
 #if defined(OS_CHROMEOS)
 // Keep alphabetized.
+const char kChromeUIAccountManagerErrorHost[] = "account-manager-error";
+const char kChromeUIAccountManagerErrorURL[] = "chrome://account-manager-error";
 const char kChromeUIAccountManagerWelcomeHost[] = "account-manager-welcome";
 const char kChromeUIAccountManagerWelcomeURL[] =
     "chrome://account-manager-welcome";
@@ -197,6 +203,8 @@ const char kChromeUIAddSupervisionHost[] = "add-supervision";
 const char kChromeUIAddSupervisionURL[] = "chrome://add-supervision/";
 const char kChromeUIArcGraphicsTracingHost[] = "arc-graphics-tracing";
 const char kChromeUIArcGraphicsTracingURL[] = "chrome://arc-graphics-tracing/";
+const char kChromeUIArcOverviewTracingHost[] = "arc-overview-tracing";
+const char kChromeUIArcOverviewTracingURL[] = "chrome://arc-overview-tracing/";
 const char kChromeUIAssistantOptInHost[] = "assistant-optin";
 const char kChromeUIAssistantOptInURL[] = "chrome://assistant-optin/";
 const char kChromeUIBluetoothPairingHost[] = "bluetooth-pairing";
@@ -209,6 +217,8 @@ const char kChromeUICertificateManagerHost[] = "certificate-manager";
 const char kChromeUIConfirmPasswordChangeHost[] = "confirm-password-change";
 const char kChromeUIConfirmPasswordChangeUrl[] =
     "chrome://confirm-password-change";
+const char kChromeUICrostiniInstallerHost[] = "crostini-installer";
+const char kChromeUICrostiniInstallerUrl[] = "chrome://crostini-installer";
 const char kChromeUICryptohomeHost[] = "cryptohome";
 const char kChromeUIDeviceEmulatorHost[] = "device-emulator";
 const char kChromeUIDiscoverURL[] = "chrome://oobe/discover";
@@ -250,6 +260,8 @@ const char kChromeUISmbShareURL[] = "chrome://smb-share-dialog/";
 const char kChromeUISmbCredentialsHost[] = "smb-credentials-dialog";
 const char kChromeUISmbCredentialsURL[] = "chrome://smb-credentials-dialog/";
 const char kChromeUISysInternalsHost[] = "sys-internals";
+const char kChromeUITerminalHost[] = "terminal";
+const char kChromeUITerminalURL[] = "chrome://terminal/";
 const char kChromeUIUserImageHost[] = "userimage";
 const char kChromeUIUserImageURL[] = "chrome://userimage/";
 const char kChromeUIUrgentPasswordExpiryNotificationHost[] =
@@ -262,6 +274,7 @@ bool IsSystemWebUIHost(base::StringPiece host) {
   // Compares host instead of full URL for performance (the strings are
   // shorter).
   static const char* const kHosts[] = {
+      kChromeUIAccountManagerErrorHost,
       kChromeUIAccountManagerWelcomeHost,
       kChromeUIAccountMigrationWelcomeHost,
       kChromeUIActivationMessageHost,
@@ -270,6 +283,7 @@ bool IsSystemWebUIHost(base::StringPiece host) {
       kChromeUIBluetoothPairingHost,
       kChromeUICellularSetupHost,
       kChromeUICertificateManagerHost,
+      kChromeUICrostiniInstallerHost,
       kChromeUICryptohomeHost,
       kChromeUIDeviceEmulatorHost,
       kChromeUIFirstRunHost,
@@ -296,11 +310,6 @@ bool IsSystemWebUIHost(base::StringPiece host) {
 }
 #endif  // defined(OS_CHROMEOS)
 
-#if defined(OS_WIN)
-const char kChromeUIMetroFlowHost[] = "make-metro";
-const char kChromeUIMetroFlowURL[] = "chrome://make-metro/";
-#endif
-
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
 const char kChromeUICastHost[] = "cast";
 #endif
@@ -316,7 +325,7 @@ const char kChromeUIHatsURL[] = "chrome://hats/";
 const char kChromeUILinuxProxyConfigHost[] = "linux-proxy-config";
 #endif
 
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_ANDROID)
 const char kChromeUISandboxHost[] = "sandbox";
 #endif
 
@@ -332,6 +341,11 @@ const char kChromeUITabModalConfirmDialogHost[] = "tab-modal-confirm-dialog";
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 const char kChromeUIPrintHost[] = "print";
+#endif
+
+#if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
+const char kChromeUITabStripHost[] = "tab-strip";
+const char kChromeUITabStripURL[] = "chrome://tab-strip";
 #endif
 
 const char kChromeUIWebRtcLogsHost[] = "webrtc-logs";
@@ -372,27 +386,35 @@ const char kTriggeredResetProfileSettingsSubPage[] =
 const char kAccessibilitySubPage[] = "accessibility";
 const char kAccountManagerSubPage[] = "accountManager";
 const char kAccountSubPage[] = "accounts";
-const char kAndroidAppsDetailsSubPage[] = "androidApps/details";
+const char kAndroidAppsDetailsSubPage[] = "apps/androidAppsDetails";
+const char kAndroidAppsDetailsSubPageInBrowserSettings[] =
+    "androidApps/details";
+const char kAppManagementDetailSubPage[] = "app-management/detail";
 const char kAssistantSubPage[] = "googleAssistant";
 const char kBluetoothSubPage[] = "bluetoothDevices";
 const char kChangePictureSubPage[] = "changePicture";
 // 'multidevice/features' is a child of the 'multidevice' route
 const char kConnectedDevicesSubPage[] = "multidevice/features";
+const char kCrostiniSharedPathsSubPage[] = "crostini/sharedPaths";
 const char kCrostiniSharedUsbDevicesSubPage[] = "crostini/sharedUsbDevices";
+const char kCrostiniExportImportSubPage[] = "crostini/exportImport";
 const char kDateTimeSubPage[] = "dateTime";
 const char kDisplaySubPage[] = "display";
+const char kExternalStorageSubPage[] = "storage/externalStoragePreferences";
 const char kHelpSubPage[] = "help";
 const char kInternetSubPage[] = "internet";
 const char kKerberosAccountsSubPage[] = "kerberosAccounts";
 const char kKeyboardOverlaySubPage[] = "keyboard-overlay";
+const char kLanguageSubPage[] = "languages/details";
 const char kLockScreenSubPage[] = "lockScreen";
 const char kManageAccessibilitySubPage[] = "manageAccessibility";
+const char kManageAccessibilityTtsSubPage[] = "manageAccessibility/tts";
 const char kMultideviceSubPage[] = "multidevice";
 const char kNativePrintingSettingsSubPage[] = "cupsPrinters";
 const char kNetworkDetailSubPage[] = "networkDetail";
 const char kNetworksSubPage[] = "networks";
 const char kPluginVmDetailsSubPage[] = "pluginVm/details";
-const char kPluginVmSharedPathSubPage[] = "pluginVm/sharedPath";
+const char kPluginVmSharedPathsSubPage[] = "pluginVm/sharedPaths";
 const char kPointerOverlaySubPage[] = "pointer-overlay";
 const char kPowerSubPage[] = "power";
 const char kResetSubPage[] = "reset";
@@ -400,6 +422,7 @@ const char kSmartLockSettingsSubPage[] = "multidevice/features/smartLock";
 const char kSmbSharesSubPage[] = "smbShares";
 const char kStorageSubPage[] = "storage";
 const char kStylusSubPage[] = "stylus";
+const char kSwitchAccessSubPage[] = "manageAccessibility/switchAccess";
 // Tether is a child of the 'networks' route.
 const char kTetherSettingsSubPage[] = "networks?type=Tether";
 const char kVPNSettingsSubPage[] = "networks?type=VPN";
@@ -412,21 +435,26 @@ bool IsOSSettingsSubPage(const std::string& sub_page) {
       kAccountManagerSubPage,
       kAccountSubPage,
       kAndroidAppsDetailsSubPage,
+      kAndroidAppsDetailsSubPageInBrowserSettings,
+      kAppManagementDetailSubPage,
       kAssistantSubPage,
       kBluetoothSubPage,
       kChangePictureSubPage,
       kConnectedDevicesSubPage,
+      kCrostiniSharedPathsSubPage,
       kCrostiniSharedUsbDevicesSubPage,
       kDateTimeSubPage,
       kDisplaySubPage,
+      kExternalStorageSubPage,
       kHelpSubPage,
       kInternetSubPage,
       kKerberosAccountsSubPage,
       kKeyboardOverlaySubPage,
       // language is both an OS and browser sub page, but prefer the OS version
-      kLanguageOptionsSubPage,
+      kLanguageSubPage,
       kLockScreenSubPage,
       kManageAccessibilitySubPage,
+      kManageAccessibilityTtsSubPage,
       kMultideviceSubPage,
       kNativePrintingSettingsSubPage,
       kNetworkDetailSubPage,
@@ -439,6 +467,7 @@ bool IsOSSettingsSubPage(const std::string& sub_page) {
       kSmbSharesSubPage,
       kStorageSubPage,
       kStylusSubPage,
+      kSwitchAccessSubPage,
       // sync is both an OS and browser sub page, but prefer the OS version
       kSyncSetupSubPage,
       kVPNSettingsSubPage,
@@ -473,6 +502,7 @@ const char kExtensionConfigureCommandsSubPage[] = "configureCommands";
 const char* const kChromeHostURLs[] = {
     kChromeUIAboutHost,
     kChromeUIAccessibilityHost,
+    kChromeUIAutofillInternalsHost,
     kChromeUIBluetoothInternalsHost,
     kChromeUIChromeURLsHost,
     kChromeUIComponentsHost,
@@ -541,9 +571,9 @@ const char* const kChromeHostURLs[] = {
     kChromeUIDownloadsHost,
     kChromeUIHelpHost,
     kChromeUIInspectHost,
+    kChromeUINewTabPageHost,
     kChromeUISettingsHost,
     kChromeUISystemInfoHost,
-    kChromeUIUberHost,
 #endif
 #if defined(OS_ANDROID)
     kChromeUIExploreSitesInternalsHost,
@@ -561,6 +591,7 @@ const char* const kChromeHostURLs[] = {
     kChromeUINetworkHost,
     kChromeUIOobeHost,
     kChromeUIOSCreditsHost,
+    kChromeUIOSSettingsHost,
     kChromeUIPowerHost,
     kChromeUIInternetConfigDialogHost,
     kChromeUIInternetDetailDialogHost,
@@ -572,7 +603,7 @@ const char* const kChromeHostURLs[] = {
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
     kChromeUILinuxProxyConfigHost,
 #endif
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_ANDROID)
     kChromeUISandboxHost,
 #endif
 #if defined(OS_WIN)

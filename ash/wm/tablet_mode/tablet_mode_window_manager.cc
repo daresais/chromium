@@ -6,7 +6,9 @@
 
 #include <memory>
 
+#include "ash/display/screen_orientation_controller.h"
 #include "ash/public/cpp/app_types.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
@@ -15,6 +17,7 @@
 #include "ash/screen_util.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/overview_controller.h"
@@ -41,18 +44,14 @@ namespace {
 
 // This function is called to check if window[i] is eligible to be carried over
 // to split view mode during clamshell <-> tablet mode transition or multi-user
-// switch transition. Returns true if windows[i] exists, can snap in split view,
-// is not showing in overview, and is not ARC window.
-// TODO(xdai): Make it work for ARC windows. (see
-// https://crbug.com/922282 and
-// https://buganizer.corp.google.com/issues/123432223).
+// switch transition. Returns true if windows[i] exists, is on |root_window|,
+// and can snap in split view.
 bool IsCarryOverCandidateForSplitView(
     const MruWindowTracker::WindowList& windows,
-    size_t i) {
-  return windows.size() > i && CanSnapInSplitview(windows[i]) &&
-         !windows[i]->GetProperty(kIsShowingInOverviewKey) &&
-         static_cast<ash::AppType>(windows[i]->GetProperty(
-             aura::client::kAppType)) != AppType::ARC_APP;
+    size_t i,
+    aura::Window* root_window) {
+  return windows.size() > i && windows[i]->GetRootWindow() == root_window &&
+         CanSnapInSplitview(windows[i]);
 }
 
 // Returns the windows that are going to be carried over to splitview during
@@ -61,25 +60,32 @@ bool IsCarryOverCandidateForSplitView(
 base::flat_map<aura::Window*, WindowStateType>
 GetCarryOverWindowsInSplitView() {
   base::flat_map<aura::Window*, WindowStateType> windows;
-  // Check the topmost window and the second topmost's window state to see if
-  // they are eligible to be carried over to splitscreen. A window must meet
+  // Check the states of the topmost two non-overview windows to see if they are
+  // eligible to be carried over to splitscreen. A window must meet
   // IsCarryOverCandidateForSplitView() to be carried over to splitscreen.
   MruWindowTracker::WindowList mru_windows =
       Shell::Get()->mru_window_tracker()->BuildWindowForCycleList(kActiveDesk);
-  if (IsCarryOverCandidateForSplitView(mru_windows, 0u)) {
-    if (wm::GetWindowState(mru_windows[0])->GetStateType() ==
+  mru_windows.erase(
+      std::remove_if(mru_windows.begin(), mru_windows.end(),
+                     [](aura::Window* window) {
+                       return window->GetProperty(kIsShowingInOverviewKey);
+                     }),
+      mru_windows.end());
+  aura::Window* root_window = Shell::GetPrimaryRootWindow();
+  if (IsCarryOverCandidateForSplitView(mru_windows, 0u, root_window)) {
+    if (WindowState::Get(mru_windows[0])->GetStateType() ==
         WindowStateType::kLeftSnapped) {
       windows.emplace(mru_windows[0], WindowStateType::kLeftSnapped);
-      if (IsCarryOverCandidateForSplitView(mru_windows, 1u) &&
-          wm::GetWindowState(mru_windows[1])->GetStateType() ==
+      if (IsCarryOverCandidateForSplitView(mru_windows, 1u, root_window) &&
+          WindowState::Get(mru_windows[1])->GetStateType() ==
               WindowStateType::kRightSnapped) {
         windows.emplace(mru_windows[1], WindowStateType::kRightSnapped);
       }
-    } else if (wm::GetWindowState(mru_windows[0])->GetStateType() ==
+    } else if (WindowState::Get(mru_windows[0])->GetStateType() ==
                WindowStateType::kRightSnapped) {
       windows.emplace(mru_windows[0], WindowStateType::kRightSnapped);
-      if (IsCarryOverCandidateForSplitView(mru_windows, 1u) &&
-          wm::GetWindowState(mru_windows[1])->GetStateType() ==
+      if (IsCarryOverCandidateForSplitView(mru_windows, 1u, root_window) &&
+          WindowState::Get(mru_windows[1])->GetStateType() ==
               WindowStateType::kLeftSnapped) {
         windows.emplace(mru_windows[1], WindowStateType::kLeftSnapped);
       }
@@ -127,8 +133,8 @@ int CalculateCarryOverDividerPostion(
       return left_window ? work_area.height() - left_window_bounds.height()
                          : right_window_bounds.height();
     default:
-      return Shell::Get()->split_view_controller()->GetDefaultDividerPosition(
-          left_window ? left_window : right_window);
+      return SplitViewController::Get(Shell::GetPrimaryRootWindow())
+          ->GetDefaultDividerPosition();
   }
 }
 
@@ -140,7 +146,7 @@ void DoSplitViewTransition(
     return;
 
   SplitViewController* split_view_controller =
-      Shell::Get()->split_view_controller();
+      SplitViewController::Get(Shell::GetPrimaryRootWindow());
   // If split view mode is already active, use its own divider position.
   if (!split_view_controller->InSplitViewMode())
     split_view_controller->InitDividerPositionForTransition(divider_position);
@@ -232,28 +238,44 @@ aura::Window* TabletModeWindowManager::GetTopWindow() {
   return windows.empty() ? nullptr : windows[0];
 }
 
+// static
+bool TabletModeWindowManager::ShouldMinimizeTopWindowOnBack() {
+  if (!features::IsSwipingFromLeftEdgeToGoBackEnabled())
+    return false;
+
+  Shell* shell = Shell::Get();
+  if (!shell->tablet_mode_controller()->InTabletMode())
+    return false;
+
+  aura::Window* window = GetTopWindow();
+  if (!window)
+    return false;
+
+  // Do not minimize the window if it is in overview. This can avoid unnecessary
+  // window minimize animation.
+  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  if (overview_controller->InOverviewSession() &&
+      overview_controller->overview_session()->IsWindowInOverview(window)) {
+    return false;
+  }
+
+  const int app_type = window->GetProperty(aura::client::kAppType);
+  if (app_type != static_cast<int>(AppType::BROWSER) &&
+      app_type != static_cast<int>(AppType::CHROME_APP)) {
+    return false;
+  }
+
+  WindowState* window_state = WindowState::Get(window);
+  if (!window_state || !window_state->CanMinimize() ||
+      window_state->IsMinimized()) {
+    return false;
+  }
+
+  // Minimize the window if it is at the bottom page.
+  return !shell->shell_delegate()->CanGoBack(window);
+}
+
 void TabletModeWindowManager::Init() {
-  // If clamshell split view mode is not enabled, still keep the old behavior:
-  // end overview if it's active. And carry over snapped windows to splitscreen
-  // if possible.
-  if (!IsClamshellSplitViewModeEnabled())
-    Shell::Get()->overview_controller()->EndOverview();
-
-  // If clamshell splitview mode is enabled, there are 3 cases when entering
-  // tablet mode:
-  // 1) overview is active but split view is inactive: keep overview active in
-  //    tablet mode.
-  // 2) overview and splitview are both active (splitview can only be active
-  //    when overview is active in clamshell mode): keep overview and splitview
-  //    both active in tablet mode.
-  // 3) overview is inactive: keep the current behavior, i.e.,
-  //    a. if the top window is a snapped window, put it in splitview
-  //    b. if the second top window is also a snapped window and snapped to
-  //       the other side, put it in split view as well. Otherwise, open
-  //       overview on the other side of the screen
-  //    c. if the top window is not a snapped window, maximize all windows
-  //       when entering tablet mode.
-
   {
     ScopedObserveWindowAnimation scoped_observe(GetTopWindow(), this,
                                                 /*exiting_tablet_mode=*/false);
@@ -261,15 +283,17 @@ void TabletModeWindowManager::Init() {
   }
   AddWindowCreationObservers();
   display::Screen::GetScreen()->AddObserver(this);
-  Shell::Get()->AddShellObserver(this);
+  SplitViewController::Get(Shell::GetPrimaryRootWindow())->AddObserver(this);
   Shell::Get()->session_controller()->AddObserver(this);
   Shell::Get()->overview_controller()->AddObserver(this);
   accounts_since_entering_tablet_.insert(
       Shell::Get()->session_controller()->GetActiveAccountId());
-  event_handler_ = std::make_unique<wm::TabletModeEventHandler>();
+  event_handler_ = std::make_unique<TabletModeEventHandler>();
 }
 
 void TabletModeWindowManager::Shutdown() {
+  SplitViewController* split_view_controller =
+      SplitViewController::Get(Shell::GetPrimaryRootWindow());
   base::flat_map<aura::Window*, WindowStateType> carryover_windows_in_splitview;
   const bool was_in_overview =
       Shell::Get()->overview_controller()->InOverviewSession();
@@ -302,14 +326,12 @@ void TabletModeWindowManager::Shutdown() {
     // single split case to match the clamshell split view behavior. (there is
     // no both snapped state or single split state in clamshell split view). The
     // windows will still be kept snapped though.
-    SplitViewController* split_view_controller =
-        Shell::Get()->split_view_controller();
     if (split_view_controller->InSplitViewMode()) {
       OverviewController* overview_controller =
           Shell::Get()->overview_controller();
       if (!overview_controller->InOverviewSession() ||
           overview_controller->overview_session()->IsEmpty()) {
-        Shell::Get()->split_view_controller()->EndSplitView(
+        split_view_controller->EndSplitView(
             SplitViewController::EndReason::kExitTabletMode);
         overview_controller->EndOverview();
       }
@@ -319,7 +341,7 @@ void TabletModeWindowManager::Shutdown() {
   for (aura::Window* window : added_windows_)
     window->RemoveObserver(this);
   added_windows_.clear();
-  Shell::Get()->RemoveShellObserver(this);
+  split_view_controller->RemoveObserver(this);
   Shell::Get()->session_controller()->RemoveObserver(this);
   Shell::Get()->overview_controller()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
@@ -363,6 +385,7 @@ void TabletModeWindowManager::WindowStateDestroyed(aura::Window* window) {
 }
 
 void TabletModeWindowManager::SetIgnoreWmEventsForExit() {
+  is_exiting_ = true;
   for (auto& pair : window_state_map_)
     pair.second->set_ignore_wm_events(true);
 }
@@ -377,7 +400,8 @@ void TabletModeWindowManager::OnOverviewModeEndingAnimationComplete(
   if (canceled)
     return;
 
-  auto* split_view_controller = Shell::Get()->split_view_controller();
+  SplitViewController* split_view_controller =
+      SplitViewController::Get(Shell::GetPrimaryRootWindow());
 
   // Maximize all snapped windows upon exiting overview mode except snapped
   // windows in splitview mode. Note the snapped window might not be tracked in
@@ -394,12 +418,21 @@ void TabletModeWindowManager::OnOverviewModeEndingAnimationComplete(
   }
 }
 
-// ShellObserver:
-void TabletModeWindowManager::OnSplitViewModeEnded() {
-  switch (Shell::Get()->split_view_controller()->end_reason()) {
+void TabletModeWindowManager::OnSplitViewStateChanged(
+    SplitViewController::State previous_state,
+    SplitViewController::State state) {
+  // All TabletModeWindowState will ignore further WMEvents, but we still have
+  // to manually prevent sending maximizing events to ClientControlledState ARC
+  // windows e.g. ARC apps.
+  if (is_exiting_)
+    return;
+
+  if (state != SplitViewController::State::kNoSnap)
+    return;
+  switch (
+      SplitViewController::Get(Shell::GetPrimaryRootWindow())->end_reason()) {
     case SplitViewController::EndReason::kNormal:
     case SplitViewController::EndReason::kUnsnappableWindowActivated:
-    case SplitViewController::EndReason::kPipExpanded:
       break;
     case SplitViewController::EndReason::kHomeLauncherPressed:
     case SplitViewController::EndReason::kActiveUserChanged:
@@ -460,8 +493,8 @@ void TabletModeWindowManager::OnWindowHierarchyChanged(
     // When the state got added, the "WM_EVENT_ADDED_TO_WORKSPACE" event got
     // already sent and we have to notify our state again.
     if (base::Contains(window_state_map_, params.target)) {
-      wm::WMEvent event(wm::WM_EVENT_ADDED_TO_WORKSPACE);
-      wm::GetWindowState(params.target)->OnWMEvent(&event);
+      WMEvent event(WM_EVENT_ADDED_TO_WORKSPACE);
+      WindowState::Get(params.target)->OnWMEvent(&event);
     }
   }
 }
@@ -491,7 +524,7 @@ void TabletModeWindowManager::OnWindowBoundsChanged(
 
   // Reposition all non maximizeable windows.
   for (auto& pair : window_state_map_) {
-    pair.second->UpdateWindowPosition(wm::GetWindowState(pair.first),
+    pair.second->UpdateWindowPosition(WindowState::Get(pair.first),
                                       /*animate=*/false);
   }
   if (session)
@@ -512,8 +545,8 @@ void TabletModeWindowManager::OnWindowVisibilityChanged(aura::Window* window,
     // When the state got added, the "WM_EVENT_ADDED_TO_WORKSPACE" event got
     // already sent and we have to notify our state again.
     if (IsTrackingWindow(window)) {
-      wm::WMEvent event(wm::WM_EVENT_ADDED_TO_WORKSPACE);
-      wm::GetWindowState(window)->OnWMEvent(&event);
+      WMEvent event(WM_EVENT_ADDED_TO_WORKSPACE);
+      WindowState::Get(window)->OnWMEvent(&event);
     }
   }
 }
@@ -530,7 +563,7 @@ void TabletModeWindowManager::OnDisplayRemoved(
 void TabletModeWindowManager::OnActiveUserSessionChanged(
     const AccountId& account_id) {
   SplitViewController* split_view_controller =
-      Shell::Get()->split_view_controller();
+      SplitViewController::Get(Shell::GetPrimaryRootWindow());
 
   // There is only one SplitViewController object for all user sessions, but
   // functionally, each user session independently can be in split view or not.
@@ -565,11 +598,32 @@ WindowStateType TabletModeWindowManager::GetDesktopWindowStateType(
     aura::Window* window) const {
   auto iter = window_state_map_.find(window);
   return iter == window_state_map_.end()
-             ? wm::GetWindowState(window)->GetStateType()
+             ? WindowState::Get(window)->GetStateType()
              : iter->second->old_state()->GetType();
 }
 
 void TabletModeWindowManager::ArrangeWindowsForTabletMode() {
+  // If clamshell split view mode is not enabled, still keep the old behavior:
+  // end overview if it's active. And carry over snapped windows to
+  // splitscreen if possible.
+  if (!IsClamshellSplitViewModeEnabled())
+    Shell::Get()->overview_controller()->EndOverview();
+
+  // If clamshell splitview mode is enabled, there are 3 cases when entering
+  // tablet mode:
+  // 1) overview is active but split view is inactive: keep overview active in
+  //    tablet mode.
+  // 2) overview and splitview are both active (splitview can only be active
+  //    when overview is active in clamshell mode): keep overview and splitview
+  //    both active in tablet mode.
+  // 3) overview is inactive: keep the current behavior, i.e.,
+  //    a. if the top window is a snapped window, put it in splitview
+  //    b. if the second top window is also a snapped window and snapped to
+  //       the other side, put it in split view as well. Otherwise, open
+  //       overview on the other side of the screen
+  //    c. if the top window is not a snapped window, maximize all windows
+  //       when entering tablet mode.
+
   // |activatable_windows| includes all windows to be tracked, and that includes
   // windows on the lock screen via |scoped_skip_user_session_blocked_check|.
   ScopedSkipUserSessionBlockedCheck scoped_skip_user_session_blocked_check;
@@ -667,7 +721,7 @@ void TabletModeWindowManager::ForgetWindow(aura::Window* window,
   } else {
     // By telling the state object to revert, it will switch back the old
     // State object and destroy itself, calling WindowStateDestroyed().
-    it->second->LeaveTabletMode(wm::GetWindowState(it->first), was_in_overview);
+    it->second->LeaveTabletMode(WindowState::Get(it->first), was_in_overview);
     DCHECK(!IsTrackingWindow(window));
   }
 }
@@ -684,8 +738,8 @@ bool TabletModeWindowManager::ShouldHandleWindow(aura::Window* window) {
 
   // If the changing bounds in the maximized/fullscreen is allowed, then
   // let the client manage it even in tablet mode.
-  if (!wm::GetWindowState(window) ||
-      wm::GetWindowState(window)->allow_set_bounds_direct()) {
+  if (!WindowState::Get(window) ||
+      WindowState::Get(window)->allow_set_bounds_direct()) {
     return false;
   }
 

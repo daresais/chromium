@@ -31,7 +31,6 @@
 #include "third_party/blink/public/web/web_frame_serializer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
@@ -69,9 +68,7 @@ class WebFrameSerializerSanitizationTest : public testing::Test {
   WebFrameSerializerSanitizationTest() { helper_.Initialize(); }
 
   ~WebFrameSerializerSanitizationTest() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
   String GenerateMHTMLFromHtml(const String& url, const String& file_name) {
@@ -122,6 +119,8 @@ class WebFrameSerializerSanitizationTest : public testing::Test {
   void RegisterMockedFileURLLoad(const KURL& url,
                                  const String& file_path,
                                  const String& mime_type = "image/png") {
+    // TODO(crbug.com/751425): We should use the mock functionality
+    // via |helper_|.
     url_test_helpers::RegisterMockedURLLoad(
         url, test::CoreTestDataPath(file_path.Utf8().c_str()), mime_type);
   }
@@ -227,8 +226,17 @@ TEST_F(WebFrameSerializerSanitizationTest, ImageLoadedFromSrcsetForHiDPI) {
   String mhtml =
       GenerateMHTMLFromHtml("http://www.test.com", "img_srcset.html");
 
-  // srcset attribute should be skipped.
+  // srcset and sizes attributes should be skipped.
   EXPECT_EQ(WTF::kNotFound, mhtml.Find("srcset="));
+  EXPECT_EQ(WTF::kNotFound, mhtml.Find("sizes="));
+
+  // src attribute with original URL should be preserved.
+  EXPECT_EQ(2,
+            MatchSubstring(mhtml, "src=3D\"http://www.test.com/1x.png\"", 34));
+
+  // The image resource for original URL should be attached.
+  EXPECT_NE(WTF::kNotFound,
+            mhtml.Find("Content-Location: http://www.test.com/1x.png"));
 
   // Width and height attributes should be set when none is present in <img>.
   EXPECT_NE(WTF::kNotFound,
@@ -248,8 +256,17 @@ TEST_F(WebFrameSerializerSanitizationTest, ImageLoadedFromSrcForNormalDPI) {
   String mhtml =
       GenerateMHTMLFromHtml("http://www.test.com", "img_srcset.html");
 
-  // srcset attribute should be skipped.
+  // srcset and sizes attributes should be skipped.
   EXPECT_EQ(WTF::kNotFound, mhtml.Find("srcset="));
+  EXPECT_EQ(WTF::kNotFound, mhtml.Find("sizes="));
+
+  // src attribute with original URL should be preserved.
+  EXPECT_EQ(2,
+            MatchSubstring(mhtml, "src=3D\"http://www.test.com/1x.png\"", 34));
+
+  // The image resource for original URL should be attached.
+  EXPECT_NE(WTF::kNotFound,
+            mhtml.Find("Content-Location: http://www.test.com/1x.png"));
 
   // New width and height attributes should not be set.
   EXPECT_NE(WTF::kNotFound, mhtml.Find("id=3D\"i1\">"));

@@ -12,6 +12,7 @@
 #include "components/prefs/pref_member.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/base/signin_buildflags.h"
+#include "google_apis/gaia/core_account_id.h"
 #include "url/gurl.h"
 
 namespace content_settings {
@@ -42,7 +43,7 @@ extern const char kDiceResponseHeader[];
 // perform.
 // A Java counterpart will be generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin
-enum GAIAServiceType {
+enum GAIAServiceType : int {
   GAIA_SERVICE_TYPE_NONE = 0,    // No Gaia response header.
   GAIA_SERVICE_TYPE_SIGNOUT,     // Logout all existing sessions.
   GAIA_SERVICE_TYPE_INCOGNITO,   // Open an incognito tab.
@@ -204,7 +205,7 @@ class SigninHeaderHelper {
 // added to the request to |url|.
 std::string BuildMirrorRequestCookieIfPossible(
     const GURL& url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask);
@@ -215,7 +216,7 @@ std::string BuildMirrorRequestCookieIfPossible(
 void AppendOrRemoveMirrorRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask);
@@ -227,7 +228,7 @@ void AppendOrRemoveMirrorRequestHeader(
 bool AppendOrRemoveDiceRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     bool sync_enabled,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,

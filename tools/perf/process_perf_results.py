@@ -3,6 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import argparse
 import collections
 import json
@@ -53,6 +55,21 @@ DATA_FORMAT_UNKNOWN = 'unknown'
 # problems. So, only perform the conversion on tests that are whitelisted and
 # are okay with potentially encountering issues.
 GTEST_CONVERSION_WHITELIST = [
+  'angle_perftests',
+  'cc_perftests',
+  'components_perftests',
+  'gpu_perftests',
+  'latency_perftests',
+  'load_library_perf_tests',
+  'media_perftests',
+  'net_perftests',
+  'passthrough_command_buffer_perftests',
+  'performance_browser_tests',
+  'services_perftests',
+  'tracing_perftests',
+  'validating_command_buffer_perftests',
+  'views_perftests',
+  'viz_perftests',
   'xr.vr.common_perftests',
 ]
 
@@ -80,7 +97,7 @@ def _GetMachineGroup(build_properties):
 
 
 def _upload_perf_results(json_to_upload, name, configuration_name,
-    build_properties, service_account_file, output_json_file):
+    build_properties, output_json_file):
   """Upload the contents of result JSON(s) to the perf dashboard."""
   args= [
       '--buildername', build_properties['buildername'],
@@ -95,16 +112,11 @@ def _upload_perf_results(json_to_upload, name, configuration_name,
       '--output-json-file', output_json_file,
       '--perf-dashboard-machine-group', _GetMachineGroup(build_properties)
   ]
-  is_luci = False
   buildbucket = build_properties.get('buildbucket', {})
   if isinstance(buildbucket, basestring):
     buildbucket = json.loads(buildbucket)
-  if ('build' in buildbucket and
-      buildbucket['build'].get('bucket') == 'luci.chrome.ci'):
-    is_luci = True
 
-  if is_luci and _is_gtest(json_to_upload) and (
-      name in GTEST_CONVERSION_WHITELIST):
+  if _is_gtest(json_to_upload) and name in GTEST_CONVERSION_WHITELIST:
     path_util.AddTracingToPath()
     from tracing.value import (  # pylint: disable=no-name-in-module
         gtest_json_converter)
@@ -116,9 +128,6 @@ def _upload_perf_results(json_to_upload, name, configuration_name,
       '--project', buildbucket['build'].get('project'),
       '--buildbucket', buildbucket['build'].get('bucket'),
     ]
-
-  if service_account_file and not is_luci:
-    args += ['--service-account-file', service_account_file]
 
   if build_properties.get('git_revision'):
     args.append('--git-revision')
@@ -194,7 +203,7 @@ def _handle_perf_json_test_results(
             # Output is null meaning the test didn't produce any results.
             # Want to output an error and continue loading the rest of the
             # test results.
-            print 'No results produced for %s, skipping upload' % directory
+            print('No results produced for %s, skipping upload' % directory)
             continue
           if json_results.get('version') == 3:
             # Non-telemetry tests don't have written json results but
@@ -215,7 +224,8 @@ def _handle_perf_json_test_results(
       if not enabled:
         # We don't upload disabled benchmarks or tests that are run
         # as a smoke test
-        print 'Benchmark %s ran no tests on at least one shard' % benchmark_name
+        print(
+            'Benchmark %s ran no tests on at least one shard' % benchmark_name)
         continue
       benchmark_enabled_map[benchmark_name] = True
 
@@ -272,7 +282,6 @@ def _get_benchmark_name(directory):
 
 
 def process_perf_results(output_json, configuration_name,
-                         service_account_file,
                          build_properties, task_output_dir,
                          smoke_test_mode, output_results_dir):
   """Process perf results.
@@ -348,8 +357,7 @@ def process_perf_results(output_json, configuration_name,
     try:
       return_code, benchmark_upload_result_map = _handle_perf_results(
           benchmark_enabled_map, benchmark_directory_map,
-          configuration_name, build_properties, service_account_file,
-          extra_links, output_results_dir)
+          configuration_name, build_properties, extra_links, output_results_dir)
     except Exception:
       logging.exception('Error handling perf results jsons')
       return_code = 1
@@ -412,8 +420,8 @@ def _merge_perf_results(benchmark_name, results_filename, directories):
 
 
 def _upload_individual(
-    benchmark_name, directories, configuration_name,
-    build_properties, output_json_file, service_account_file):
+    benchmark_name, directories, configuration_name, build_properties,
+    output_json_file):
   tmpfile_dir = tempfile.mkdtemp()
   try:
     upload_begin_time = time.time()
@@ -433,13 +441,12 @@ def _upload_individual(
       results_filename = os.path.join(directories[0], 'perf_results.json')
 
     results_size_in_mib = os.path.getsize(results_filename) / (2 ** 20)
-    print 'Uploading perf results from %s benchmark (size %s Mib)' % (
-        benchmark_name, results_size_in_mib)
+    print('Uploading perf results from %s benchmark (size %s Mib)' %
+          (benchmark_name, results_size_in_mib))
     with open(output_json_file, 'w') as oj:
       upload_return_code = _upload_perf_results(
         results_filename,
-        benchmark_name, configuration_name, build_properties,
-        service_account_file, oj)
+        benchmark_name, configuration_name, build_properties, oj)
       upload_end_time = time.time()
       print_duration(('%s upload time' % (benchmark_name)),
                      upload_begin_time, upload_end_time)
@@ -474,8 +481,7 @@ def _GetCpuCount(log=True):
 
 def _handle_perf_results(
     benchmark_enabled_map, benchmark_directory_map, configuration_name,
-    build_properties, service_account_file, extra_links,
-    output_results_dir):
+    build_properties, extra_links, output_results_dir):
   """
     Upload perf results to the perf dashboard.
 
@@ -504,7 +510,7 @@ def _handle_perf_results(
     results_dict[benchmark_name] = output_json_file
     invocations.append((
         benchmark_name, directories, configuration_name,
-        build_properties, output_json_file, service_account_file))
+        build_properties, output_json_file))
 
   # Kick off the uploads in multiple processes
   pool = multiprocessing.Pool(_GetCpuCount())
@@ -569,14 +575,14 @@ def _write_perf_data_to_logfile(benchmark_name, output_file,
         json.dump(results, output_json_file,
                 indent=4, separators=(',', ': '))
       except ValueError:
-        print ('Error parsing perf results JSON for benchmark  %s' %
-               benchmark_name)
+        print('Error parsing perf results JSON for benchmark  %s' %
+              benchmark_name)
 
     output_json_file.close()
     viewer_url = output_json_file.get_viewer_url()
   else:
-    print ("Perf results JSON file doesn't exist for benchmark %s" %
-           benchmark_name)
+    print("Perf results JSON file doesn't exist for benchmark %s" %
+          benchmark_name)
 
   base_benchmark_name = benchmark_name.replace('.reference', '')
 
@@ -602,19 +608,18 @@ def _write_perf_data_to_logfile(benchmark_name, output_file,
 
 
 def print_duration(step, start, end):
-  print 'Duration of %s: %d seconds' % (step, end-start)
+  print('Duration of %s: %d seconds' % (step, end - start))
+
 
 def main():
   """ See collect_task.collect_task for more on the merge script API. """
-  print sys.argv
+  print(sys.argv)
   parser = argparse.ArgumentParser()
   # configuration-name (previously perf-id) is the name of bot the tests run on
   # For example, buildbot-test is the name of the android-go-perf bot
   # configuration-name and results-url are set in the json file which is going
   # away tools/perf/core/chromium.perf.fyi.extras.json
   parser.add_argument('--configuration-name', help=argparse.SUPPRESS)
-  parser.add_argument('--service-account-file', help=argparse.SUPPRESS,
-                      default=None)
 
   parser.add_argument('--build-properties', help=argparse.SUPPRESS)
   parser.add_argument('--summary-json', help=argparse.SUPPRESS)
@@ -632,7 +637,6 @@ def main():
   try:
     return_code, _ = process_perf_results(
         args.output_json, args.configuration_name,
-        args.service_account_file,
         args.build_properties, args.task_output_dir,
         args.smoke_test_mode, output_results_dir)
     return return_code

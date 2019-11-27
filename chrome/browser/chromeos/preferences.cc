@@ -10,16 +10,18 @@
 #include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/ash_prefs.h"
-#include "ash/public/interfaces/constants.mojom.h"
-#include "ash/public/interfaces/cros_display_config.mojom.h"
+#include "ash/public/mojom/constants.mojom.h"
+#include "ash/public/mojom/cros_display_config.mojom.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
@@ -58,7 +60,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/system_connector.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "third_party/blink/public/platform/web_speech_synthesis_constants.h"
+#include "third_party/blink/public/mojom/speech/speech_synthesis.mojom.h"
 #include "third_party/cros_system_api/dbus/update_engine/dbus-constants.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -114,25 +116,6 @@ void TryMigrateToResolveTimezoneByGeolocationMethod(PrefService* prefs) {
                     static_cast<int>(method));
 }
 
-// Whitelist synable preferences that may be registered after sync system init.
-void WhitelistLateRegistrationPrefsForSync(
-    user_prefs::PrefRegistrySyncable* registry) {
-  // These foreign syncable preferences are registered asynchronously by Ash,
-  // perhaps after sync system initialization. Whitelist these prefs so that any
-  // values obtained via sync before the prefs are registered will be stored.
-  const char* const kAshForeignSyncablePrefs[] = {
-      ash::prefs::kEnableAutoScreenLock,
-      ash::prefs::kEnableStylusTools,
-      ash::prefs::kLaunchPaletteOnEjectEvent,
-      ash::prefs::kMessageCenterLockScreenMode,
-      ash::prefs::kShelfAlignment,
-      ash::prefs::kShelfAutoHideBehavior,
-      ash::prefs::kTapDraggingEnabled,
-  };
-  for (const auto* pref : kAshForeignSyncablePrefs)
-    registry->WhitelistLateRegistrationPrefForSync(pref);
-}
-
 }  // namespace
 
 Preferences::Preferences()
@@ -146,8 +129,8 @@ Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
   // |connector| may be null in tests.
   service_manager::Connector* connector = content::GetSystemConnector();
   if (connector) {
-    connector->BindInterface(ash::mojom::kServiceName,
-                             &cros_display_config_ptr_);
+    connector->Connect(ash::mojom::kServiceName,
+                       cros_display_config_.BindNewPipeAndPassReceiver());
   }
 }
 
@@ -183,8 +166,6 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
 // static
 void Preferences::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  WhitelistLateRegistrationPrefsForSync(registry);
-
   std::string hardware_keyboard_id;
   // TODO(yusukes): Remove the runtime hack.
   if (IsRunningAsSystemCompositor()) {
@@ -209,175 +190,51 @@ void Preferences::RegisterProfilePrefs(
       prefs::kAccountManagerNumTimesWelcomeScreenShown, 0 /* default_value */);
 
   registry->RegisterBooleanPref(
-      prefs::kTapToClickEnabled,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      prefs::kTapToClickEnabled, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterBooleanPref(prefs::kEnableTouchpadThreeFingerClick, false);
   // This preference can only be set to true by policy or command_line flag
   // and it should not carry over to sessions were neither of these is set.
   registry->RegisterBooleanPref(prefs::kUnifiedDesktopEnabledByDefault, false,
                                 PrefRegistry::NO_REGISTRATION_FLAGS);
   registry->RegisterBooleanPref(
-      prefs::kNaturalScroll, base::CommandLine::ForCurrentProcess()->HasSwitch(
-                                 switches::kNaturalScrollDefault),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      prefs::kNaturalScroll,
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNaturalScrollDefault),
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterBooleanPref(
-      prefs::kPrimaryMouseButtonRight,
-      false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      prefs::kPrimaryMouseButtonRight, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterBooleanPref(
       prefs::kMouseReverseScroll, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kMouseAcceleration, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kTouchpadAcceleration, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterBooleanPref(prefs::kLabsMediaplayerEnabled, false);
   registry->RegisterBooleanPref(prefs::kLabsAdvancedFilesystemEnabled, false);
   registry->RegisterBooleanPref(prefs::kAppReinstallRecommendationEnabled,
                                 false);
 
-  // TODO(jamescook): Move ownership and registration into ash. This will need
-  // changes to policy::RecommendationRestorer which requires that prefs are
-  // available immediately during startup.
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityStickyKeysEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityLargeCursorEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(ash::prefs::kAccessibilityLargeCursorDipSize,
-                                ash::kDefaultLargeCursorSize,
-                                PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(ash::prefs::kAccessibilitySpokenFeedbackEnabled,
-                                false, PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityHighContrastEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kHighContrastAcceleratorDialogHasBeenAccepted, false,
-      PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(ash::prefs::kDockedMagnifierEnabled, false,
-                                PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kDockedMagnifierAcceleratorDialogHasBeenAccepted, false,
-      PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityScreenMagnifierCenterFocus, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      ash::prefs::kScreenMagnifierAcceleratorDialogHasBeenAccepted, false,
-      PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kDictationAcceleratorDialogHasBeenAccepted, false,
-      PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kDisplayRotationAcceleratorDialogHasBeenAccepted, false,
-      PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityScreenMagnifierEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityDictationEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterDoublePref(ash::prefs::kAccessibilityScreenMagnifierScale,
-                               std::numeric_limits<double>::min(),
-                               PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityAutoclickEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilityAutoclickDelayMs, ash::kDefaultAutoclickDelayMs,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      prefs::kMouseSensitivity, 3,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilityAutoclickEventType,
-      static_cast<int>(ash::kDefaultAutoclickEventType),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      prefs::kTouchpadSensitivity, 3,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityAutoclickRevertToLeftClick, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityAutoclickStabilizePosition, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilityAutoclickMovementThreshold,
-      ash::kDefaultAutoclickMovementThreshold,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilityAutoclickMenuPosition,
-      static_cast<int>(ash::kDefaultAutoclickMenuPosition),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityVirtualKeyboardEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityMonoAudioEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityCaretHighlightEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityCursorHighlightEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilityFocusHighlightEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilitySelectToSpeakEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilitySwitchAccessEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterListPref(
-      ash::prefs::kAccessibilitySwitchAccessSelectKeyCodes,
-      base::Value(std::vector<base::Value>()),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilitySwitchAccessSelectSetting,
-      ash::kSwitchAccessAssignmentNone,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterListPref(
-      ash::prefs::kAccessibilitySwitchAccessNextKeyCodes,
-      base::Value(std::vector<base::Value>()),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilitySwitchAccessNextSetting,
-      ash::kSwitchAccessAssignmentNone,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterListPref(
-      ash::prefs::kAccessibilitySwitchAccessPreviousKeyCodes,
-      base::Value(std::vector<base::Value>()),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilitySwitchAccessPreviousSetting,
-      ash::kSwitchAccessAssignmentNone,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kAccessibilitySwitchAccessAutoScanEnabled, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterIntegerPref(
-      ash::prefs::kAccessibilitySwitchAccessAutoScanSpeedMs,
-      ash::kDefaultSwitchAccessAutoScanSpeed.InMilliseconds(),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kShouldAlwaysShowAccessibilityMenu, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-
-  registry->RegisterIntegerPref(
-      prefs::kMouseSensitivity,
-      3,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kTouchpadSensitivity,
-      3,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kUse24HourClock,
-      base::GetHourClockType() == base::k24HourClock,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      prefs::kUse24HourClock, base::GetHourClockType() == base::k24HourClock,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterBooleanPref(prefs::kCameraMediaConsolidated, false);
   registry->RegisterBooleanPref(
       drive::prefs::kDisableDrive, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterBooleanPref(
       drive::prefs::kDisableDriveOverCellular, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterBooleanPref(drive::prefs::kDriveFsWasLaunchedAtLeastOnce,
                                 false);
   registry->RegisterStringPref(drive::prefs::kDriveFsProfileSalt, "");
@@ -396,20 +253,19 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapSearchKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kSearchKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF |
-          PrefRegistry::PUBLIC);  // Used in ash.
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapControlKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kControlKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapAltKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kAltKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapAssistantKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kAssistantKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   // We don't sync the CapsLock remapping pref, since the UI hides this pref
   // on certain devices, so syncing a non-default value to a device that
   // doesn't allow changing the pref would be odd. http://crbug.com/167237
@@ -419,23 +275,23 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapEscapeKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kEscapeKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapBackspaceKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kBackspaceKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   // The Command key on external Apple keyboards is remapped by default to Ctrl
   // until the user changes it from the keyboard settings.
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapExternalCommandKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kControlKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   // The Meta key (Search or Windows keys) on external keyboards is remapped by
   // default to Search until the user changes it from the keyboard settings.
   registry->RegisterIntegerPref(
       prefs::kLanguageRemapExternalMetaKeyTo,
       static_cast<int>(ui::chromeos::ModifierKey::kSearchKey),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   // The following pref isn't synced since the user may desire a different value
   // depending on whether an external keyboard is attached to a particular
   // device.
@@ -443,15 +299,15 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       prefs::kLanguageXkbAutoRepeatEnabled,
       language_prefs::kXkbAutoRepeatEnabled,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageXkbAutoRepeatDelay,
       language_prefs::kXkbAutoRepeatDelayInMs,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterIntegerPref(
       prefs::kLanguageXkbAutoRepeatInterval,
       language_prefs::kXkbAutoRepeatIntervalInMs,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   // Don't sync the note-taking app; it may not be installed on other devices.
   registry->RegisterStringPref(prefs::kNoteTakingAppId, std::string());
@@ -460,14 +316,6 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kRestoreLastLockScreenNote, true);
   registry->RegisterDictionaryPref(prefs::kNoteTakingAppsLockScreenToastShown);
 
-  // TODO(warx): Move prefs::kAllowScreenLock and prefs::kEnableAutoScreenLock
-  // registration to ash, which requires refactoring in SessionControllerClient.
-  registry->RegisterBooleanPref(ash::prefs::kAllowScreenLock, true,
-                                PrefRegistry::PUBLIC);
-  registry->RegisterBooleanPref(
-      ash::prefs::kEnableAutoScreenLock, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-
   // We don't sync wake-on-wifi related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kWakeOnWifiDarkConnect, true);
 
@@ -475,15 +323,14 @@ void Preferences::RegisterProfilePrefs(
 
   // Number of times Data Saver prompt has been shown on 3G data network.
   registry->RegisterIntegerPref(
-      prefs::kDataSaverPromptsShown,
-      0,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      prefs::kDataSaverPromptsShown, 0,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   // Initially all existing users would see "What's new" for current version
   // after update.
-  registry->RegisterStringPref(prefs::kChromeOSReleaseNotesVersion,
-                               "0.0.0.0",
-                               user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterStringPref(
+      prefs::kChromeOSReleaseNotesVersion, "0.0.0.0",
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   registry->RegisterBooleanPref(prefs::kExternalStorageDisabled, false);
 
@@ -507,17 +354,17 @@ void Preferences::RegisterProfilePrefs(
 
   registry->RegisterBooleanPref(
       prefs::kResolveTimezoneByGeolocation, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   registry->RegisterBooleanPref(
       prefs::kResolveTimezoneByGeolocationMigratedToMethod, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   registry->RegisterIntegerPref(
       prefs::kResolveTimezoneByGeolocationMethod,
       static_cast<int>(
           system::TimeZoneResolverManager::TimeZoneResolveMethod::IP_ONLY),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   registry->RegisterBooleanPref(prefs::kCaptivePortalAuthenticationIgnoresProxy,
                                 true);
@@ -541,8 +388,9 @@ void Preferences::RegisterProfilePrefs(
 
   // We don't sync EOL related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kEolNotificationDismissed, false);
-  registry->RegisterIntegerPref(prefs::kEolStatus,
-                                update_engine::EndOfLifeStatus::kSupported);
+  registry->RegisterTimePref(prefs::kEndOfLifeDate, base::Time());
+  registry->RegisterBooleanPref(prefs::kFirstEolWarningDismissed, false);
+  registry->RegisterBooleanPref(prefs::kSecondEolWarningDismissed, false);
 
   registry->RegisterBooleanPref(prefs::kCastReceiverEnabled, false);
   registry->RegisterBooleanPref(prefs::kShowArcSettingsOnSessionStart, false);
@@ -551,19 +399,16 @@ void Preferences::RegisterProfilePrefs(
   // Text-to-speech prefs.
   registry->RegisterDictionaryPref(
       prefs::kTextToSpeechLangToVoiceName,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterDoublePref(
-      prefs::kTextToSpeechRate,
-      blink::kWebSpeechSynthesisDefaultTextToSpeechRate,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      prefs::kTextToSpeechRate, blink::mojom::kSpeechSynthesisDefaultRate,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterDoublePref(
-      prefs::kTextToSpeechPitch,
-      blink::kWebSpeechSynthesisDefaultTextToSpeechPitch,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      prefs::kTextToSpeechPitch, blink::mojom::kSpeechSynthesisDefaultPitch,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterDoublePref(
-      prefs::kTextToSpeechVolume,
-      blink::kWebSpeechSynthesisDefaultTextToSpeechVolume,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      prefs::kTextToSpeechVolume, blink::mojom::kSpeechSynthesisDefaultVolume,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   // By default showing Sync Consent is set to true. It can changed by policy.
   registry->RegisterBooleanPref(prefs::kEnableSyncConsent, true);
@@ -573,6 +418,9 @@ void Preferences::RegisterProfilePrefs(
 
   registry->RegisterBooleanPref(prefs::kStartupBrowserWindowLaunchSuppressed,
                                 false);
+
+  registry->RegisterBooleanPref(prefs::kSettingsShowBrowserBanner, true);
+  registry->RegisterBooleanPref(prefs::kSettingsShowOSBanner, true);
 }
 
 void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
@@ -594,6 +442,8 @@ void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
   primary_mouse_button_right_.Init(prefs::kPrimaryMouseButtonRight,
                                    prefs, callback);
   mouse_reverse_scroll_.Init(prefs::kMouseReverseScroll, prefs, callback);
+  mouse_acceleration_.Init(prefs::kMouseAcceleration, prefs, callback);
+  touchpad_acceleration_.Init(prefs::kTouchpadAcceleration, prefs, callback);
   download_default_directory_.Init(prefs::kDownloadDefaultDirectory,
                                    prefs, callback);
   preload_engines_.Init(prefs::kLanguagePreloadEngines, prefs, callback);
@@ -758,8 +608,8 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       pref_name == prefs::kUnifiedDesktopEnabledByDefault) {
     // "Unified Desktop" is a per-user policy setting which will not be applied
     // until a user logs in.
-    if (cros_display_config_ptr_) {  // May be null in tests.
-      cros_display_config_ptr_->SetUnifiedDesktopEnabled(
+    if (cros_display_config_) {  // May be null in tests.
+      cros_display_config_->SetUnifiedDesktopEnabled(
           unified_desktop_enabled_by_default_.GetValue());
     }
   }
@@ -831,6 +681,25 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       UMA_HISTOGRAM_BOOLEAN("Mouse.ReverseScroll.Changed", enabled);
     else if (reason == REASON_INITIALIZATION)
       UMA_HISTOGRAM_BOOLEAN("Mouse.ReverseScroll.Started", enabled);
+  }
+  if (reason != REASON_PREF_CHANGED || pref_name == prefs::kMouseAcceleration) {
+    const bool enabled = mouse_acceleration_.GetValue();
+    if (user_is_active)
+      mouse_settings.SetAcceleration(enabled);
+    if (reason == REASON_PREF_CHANGED)
+      base::UmaHistogramBoolean("Mouse.Acceleration.Changed", enabled);
+    else if (reason == REASON_INITIALIZATION)
+      base::UmaHistogramBoolean("Mouse.Acceleration.Started", enabled);
+  }
+  if (reason != REASON_PREF_CHANGED ||
+      pref_name == prefs::kTouchpadAcceleration) {
+    const bool enabled = touchpad_acceleration_.GetValue();
+    if (user_is_active)
+      touchpad_settings.SetAcceleration(enabled);
+    if (reason == REASON_PREF_CHANGED)
+      base::UmaHistogramBoolean("Touchpad.Acceleration.Changed", enabled);
+    else if (reason == REASON_INITIALIZATION)
+      base::UmaHistogramBoolean("Touchpad.Acceleration.Started", enabled);
   }
   if (reason != REASON_PREF_CHANGED ||
       pref_name == prefs::kDownloadDefaultDirectory) {
@@ -1096,7 +965,7 @@ void Preferences::UpdateAutoRepeatRate() {
       rate.repeat_interval_in_ms);
 }
 
-void Preferences::ActiveUserChanged(const user_manager::User* active_user) {
+void Preferences::ActiveUserChanged(user_manager::User* active_user) {
   if (active_user != user_)
     return;
   ApplyPreferences(REASON_ACTIVE_USER_CHANGED, "");

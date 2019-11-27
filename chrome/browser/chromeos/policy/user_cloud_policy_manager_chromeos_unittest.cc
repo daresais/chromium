@@ -55,15 +55,11 @@
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/user_manager/scoped_user_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/http/http_response_headers.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_status.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -268,13 +264,12 @@ class UserCloudPolicyManagerChromeOSTest
       GaiaUrls* gaia_urls = GaiaUrls::GetInstance();
 
       network::URLLoaderCompletionStatus ok_completion_status(net::OK);
-      network::ResourceResponseHead ok_response =
-          network::CreateResourceResponseHead(net::HTTP_OK);
+      auto ok_response = network::CreateURLResponseHead(net::HTTP_OK);
       // Issue the access token.
       EXPECT_TRUE(
           test_system_url_loader_factory_.SimulateResponseForPendingRequest(
-              gaia_urls->oauth2_token_url(), ok_completion_status, ok_response,
-              kOAuth2AccessTokenData));
+              gaia_urls->oauth2_token_url(), ok_completion_status,
+              std::move(ok_response), kOAuth2AccessTokenData));
     } else {
       // Since the refresh token is available, IdentityManager was used
       // to request the access token and not UserCloudPolicyTokenForwarder.
@@ -348,7 +343,7 @@ class UserCloudPolicyManagerChromeOSTest
 
   // Required by the refresh scheduler that's created by the manager and
   // for the cleanup of URLRequestContextGetter in the |signin_profile_|.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   // Convenience policy objects.
   em::PolicyData policy_data_;
@@ -358,7 +353,6 @@ class UserCloudPolicyManagerChromeOSTest
   PolicyBundle expected_bundle_;
 
   // Policy infrastructure.
-  net::TestURLFetcherFactory test_url_fetcher_factory_;
   TestingPrefServiceSimple prefs_;
   MockConfigurationPolicyObserver observer_;
   MockDeviceManagementService device_management_service_;
@@ -415,7 +409,7 @@ class UserCloudPolicyManagerChromeOSTest
     // token using the IdentityManager and forwards it to the
     // UserCloudPolicyManagerChromeOS. This service is automatically created
     // for regular Profiles but not for testing Profiles.
-    identity::IdentityManager* identity_manager =
+    signin::IdentityManager* identity_manager =
         IdentityManagerFactory::GetForProfile(profile_);
     ASSERT_TRUE(identity_manager);
     token_forwarder_ = std::make_unique<UserCloudPolicyTokenForwarder>(
@@ -433,7 +427,7 @@ class UserCloudPolicyManagerChromeOSTest
     return &test_system_url_loader_factory_;
   }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return identity_test_env_profile_adaptor_->identity_test_env();
   }
 
@@ -570,7 +564,7 @@ TEST_P(UserCloudPolicyManagerChromeOSTest, BlockingFetchOAuthError) {
       test_system_url_loader_factory()->SimulateResponseForPendingRequest(
           GaiaUrls::GetInstance()->oauth2_token_url(),
           network::URLLoaderCompletionStatus(net::OK),
-          network::CreateResourceResponseHead(net::HTTP_BAD_REQUEST),
+          network::CreateURLResponseHead(net::HTTP_BAD_REQUEST),
           "Error=BadAuthentication"));
 
   // Server check failed, so profile should not be initialized.
@@ -760,10 +754,6 @@ TEST_P(UserCloudPolicyManagerChromeOSTest, NonBlockingFirstFetch) {
   EXPECT_TRUE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
   EXPECT_FALSE(manager_->core()->client()->is_registered());
 
-  // The manager is waiting for the refresh token, and hasn't started any
-  // fetchers.
-  EXPECT_FALSE(test_url_fetcher_factory_.GetFetcherByID(0));
-
   AccountInfo account_info =
       identity_test_env()->MakePrimaryAccountAvailable(kEmail);
   EXPECT_TRUE(
@@ -919,12 +909,11 @@ TEST_P(UserCloudPolicyManagerChromeOSTest, Reregistration) {
   // Simulate OAuth token fetch.
   GaiaUrls* gaia_urls = GaiaUrls::GetInstance();
   network::URLLoaderCompletionStatus ok_completion_status(net::OK);
-  network::ResourceResponseHead ok_response =
-      network::CreateResourceResponseHead(net::HTTP_OK);
+  auto ok_response = network::CreateURLResponseHead(net::HTTP_OK);
   EXPECT_TRUE(
       test_system_url_loader_factory()->SimulateResponseForPendingRequest(
-          gaia_urls->oauth2_token_url(), ok_completion_status, ok_response,
-          kOAuth2AccessTokenData));
+          gaia_urls->oauth2_token_url(), ok_completion_status,
+          std::move(ok_response), kOAuth2AccessTokenData));
 
   // Validate that re-registration sends the correct parameters.
   EXPECT_TRUE(register_request.register_request().reregister());
@@ -1009,12 +998,11 @@ TEST_P(UserCloudPolicyManagerChromeOSTest, ReregistrationFails) {
   // Simulate OAuth token fetch.
   GaiaUrls* gaia_urls = GaiaUrls::GetInstance();
   network::URLLoaderCompletionStatus ok_completion_status(net::OK);
-  network::ResourceResponseHead ok_response =
-      network::CreateResourceResponseHead(net::HTTP_OK);
+  auto ok_response = network::CreateURLResponseHead(net::HTTP_OK);
   EXPECT_TRUE(
       test_system_url_loader_factory()->SimulateResponseForPendingRequest(
-          gaia_urls->oauth2_token_url(), ok_completion_status, ok_response,
-          kOAuth2AccessTokenData));
+          gaia_urls->oauth2_token_url(), ok_completion_status,
+          std::move(ok_response), kOAuth2AccessTokenData));
 
   // Validate re-registration state.
   ASSERT_TRUE(reregister_job);
@@ -1040,8 +1028,8 @@ TEST_P(UserCloudPolicyManagerChromeOSTest, ReregistrationFails) {
 class UserCloudPolicyManagerChromeOSChildTest
     : public UserCloudPolicyManagerChromeOSTest {
  public:
-  // Issues OAuthToken for device management scopes using OAuth2TokenService.
-  void IssueOAuthTokenWithTokenService(base::TimeDelta token_lifetime) {
+  // Issues OAuthToken for device management scopes.
+  void IssueOAuth2AccessToken(base::TimeDelta token_lifetime) {
     identity::ScopeSet scopes;
     scopes.insert(GaiaConstants::kDeviceManagementServiceOAuth);
     scopes.insert(GaiaConstants::kOAuthWrapBridgeUserInfoScope);
@@ -1100,7 +1088,7 @@ TEST_P(UserCloudPolicyManagerChromeOSChildTest, RefreshSchedulerStart) {
   LoadStoreWithCachedData();
   EXPECT_FALSE(manager_->core()->refresh_scheduler());
 
-  IssueOAuthTokenWithTokenService(base::TimeDelta::FromSeconds(3600));
+  IssueOAuth2AccessToken(base::TimeDelta::FromSeconds(3600));
 
   EXPECT_TRUE(manager_->core()->refresh_scheduler());
 }
@@ -1113,7 +1101,7 @@ TEST_P(UserCloudPolicyManagerChromeOSChildTest, RefreshScheduler) {
 
   // This starts refresh scheduler.
   const base::TimeDelta token_lifetime = base::TimeDelta::FromMinutes(50);
-  IssueOAuthTokenWithTokenService(token_lifetime);
+  IssueOAuth2AccessToken(token_lifetime);
 
   // First refresh is scheduled with delay of 0s - let it execute.
   FetchPolicy(
@@ -1133,7 +1121,7 @@ TEST_P(UserCloudPolicyManagerChromeOSChildTest, RefreshScheduler) {
   for (int i = 0; i < iterations; ++i) {
     task_runner_->FastForwardBy(token_lifetime);
     refresh_delay -= token_lifetime;
-    IssueOAuthTokenWithTokenService(token_lifetime);
+    IssueOAuth2AccessToken(token_lifetime);
   }
 
   // Advance the clock by the remaining time to get scheduled policy refresh.

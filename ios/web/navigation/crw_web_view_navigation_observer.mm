@@ -52,9 +52,18 @@ using web::wk_navigation_util::IsPlaceholderUrl;
 // The NavigationManagerImpl associated with the web state.
 @property(nonatomic, readonly) NavigationManagerImpl* navigationManagerImpl;
 
+// Set to YES when [self close] is called.
+@property(nonatomic, assign) BOOL beingDestroyed;
+
 @end
 
 @implementation CRWWebViewNavigationObserver
+
+#pragma mark - Public
+
+- (void)close {
+  self.beingDestroyed = YES;
+}
 
 #pragma mark - Property
 
@@ -103,6 +112,7 @@ using web::wk_navigation_util::IsPlaceholderUrl;
                       ofObject:(id)object
                         change:(NSDictionary*)change
                        context:(void*)context {
+  DCHECK(!self.beingDestroyed);
   NSString* dispatcherSelectorName = self.WKWebViewObservers[keyPath];
   DCHECK(dispatcherSelectorName);
   if (dispatcherSelectorName) {
@@ -129,6 +139,10 @@ using web::wk_navigation_util::IsPlaceholderUrl;
 
 // Called when WKWebView loading state has been changed.
 - (void)webViewLoadingStateDidChange {
+  if (web::features::UseWKWebViewLoading()) {
+    self.webStateImpl->SetIsLoading(self.webView.loading);
+  }
+
   if (self.webView.loading)
     return;
 
@@ -144,19 +158,23 @@ using web::wk_navigation_util::IsPlaceholderUrl;
   // not fire 'pageshow', 'onload', 'popstate' or any of the
   // WKNavigationDelegate callbacks for back/forward navigation from an about:
   // scheme placeholder URL to another entry or if either of the redirect fails
-  // to load (e.g. in airplane mode). Loading state KVO is the only observable
-  // event in this scenario, so force a reload to trigger redirect from
-  // restore_session.html to the restored URL.
+  // to load (e.g. in airplane mode, <iOS13). Loading state KVO is the only
+  // observable event in this scenario, so force a reload to trigger redirect
+  // from restore_session.html to the restored URL.
   bool previousURLHasAboutScheme =
       self.documentURL.SchemeIs(url::kAboutScheme) ||
       IsPlaceholderUrl(self.documentURL) ||
       web::GetWebClient()->IsAppSpecificURL(self.documentURL);
-  bool is_back_forward_navigation =
+  bool needs_back_forward_navigation_reload =
       existingContext &&
       (existingContext->GetPageTransition() & ui::PAGE_TRANSITION_FORWARD_BACK);
+  // The back-forward workaround isn't need on iOS13.
+  if (@available(iOS 13, *)) {
+    needs_back_forward_navigation_reload = false;
+  }
   if (web::GetWebClient()->IsSlimNavigationManagerEnabled() &&
       IsRestoreSessionUrl(webViewURL)) {
-    if (previousURLHasAboutScheme || is_back_forward_navigation) {
+    if (previousURLHasAboutScheme || needs_back_forward_navigation_reload) {
       [self.webView reload];
       self.navigationHandler.navigationState =
           web::WKNavigationState::REQUESTED;
@@ -193,11 +211,9 @@ using web::wk_navigation_util::IsPlaceholderUrl;
               forSameDocumentNavigation:isSameDocumentNavigation];
     } else {
       // Same document navigation does not contain response headers.
-      net::HttpResponseHeaders* headers =
-          isSameDocumentNavigation
-              ? nullptr
-              : self.webStateImpl->GetHttpResponseHeaders();
-      existingContext->SetResponseHeaders(headers);
+      if (isSameDocumentNavigation) {
+        existingContext->SetResponseHeaders(nullptr);
+      }
       existingContext->SetIsSameDocument(isSameDocumentNavigation);
       existingContext->SetHasCommitted(!isSameDocumentNavigation);
       self.webStateImpl->OnNavigationStarted(existingContext);
@@ -263,8 +279,10 @@ using web::wk_navigation_util::IsPlaceholderUrl;
       if (!web::IsSafeBrowsingWarningDisplayedInWebView(self.webView))
         return;
 
+      if (!web::features::UseWKWebViewLoading()) {
+        self.webStateImpl->SetIsLoading(false);
+      }
       self.navigationManagerImpl->DiscardNonCommittedItems();
-      self.webStateImpl->SetIsLoading(false);
       self.navigationHandler.pendingNavigationInfo = nil;
       if (web::GetWebClient()->IsSlimNavigationManagerEnabled()) {
         // Right after a history navigation that gets cancelled by a tap on

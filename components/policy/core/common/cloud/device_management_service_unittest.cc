@@ -17,7 +17,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/core/common/cloud/mock_device_management_service.h"
@@ -242,7 +242,7 @@ class DeviceManagementServiceTestBase : public testing::Test {
 
   MOCK_METHOD0(OnJobRetry, void());
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   network::TestURLLoaderFactory url_loader_factory_;
   scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
       shared_url_loader_factory_;
@@ -1173,10 +1173,12 @@ TEST_F(DeviceManagementRequestAuthTest, OAuthAndGaiaToken) {
   SendResponse(net::OK, 200, std::string());
 }
 
+#if defined(GTEST_HAS_DEATH_TEST)
 TEST_F(DeviceManagementRequestAuthTest, CannotUseOAuthTokenAsAuthData) {
   // Job type is not really relevant for the test.
   ASSERT_DEATH(StartJobWithAuthData(DMAuth::FromOAuthToken(kOAuthToken), ""),
                "");
 }
+#endif  // GTEST_HAS_DEATH_TEST
 
 }  // namespace policy

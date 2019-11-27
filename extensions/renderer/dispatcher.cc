@@ -44,7 +44,6 @@
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
-#include "extensions/common/manifest_handlers/content_capabilities_handler.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/message_bundle.h"
 #include "extensions/common/permissions/permission_set.h"
@@ -203,6 +202,15 @@ base::LazyInstance<WorkerScriptContextSet>::DestructorAtExit
 
 }  // namespace
 
+Dispatcher::PendingServiceWorker::PendingServiceWorker(
+    blink::WebServiceWorkerContextProxy* context_proxy)
+    : task_runner(base::ThreadTaskRunnerHandle::Get()),
+      context_proxy(context_proxy) {
+  DCHECK(context_proxy);
+}
+
+Dispatcher::PendingServiceWorker::~PendingServiceWorker() = default;
+
 // Note that we can't use Blink public APIs in the constructor becase Blink
 // is not initialized at the point we create Dispatcher.
 Dispatcher::Dispatcher(std::unique_ptr<DispatcherDelegate> delegate)
@@ -284,7 +292,7 @@ bool Dispatcher::IsExtensionActive(const std::string& extension_id) const {
 void Dispatcher::DidCreateScriptContext(
     blink::WebLocalFrame* frame,
     const v8::Local<v8::Context>& v8_context,
-    int world_id) {
+    int32_t world_id) {
   const base::TimeTicks start_time = base::TimeTicks::Now();
 
   ScriptContext* context =
@@ -307,7 +315,6 @@ void Dispatcher::DidCreateScriptContext(
                          v8_schema_registry_.get());
 
   bindings_system_->DidCreateScriptContext(context);
-  UpdateBindingsForContext(context);
 
   // Inject custom JS into the platform app context.
   if (IsWithinPlatformApp()) {
@@ -323,6 +330,9 @@ void Dispatcher::DidCreateScriptContext(
                           elapsed);
       break;
     case Feature::BLESSED_EXTENSION_CONTEXT:
+      // For service workers this is handled in
+      // WillEvaluateServiceWorkerOnWorkerThread().
+      DCHECK(!context->IsForServiceWorker());
       UMA_HISTOGRAM_TIMES("Extensions.DidCreateScriptContext_Blessed", elapsed);
       break;
     case Feature::UNBLESSED_EXTENSION_CONTEXT:
@@ -343,10 +353,6 @@ void Dispatcher::DidCreateScriptContext(
     case Feature::WEBUI_CONTEXT:
       UMA_HISTOGRAM_TIMES("Extensions.DidCreateScriptContext_WebUI", elapsed);
       break;
-    case Feature::SERVICE_WORKER_CONTEXT:
-      // Handled in DidInitializeServiceWorkerContextOnWorkerThread().
-      NOTREACHED();
-      break;
     case Feature::LOCK_SCREEN_EXTENSION_CONTEXT:
       UMA_HISTOGRAM_TIMES(
           "Extensions.DidCreateScriptContext_LockScreenExtension", elapsed);
@@ -357,6 +363,31 @@ void Dispatcher::DidCreateScriptContext(
 }
 
 void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
+    blink::WebServiceWorkerContextProxy* context_proxy,
+    const GURL& service_worker_scope,
+    const GURL& script_url) {
+  if (!script_url.SchemeIs(kExtensionScheme))
+    return;
+
+  {
+    base::AutoLock lock(service_workers_paused_for_on_loaded_message_lock_);
+    ExtensionId extension_id =
+        RendererExtensionRegistry::Get()->GetExtensionOrAppIDByURL(script_url);
+    // If the extension is already loaded we don't have to suspend the service
+    // worker. The service worker will continue in
+    // Dispatcher::WillEvaluateServiceWorkerOnWorkerThread().
+    if (RendererExtensionRegistry::Get()->GetByID(extension_id))
+      return;
+
+    // Suspend the service worker until loaded message of the extension comes.
+    // The service worker will be resumed in Dispatcher::OnLoaded().
+    context_proxy->PauseEvaluation();
+    service_workers_paused_for_on_loaded_message_.emplace(
+        extension_id, std::make_unique<PendingServiceWorker>(context_proxy));
+  }
+}
+
+void Dispatcher::WillEvaluateServiceWorkerOnWorkerThread(
     blink::WebServiceWorkerContextProxy* context_proxy,
     v8::Local<v8::Context> v8_context,
     int64_t service_worker_version_id,
@@ -407,8 +438,8 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
   // by extensions minimal bindings, just as we might want to give them to
   // service workers that aren't registered by extensions.
   ScriptContext* context = new ScriptContext(
-      v8_context, nullptr, extension, Feature::SERVICE_WORKER_CONTEXT,
-      extension, Feature::SERVICE_WORKER_CONTEXT);
+      v8_context, nullptr, extension, Feature::BLESSED_EXTENSION_CONTEXT,
+      extension, Feature::BLESSED_EXTENSION_CONTEXT);
   context->set_url(script_url);
   context->set_service_worker_scope(service_worker_scope);
   context->set_service_worker_version_id(service_worker_version_id);
@@ -439,7 +470,6 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
                            WorkerThreadDispatcher::GetV8SchemaRegistry());
 
     worker_bindings_system->DidCreateScriptContext(context);
-    worker_bindings_system->UpdateBindingsForContext(context);
 
     // TODO(lazyboy): Get rid of RequireGuestViewModules() as this doesn't seem
     // necessary for Extension SW.
@@ -499,7 +529,7 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
 void Dispatcher::WillReleaseScriptContext(
     blink::WebLocalFrame* frame,
     const v8::Local<v8::Context>& v8_context,
-    int world_id) {
+    int32_t world_id) {
   ScriptContext* context = script_context_set_->GetByV8Context(v8_context);
   if (!context)
     return;
@@ -509,7 +539,6 @@ void Dispatcher::WillReleaseScriptContext(
   VLOG(1) << "Num tracked contexts: " << script_context_set_->size();
 }
 
-// static
 void Dispatcher::DidStartServiceWorkerContextOnWorkerThread(
     int64_t service_worker_version_id,
     const GURL& service_worker_scope,
@@ -524,15 +553,15 @@ void Dispatcher::DidStartServiceWorkerContextOnWorkerThread(
                                                  service_worker_version_id);
 }
 
-// static
 void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
     v8::Local<v8::Context> v8_context,
     int64_t service_worker_version_id,
     const GURL& service_worker_scope,
     const GURL& script_url) {
-  if (!ExtensionsRendererClient::Get()
-           ->ExtensionAPIEnabledForServiceWorkerScript(service_worker_scope,
-                                                       script_url)) {
+  // Note that using ExtensionAPIEnabledForServiceWorkerScript() won't work here
+  // as RendererExtensionRegistry might have already unloaded this extension.
+  // Use the existence of ServiceWorkerData as the source of truth instead.
+  if (!WorkerThreadDispatcher::GetServiceWorkerData()) {
     // If extension APIs in service workers aren't enabled, we just need to
     // remove the context.
     g_worker_script_context_set.Get().Remove(v8_context, script_url);
@@ -551,6 +580,13 @@ void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
     g_worker_script_context_set.Get().Remove(v8_context, script_url);
     WorkerThreadDispatcher::Get()->RemoveWorkerData(service_worker_version_id);
     worker_thread_util::SetWorkerContextProxy(nullptr);
+  }
+
+  std::string extension_id =
+      RendererExtensionRegistry::Get()->GetExtensionOrAppIDByURL(script_url);
+  {
+    base::AutoLock lock(service_workers_paused_for_on_loaded_message_lock_);
+    service_workers_paused_for_on_loaded_message_.erase(extension_id);
   }
 }
 
@@ -657,19 +693,13 @@ std::vector<Dispatcher::JsResourceInfo> Dispatcher::GetJsResources() {
   std::vector<JsResourceInfo> resources = {
       {"appView", IDR_APP_VIEW_JS},
       {"appViewElement", IDR_APP_VIEW_ELEMENT_JS},
+      {"appViewDeny", IDR_APP_VIEW_DENY_JS},
       {"entryIdManager", IDR_ENTRY_ID_MANAGER},
       {"extensionOptions", IDR_EXTENSION_OPTIONS_JS},
       {"extensionOptionsElement", IDR_EXTENSION_OPTIONS_ELEMENT_JS},
       {"extensionOptionsAttributes", IDR_EXTENSION_OPTIONS_ATTRIBUTES_JS},
       {"extensionOptionsConstants", IDR_EXTENSION_OPTIONS_CONSTANTS_JS},
       {"extensionOptionsEvents", IDR_EXTENSION_OPTIONS_EVENTS_JS},
-      {"extensionView", IDR_EXTENSION_VIEW_JS},
-      {"extensionViewElement", IDR_EXTENSION_VIEW_ELEMENT_JS},
-      {"extensionViewApiMethods", IDR_EXTENSION_VIEW_API_METHODS_JS},
-      {"extensionViewAttributes", IDR_EXTENSION_VIEW_ATTRIBUTES_JS},
-      {"extensionViewConstants", IDR_EXTENSION_VIEW_CONSTANTS_JS},
-      {"extensionViewEvents", IDR_EXTENSION_VIEW_EVENTS_JS},
-      {"extensionViewInternal", IDR_EXTENSION_VIEW_INTERNAL_CUSTOM_BINDINGS_JS},
       {"feedbackPrivate", IDR_FEEDBACK_PRIVATE_CUSTOM_BINDINGS_JS},
       {"fileEntryBindingUtil", IDR_FILE_ENTRY_BINDING_UTIL_JS},
       {"fileSystem", IDR_FILE_SYSTEM_CUSTOM_BINDINGS_JS},
@@ -694,6 +724,7 @@ std::vector<Dispatcher::JsResourceInfo> Dispatcher::GetJsResources() {
       {"webView", IDR_WEB_VIEW_JS},
       {"webViewElement", IDR_WEB_VIEW_ELEMENT_JS},
       {"extensionsWebViewElement", IDR_EXTENSIONS_WEB_VIEW_ELEMENT_JS},
+      {"webViewDeny", IDR_WEB_VIEW_DENY_JS},
       {"webViewActionRequests", IDR_WEB_VIEW_ACTION_REQUESTS_JS},
       {"webViewApiMethods", IDR_WEB_VIEW_API_METHODS_JS},
       {"webViewAttributes", IDR_WEB_VIEW_ATTRIBUTES_JS},
@@ -703,7 +734,7 @@ std::vector<Dispatcher::JsResourceInfo> Dispatcher::GetJsResources() {
 
       {"keep_alive", IDR_KEEP_ALIVE_JS},
       {"mojo_bindings", IDR_MOJO_MOJO_BINDINGS_JS},
-      {"extensions/common/mojo/keep_alive.mojom", IDR_KEEP_ALIVE_MOJOM_JS},
+      {"extensions/common/mojom/keep_alive.mojom", IDR_KEEP_ALIVE_MOJOM_JS},
 
       // Custom bindings.
       {"automation", IDR_AUTOMATION_CUSTOM_BINDINGS_JS},
@@ -927,6 +958,12 @@ void Dispatcher::OnDispatchOnDisconnect(int worker_thread_id,
       NULL);  // All render frames.
 }
 
+void ResumeEvaluationOnWorkerThread(
+    blink::WebServiceWorkerContextProxy* context_proxy) {
+  DCHECK(context_proxy);
+  context_proxy->ResumeEvaluation();
+}
+
 void Dispatcher::OnLoaded(
     const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions) {
   for (const auto& param : loaded_extensions) {
@@ -963,12 +1000,29 @@ void Dispatcher::OnLoaded(
     }
 
     ExtensionsRendererClient::Get()->OnExtensionLoaded(*extension);
+
+    // Resume service worker if it is suspended.
+    {
+      base::AutoLock lock(service_workers_paused_for_on_loaded_message_lock_);
+      auto it =
+          service_workers_paused_for_on_loaded_message_.find(extension->id());
+      if (it != service_workers_paused_for_on_loaded_message_.end()) {
+        scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+            std::move(it->second->task_runner);
+        blink::WebServiceWorkerContextProxy* context_proxy =
+            it->second->context_proxy;
+        service_workers_paused_for_on_loaded_message_.erase(it);
+        task_runner->PostTask(
+            FROM_HERE,
+            base::BindOnce(&ResumeEvaluationOnWorkerThread, context_proxy));
+      }
+    }
   }
 
   // Update the available bindings for all contexts. These may have changed if
   // an externally_connectable extension was loaded that can connect to an
   // open webpage.
-  UpdateBindings(std::string());
+  UpdateAllBindings();
 }
 
 void Dispatcher::OnMessageInvoke(const std::string& extension_id,
@@ -1111,7 +1165,7 @@ void Dispatcher::OnUnloaded(const std::string& id) {
   // Update the available bindings for the remaining contexts. These may have
   // changed if an externally_connectable extension is unloaded and a webpage
   // is no longer accessible.
-  UpdateBindings("");
+  UpdateAllBindings();
 
   // Invalidates the messages map for the extension in case the extension is
   // reloaded with a new messages map.
@@ -1141,7 +1195,7 @@ void Dispatcher::OnUpdateDefaultPolicyHostRestrictions(
       UpdateOriginPermissions(*extension);
     }
   }
-  UpdateBindings(std::string());
+  UpdateAllBindings();
 }
 
 void Dispatcher::OnUpdatePermissions(
@@ -1167,8 +1221,7 @@ void Dispatcher::OnUpdatePermissions(
                                                 std::move(withheld));
   UpdateOriginPermissions(*extension);
 
-  bindings_system_->OnExtensionPermissionsUpdated(params.extension_id);
-  UpdateBindings(extension->id());
+  UpdateBindingsForExtension(*extension);
 }
 
 void Dispatcher::OnUpdateTabSpecificPermissions(const GURL& visible_url,
@@ -1259,27 +1312,32 @@ void Dispatcher::EnableCustomElementWhiteList() {
   blink::WebCustomElement::AddEmbedderCustomElementName("extensionoptions");
   blink::WebCustomElement::AddEmbedderCustomElementName(
       "extensionoptionsbrowserplugin");
-  blink::WebCustomElement::AddEmbedderCustomElementName("extensionview");
-  blink::WebCustomElement::AddEmbedderCustomElementName(
-      "extensionviewbrowserplugin");
   blink::WebCustomElement::AddEmbedderCustomElementName("webview");
   blink::WebCustomElement::AddEmbedderCustomElementName("webviewbrowserplugin");
 }
 
-void Dispatcher::UpdateBindings(const std::string& extension_id) {
-  script_context_set_iterator()->ForEach(
-      extension_id, base::BindRepeating(&Dispatcher::UpdateBindingsForContext,
-                                        // Called synchronously.
-                                        base::Unretained(this)));
+void Dispatcher::UpdateAllBindings() {
+  bindings_system_->UpdateBindings(ExtensionId() /* all contexts */,
+                                   false /* permissions_changed */,
+                                   script_context_set_iterator());
+  // TODO(crbug.com/986416): Can "externally_connectable" affect Service Worker
+  // ScriptContext-s in some way? We'd need to process that here if that is the
+  // case.
 }
 
-void Dispatcher::UpdateBindingsForContext(ScriptContext* context) {
-  bindings_system_->UpdateBindingsForContext(context);
-  Feature::Context context_type = context->context_type();
-  if (context_type == Feature::WEB_PAGE_CONTEXT ||
-      context_type == Feature::BLESSED_WEB_PAGE_CONTEXT) {
-    UpdateContentCapabilities(context);
-  }
+void Dispatcher::UpdateBindingsForExtension(const Extension& extension) {
+  bindings_system_->UpdateBindings(extension.id(),
+                                   true /* permissions_changed */,
+                                   script_context_set_iterator());
+
+  // Update Service Worker bindings too, if applicable.
+  if (!BackgroundInfo::IsServiceWorkerBased(&extension))
+    return;
+
+  const bool updated =
+      WorkerThreadDispatcher::Get()->UpdateBindingsForWorkers(extension.id());
+  // TODO(lazyboy): When can this fail?
+  DCHECK(updated) << "Some or all workers failed to update bindings.";
 }
 
 // NOTE: please use the naming convention "foo_natives" for these.
@@ -1307,27 +1365,6 @@ void Dispatcher::RegisterNativeHandlers(
                                     context);
 }
 
-void Dispatcher::UpdateContentCapabilities(ScriptContext* context) {
-  APIPermissionSet permissions;
-  for (const auto& extension :
-       *RendererExtensionRegistry::Get()->GetMainThreadExtensionSet()) {
-    blink::WebLocalFrame* web_frame = context->web_frame();
-    GURL url = context->url();
-    // We allow about:blank pages to take on the privileges of their parents if
-    // they aren't sandboxed.
-    if (web_frame && !web_frame->GetSecurityOrigin().IsUnique())
-      url = ScriptContext::GetEffectiveDocumentURL(web_frame, url, true);
-    const ContentCapabilitiesInfo& info =
-        ContentCapabilitiesInfo::Get(extension.get());
-    if (info.url_patterns.MatchesURL(url)) {
-      APIPermissionSet new_permissions;
-      APIPermissionSet::Union(permissions, info.permissions, &new_permissions);
-      permissions = std::move(new_permissions);
-    }
-  }
-  context->set_content_capabilities(std::move(permissions));
-}
-
 void Dispatcher::PopulateSourceMap() {
   const std::vector<JsResourceInfo> resources = GetJsResources();
   for (const auto& resource : resources)
@@ -1347,9 +1384,25 @@ bool Dispatcher::IsWithinPlatformApp() {
 }
 
 void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
-  Feature::Context context_type = context->context_type();
   ModuleSystem* module_system = context->module_system();
   bool requires_guest_view_module = false;
+
+  // This determines whether to register error-providing custom elements for the
+  // GuestView types that are not available. We only do this in contexts where
+  // it is possible to gain access to a given GuestView element by declaring the
+  // necessary permission in a manifest file. We don't want to define
+  // error-providing elements in other extension contexts as the names could
+  // collide with names used in the extension. Also, WebUIs may be whitelisted
+  // to use GuestViews, but we don't define the error-providing elements in this
+  // case.
+  const bool is_platform_app =
+      context->context_type() == Feature::BLESSED_EXTENSION_CONTEXT &&
+      !context->IsForServiceWorker() && context->extension() &&
+      context->extension()->is_platform_app();
+  const bool app_view_permission_exists = is_platform_app;
+  // The webview permission is also available to internal whitelisted
+  // extensions, but not to extensions in general.
+  const bool web_view_permission_exists = is_platform_app;
 
   // TODO(fsamuel): Eagerly calling Require on context startup is expensive.
   // It would be better if there were a light way of detecting when a webview
@@ -1359,6 +1412,8 @@ void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
   if (context->GetAvailability("appViewEmbedderInternal").is_available()) {
     requires_guest_view_module = true;
     module_system->Require("appViewElement");
+  } else if (app_view_permission_exists) {
+    module_system->Require("appViewDeny");
   }
 
   // Require ExtensionOptions.
@@ -1367,18 +1422,14 @@ void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
     module_system->Require("extensionOptionsElement");
   }
 
-  // Require ExtensionView.
-  if (context->GetAvailability("extensionViewInternal").is_available()) {
-    requires_guest_view_module = true;
-    module_system->Require("extensionViewElement");
-  }
-
   // Require WebView.
   if (context->GetAvailability("webViewInternal").is_available()) {
     requires_guest_view_module = true;
     // The embedder of the extensions layer may define its own implementation
     // of WebView.
     delegate_->RequireWebViewModules(context);
+  } else if (web_view_permission_exists) {
+    module_system->Require("webViewDeny");
   }
 
   if (requires_guest_view_module &&
@@ -1396,14 +1447,6 @@ void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
         ->View()
         ->GetSettings()
         ->SetForceMainWorldInitialization(true);
-  }
-
-  // The "guestViewDeny" module must always be loaded last. It registers
-  // error-providing custom elements for the GuestView types that are not
-  // available, and thus all of those types must have been checked and loaded
-  // (or not loaded) beforehand.
-  if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
-    module_system->Require("guestViewDeny");
   }
 }
 

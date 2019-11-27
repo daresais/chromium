@@ -7,8 +7,10 @@
 
 #include <memory>
 
+#include "content/public/common/client_hints.mojom.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/common/web_test/fake_bluetooth_chooser.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom.h"
 
 namespace content {
@@ -35,9 +37,7 @@ class WebTestContentBrowserClient : public ShellContentBrowserClient {
   std::unique_ptr<FakeBluetoothChooser> GetNextFakeBluetoothChooser();
 
   // ContentBrowserClient overrides.
-  void RenderProcessWillLaunch(
-      RenderProcessHost* host,
-      service_manager::mojom::ServiceRequest* service_request) override;
+  void RenderProcessWillLaunch(RenderProcessHost* host) override;
   void ExposeInterfacesToRenderer(
       service_manager::BinderRegistry* registry,
       blink::AssociatedInterfaceRegistry* associated_registry,
@@ -72,7 +72,10 @@ class WebTestContentBrowserClient : public ShellContentBrowserClient {
                        bool user_gesture,
                        bool opener_suppressed,
                        bool* no_javascript_access) override;
-  bool CanIgnoreCertificateErrorIfNeeded() override;
+  bool CanAcceptUntrustedExchangesIfNeeded() override;
+
+  content::TtsControllerDelegate* GetTtsControllerDelegate() override;
+  content::TtsPlatform* GetTtsPlatform() override;
 
   // ShellContentBrowserClient overrides.
   void ExposeInterfacesToFrame(
@@ -91,8 +94,16 @@ class WebTestContentBrowserClient : public ShellContentBrowserClient {
  private:
   // Creates and stores a FakeBluetoothChooserFactory instance.
   void CreateFakeBluetoothChooserFactory(
-      mojom::FakeBluetoothChooserFactoryRequest request);
-  void BindClipboardHost(blink::mojom::ClipboardHostRequest request);
+      mojo::PendingReceiver<mojom::FakeBluetoothChooserFactory> receiver);
+  // TODO(https://crbug.com/955171): Remove this and use BindClipboardHost
+  // directly once it uses service_manager::BinderMap instead of
+  // service_manager::BinderRegistry.
+  void BindClipboardHostForRequest(blink::mojom::ClipboardHostRequest request);
+  void BindClipboardHost(
+      mojo::PendingReceiver<blink::mojom::ClipboardHost> receiver);
+
+  void BindClientHintsControllerDelegate(
+      mojo::PendingReceiver<client_hints::mojom::ClientHints> receiver);
 
   std::unique_ptr<MockPlatformNotificationService>
       mock_platform_notification_service_;

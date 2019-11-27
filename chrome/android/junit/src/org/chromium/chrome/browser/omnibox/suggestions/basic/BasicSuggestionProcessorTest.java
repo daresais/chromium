@@ -11,21 +11,15 @@ import android.content.res.Resources;
 
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestionType;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestion;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionViewProperties.SuggestionIcon;
-import org.chromium.chrome.test.util.browser.Features;
-import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
-import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -61,13 +55,14 @@ public class BasicSuggestionProcessorTest {
         sSuggestionTypes[OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE] = "SEARCH_SUGGEST_PROFILE";
         sSuggestionTypes[OmniboxSuggestionType.SEARCH_OTHER_ENGINE] = "SEARCH_OTHER_ENGINE";
         sSuggestionTypes[OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED] = "NAVSUGGEST_PERSONALIZED";
-        sSuggestionTypes[OmniboxSuggestionType.CALCULATOR] = "CALCULATOR";
         sSuggestionTypes[OmniboxSuggestionType.CLIPBOARD_URL] = "CLIPBOARD_URL";
         sSuggestionTypes[OmniboxSuggestionType.VOICE_SUGGEST] = "VOICE_SUGGEST";
         sSuggestionTypes[OmniboxSuggestionType.DOCUMENT_SUGGESTION] = "DOCUMENT_SUGGESTION";
         sSuggestionTypes[OmniboxSuggestionType.PEDAL] = "PEDAL";
         sSuggestionTypes[OmniboxSuggestionType.CLIPBOARD_TEXT] = "CLIPBOARD_TEXT";
         sSuggestionTypes[OmniboxSuggestionType.CLIPBOARD_IMAGE] = "CLIPBOARD_IMAGE";
+        // Note: CALCULATOR suggestions are not handled by basic suggestion processor.
+        // These suggestions are now processed by AnswerSuggestionProcessor instead.
 
         sIconTypes = new String[SuggestionIcon.TOTAL_COUNT];
         sIconTypes[SuggestionIcon.UNSET] = "UNSET";
@@ -76,7 +71,6 @@ public class BasicSuggestionProcessorTest {
         sIconTypes[SuggestionIcon.GLOBE] = "GLOBE";
         sIconTypes[SuggestionIcon.MAGNIFIER] = "MAGNIFIER";
         sIconTypes[SuggestionIcon.VOICE] = "VOICE";
-        sIconTypes[SuggestionIcon.CALCULATOR] = "CALCULATOR";
         sIconTypes[SuggestionIcon.FAVICON] = "FAVICON";
     }
 
@@ -86,8 +80,6 @@ public class BasicSuggestionProcessorTest {
     Resources mResources;
     @Mock
     SuggestionHost mSuggestionHost;
-    @Rule
-    public TestRule mFeatureProcessor = new Features.JUnitProcessor();
 
     @Before
     public void setUp() {
@@ -143,77 +135,6 @@ public class BasicSuggestionProcessorTest {
                 {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.MAGNIFIER},
                 {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.MAGNIFIER},
                 {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.VOICE},
-                {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.PEDAL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.MAGNIFIER},
-        };
-
-        for (int[] test : testSuites) {
-            assertSuggestionIconTypeIs(createSearchSuggestion(test[0]), test[1]);
-        }
-    }
-
-    @Test
-    @EnableFeatures(ChromeFeatureList.OMNIBOX_NEW_ANSWER_LAYOUT)
-    @DisableFeatures(ChromeFeatureList.OMNIBOX_SHOW_SUGGESTION_FAVICONS)
-    public void getSuggestionIconTypeForSearch_AnwersInSuggest() {
-        mProcessor.onNativeInitialized();
-        int[][] testSuites = {
-                {OmniboxSuggestionType.URL_WHAT_YOU_TYPED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_URL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_TITLE, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_BODY, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_KEYWORD, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.NAVSUGGEST, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_WHAT_YOU_TYPED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_HISTORY, SuggestionIcon.HISTORY},
-                {OmniboxSuggestionType.SEARCH_SUGGEST, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_ENTITY, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_TAIL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED, SuggestionIcon.HISTORY},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.CALCULATOR},
-                {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.VOICE},
-                {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.PEDAL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.MAGNIFIER},
-        };
-
-        for (int[] test : testSuites) {
-            assertSuggestionIconTypeIs(createSearchSuggestion(test[0]), test[1]);
-        }
-    }
-
-    @Test
-    @EnableFeatures(ChromeFeatureList.OMNIBOX_SHOW_SUGGESTION_FAVICONS)
-    @DisableFeatures(ChromeFeatureList.OMNIBOX_NEW_ANSWER_LAYOUT)
-    public void getSuggestionIconTypeForSearch_FavIcons() {
-        mProcessor.onNativeInitialized();
-        int[][] testSuites = {
-                {OmniboxSuggestionType.URL_WHAT_YOU_TYPED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_URL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_TITLE, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_BODY, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.HISTORY_KEYWORD, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.NAVSUGGEST, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_WHAT_YOU_TYPED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_HISTORY, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_ENTITY, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_TAIL, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.MAGNIFIER},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.MAGNIFIER},
                 {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.MAGNIFIER},
                 {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.VOICE},
                 {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.MAGNIFIER},
@@ -231,41 +152,6 @@ public class BasicSuggestionProcessorTest {
     public void getSuggestionIconTypeForUrl_Default() {
         int[][] testSuites = {
                 {OmniboxSuggestionType.URL_WHAT_YOU_TYPED, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.HISTORY_URL, SuggestionIcon.HISTORY},
-                {OmniboxSuggestionType.HISTORY_TITLE, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.HISTORY_BODY, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.HISTORY_KEYWORD, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.NAVSUGGEST, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_WHAT_YOU_TYPED, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_HISTORY, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_SUGGEST, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_ENTITY, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_TAIL, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.PEDAL, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.GLOBE},
-        };
-
-        for (int[] test : testSuites) {
-            assertSuggestionIconTypeIs(createUrlSuggestion(test[0]), test[1]);
-        }
-    }
-
-    @Test
-    @EnableFeatures(ChromeFeatureList.OMNIBOX_SHOW_SUGGESTION_FAVICONS)
-    @DisableFeatures(ChromeFeatureList.OMNIBOX_NEW_ANSWER_LAYOUT)
-    public void getSuggestionIconTypeForUrl_FavIcons() {
-        mProcessor.onNativeInitialized();
-        int[][] testSuites = {
-                {OmniboxSuggestionType.URL_WHAT_YOU_TYPED, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.HISTORY_URL, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.HISTORY_TITLE, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.HISTORY_BODY, SuggestionIcon.GLOBE},
@@ -280,13 +166,12 @@ public class BasicSuggestionProcessorTest {
                 {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.GLOBE},
                 {OmniboxSuggestionType.PEDAL, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.GLOBE},
-                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.GLOBE},
+                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.MAGNIFIER},
+                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.MAGNIFIER},
         };
 
         for (int[] test : testSuites) {
@@ -312,48 +197,12 @@ public class BasicSuggestionProcessorTest {
                 {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.BOOKMARK},
                 {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.BOOKMARK},
                 {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.BOOKMARK},
                 {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.BOOKMARK},
                 {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.BOOKMARK},
                 {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.BOOKMARK},
                 {OmniboxSuggestionType.PEDAL, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.BOOKMARK},
-        };
-
-        for (int[] test : testSuites) {
-            assertSuggestionIconTypeIs(createBookmarkSuggestion(test[0]), test[1]);
-        }
-    }
-
-    @Test
-    @EnableFeatures(ChromeFeatureList.OMNIBOX_SHOW_SUGGESTION_FAVICONS)
-    @DisableFeatures(ChromeFeatureList.OMNIBOX_NEW_ANSWER_LAYOUT)
-    public void getSuggestionIconTypeForBookmarks_FavIcons() {
-        mProcessor.onNativeInitialized();
-        int[][] testSuites = {
-                {OmniboxSuggestionType.URL_WHAT_YOU_TYPED, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.HISTORY_URL, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.HISTORY_TITLE, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.HISTORY_BODY, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.HISTORY_KEYWORD, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.NAVSUGGEST, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_WHAT_YOU_TYPED, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_HISTORY, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_SUGGEST, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_ENTITY, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_TAIL, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.SEARCH_OTHER_ENGINE, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.NAVSUGGEST_PERSONALIZED, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CALCULATOR, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CLIPBOARD_URL, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.VOICE_SUGGEST, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.DOCUMENT_SUGGESTION, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.PEDAL, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.BOOKMARK},
-                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.BOOKMARK},
+                {OmniboxSuggestionType.CLIPBOARD_TEXT, SuggestionIcon.MAGNIFIER},
+                {OmniboxSuggestionType.CLIPBOARD_IMAGE, SuggestionIcon.MAGNIFIER},
         };
 
         for (int[] test : testSuites) {

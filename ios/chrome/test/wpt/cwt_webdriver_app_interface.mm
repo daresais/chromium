@@ -20,7 +20,7 @@
 #import "ios/testing/earl_grey/earl_grey_app.h"
 #import "ios/testing/nserror_util.h"
 #import "ios/web/public/test/navigation_test_util.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/image/image.h"
 
@@ -192,12 +192,14 @@ int GetIndexOfWebStateWithId(NSString* tab_id) {
       });
 
   __block BOOL webStateFound = NO;
+  __block std::unique_ptr<web::WebState::ScriptCommandSubscription>
+      subscription;
   grey_dispatch_sync_on_main_thread(^{
     web::WebState* webState = GetWebStateWithId(tabID);
     if (!webState)
       return;
     webStateFound = YES;
-    webState->AddScriptCommandCallback(callback, command);
+    subscription = webState->AddScriptCommandCallback(callback, command);
     webState->ExecuteJavaScript(
         base::UTF8ToUTF16(scriptFunctionWithCompletionHandler));
   });
@@ -211,12 +213,6 @@ int GetIndexOfWebStateWithId(NSString* tab_id) {
       scriptExecutionComplete = messageValue.has_value();
     });
     return scriptExecutionComplete;
-  });
-
-  grey_dispatch_sync_on_main_thread(^{
-    web::WebState* webState = GetWebStateWithId(tabID);
-    if (webState)
-      webState->RemoveScriptCommandCallback(command);
   });
 
   if (!success)
@@ -249,7 +245,7 @@ int GetIndexOfWebStateWithId(NSString* tab_id) {
     CGRect adjustedBounds = UIEdgeInsetsInsetRect(bounds, insets);
 
     webState->TakeSnapshot(gfx::RectF(adjustedBounds),
-                           base::BindOnce(^(const gfx::Image& image) {
+                           base::BindRepeating(^(const gfx::Image& image) {
                              snapshot = image.ToUIImage();
                            }));
   });

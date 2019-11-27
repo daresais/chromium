@@ -11,7 +11,6 @@
 #include "base/android/application_status_listener.h"
 #include "base/android/path_utils.h"
 #include "base/big_endian.h"
-#include "base/command_line.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -22,7 +21,7 @@
 #include "build/build_config.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/android_opengl/etc1/etc1.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -133,8 +132,8 @@ ThumbnailCache::ThumbnailCache(size_t default_cache_size,
                                size_t write_queue_max_size,
                                bool use_approximation_thumbnail,
                                bool save_jpeg_thumbnails)
-    : file_sequenced_task_runner_(
-          base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()})),
+    : file_sequenced_task_runner_(base::CreateSequencedTaskRunner(
+          {base::ThreadPool(), base::MayBlock()})),
       compression_queue_max_size_(compression_queue_max_size),
       write_queue_max_size_(write_queue_max_size),
       use_approximation_thumbnail_(use_approximation_thumbnail),
@@ -145,8 +144,7 @@ ThumbnailCache::ThumbnailCache(size_t default_cache_size,
       read_in_progress_(false),
       cache_(default_cache_size),
       approximation_cache_(approximation_cache_size),
-      ui_resource_provider_(nullptr),
-      weak_factory_(this) {
+      ui_resource_provider_(nullptr) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   memory_pressure_ = std::make_unique<base::MemoryPressureListener>(
       base::Bind(&ThumbnailCache::OnMemoryPressure, base::Unretained(this)));
@@ -198,13 +196,6 @@ void ThumbnailCache::Put(TabId tab_id,
   RemoveFromReadQueue(tab_id);
   MakeSpaceForNewItemIfNecessary(tab_id);
   cache_.Put(tab_id, std::move(thumbnail));
-
-  // Vulkan does not yet support compressed texture uploads. Disable compression
-  // and approximation when in experimental Vulkan mode.
-  // TODO(ericrk): Remove this restriction. https://crbug.com/906794
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseVulkan)) {
-    return;
-  }
 
   if (use_approximation_thumbnail_) {
     std::pair<SkBitmap, float> approximation =
@@ -431,11 +422,11 @@ void ThumbnailCache::SaveAsJpeg(TabId tab_id, const SkBitmap& bitmap) {
       base::Bind(&ThumbnailCache::WriteJpegThumbnailIfNecessary,
                  weak_factory_.GetWeakPtr(), tab_id);
 
-  base::PostTaskWithTraits(FROM_HERE,
-                           {base::TaskPriority::BEST_EFFORT,
-                            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-                           base::BindOnce(&ThumbnailCache::JpegProcessingTask,
-                                          bitmap, post_jpeg_compression_task));
+  base::PostTask(FROM_HERE,
+                 {base::ThreadPool(), base::TaskPriority::BEST_EFFORT,
+                  base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+                 base::BindOnce(&ThumbnailCache::JpegProcessingTask, bitmap,
+                                post_jpeg_compression_task));
 }
 
 void ThumbnailCache::CompressThumbnailIfNecessary(
@@ -461,12 +452,11 @@ void ThumbnailCache::CompressThumbnailIfNecessary(
   gfx::Size encoded_size = GetEncodedSize(
       raw_data_size, ui_resource_provider_->SupportsETC1NonPowerOfTwo());
 
-  base::PostTaskWithTraits(
-      FROM_HERE,
-      {base::TaskPriority::BEST_EFFORT,
-       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::BindOnce(&ThumbnailCache::CompressionTask, bitmap, encoded_size,
-                     post_compression_task));
+  base::PostTask(FROM_HERE,
+                 {base::ThreadPool(), base::TaskPriority::BEST_EFFORT,
+                  base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+                 base::BindOnce(&ThumbnailCache::CompressionTask, bitmap,
+                                encoded_size, post_compression_task));
 
   if (save_jpeg_thumbnails_) {
     SaveAsJpeg(tab_id, bitmap);
@@ -640,8 +630,7 @@ void ThumbnailCache::WriteTask(TabId tab_id,
   if (!success)
     base::DeleteFile(file_path, false);
 
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           post_write_task);
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI}, post_write_task);
 }
 
 void ThumbnailCache::WriteJpegTask(
@@ -666,8 +655,7 @@ void ThumbnailCache::WriteJpegTask(
   if (!success)
     base::DeleteFile(file_path, false);
 
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           post_write_task);
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI}, post_write_task);
 }
 
 void ThumbnailCache::PostWriteTask() {
@@ -716,10 +704,9 @@ void ThumbnailCache::CompressionTask(
     }
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(post_compression_task, std::move(compressed_data),
-                     content_size));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(post_compression_task,
+                                std::move(compressed_data), content_size));
 }
 
 void ThumbnailCache::JpegProcessingTask(
@@ -744,9 +731,8 @@ void ThumbnailCache::JpegProcessingTask(
       gfx::JPEGCodec::Encode(result_bitmap, kCompressionQuality, &data);
   DCHECK(result);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(post_processing_task, std::move(data)));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(post_processing_task, std::move(data)));
 }
 
 void ThumbnailCache::PostCompressionTask(
@@ -907,15 +893,14 @@ void ThumbnailCache::ReadTask(
   }
 
   if (decompress) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {base::TaskPriority::USER_VISIBLE},
-        base::BindOnce(post_read_task, std::move(compressed_data), scale,
-                       content_size));
+    base::PostTask(FROM_HERE,
+                   {base::ThreadPool(), base::TaskPriority::USER_VISIBLE},
+                   base::BindOnce(post_read_task, std::move(compressed_data),
+                                  scale, content_size));
   } else {
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
-        base::BindOnce(post_read_task, std::move(compressed_data), scale,
-                       content_size));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(post_read_task, std::move(compressed_data),
+                                  scale, content_size));
   }
 }
 
@@ -1015,7 +1000,7 @@ void ThumbnailCache::DecompressionTask(
     }
   }
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(post_decompression_callback, success, raw_data_small));
 }

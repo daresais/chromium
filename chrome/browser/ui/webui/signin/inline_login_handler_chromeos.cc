@@ -6,23 +6,37 @@
 
 #include <string>
 
+#include "base/base64.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/chrome_device_id_helper.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/webui/signin/inline_login_handler.h"
 #include "chromeos/components/account_manager/account_manager.h"
 #include "chromeos/components/account_manager/account_manager_factory.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "crypto/sha2.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace chromeos {
 namespace {
+
+// Returns a base64-encoded hash code of "signin_scoped_device_id:gaia_id".
+std::string GetAccountDeviceId(const std::string& signin_scoped_device_id,
+                               const std::string& gaia_id) {
+  std::string account_device_id;
+  base::Base64Encode(
+      crypto::SHA256HashString(signin_scoped_device_id + ":" + gaia_id),
+      &account_device_id);
+  return account_device_id;
+}
 
 // A helper class for completing the inline login flow. Primarily, it is
 // responsible for exchanging the auth code, obtained after a successful user
@@ -38,7 +52,8 @@ class SigninHelper : public GaiaAuthConsumer {
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       const std::string& gaia_id,
       const std::string& email,
-      const std::string& auth_code)
+      const std::string& auth_code,
+      const std::string& signin_scoped_device_id)
       : account_manager_(account_manager),
         close_dialog_closure_(close_dialog_closure),
         email_(email),
@@ -48,7 +63,9 @@ class SigninHelper : public GaiaAuthConsumer {
     account_key_ = chromeos::AccountManager::AccountKey{
         gaia_id, chromeos::account_manager::AccountType::ACCOUNT_TYPE_GAIA};
 
-    gaia_auth_fetcher_.StartAuthCodeForOAuth2TokenExchange(auth_code);
+    DCHECK(!signin_scoped_device_id.empty());
+    gaia_auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
+        auth_code, signin_scoped_device_id);
   }
 
   ~SigninHelper() override = default;
@@ -124,6 +141,18 @@ void InlineLoginHandlerChromeOS::SetExtraInitParams(
   params.SetKey("constrained", base::Value("1"));
   params.SetKey("flow", base::Value("crosAddAccount"));
   params.SetBoolean("dontResizeNonEmbeddedPages", true);
+
+  // For in-session login flows, request Gaia to ignore third party SAML IdP SSO
+  // redirection policies (and redirect to SAML IdPs by default), otherwise some
+  // managed users will not be able to login to Chrome OS at all. Please check
+  // https://crbug.com/984525 and https://crbug.com/984525#c20 for more context.
+  params.SetBoolean("ignoreCrOSIdpSetting", true);
+}
+
+void InlineLoginHandlerChromeOS::HandleAuthExtensionReadyMessage(
+    const base::ListValue* args) {
+  AllowJavascript();
+  FireWebUIListener("showBackButton");
 }
 
 void InlineLoginHandlerChromeOS::CompleteLogin(const std::string& email,
@@ -150,9 +179,16 @@ void InlineLoginHandlerChromeOS::CompleteLogin(const std::string& email,
           ->GetAccountManager(profile->GetPath().value());
 
   // SigninHelper deletes itself after its work is done.
-  new SigninHelper(account_manager, close_dialog_closure_,
-                   account_manager->GetUrlLoaderFactory(), gaia_id, email,
-                   auth_code);
+  new SigninHelper(
+      account_manager, close_dialog_closure_,
+      account_manager->GetUrlLoaderFactory(), gaia_id, email, auth_code,
+      GetAccountDeviceId(GetSigninScopedDeviceIdForProfile(profile), gaia_id));
+}
+
+void InlineLoginHandlerChromeOS::HandleDialogClose(
+    const base::ListValue* args) {
+  AllowJavascript();
+  close_dialog_closure_.Run();
 }
 
 void InlineLoginHandlerChromeOS::ShowIncognitoAndCloseDialog(

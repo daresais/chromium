@@ -54,6 +54,7 @@ source_set("omnibox_suggestion_icon_util") {
     "resources:omnibox_completion_default_favicon",
     "resources:omnibox_completion_history",
     "resources:omnibox_completion_search",
+    "resources:omnibox_popup_recent_query",
     "resources:search",
     "//base",
   ]
@@ -83,7 +84,21 @@ source_set("omnibox_util") {
     "//ios/chrome/browser/ui:feature_flags",
   ]
   public_deps = [
+    ":omnibox_icon_type_constants",
     "//ios/chrome/app/theme",
+  ]
+}
+
+# This target can also be used on EG2 tests, so it should only contain constants
+source_set("omnibox_icon_type_constants") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+
+  sources = [
+    "omnibox_icon_type.h",
+    "omnibox_icon_type.mm",
+  ]
+  deps = [
+    "//base",
   ]
 }
 
@@ -99,6 +114,7 @@ source_set("omnibox_internal") {
     "omnibox_coordinator.mm",
     "omnibox_mediator.h",
     "omnibox_mediator.mm",
+    "omnibox_text_change_delegate.h",
     "omnibox_text_field_delegate.h",
     "omnibox_text_field_ios.h",
     "omnibox_text_field_ios.mm",
@@ -145,6 +161,7 @@ source_set("omnibox_internal") {
     "//ios/chrome/browser/ui/toolbar/public:feature_flags",
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/common",
+    "//ios/chrome/common/colors",
     "//ios/chrome/common/favicon",
     "//ios/public/provider/chrome/browser",
     "//ios/public/provider/chrome/browser/images",
@@ -152,13 +169,13 @@ source_set("omnibox_internal") {
     "//ios/web",
     "//net",
     "//skia",
-    "//third_party/google_toolbox_for_mac",
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//url",
   ]
   public_deps = [
+    ":omnibox_icon_type_constants",
     "//components/omnibox/browser",
   ]
   libs = [
@@ -167,6 +184,40 @@ source_set("omnibox_internal") {
     "QuartzCore.framework",
     "UIKit.framework",
   ]
+}
+
+source_set("eg_tests") {
+  defines = [ "CHROME_EARL_GREY_1" ]
+  testonly = true
+  sources = [
+    "omnibox_app_interface.h",
+    "omnibox_app_interface.mm",
+    "omnibox_egtest.mm",
+  ]
+  deps = [
+    ":omnibox",
+    ":omnibox_internal",
+    "//base",
+    "//base/test:test_support",
+    "//components/google/core/common",
+    "//components/omnibox/browser",
+    "//components/variations",
+    "//ios/chrome/app/strings:ios_strings_grit",
+    "//ios/chrome/browser/browser_state",
+    "//ios/chrome/browser/ui:feature_flags",
+    "//ios/chrome/browser/ui/content_suggestions:content_suggestions_constant",
+    "//ios/chrome/browser/ui/omnibox/popup:popup_ui",
+    "//ios/chrome/test/app:test_support",
+    "//ios/chrome/test/earl_grey:test_support",
+    "//ios/testing:hardware_keyboarr_support",
+    "//ios/testing/earl_grey:earl_grey_support",
+    "//ios/third_party/earl_grey:earl_grey+link",
+    "//net:test_support",
+    "//testing/gmock",
+    "//ui/base",
+  ]
+  libs = [ "XCTest.framework" ]
+  configs += [ "//build/config/compiler:enable_arc" ]
 }
 
 source_set("unit_tests") {
@@ -216,6 +267,7 @@ source_set("perf_tests") {
     "//components/omnibox/browser:test_support",
     "//ios/chrome/browser/autocomplete",
     "//ios/chrome/browser/browser_state:test_support",
+    "//ios/chrome/browser/main:test_support",
     "//ios/chrome/browser/search_engines",
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/tabs:tabs_internal",

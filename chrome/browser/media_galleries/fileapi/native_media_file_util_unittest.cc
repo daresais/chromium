@@ -22,16 +22,16 @@
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "storage/browser/blob/shareable_file_reference.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/browser/fileapi/file_system_backend.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_operation_runner.h"
-#include "storage/browser/fileapi/file_system_url.h"
-#include "storage/browser/fileapi/isolated_context.h"
-#include "storage/browser/fileapi/native_file_util.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/browser/file_system/file_system_backend.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_operation_runner.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/browser/file_system/isolated_context.h"
+#include "storage/browser/file_system/native_file_util.h"
 #include "storage/browser/test/mock_special_storage_policy.h"
 #include "storage/browser/test/test_file_system_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -134,9 +134,7 @@ class NativeMediaFileUtilTest : public testing::Test {
         std::make_unique<MediaFileSystemBackend>(data_dir_.GetPath()));
 
     file_system_context_ = new storage::FileSystemContext(
-        base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::IO})
-            .get(),
+        base::CreateSingleThreadTaskRunner({content::BrowserThread::IO}).get(),
         base::SequencedTaskRunnerHandle::Get().get(),
         storage::ExternalMountPoints::CreateRefCounted().get(),
         storage_policy.get(), NULL, std::move(additional_providers),
@@ -148,9 +146,7 @@ class NativeMediaFileUtilTest : public testing::Test {
     filesystem_id_ = filesystem_.id();
   }
 
-  void TearDown() override {
-    file_system_context_ = NULL;
-  }
+  void TearDown() override { file_system_context_.reset(); }
 
  protected:
   storage::FileSystemContext* file_system_context() {
@@ -186,7 +182,7 @@ class NativeMediaFileUtilTest : public testing::Test {
     return file_system_context_->operation_runner();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
  private:
   base::ScopedTempDir data_dir_;

@@ -137,12 +137,13 @@ class BASE_EXPORT CancelableTaskTracker {
   // See https://crbug.com/918948.
   using TaskCancellationFlag = RefCountedData<AtomicFlag>;
 
-  static void RunIfNotCanceled(const TaskCancellationFlag* flag,
+  static void RunIfNotCanceled(const scoped_refptr<TaskCancellationFlag>& flag,
                                OnceClosure task);
-  static void RunThenUntrackIfNotCanceled(const TaskCancellationFlag* flag,
-                                          OnceClosure task,
-                                          OnceClosure untrack);
-  static bool IsCanceled(const TaskCancellationFlag* flag,
+  static void RunThenUntrackIfNotCanceled(
+      const scoped_refptr<TaskCancellationFlag>& flag,
+      OnceClosure task,
+      OnceClosure untrack);
+  static bool IsCanceled(const scoped_refptr<TaskCancellationFlag>& flag,
                          const ScopedClosureRunner& cleanup_runner);
 
   void Track(TaskId id, scoped_refptr<TaskCancellationFlag> flag);
@@ -156,7 +157,10 @@ class BASE_EXPORT CancelableTaskTracker {
       task_flags_;
 
   TaskId next_id_ = 1;
-  SequenceChecker sequence_checker_;
+
+  // TODO(https://crbug.com/1009795): Replace with SEQUENCE_CHECKER() once
+  // crasher is resolved.
+  SequenceCheckerImpl sequence_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(CancelableTaskTracker);
 };

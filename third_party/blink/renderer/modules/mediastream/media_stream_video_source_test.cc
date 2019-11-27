@@ -12,14 +12,14 @@
 #include "media/base/limits.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
-#include "third_party/blink/public/web/modules/mediastream/mock_constraint_factory.h"
-#include "third_party/blink/public/web/modules/mediastream/mock_media_stream_video_sink.h"
-#include "third_party/blink/public/web/modules/mediastream/mock_media_stream_video_source.h"
-#include "third_party/blink/public/web/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/public/web/web_heap.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_constraint_factory.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_sink.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_source.h"
+#include "third_party/blink/renderer/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -73,8 +73,8 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
     bool enabled = true;
     return MediaStreamVideoTrack::CreateVideoTrack(
         mock_source_,
-        base::Bind(&MediaStreamVideoSourceTest::OnConstraintsApplied,
-                   base::Unretained(this)),
+        WTF::Bind(&MediaStreamVideoSourceTest::OnConstraintsApplied,
+                  base::Unretained(this)),
         enabled);
   }
 
@@ -88,8 +88,8 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
     return MediaStreamVideoTrack::CreateVideoTrack(
         mock_source_, adapter_settings, noise_reduction, is_screencast,
         min_frame_rate,
-        base::Bind(&MediaStreamVideoSourceTest::OnConstraintsApplied,
-                   base::Unretained(this)),
+        WTF::Bind(&MediaStreamVideoSourceTest::OnConstraintsApplied,
+                  base::Unretained(this)),
         enabled);
   }
 
@@ -104,7 +104,7 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
     EXPECT_EQ(0, NumberOfSuccessConstraintsCallbacks());
     mock_source_->StartMockedSource();
     // Once the source has started successfully we expect that the
-    // ConstraintsCallback in WebPlatformMediaStreamSource::AddTrack
+    // ConstraintsOnceCallback in WebPlatformMediaStreamSource::AddTrack
     // completes.
     EXPECT_EQ(1, NumberOfSuccessConstraintsCallbacks());
     return track;

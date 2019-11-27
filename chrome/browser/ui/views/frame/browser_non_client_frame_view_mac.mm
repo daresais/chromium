@@ -14,15 +14,16 @@
 #include "chrome/browser/ui/cocoa/fullscreen/fullscreen_menubar_tracker.h"
 #include "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller_views.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
-#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/layout_constants.h"
+#include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
-#include "chrome/browser/ui/views/frame/hosted_app_button_container.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/views/web_apps/web_app_frame_toolbar_view.h"
+#include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -67,19 +68,20 @@ BrowserNonClientFrameViewMac::BrowserNonClientFrameViewMac(
                             *show_fullscreen_toolbar_)];
   }
 
-  if (browser_view->IsBrowserTypeHostedApp()) {
-    if (browser_view->browser()
-            ->app_controller()
-            ->ShouldShowHostedAppButtonContainer()) {
-      set_hosted_app_button_container(new HostedAppButtonContainer(
-          frame, browser_view, GetCaptionColor(kActive),
-          GetCaptionColor(kInactive), kHostedAppMenuMargin));
-      AddChildView(hosted_app_button_container());
+  if (browser_view->IsBrowserTypeWebApp()) {
+    if (browser_view->browser()->app_controller()->HasTitlebarToolbar()) {
+      set_web_app_frame_toolbar(
+          AddChildView(std::make_unique<WebAppFrameToolbarView>(
+              frame, browser_view,
+              GetCaptionColor(BrowserFrameActiveState::kActive),
+              GetCaptionColor(BrowserFrameActiveState::kInactive),
+              kHostedAppMenuMargin, kHostedAppMenuMargin)));
     }
 
     DCHECK(browser_view->ShouldShowWindowTitle());
-    window_title_ = new views::Label(browser_view->GetWindowTitle());
-    AddChildView(window_title_);
+    window_title_ = AddChildView(
+        std::make_unique<views::Label>(browser_view->GetWindowTitle()));
+    window_title_->SetID(VIEW_ID_WINDOW_TITLE);
   }
 }
 
@@ -130,11 +132,11 @@ gfx::Rect BrowserNonClientFrameViewMac::GetBoundsForTabStripRegion(
 }
 
 int BrowserNonClientFrameViewMac::GetTopInset(bool restored) const {
-  if (hosted_app_button_container()) {
-    DCHECK(browser_view()->IsBrowserTypeHostedApp());
+  if (web_app_frame_toolbar()) {
+    DCHECK(browser_view()->IsBrowserTypeWebApp());
     if (ShouldHideTopUIForFullscreen())
       return 0;
-    return hosted_app_button_container()->GetPreferredSize().height() +
+    return web_app_frame_toolbar()->GetPreferredSize().height() +
            kHostedAppMenuMargin * 2;
   }
 
@@ -281,7 +283,7 @@ void BrowserNonClientFrameViewMac::UpdateMinimumSize() {
 
 gfx::Size BrowserNonClientFrameViewMac::GetMinimumSize() const {
   gfx::Size client_size = frame()->client_view()->GetMinimumSize();
-  if (browser_view()->browser()->is_type_tabbed())
+  if (browser_view()->browser()->is_type_normal())
     client_size.SetToMax(browser_view()->tabstrip()->GetMinimumSize());
 
   // macOS apps generally don't allow their windows to get shorter than a
@@ -300,7 +302,7 @@ gfx::Size BrowserNonClientFrameViewMac::GetMinimumSize() const {
 
 void BrowserNonClientFrameViewMac::OnPaint(gfx::Canvas* canvas) {
   if (!browser_view()->IsBrowserTypeNormal() &&
-      !browser_view()->IsBrowserTypeHostedApp()) {
+      !browser_view()->IsBrowserTypeWebApp()) {
     return;
   }
 
@@ -309,7 +311,8 @@ void BrowserNonClientFrameViewMac::OnPaint(gfx::Canvas* canvas) {
 
   if (window_title_) {
     window_title_->SetBackgroundColor(frame_color);
-    window_title_->SetEnabledColor(GetCaptionColor(kUseCurrent));
+    window_title_->SetEnabledColor(
+        GetCaptionColor(BrowserFrameActiveState::kUseCurrent));
   }
 
   auto* theme_service =
@@ -323,9 +326,12 @@ void BrowserNonClientFrameViewMac::Layout() {
   int leading_x = kFramePaddingLeft;
   int trailing_x = width();
 
-  if (hosted_app_button_container()) {
-    trailing_x = hosted_app_button_container()->LayoutInContainer(
-        leading_x, trailing_x, 0, available_height);
+  if (web_app_frame_toolbar()) {
+    std::pair<int, int> remaining_bounds =
+        web_app_frame_toolbar()->LayoutInContainer(leading_x, trailing_x, 0,
+                                                   available_height);
+    leading_x = remaining_bounds.first;
+    trailing_x = remaining_bounds.second;
 
     const int title_padding = base::checked_cast<int>(
         std::round(width() * kTitlePaddingWidthFraction));

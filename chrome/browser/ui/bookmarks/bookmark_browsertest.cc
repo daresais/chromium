@@ -164,10 +164,9 @@ IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, DISABLED_MultiProfile) {
 
   BookmarkModel* bookmark_model1 = WaitForBookmarkModel(browser()->profile());
 
-  ui_test_utils::BrowserAddedObserver observer;
   g_browser_process->profile_manager()->CreateMultiProfileAsync(
       base::string16(), std::string(), ProfileManager::CreateCallback());
-  Browser* browser2 = observer.WaitForSingleNewBrowser();
+  Browser* browser2 = ui_test_utils::WaitForBrowserToOpen();
   BookmarkModel* bookmark_model2 = WaitForBookmarkModel(browser2->profile());
 
   bookmarks::AddIfNotBookmarked(bookmark_model1, GURL(kPersistBookmarkURL),
@@ -369,7 +368,14 @@ IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, PRE_EmitUmaForEmptyTitles) {
                          GURL("http://e.com"));
 }
 
-IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, EmitUmaForEmptyTitles) {
+// TODO(crbug.com/1017731): Flaky on Windows
+#if defined(OS_WIN)
+#define MAYBE_EmitUmaForEmptyTitles DISABLED_EmitUmaForEmptyTitles
+#else
+#define MAYBE_EmitUmaForEmptyTitles EmitUmaForEmptyTitles
+#endif
+
+IN_PROC_BROWSER_TEST_F(BookmarkBrowsertest, MAYBE_EmitUmaForEmptyTitles) {
   WaitForBookmarkModel(browser()->profile());
 
   ASSERT_THAT(

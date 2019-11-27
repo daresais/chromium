@@ -53,7 +53,7 @@ void HandlePrintLayerHierarchy() {
 }
 
 void HandlePrintViewHierarchy() {
-  aura::Window* active_window = wm::GetActiveWindow();
+  aura::Window* active_window = window_util::GetActiveWindow();
   if (!active_window)
     return;
   views::Widget* widget = views::Widget::GetWidgetForNativeView(active_window);
@@ -76,8 +76,11 @@ void PrintWindowHierarchy(const aura::Window* active_window,
   *out << indent_str;
   *out << name << " (" << window << ")"
        << " type=" << window->type();
+  int window_id = window->id();
+  if (window_id != aura::Window::kInitialId)
+    *out << " id=" << window_id;
   if (window->GetProperty(kWindowStateKey))
-    *out << " " << wm::GetWindowState(window)->GetStateType();
+    *out << " " << WindowState::Get(window)->GetStateType();
   *out << ((window == active_window) ? " [active]" : "")
        << ((window == focused_window) ? " [focused]" : "")
        << (window->IsVisible() ? " visible" : "") << " "
@@ -105,8 +108,8 @@ void PrintWindowHierarchy(const aura::Window* active_window,
 }
 
 void HandlePrintWindowHierarchy() {
-  aura::Window* active_window = wm::GetActiveWindow();
-  aura::Window* focused_window = wm::GetFocusedWindow();
+  aura::Window* active_window = window_util::GetActiveWindow();
+  aura::Window* focused_window = window_util::GetFocusedWindow();
   aura::Window::Windows roots = Shell::Get()->GetAllRootWindows();
   for (size_t i = 0; i < roots.size(); ++i) {
     std::ostringstream out;

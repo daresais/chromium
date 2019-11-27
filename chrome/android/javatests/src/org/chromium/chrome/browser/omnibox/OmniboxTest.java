@@ -9,7 +9,6 @@ import static org.chromium.chrome.test.util.OmniboxTestUtils.buildSuggestionMap;
 import android.annotation.SuppressLint;
 import android.os.Build;
 import android.os.SystemClock;
-import android.support.annotation.Nullable;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
@@ -28,16 +27,16 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.params.ParameterizedCommandLineFlags;
+import org.chromium.base.test.params.ParameterizedCommandLineFlags.Switches;
+import org.chromium.base.test.params.SkipCommandLineParameterization;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.EnormousTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.base.test.util.ScalableTimeout;
-import org.chromium.base.test.util.parameter.CommandLineParameter;
-import org.chromium.base.test.util.parameter.SkipCommandLineParameterization;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -51,6 +50,7 @@ import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
+import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -79,12 +79,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Tests of the Omnibox.
  *
- * TODO(yolandyan): Replace the CommandLineParameter with new JUnit4 parameterized
- * framework once it supports Test Rule Parameterization
+ * TODO(yolandyan): Replace the ParameterizedCommandLineFlags with new JUnit4
+ * parameterized framework once it supports Test Rule Parameterization.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@CommandLineParameter({"", "disable-features=" + ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE})
+// clang-format off
+@ParameterizedCommandLineFlags({
+  @Switches(),
+  @Switches("disable-features=" + ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE),
+})
+// clang-format on
 @SuppressLint("SetTextI18n")
 public class OmniboxTest {
     @Rule
@@ -129,17 +134,19 @@ public class OmniboxTest {
                         KeyUtils.singleKeyEventView(InstrumentationRegistry.getInstrumentation(),
                                 urlBar, KeyEvent.KEYCODE_ENTER);
                     }
-                }, ScalableTimeout.scaleTimeout(20));
+                }, 20L);
     }
 
     /**
      * Test for checking whether soft input model switches with focus.
      */
     @Test
+    @DisableIf.
+    Build(sdk_is_greater_than = Build.VERSION_CODES.KITKAT, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
-    public void testFocusChangingSoftInputMode() throws InterruptedException {
+    public void testFocusChangingSoftInputMode() {
         final UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
 
         OmniboxTestUtils.toggleUrlBarFocus(urlBar, true);
@@ -174,7 +181,7 @@ public class OmniboxTest {
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
-    public void testRequestZeroSuggestOnFocus() throws Exception {
+    public void testRequestZeroSuggestOnFocus() {
         final LocationBarLayout locationBar =
                 (LocationBarLayout) mActivityTestRule.getActivity().findViewById(R.id.location_bar);
         final UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
@@ -209,6 +216,8 @@ public class OmniboxTest {
      * Tests that focusing a url bar starts a zero suggest request.
      */
     @Test
+    @DisableIf.
+    Build(sdk_is_greater_than = Build.VERSION_CODES.KITKAT, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
@@ -253,10 +262,12 @@ public class OmniboxTest {
     }
 
     @Test
+    @DisableIf.
+    Build(sdk_is_greater_than = Build.VERSION_CODES.KITKAT, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
-    public void testRequestZeroSuggestTypeAndBackspace() throws InterruptedException {
+    public void testRequestZeroSuggestTypeAndBackspace() {
         final LocationBarLayout locationBar =
                 (LocationBarLayout) mActivityTestRule.getActivity().findViewById(R.id.location_bar);
         final UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
@@ -290,8 +301,8 @@ public class OmniboxTest {
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
-    public void testDefaultText() throws InterruptedException {
-        mActivityTestRule.startMainActivityFromLauncher();
+    public void testDefaultText() {
+        mActivityTestRule.startMainActivityWithURL(UrlConstants.NTP_URL);
 
         final UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
 
@@ -314,6 +325,7 @@ public class OmniboxTest {
     }
 
     @Test
+    @DisableIf.Build(sdk_is_greater_than = Build.VERSION_CODES.O, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox", "Main"})
     @RetryOnFailure
@@ -328,6 +340,7 @@ public class OmniboxTest {
     }
 
     @Test
+    @DisableIf.Build(sdk_is_greater_than = Build.VERSION_CODES.O, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox", "Main"})
     @RetryOnFailure
@@ -381,6 +394,7 @@ public class OmniboxTest {
     }
 
     @Test
+    @DisableIf.Build(sdk_is_greater_than = Build.VERSION_CODES.O, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
@@ -411,6 +425,7 @@ public class OmniboxTest {
     }
 
     @Test
+    @DisableIf.Build(sdk_is_greater_than = Build.VERSION_CODES.O, message = "crbug.com/1027549")
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
@@ -531,7 +546,7 @@ public class OmniboxTest {
 
         CharSequence urlText = TestThreadUtils.runOnUiThreadBlocking(new Callable<CharSequence>() {
             @Override
-            public CharSequence call() throws Exception {
+            public CharSequence call() {
                 return urlBarView.getText();
             }
         });
@@ -589,7 +604,7 @@ public class OmniboxTest {
     @Test
     @MediumTest
     @SkipCommandLineParameterization
-    public void testSecurityIconOnHTTP() throws InterruptedException {
+    public void testSecurityIconOnHTTP() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         try {
@@ -724,65 +739,12 @@ public class OmniboxTest {
         }
     }
 
-    // TODO(bauerb): Move this to a Robolectric test.
-    @Test
-    @SmallTest
-    @SkipCommandLineParameterization
-    public void testOriginSpan() {
-        verifyOriginSpan("", null, "");
-        verifyOriginSpan("https:", null, "https:");
-        verifyOriginSpan("about:blank", null, "about:blank");
-
-        verifyOriginSpan("chrome://flags", null, "chrome://flags");
-        verifyOriginSpan("chrome://flags", "/?egads", "chrome://flags/?egads");
-
-        verifyOriginSpan("www.google.com", null, "www.google.com");
-        verifyOriginSpan("www.google.com", null, "www.google.com/");
-        verifyOriginSpan("www.google.com", "/?q=blah", "www.google.com/?q=blah");
-
-        verifyOriginSpan("https://www.google.com", null, "https://www.google.com");
-        verifyOriginSpan("https://www.google.com", null, "https://www.google.com/");
-        verifyOriginSpan("https://www.google.com", "/?q=blah", "https://www.google.com/?q=blah");
-
-        // crbug.com/414990
-        String testUrl = "https://disneyworld.disney.go.com/special-offers/"
-                + "?CMP=KNC-WDW_FY15_DOM_Q1RO_BR_Gold_SpOffer|G|4141300.RR.AM.01.47"
-                + "&keyword_id=s6JyxRifG_dm|walt%20disney%20world|37174067873|e|1540wwa14043";
-        verifyOriginSpan("https://disneyworld.disney.go.com",
-                "/special-offers/?CMP=KNC-WDW_FY15_DOM_Q1RO_BR_Gold_SpOffer|G|4141300.RR.AM.01.47"
-                        + "&keyword_id=s6JyxRifG_dm|walt%20disney%20world|37174067873|e|"
-                        + "1540wwa14043",
-                testUrl);
-
-        // crbug.com/415387
-        verifyOriginSpan("ftp://example.com", "/ftp.html", "ftp://example.com/ftp.html");
-
-        // crbug.com/447416
-        verifyOriginSpan("file:///dev/blah", null, "file:///dev/blah");
-        verifyOriginSpan(
-                "javascript:window.alert('hello');", null, "javascript:window.alert('hello');");
-        verifyOriginSpan("data:text/html;charset=utf-8,Page%201", null,
-                "data:text/html;charset=utf-8,Page%201");
-    }
-
-    private void verifyOriginSpan(
-            String expectedOrigin, @Nullable String expectedOriginSuffix, String url) {
-        UrlBarData urlBarData = UrlBarData.forUrl(url);
-        String displayText = urlBarData.displayText.toString();
-        Assert.assertEquals(expectedOriginSuffix == null ? expectedOrigin
-                                                         : expectedOrigin + expectedOriginSuffix,
-                displayText);
-        Assert.assertEquals(expectedOrigin,
-                displayText.substring(urlBarData.originStartIndex, urlBarData.originEndIndex));
-    }
-
     @Test
     @MediumTest
     @Feature({"Omnibox"})
     @RetryOnFailure
-    @MinAndroidSdkLevel(Build.VERSION_CODES.JELLY_BEAN_MR1)
     @DisabledTest // https://crbug.com/950556
-    public void testSuggestionDirectionSwitching() throws InterruptedException {
+    public void testSuggestionDirectionSwitching() {
         final TextView urlBarView =
                 (TextView) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
         TestThreadUtils.runOnUiThreadBlocking(() -> {

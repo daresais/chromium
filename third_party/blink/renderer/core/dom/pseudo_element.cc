@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/generated_children.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_quote.h"
@@ -69,6 +70,11 @@ const QualifiedName& PseudoElementTagName(PseudoId pseudo_id) {
                           (g_null_atom, "<pseudo:first-letter>", g_null_atom));
       return first_letter;
     }
+    case kPseudoIdMarker: {
+      DEFINE_STATIC_LOCAL(QualifiedName, marker,
+                          (g_null_atom, "<pseudo:marker>", g_null_atom));
+      return marker;
+    }
     default:
       NOTREACHED();
   }
@@ -80,11 +86,14 @@ const QualifiedName& PseudoElementTagName(PseudoId pseudo_id) {
 String PseudoElement::PseudoElementNameForEvents(PseudoId pseudo_id) {
   DEFINE_STATIC_LOCAL(const String, after, ("::after"));
   DEFINE_STATIC_LOCAL(const String, before, ("::before"));
+  DEFINE_STATIC_LOCAL(const String, marker, ("::marker"));
   switch (pseudo_id) {
     case kPseudoIdAfter:
       return after;
     case kPseudoIdBefore:
       return before;
+    case kPseudoIdMarker:
+      return marker;
     default:
       return g_empty_string;
   }
@@ -108,7 +117,7 @@ PseudoElement::PseudoElement(Element* parent, PseudoId pseudo_id)
 
 scoped_refptr<ComputedStyle> PseudoElement::CustomStyleForLayoutObject() {
   return ParentOrShadowHostElement()->StyleForPseudoElement(
-      PseudoStyleRequest(pseudo_id_));
+      PseudoElementStyleRequest(pseudo_id_));
 }
 
 scoped_refptr<ComputedStyle> PseudoElement::LayoutStyleForDisplayContents(
@@ -174,7 +183,8 @@ void PseudoElement::AttachLayoutTree(AttachContext& context) {
 
   const ComputedStyle& style = layout_object->StyleRef();
   if (style.StyleType() != kPseudoIdBefore &&
-      style.StyleType() != kPseudoIdAfter)
+      style.StyleType() != kPseudoIdAfter &&
+      style.StyleType() != kPseudoIdMarker)
     return;
   DCHECK(style.GetContentData());
 

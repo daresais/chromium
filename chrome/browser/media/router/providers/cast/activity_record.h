@@ -13,9 +13,12 @@
 #include "chrome/browser/media/router/providers/cast/cast_internal_message_util.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_client.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_tracker.h"
+#include "chrome/common/media_router/discovery/media_sink_internal.h"
 #include "chrome/common/media_router/media_route.h"
-#include "chrome/common/media_router/mojo/media_router.mojom.h"
+#include "chrome/common/media_router/mojom/media_router.mojom.h"
 #include "chrome/common/media_router/providers/cast/cast_media_source.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace cast_channel {
 class CastMessageHandler;
@@ -28,7 +31,6 @@ class Origin;
 namespace media_router {
 
 class CastSessionTracker;
-class DataDecoder;
 
 class ActivityRecord {
  public:
@@ -38,8 +40,7 @@ class ActivityRecord {
   ActivityRecord(const MediaRoute& route,
                  const std::string& app_id,
                  cast_channel::CastMessageHandler* message_handler,
-                 CastSessionTracker* session_tracker,
-                 DataDecoder* data_decoder);
+                 CastSessionTracker* session_tracker);
   ActivityRecord(const ActivityRecord&) = delete;
   ActivityRecord& operator=(const ActivityRecord&) = delete;
   virtual ~ActivityRecord();
@@ -47,6 +48,8 @@ class ActivityRecord {
   const MediaRoute& route() const { return route_; }
   const std::string& app_id() const { return app_id_; }
   const base::Optional<std::string>& session_id() const { return session_id_; }
+  base::Optional<int> mirroring_tab_id() const { return mirroring_tab_id_; }
+  const MediaSinkInternal sink() const { return sink_; }
 
   // On the first call, saves the ID of |session|.  On subsequent calls,
   // notifies all connected clients that the session has been updated.  In both
@@ -137,15 +140,20 @@ class ActivityRecord {
       blink::mojom::PresentationConnectionCloseReason close_reason) = 0;
   virtual void TerminatePresentationConnections() = 0;
 
- protected:
-  // Function called the first time session_id_ has been set.
-  virtual void OnSessionSet();
+  virtual void CreateMediaController(
+      mojo::PendingReceiver<mojom::MediaController> media_controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer) = 0;
 
+ protected:
   CastSession* GetSession() const;
 
   MediaRoute route_;
   std::string app_id_;
+  base::Optional<int> mirroring_tab_id_;
   ClientMap connected_clients_;
+
+  // Called when a session is initially set from SetOrUpdateSession().
+  base::OnceCallback<void()> on_session_set_;
 
   // TODO(https://crbug.com/809249): Consider wrapping CastMessageHandler with
   // known parameters (sink, client ID, session transport ID) and passing them
@@ -153,10 +161,11 @@ class ActivityRecord {
   cast_channel::CastMessageHandler* const message_handler_;
 
   CastSessionTracker* const session_tracker_;
-  DataDecoder* const data_decoder_;
 
   // Set by CastActivityManager after the session is launched successfully.
   base::Optional<std::string> session_id_;
+
+  MediaSinkInternal sink_;
 };
 
 }  // namespace media_router

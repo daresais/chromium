@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.tab.Tab;
@@ -70,7 +70,7 @@ public interface TabCreatorManager {
          * @return            Whether a Tab was created successfully.
          */
         public abstract boolean createTabWithWebContents(
-                Tab parent, WebContents webContents, @TabLaunchType int type, String url);
+                @Nullable Tab parent, WebContents webContents, @TabLaunchType int type, String url);
 
         /**
          * Creates a tab around the native web contents pointer.

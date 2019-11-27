@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ash/public/cpp/app_list/app_list_controller.h"
+#include "ash/public/cpp/tablet_mode.h"
 #include "base/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -31,7 +32,6 @@
 #include "chrome/browser/ui/app_list/search/search_result_ranker/ranking_item_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
@@ -48,14 +48,13 @@ namespace {
 AppListClientImpl* g_app_list_client_instance = nullptr;
 
 bool IsTabletMode() {
-  return TabletModeClient::Get() &&
-         TabletModeClient::Get()->tablet_mode_enabled();
+  return ash::TabletMode::Get() && ash::TabletMode::Get()->InTabletMode();
 }
 
 }  // namespace
 
 AppListClientImpl::AppListClientImpl()
-    : app_list_controller_(app_list::AppListController::Get()) {
+    : app_list_controller_(ash::AppListController::Get()) {
   app_list_controller_->SetClient(this);
   user_manager::UserManager::Get()->AddSessionStateObserver(this);
 
@@ -99,7 +98,8 @@ void AppListClientImpl::OpenSearchResult(const std::string& result_id,
                                          int event_flags,
                                          ash::AppListLaunchedFrom launched_from,
                                          ash::AppListLaunchType launch_type,
-                                         int suggestion_index) {
+                                         int suggestion_index,
+                                         bool launch_as_default) {
   if (!search_controller_)
     return;
 
@@ -111,18 +111,25 @@ void AppListClientImpl::OpenSearchResult(const std::string& result_id,
   app_launch_data.id = result_id;
   app_launch_data.ranking_item_type =
       app_list::RankingItemTypeFromSearchResult(*result);
+  app_launch_data.launch_type = launch_type;
+  app_launch_data.launched_from = launched_from;
+
+  if (launch_type == ash::AppListLaunchType::kAppSearchResult &&
+      launched_from == ash::AppListLaunchedFrom::kLaunchedFromSearchBox &&
+      app_launch_data.ranking_item_type == app_list::RankingItemType::kApp &&
+      search_controller_->GetLastQueryLength() != 0) {
+    ash::RecordSuccessfulAppLaunchUsingSearch(
+        launched_from, search_controller_->GetLastQueryLength());
+  }
+
   // Send training signal to search controller.
   search_controller_->Train(std::move(app_launch_data));
 
-  if (launch_type == ash::AppListLaunchType::kAppSearchResult) {
-    // Log the AppResult (either in the search result page, or in chip form in
-    // AppsGridView) to the UKM system.
-    app_launch_event_logger_.OnSuggestionChipOrSearchBoxClicked(
-        result_id, suggestion_index, static_cast<int>(launched_from));
-  }
-
   RecordSearchResultOpenTypeHistogram(
       launched_from, result->GetSearchResultType(), IsTabletMode());
+
+  if (launch_as_default)
+    RecordDefaultSearchResultOpenTypeHistogram(result->GetSearchResultType());
 
   if (!search_controller_->GetLastQueryLength() &&
       launched_from == ash::AppListLaunchedFrom::kLaunchedFromSearchBox)
@@ -191,20 +198,18 @@ void AppListClientImpl::ActivateItem(int profile_id,
     return;
   }
 
-  requested_model_updater->ActivateChromeItem(id, event_flags);
-
   // Send a training signal to the search controller.
-  CHECK(current_model_updater_);
   const auto* item = current_model_updater_->FindItem(id);
   if (item) {
     app_list::AppLaunchData app_launch_data;
     app_launch_data.id = id;
     app_launch_data.ranking_item_type =
         app_list::RankingItemTypeFromChromeAppListItem(*item);
+    app_launch_data.launched_from = ash::AppListLaunchedFrom::kLaunchedFromGrid;
     search_controller_->Train(std::move(app_launch_data));
   }
 
-  app_launch_event_logger_.OnGridClicked(id);
+  requested_model_updater->ActivateChromeItem(id, event_flags);
 }
 
 void AppListClientImpl::GetContextMenuModel(
@@ -226,12 +231,14 @@ void AppListClientImpl::GetContextMenuModel(
               std::move(callback)));
 }
 
-void AppListClientImpl::OnAppListTargetVisibilityChanged(bool visible) {
+void AppListClientImpl::OnAppListVisibilityWillChange(bool visible) {
   app_list_target_visibility_ = visible;
 }
 
 void AppListClientImpl::OnAppListVisibilityChanged(bool visible) {
   app_list_visible_ = visible;
+  if (visible && search_controller_)
+    search_controller_->AppListShown();
 }
 
 void AppListClientImpl::OnFolderCreated(
@@ -301,10 +308,10 @@ void AppListClientImpl::OnSearchResultVisibilityChanged(const std::string& id,
   result->OnVisibilityChanged(visibility);
 }
 
-void AppListClientImpl::ActiveUserChanged(
-    const user_manager::User* active_user) {
+void AppListClientImpl::ActiveUserChanged(user_manager::User* active_user) {
   if (!active_user->is_profile_created())
     return;
+
   UpdateProfile();
 }
 
@@ -312,8 +319,9 @@ void AppListClientImpl::UpdateProfile() {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   app_list::AppListSyncableService* syncable_service =
       app_list::AppListSyncableServiceFactory::GetForProfile(profile);
-  DCHECK(syncable_service);
-  SetProfile(profile);
+  // AppListSyncableService is null in tests.
+  if (syncable_service)
+    SetProfile(profile);
 }
 
 void AppListClientImpl::SetProfile(Profile* new_profile) {
@@ -376,6 +384,10 @@ void AppListClientImpl::SetUpSearchUI() {
 
   search_controller_ =
       app_list::CreateSearchController(profile_, current_model_updater_, this);
+
+  // Refresh the results used for the suggestion chips with empty query.
+  // This fixes crbug.com/999287.
+  StartSearch(base::string16());
 }
 
 app_list::SearchController* AppListClientImpl::search_controller() {
@@ -401,12 +413,6 @@ void AppListClientImpl::OnTemplateURLServiceChanged() {
   current_model_updater_->SetSearchEngineIsGoogle(is_google);
 }
 
-void AppListClientImpl::ShowAndSwitchToState(ash::AppListState state) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->ShowAppListAndSwitchToState(state);
-}
-
 void AppListClientImpl::ShowAppList() {
   // This may not work correctly if the profile passed in is different from the
   // one the ash Shell is currently using.
@@ -419,7 +425,7 @@ Profile* AppListClientImpl::GetCurrentAppListProfile() const {
   return ChromeLauncherController::instance()->profile();
 }
 
-app_list::AppListController* AppListClientImpl::GetAppListController() const {
+ash::AppListController* AppListClientImpl::GetAppListController() const {
   return app_list_controller_;
 }
 
@@ -427,6 +433,10 @@ void AppListClientImpl::DismissView() {
   if (!app_list_controller_)
     return;
   app_list_controller_->DismissAppList();
+}
+
+aura::Window* AppListClientImpl::GetAppListWindow() {
+  return app_list_controller_->GetWindow();
 }
 
 int64_t AppListClientImpl::GetAppListDisplayId() {
@@ -511,6 +521,16 @@ void AppListClientImpl::LaunchApp(Profile* profile,
 
   if (!IsTabletMode())
     DismissView();
+}
+
+void AppListClientImpl::NotifySearchResultsForLogging(
+    const base::string16& trimmed_query,
+    const ash::SearchResultIdWithPositionIndices& results,
+    int position_index) {
+  if (search_controller_) {
+    search_controller_->OnSearchResultsDisplayed(trimmed_query, results,
+                                                 position_index);
+  }
 }
 
 ash::ShelfLaunchSource AppListClientImpl::AppListSourceToLaunchSource(

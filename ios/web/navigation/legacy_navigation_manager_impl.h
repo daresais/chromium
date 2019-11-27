@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/public/deprecated/navigation_item_list.h"
-#include "ios/web/public/reload_type.h"
+#include "ios/web/public/navigation/reload_type.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -36,7 +36,7 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
   void SetSessionController(CRWSessionController* session_controller) override;
   void InitializeSession() override;
   void OnNavigationItemsPruned(size_t pruned_item_count) override;
-  void OnRendererInitiatedNavigationStarted(const GURL& url) override;
+  void OnNavigationStarted(const GURL& url) override;
   void OnNavigationItemCommitted() override;
   CRWSessionController* GetSessionController() const override;
   void AddTransientItem(const GURL& url) override;
@@ -57,6 +57,7 @@ class LegacyNavigationManagerImpl : public NavigationManagerImpl {
                                    NSString* state_object,
                                    ui::PageTransition transition) override;
   bool IsRestoreSessionInProgress() const override;
+  bool ShouldBlockUrlDuringRestore(const GURL& url) override;
   void SetPendingItemIndex(int index) override;
 
   // NavigationManager:

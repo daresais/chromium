@@ -36,11 +36,13 @@
 #include "chromeos/network/proxy/proxy_config_service_impl.h"
 #include "chromeos/settings/timezone_settings.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "components/arc/arc_features.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_util.h"
-#include "components/arc/common/backup_settings.mojom.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #include "components/arc/intent_helper/font_size_util.h"
+#include "components/arc/mojom/backup_settings.mojom.h"
+#include "components/arc/mojom/pip.mojom.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/onc/onc_pref_names.h"
@@ -49,9 +51,9 @@
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
-#include "content/public/common/page_zoom.h"
 #include "net/proxy_resolution/proxy_bypass_rules.h"
 #include "net/proxy_resolution/proxy_config.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 
 using ::chromeos::system::TimezoneSettings;
 
@@ -62,7 +64,7 @@ constexpr char kSetFontScaleAction[] =
 constexpr char kSetPageZoomAction[] =
     "org.chromium.arc.intent_helper.SET_PAGE_ZOOM";
 
-constexpr char kArcProxyBypassListDelimeter[] = ",";
+constexpr char kArcProxyBypassListDelimiter[] = ",";
 
 bool GetHttpProxyServer(const ProxyConfigDictionary* proxy_config_dict,
                         std::string* host,
@@ -171,6 +173,7 @@ class ArcSettingsServiceImpl
   void SyncLocationServiceEnabled() const;
   void SyncProxySettings() const;
   void SyncReportingConsent(bool initial_sync) const;
+  void SyncPictureInPictureEnabled() const;
   void SyncSelectToSpeakEnabled() const;
   void SyncSpokenFeedbackEnabled() const;
   void SyncSwitchAccessEnabled() const;
@@ -383,6 +386,7 @@ void ArcSettingsServiceImpl::SyncBootTimeSettings() const {
   SyncFocusHighlightEnabled();
   SyncProxySettings();
   SyncReportingConsent(/*initial_sync=*/false);
+  SyncPictureInPictureEnabled();
   SyncSelectToSpeakEnabled();
   SyncSpokenFeedbackEnabled();
   SyncSwitchAccessEnabled();
@@ -477,7 +481,7 @@ void ArcSettingsServiceImpl::SyncPageZoom() const {
     return;
 
   double zoom_level = profile_->GetZoomLevelPrefs()->GetDefaultZoomLevelPref();
-  double zoom_factor = content::ZoomLevelToZoomFactor(zoom_level);
+  double zoom_factor = blink::PageZoomLevelToZoomFactor(zoom_level);
 
   base::DictionaryValue extras;
   extras.SetDouble("zoomFactor", zoom_factor);
@@ -560,7 +564,7 @@ void ArcSettingsServiceImpl::SyncProxySettings() const {
             bypass_list, net::ProxyBypassRules::kBypassListDelimeter,
             base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
         bypass_list =
-            base::JoinString(bypassed_hosts, kArcProxyBypassListDelimeter);
+            base::JoinString(bypassed_hosts, kArcProxyBypassListDelimiter);
         extras.SetString("bypassList", bypass_list);
       }
       break;
@@ -593,6 +597,18 @@ void ArcSettingsServiceImpl::SyncReportingConsent(bool initial_sync) const {
   extras.SetBoolean("reportingConsent", consent);
   SendSettingsBroadcast("org.chromium.arc.intent_helper.SET_REPORTING_CONSENT",
                         extras);
+}
+
+void ArcSettingsServiceImpl::SyncPictureInPictureEnabled() const {
+  bool isPipEnabled =
+      base::FeatureList::IsEnabled(arc::kPictureInPictureFeature);
+
+  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->pip(),
+                                               SetPipSuppressionStatus);
+  if (!instance)
+    return;
+
+  instance->SetPipSuppressionStatus(!isPipEnabled);
 }
 
 void ArcSettingsServiceImpl::SyncSelectToSpeakEnabled() const {

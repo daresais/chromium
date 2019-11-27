@@ -90,13 +90,13 @@ class NetworkConnectImpl : public NetworkConnect {
       std::unique_ptr<base::DictionaryValue> properties_to_set);
 
   Delegate* delegate_;
-  base::WeakPtrFactory<NetworkConnectImpl> weak_factory_;
+  base::WeakPtrFactory<NetworkConnectImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectImpl);
 };
 
 NetworkConnectImpl::NetworkConnectImpl(Delegate* delegate)
-    : delegate_(delegate), weak_factory_(this) {}
+    : delegate_(delegate) {}
 
 NetworkConnectImpl::~NetworkConnectImpl() = default;
 
@@ -117,11 +117,6 @@ void NetworkConnectImpl::HandleUnconfiguredNetwork(
         network->tether_guid().empty()) {
       delegate_->ShowNetworkConfigure(network_id);
     }
-    return;
-  }
-
-  if (network->type() == shill::kTypeWimax) {
-    delegate_->ShowNetworkConfigure(network_id);
     return;
   }
 
@@ -496,7 +491,12 @@ void NetworkConnect::Initialize(Delegate* delegate) {
 void NetworkConnect::Shutdown() {
   CHECK(g_network_connect);
   delete g_network_connect;
-  g_network_connect = NULL;
+  g_network_connect = nullptr;
+}
+
+// static
+bool NetworkConnect::IsInitialized() {
+  return g_network_connect;
 }
 
 // static

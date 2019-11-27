@@ -49,7 +49,6 @@ bool IsUsingOrderfileOptimization() {
 
 static void JNI_LibraryLoader_RecordRendererLibraryLoadTime(
     JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller,
     jlong library_load_time_ms) {
   g_renderer_library_load_time_ms = library_load_time_ms;
 }
@@ -64,6 +63,9 @@ void RecordLibraryLoaderRendererHistograms() {
   UMA_HISTOGRAM_TIMES(
       "ChromiumAndroidLinker.RendererLoadTime",
       base::TimeDelta::FromMilliseconds(g_renderer_library_load_time_ms));
+
+  Java_LibraryLoader_onUmaRecordingReadyInRenderer(
+      base::android::AttachCurrentThread());
 }
 
 void SetLibraryLoadedHook(LibraryLoadedHook* func) {
@@ -72,7 +74,6 @@ void SetLibraryLoadedHook(LibraryLoadedHook* func) {
 
 static jboolean JNI_LibraryLoader_LibraryLoaded(
     JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller,
     jint library_process_type) {
 #if BUILDFLAG(ORDERFILE_INSTRUMENTATION)
   orderfile::StartDelayedDump();
@@ -111,9 +112,7 @@ void SetVersionNumber(const char* version_number) {
   g_library_version_number = strdup(version_number);
 }
 
-ScopedJavaLocalRef<jstring> JNI_LibraryLoader_GetVersionNumber(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller) {
+ScopedJavaLocalRef<jstring> JNI_LibraryLoader_GetVersionNumber(JNIEnv* env) {
   return ConvertUTF8ToJavaString(env, g_library_version_number);
 }
 

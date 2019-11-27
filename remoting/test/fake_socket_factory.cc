@@ -182,8 +182,7 @@ FakePacketSocketFactory::FakePacketSocketFactory(
       dispatcher_(dispatcher),
       address_(dispatcher_->AllocateAddress()),
       out_of_order_rate_(0.0),
-      next_port_(kPortRangeStart),
-      weak_factory_(this) {
+      next_port_(kPortRangeStart) {
   dispatcher_->AddNode(this);
 }
 
@@ -262,7 +261,7 @@ rtc::AsyncPacketSocket* FakePacketSocketFactory::CreateClientTcpSocket(
     const rtc::SocketAddress& remote_address,
     const rtc::ProxyInfo& proxy_info,
     const std::string& user_agent,
-    int opts) {
+    const rtc::PacketSocketTcpOptions& opts) {
   return nullptr;
 }
 

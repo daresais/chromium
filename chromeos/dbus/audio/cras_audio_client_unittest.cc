@@ -11,7 +11,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "dbus/message.h"
 #include "dbus/mock_bus.h"
 #include "dbus/mock_object_proxy.h"
@@ -372,8 +372,8 @@ class CrasAudioClientTest : public testing::Test {
 
  protected:
   // A callback to intercept and check the method call arguments.
-  typedef base::Callback<void(dbus::MessageReader* reader)>
-      ArgumentCheckCallback;
+  using ArgumentCheckCallback =
+      base::RepeatingCallback<void(dbus::MessageReader* reader)>;
 
   // Sets expectations for called method name and arguments, and sets response.
   void PrepareForMethodCall(const std::string& method_name,
@@ -437,7 +437,7 @@ class CrasAudioClientTest : public testing::Test {
   // The interface name.
   const std::string interface_name_;
   // A message loop to emulate asynchronous behavior.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   // The mock bus.
   scoped_refptr<dbus::MockBus> mock_bus_;
   // The mock object proxy.
@@ -476,7 +476,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     output_mute_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -490,7 +490,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     input_mute_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -504,7 +504,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     nodes_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -518,7 +518,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     active_output_node_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -532,7 +532,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     active_input_node_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -546,7 +546,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     output_node_volume_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -560,7 +560,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     hotword_triggered_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -574,7 +574,7 @@ class CrasAudioClientTest : public testing::Test {
       dbus::ObjectProxy::OnConnectedCallback* on_connected_callback) {
     number_of_active_streams_changed_handler_ = signal_callback;
     const bool success = true;
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*on_connected_callback),
                                   interface_name, signal_name, success));
   }
@@ -588,7 +588,7 @@ class CrasAudioClientTest : public testing::Test {
     EXPECT_EQ(expected_method_name_, method_call->GetMember());
     dbus::MessageReader reader(method_call);
     argument_checker_.Run(&reader);
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(std::move(*response), response_));
   }
 
@@ -829,7 +829,7 @@ TEST_F(CrasAudioClientTest, GetNodes) {
   WriteNodesToResponse(expected_node_list, &writer);
 
   // Set expectations.
-  PrepareForMethodCall(cras::kGetNodes, base::Bind(&ExpectNoArgument),
+  PrepareForMethodCall(cras::kGetNodes, base::BindRepeating(&ExpectNoArgument),
                        response.get());
   // Call method.
   bool called = false;
@@ -850,7 +850,7 @@ TEST_F(CrasAudioClientTest, GetNodesV2) {
   WriteNodesToResponse(expected_node_list, &writer);
 
   // Set expectations.
-  PrepareForMethodCall(cras::kGetNodes, base::Bind(&ExpectNoArgument),
+  PrepareForMethodCall(cras::kGetNodes, base::BindRepeating(&ExpectNoArgument),
                        response.get());
 
   // Call method.
@@ -871,7 +871,7 @@ TEST_F(CrasAudioClientTest, SetOutputNodeVolume) {
   // Set expectations.
   PrepareForMethodCall(
       cras::kSetOutputNodeVolume,
-      base::Bind(&ExpectUint64AndInt32Arguments, kNodeId, kVolume),
+      base::BindRepeating(&ExpectUint64AndInt32Arguments, kNodeId, kVolume),
       response.get());
   // Call method.
   client()->SetOutputNodeVolume(kNodeId, kVolume);
@@ -886,7 +886,7 @@ TEST_F(CrasAudioClientTest, SetOutputUserMute) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kSetOutputUserMute,
-                       base::Bind(&ExpectBoolArgument, kUserMuteOn),
+                       base::BindRepeating(&ExpectBoolArgument, kUserMuteOn),
                        response.get());
   // Call method.
   client()->SetOutputUserMute(kUserMuteOn);
@@ -903,7 +903,7 @@ TEST_F(CrasAudioClientTest, SetInputNodeGain) {
   // Set expectations.
   PrepareForMethodCall(
       cras::kSetInputNodeGain,
-      base::Bind(&ExpectUint64AndInt32Arguments, kNodeId, kInputGain),
+      base::BindRepeating(&ExpectUint64AndInt32Arguments, kNodeId, kInputGain),
       response.get());
   // Call method.
   client()->SetInputNodeGain(kNodeId, kInputGain);
@@ -918,7 +918,7 @@ TEST_F(CrasAudioClientTest, SetInputMute) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kSetInputMute,
-                       base::Bind(&ExpectBoolArgument, kInputMuteOn),
+                       base::BindRepeating(&ExpectBoolArgument, kInputMuteOn),
                        response.get());
   // Call method.
   client()->SetInputMute(kInputMuteOn);
@@ -933,7 +933,7 @@ TEST_F(CrasAudioClientTest, SetActiveOutputNode) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kSetActiveOutputNode,
-                       base::Bind(&ExpectUint64Argument, kNodeId),
+                       base::BindRepeating(&ExpectUint64Argument, kNodeId),
                        response.get());
   // Call method.
   client()->SetActiveOutputNode(kNodeId);
@@ -948,7 +948,7 @@ TEST_F(CrasAudioClientTest, SetActiveInputNode) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kSetActiveInputNode,
-                       base::Bind(&ExpectUint64Argument, kNodeId),
+                       base::BindRepeating(&ExpectUint64Argument, kNodeId),
                        response.get());
   // Call method.
   client()->SetActiveInputNode(kNodeId);
@@ -963,7 +963,7 @@ TEST_F(CrasAudioClientTest, AddActiveInputNode) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kAddActiveInputNode,
-                       base::Bind(&ExpectUint64Argument, kNodeId),
+                       base::BindRepeating(&ExpectUint64Argument, kNodeId),
                        response.get());
   // Call method.
   client()->AddActiveInputNode(kNodeId);
@@ -978,7 +978,7 @@ TEST_F(CrasAudioClientTest, RemoveActiveInputNode) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kRemoveActiveInputNode,
-                       base::Bind(&ExpectUint64Argument, kNodeId),
+                       base::BindRepeating(&ExpectUint64Argument, kNodeId),
                        response.get());
   // Call method.
   client()->RemoveActiveInputNode(kNodeId);
@@ -993,7 +993,7 @@ TEST_F(CrasAudioClientTest, AddActiveOutputNode) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kAddActiveOutputNode,
-                       base::Bind(&ExpectUint64Argument, kNodeId),
+                       base::BindRepeating(&ExpectUint64Argument, kNodeId),
                        response.get());
   // Call method.
   client()->AddActiveOutputNode(kNodeId);
@@ -1008,7 +1008,7 @@ TEST_F(CrasAudioClientTest, RemoveActiveOutputNode) {
 
   // Set expectations.
   PrepareForMethodCall(cras::kRemoveActiveOutputNode,
-                       base::Bind(&ExpectUint64Argument, kNodeId),
+                       base::BindRepeating(&ExpectUint64Argument, kNodeId),
                        response.get());
   // Call method.
   client()->RemoveActiveOutputNode(kNodeId);
@@ -1025,7 +1025,7 @@ TEST_F(CrasAudioClientTest, SwapLeftRight) {
   // Set expectations.
   PrepareForMethodCall(
       cras::kSwapLeftRight,
-      base::Bind(&ExpectUint64AndBoolArguments, kNodeId, kSwap),
+      base::BindRepeating(&ExpectUint64AndBoolArguments, kNodeId, kSwap),
       response.get());
   // Call method.
   client()->SwapLeftRight(kNodeId, kSwap);
@@ -1042,7 +1042,8 @@ TEST_F(CrasAudioClientTest, SetGlobalOutputChannelRemix) {
   // Set expectations.
   PrepareForMethodCall(
       cras::kSetGlobalOutputChannelRemix,
-      base::Bind(&ExpectInt32AndArrayOfDoublesArguments, kChannels, kMixer),
+      base::BindRepeating(&ExpectInt32AndArrayOfDoublesArguments, kChannels,
+                          kMixer),
       response.get());
 
   // Call method.

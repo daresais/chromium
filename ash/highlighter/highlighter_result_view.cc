@@ -174,12 +174,12 @@ HighlighterResultView::HighlighterResultView(aura::Window* root_window) {
   params.accept_events = false;
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.parent =
       Shell::GetContainer(root_window, kShellWindowId_OverlayContainer);
   params.layer_type = ui::LAYER_SOLID_COLOR;
 
-  widget_->Init(params);
+  widget_->Init(std::move(params));
   widget_->Show();
   widget_->SetContentsView(this);
   widget_->SetFullscreen(true);

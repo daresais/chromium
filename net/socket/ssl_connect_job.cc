@@ -348,17 +348,12 @@ int SSLConnectJob::DoSSLConnect() {
   ssl_negotiation_started_ = true;
   connect_timing_.ssl_start = base::TimeTicks::Now();
 
-  // TODO(mmenke): Consider moving this up to the socket pool layer, after
-  // giving socket pools knowledge of privacy mode.
-  const SSLClientSocketContext& context =
-      params_->privacy_mode() == PRIVACY_MODE_ENABLED
-          ? ssl_client_socket_context_privacy_mode()
-          : ssl_client_socket_context();
-
   SSLConfig ssl_config = params_->ssl_config();
   ssl_config.network_isolation_key = params_->network_isolation_key();
+  ssl_config.privacy_mode = params_->privacy_mode();
   ssl_socket_ = client_socket_factory()->CreateSSLClientSocket(
-      std::move(nested_socket_), params_->host_and_port(), ssl_config, context);
+      ssl_client_context(), std::move(nested_socket_), params_->host_and_port(),
+      ssl_config);
   nested_connect_job_.reset();
   return ssl_socket_->Connect(callback_);
 }
@@ -406,18 +401,6 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
     if (ssl_info.key_exchange_group != 0) {
       base::UmaHistogramSparse("Net.SSL_KeyExchange.ECDHE",
                                ssl_info.key_exchange_group);
-    }
-
-    if (ssl_info.handshake_type == SSLInfo::HANDSHAKE_RESUME) {
-      UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSL_Connection_Latency_Resume_Handshake",
-                                 connect_duration,
-                                 base::TimeDelta::FromMilliseconds(1),
-                                 base::TimeDelta::FromMinutes(1), 100);
-    } else if (ssl_info.handshake_type == SSLInfo::HANDSHAKE_FULL) {
-      UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSL_Connection_Latency_Full_Handshake",
-                                 connect_duration,
-                                 base::TimeDelta::FromMilliseconds(1),
-                                 base::TimeDelta::FromMinutes(1), 100);
     }
 
     if (tls13_supported) {

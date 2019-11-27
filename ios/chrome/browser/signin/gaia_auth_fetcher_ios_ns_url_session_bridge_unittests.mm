@@ -15,7 +15,7 @@
 #import "ios/chrome/browser/web/chrome_web_test.h"
 #include "ios/net/cookies/system_cookie_util.h"
 #include "ios/web/common/features.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "net/cookies/cookie_store.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -187,7 +187,6 @@ NSURLSession* TestGaiaAuthFetcherIOSNSURLSessionBridge::CreateNSURLSession(
 void GaiaAuthFetcherIOSNSURLSessionBridgeTest::SetUp() {
   std::vector<base::Feature> enabled_features;
   std::vector<base::Feature> disabled_features;
-  enabled_features.push_back(web::features::kWKHTTPSystemCookieStore);
   enabled_features.push_back(kUseNSURLSessionForGaiaSigninRequests);
   scoped_feature_list.InitWithFeatures(enabled_features, disabled_features);
   delegate_.reset(new FakeGaiaAuthFetcherIOSBridgeDelegate());

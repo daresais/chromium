@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
+#include "third_party/blink/renderer/core/layout/svg/transform_helper.h"
 #include "third_party/blink/renderer/core/layout/svg/transformed_hit_test_location.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/svg_root_painter.h"
@@ -264,7 +265,7 @@ LayoutRect LayoutSVGRoot::ComputeContentsVisualOverflow() const {
 
 void LayoutSVGRoot::PaintReplaced(const PaintInfo& paint_info,
                                   const PhysicalOffset& paint_offset) const {
-  if (PaintBlockedByDisplayLock(DisplayLockContext::kChildren))
+  if (PaintBlockedByDisplayLock(DisplayLockLifecycleTarget::kChildren))
     return;
   SVGRootPainter(*this).PaintReplaced(paint_info, paint_offset);
 }

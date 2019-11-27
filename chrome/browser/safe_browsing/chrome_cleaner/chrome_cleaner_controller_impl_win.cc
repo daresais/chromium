@@ -38,12 +38,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/installer/util/scoped_token_privilege.h"
 #include "components/chrome_cleaner/public/constants/constants.h"
+#include "components/chrome_cleaner/public/proto/chrome_prompt.pb.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/extension_registry.h"
 #include "net/http/http_status_code.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -52,7 +54,7 @@ namespace safe_browsing {
 namespace {
 
 using ::content::BrowserThread;
-using PromptAcceptance = ChromePromptActions::PromptAcceptance;
+using PromptUserResponse = chrome_cleaner::PromptUserResponse;
 
 // The global singleton instance. Exposed outside of GetInstance() so that it
 // can be reset by tests.
@@ -112,9 +114,9 @@ void OnChromeCleanerFetched(
     ChromeCleanerControllerDelegate::FetchedCallback fetched_callback,
     base::FilePath downloaded_path,
     ChromeCleanerFetchStatus fetch_status) {
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(VerifyAndRenameDownloadedCleaner, downloaded_path,
                      fetch_status),
@@ -401,7 +403,7 @@ void ChromeCleanerControllerImpl::RequestUserInitiatedScan(Profile* profile) {
   if (cached_reporter_invocations_) {
     SwReporterInvocationSequence copied_sequence(*cached_reporter_invocations_);
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(
             &safe_browsing::MaybeStartSwReporter, invocation_type,
@@ -469,28 +471,30 @@ void ChromeCleanerControllerImpl::ReplyWithUserResponse(
 
   DCHECK(prompt_user_reply_callback_);
 
-  PromptAcceptance acceptance = PromptAcceptance::DENIED;
+  PromptUserResponse::PromptAcceptance acceptance = PromptUserResponse::DENIED;
   State new_state = State::kIdle;
   switch (user_response) {
     case UserResponse::kAcceptedWithLogs:
-      acceptance = PromptAcceptance::ACCEPTED_WITH_LOGS;
+      acceptance = PromptUserResponse::ACCEPTED_WITH_LOGS;
       SetLogsEnabled(profile, true);
       RecordCleanerLogsAcceptanceHistogram(true);
       new_state = State::kCleaning;
       delegate_->TagForResetting(profile);
       extension_service_ = extension_service;
+      extension_registry_ = extensions::ExtensionRegistry::Get(profile);
       break;
     case UserResponse::kAcceptedWithoutLogs:
-      acceptance = PromptAcceptance::ACCEPTED_WITHOUT_LOGS;
+      acceptance = PromptUserResponse::ACCEPTED_WITHOUT_LOGS;
       SetLogsEnabled(profile, false);
       RecordCleanerLogsAcceptanceHistogram(false);
       new_state = State::kCleaning;
       delegate_->TagForResetting(profile);
       extension_service_ = extension_service;
+      extension_registry_ = extensions::ExtensionRegistry::Get(profile);
       break;
     case UserResponse::kDenied:  // Fallthrough
     case UserResponse::kDismissed:
-      acceptance = PromptAcceptance::DENIED;
+      acceptance = PromptUserResponse::DENIED;
       idle_reason_ = IdleReason::kUserDeclinedCleanup;
       new_state = State::kIdle;
       break;
@@ -532,8 +536,7 @@ bool ChromeCleanerControllerImpl::IsReportingManagedByPolicy(Profile* profile) {
 
 ChromeCleanerControllerImpl::ChromeCleanerControllerImpl()
     : real_delegate_(std::make_unique<ChromeCleanerControllerDelegate>()),
-      delegate_(real_delegate_.get()),
-      weak_factory_(this) {
+      delegate_(real_delegate_.get()) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 }
 
@@ -607,8 +610,8 @@ void ChromeCleanerControllerImpl::OnChromeCleanerFetchedAndVerified(
           : ChromeCleanerRunner::ChromeMetricsStatus::kDisabled;
 
   ChromeCleanerRunner::RunChromeCleanerAndReplyWithExitCode(
-      extension_service_, executable_path, *reporter_invocation_,
-      metrics_status,
+      extension_service_, extension_registry_, executable_path,
+      *reporter_invocation_, metrics_status,
       base::Bind(&ChromeCleanerControllerImpl::WeakOnPromptUser,
                  weak_factory_.GetWeakPtr()),
       base::Bind(&ChromeCleanerControllerImpl::OnConnectionClosed,
@@ -629,9 +632,9 @@ void ChromeCleanerControllerImpl::WeakOnPromptUser(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // If the weak pointer has been invalidated, the controller is no longer able
-  // to receive callbacks, so respond with PromptAcceptance::Denied immediately.
+  // to receive callbacks, so respond with DENIED immediately.
   if (!controller) {
-    std::move(reply_callback).Run(PromptAcceptance::DENIED);
+    std::move(reply_callback).Run(PromptUserResponse::DENIED);
     return;
   }
 
@@ -654,7 +657,7 @@ void ChromeCleanerControllerImpl::OnPromptUser(
                                base::Time::Now() - time_scanning_started_);
 
   if (scanner_results.files_to_delete().empty()) {
-    std::move(reply_callback).Run(PromptAcceptance::DENIED);
+    std::move(reply_callback).Run(PromptUserResponse::DENIED);
     idle_reason_ = IdleReason::kScanningFoundNothing;
     SetStateAndNotifyObservers(State::kIdle);
     RecordPromptNotShownWithReasonHistogram(NO_PROMPT_REASON_NOTHING_FOUND);

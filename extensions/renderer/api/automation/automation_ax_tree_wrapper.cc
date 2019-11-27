@@ -7,6 +7,7 @@
 #include "extensions/renderer/api/automation/automation_internal_custom_bindings.h"
 #include "ui/accessibility/ax_language_detection.h"
 #include "ui/accessibility/ax_node.h"
+#include "ui/accessibility/ax_node_position.h"
 
 namespace extensions {
 
@@ -122,6 +123,9 @@ api::automation::EventType ToAutomationEvent(ax::mojom::Event event_type) {
       return api::automation::EVENT_TYPE_TEXTCHANGED;
     case ax::mojom::Event::kTextSelectionChanged:
       return api::automation::EVENT_TYPE_TEXTSELECTIONCHANGED;
+    case ax::mojom::Event::kTooltipClosed:
+    case ax::mojom::Event::kTooltipOpened:
+      return api::automation::EVENT_TYPE_NONE;
     case ax::mojom::Event::kWindowActivated:
       return api::automation::EVENT_TYPE_WINDOWACTIVATED;
     case ax::mojom::Event::kWindowDeactivated:
@@ -410,6 +414,19 @@ bool AutomationAXTreeWrapper::IsInFocusChain(int32_t node_id) {
   return true;
 }
 
+ui::AXTree::Selection AutomationAXTreeWrapper::GetUnignoredSelection() {
+  // As there is no Tree Manager, this is necessary for AXPositions to work.
+  ui::AXNodePosition::SetTree(tree());
+  ui::AXTree::Selection unignored_selection = tree()->GetUnignoredSelection();
+  ui::AXNodePosition::SetTree(nullptr);
+  return unignored_selection;
+}
+
+ui::AXNode* AutomationAXTreeWrapper::GetUnignoredNodeFromId(int32_t id) {
+  ui::AXNode* node = tree_.GetFromId(id);
+  return (node && !node->IsIgnored()) ? node : nullptr;
+}
+
 // static
 std::map<ui::AXTreeID, AutomationAXTreeWrapper*>&
 AutomationAXTreeWrapper::GetChildTreeIDReverseMap() {
@@ -418,7 +435,7 @@ AutomationAXTreeWrapper::GetChildTreeIDReverseMap() {
   return *child_tree_id_reverse_map;
 }
 
-void AutomationAXTreeWrapper::OnNodeDataWillChange(
+void AutomationAXTreeWrapper::OnNodeDataChanged(
     ui::AXTree* tree,
     const ui::AXNodeData& old_node_data,
     const ui::AXNodeData& new_node_data) {
@@ -527,6 +544,8 @@ bool AutomationAXTreeWrapper::IsEventTypeHandledByAXEventGenerator(
     case api::automation::EVENT_TYPE_MOUSEPRESSED:
     case api::automation::EVENT_TYPE_MOUSERELEASED:
     case api::automation::EVENT_TYPE_SCROLLEDTOANCHOR:
+    case api::automation::EVENT_TYPE_TOOLTIPCLOSED:
+    case api::automation::EVENT_TYPE_TOOLTIPOPENED:
     case api::automation::EVENT_TYPE_WINDOWACTIVATED:
     case api::automation::EVENT_TYPE_WINDOWDEACTIVATED:
     case api::automation::EVENT_TYPE_WINDOWVISIBILITYCHANGED:

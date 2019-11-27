@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_consistency_mode_manager_factory.h"
+#include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -26,20 +27,9 @@
 
 using signin::AccountConsistencyMethod;
 
-const base::Feature kAccountConsistencyFeature{
-    "AccountConsistency", base::FEATURE_ENABLED_BY_DEFAULT};
-const char kAccountConsistencyFeatureMethodParameter[] = "method";
-const char kAccountConsistencyFeatureMethodMirror[] = "mirror";
-const char kAccountConsistencyFeatureMethodDiceMigration[] = "dice_migration";
-const char kAccountConsistencyFeatureMethodDice[] = "dice";
-
 namespace {
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-// Preference indicating that the Dice migration should happen at the next
-// Chrome startup.
-const char kDiceMigrationOnStartupPref[] =
-    "signin.AccountReconcilor.kDiceMigrationOnStartup2";
 // Preference indicating that the Dice migraton has happened.
 const char kDiceMigrationCompletePref[] = "signin.DiceMigrationComplete";
 
@@ -51,10 +41,24 @@ enum class DiceMigrationStatus {
   kEnabled,
   kDisabledReadyForMigration,
   kDisabledNotReadyForMigration,
+  kDisabled,
 
   // This is the last value. New values should be inserted above.
   kDiceMigrationStatusCount
 };
+
+DiceMigrationStatus GetDiceMigrationStatus(
+    AccountConsistencyMethod account_consistency) {
+  switch (account_consistency) {
+    case AccountConsistencyMethod::kDice:
+      return DiceMigrationStatus::kEnabled;
+    case AccountConsistencyMethod::kDisabled:
+      return DiceMigrationStatus::kDisabled;
+    case AccountConsistencyMethod::kMirror:
+      NOTREACHED();
+      return DiceMigrationStatus::kDisabled;
+  }
+}
 #endif
 
 }  // namespace
@@ -90,23 +94,14 @@ AccountConsistencyModeManager::AccountConsistencyModeManager(Profile* profile)
   account_consistency_ = ComputeAccountConsistencyMethod(profile_);
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  bool is_ready_for_dice = IsReadyForDiceMigration(profile_);
-  if (is_ready_for_dice &&
-      signin::DiceMethodGreaterOrEqual(
-          account_consistency_, AccountConsistencyMethod::kDiceMigration)) {
-    if (account_consistency_ != AccountConsistencyMethod::kDice)
-      VLOG(1) << "Profile is migrating to Dice";
-    profile_->GetPrefs()->SetBoolean(kDiceMigrationCompletePref, true);
-    account_consistency_ = AccountConsistencyMethod::kDice;
-  }
-  UMA_HISTOGRAM_ENUMERATION(
-      kDiceMigrationStatusHistogram,
-      account_consistency_ == AccountConsistencyMethod::kDice
-          ? DiceMigrationStatus::kEnabled
-          : (is_ready_for_dice
-                 ? DiceMigrationStatus::kDisabledReadyForMigration
-                 : DiceMigrationStatus::kDisabledNotReadyForMigration),
-      DiceMigrationStatus::kDiceMigrationStatusCount);
+  // New profiles don't need Dice migration. Old profiles may need it if they
+  // were created before Dice.
+  if (profile_->IsNewProfile())
+    SetDiceMigrationCompleted();
+
+  UMA_HISTOGRAM_ENUMERATION(kDiceMigrationStatusHistogram,
+                            GetDiceMigrationStatus(account_consistency_),
+                            DiceMigrationStatus::kDiceMigrationStatusCount);
 #endif
 
   DCHECK_EQ(account_consistency_, ComputeAccountConsistencyMethod(profile_));
@@ -119,7 +114,6 @@ AccountConsistencyModeManager::~AccountConsistencyModeManager() {}
 void AccountConsistencyModeManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  registry->RegisterBooleanPref(kDiceMigrationOnStartupPref, false);
   registry->RegisterBooleanPref(kDiceMigrationCompletePref, false);
 #endif
 #if defined(OS_CHROMEOS)
@@ -145,23 +139,14 @@ bool AccountConsistencyModeManager::IsDiceEnabledForProfile(Profile* profile) {
 }
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-void AccountConsistencyModeManager::SetReadyForDiceMigration(bool is_ready) {
-  SetDiceMigrationOnStartup(profile_->GetPrefs(), is_ready);
+void AccountConsistencyModeManager::SetDiceMigrationCompleted() {
+  VLOG(1) << "Dice migration completed.";
+  profile_->GetPrefs()->SetBoolean(kDiceMigrationCompletePref, true);
 }
 
 // static
-void AccountConsistencyModeManager::SetDiceMigrationOnStartup(
-    PrefService* prefs,
-    bool migrate) {
-  VLOG(1) << "Dice migration on next startup: " << migrate;
-  prefs->SetBoolean(kDiceMigrationOnStartupPref, migrate);
-}
-
-// static
-bool AccountConsistencyModeManager::IsReadyForDiceMigration(Profile* profile) {
-  return ShouldBuildServiceForProfile(profile) &&
-         (profile->IsNewProfile() ||
-          profile->GetPrefs()->GetBoolean(kDiceMigrationOnStartupPref));
+bool AccountConsistencyModeManager::IsDiceMigrationCompleted(Profile* profile) {
+  return profile->GetPrefs()->GetBoolean(kDiceMigrationCompletePref);
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
@@ -213,14 +198,8 @@ AccountConsistencyModeManager::ComputeAccountConsistencyMethod(
   return AccountConsistencyMethod::kMirror;
 #endif
 
-  std::string method_value = base::GetFieldTrialParamValueByFeature(
-      kAccountConsistencyFeature, kAccountConsistencyFeatureMethodParameter);
-
 #if defined(OS_CHROMEOS)
-  if (chromeos::IsAccountManagerAvailable(profile))
-    return AccountConsistencyMethod::kMirror;
-
-  return (method_value == kAccountConsistencyFeatureMethodMirror ||
+  return (chromeos::IsAccountManagerAvailable(profile) ||
           profile->GetPrefs()->GetBoolean(
               prefs::kAccountConsistencyMirrorRequired))
              ? AccountConsistencyMethod::kMirror
@@ -228,16 +207,6 @@ AccountConsistencyModeManager::ComputeAccountConsistencyMethod(
 #endif
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  AccountConsistencyMethod method = AccountConsistencyMethod::kDiceMigration;
-
-  if (method_value == kAccountConsistencyFeatureMethodDiceMigration)
-    method = AccountConsistencyMethod::kDiceMigration;
-  else if (method_value == kAccountConsistencyFeatureMethodDice)
-    method = AccountConsistencyMethod::kDice;
-
-  DCHECK(signin::DiceMethodGreaterOrEqual(
-      method, AccountConsistencyMethod::kDiceMigration));
-
   // Legacy supervised users cannot get Dice.
   // TODO(droger): remove this once legacy supervised users are no longer
   // supported.
@@ -258,12 +227,7 @@ AccountConsistencyModeManager::ComputeAccountConsistencyMethod(
     return AccountConsistencyMethod::kDisabled;
   }
 
-  if (method == AccountConsistencyMethod::kDiceMigration &&
-      profile->GetPrefs()->GetBoolean(kDiceMigrationCompletePref)) {
-    return AccountConsistencyMethod::kDice;
-  }
-
-  return method;
+  return AccountConsistencyMethod::kDice;
 #endif
 
   NOTREACHED();

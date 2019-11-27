@@ -10,18 +10,17 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/containers/flat_set.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/printing/printers_map.h"
-#include "chrome/browser/chromeos/printing/printing_stubs.h"
+#include "chrome/browser/chromeos/printing/test_cups_printers_manager.h"
+#include "chrome/browser/chromeos/printing/test_printer_configurer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/printing/browser/printer_capabilities.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/printing_restrictions.h"
 #include "printing/backend/test_print_backend.h"
@@ -77,41 +76,6 @@ Printer CreateEnterprisePrinter(const std::string& id,
   return printer;
 }
 
-class TestCupsPrintersManager : public chromeos::StubCupsPrintersManager {
- public:
-  std::vector<Printer> GetPrinters(PrinterClass printer_class) const override {
-    return printers_.Get(printer_class);
-  }
-
-  bool IsPrinterInstalled(const Printer& printer) const override {
-    return installed_.contains(printer.id());
-  }
-
-  base::Optional<Printer> GetPrinter(const std::string& id) const override {
-    return printers_.Get(id);
-  }
-
-  // Add |printer| to the corresponding list in |printers_| bases on the given
-  // |printer_class|.
-  void AddPrinter(const Printer& printer, PrinterClass printer_class) {
-    printers_.Insert(printer_class, printer);
-  }
-
-  void InstallPrinter(const std::string& id) { installed_.insert(id); }
-
- private:
-  chromeos::PrintersMap printers_;
-  base::flat_set<std::string> installed_;
-};
-
-class TestPrinterConfigurer : public chromeos::StubPrinterConfigurer {
- public:
-  void SetUpPrinter(const Printer& printer,
-                    PrinterSetupCallback callback) override {
-    std::move(callback).Run(PrinterSetupResult::kSuccess);
-  }
-};
-
 // Converts JSON string to base::ListValue object.
 // On failure, returns NULL and fills |*error| string.
 std::unique_ptr<base::ListValue> GetJSONAsListValue(const std::string& json,
@@ -135,16 +99,16 @@ class LocalPrinterHandlerChromeosTest : public testing::Test {
     PrintBackend::SetPrintBackendForTesting(test_backend_.get());
     local_printer_handler_ = LocalPrinterHandlerChromeos::CreateForTesting(
         &profile_, nullptr, &printers_manager_,
-        std::make_unique<TestPrinterConfigurer>());
+        std::make_unique<chromeos::TestPrinterConfigurer>());
   }
 
  protected:
   // Must outlive |profile_|.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   // Must outlive |printers_manager_|.
   TestingProfile profile_;
   scoped_refptr<TestPrintBackend> test_backend_;
-  TestCupsPrintersManager printers_manager_;
+  chromeos::TestCupsPrintersManager printers_manager_;
   std::unique_ptr<LocalPrinterHandlerChromeos> local_printer_handler_;
 
  private:
@@ -230,7 +194,7 @@ TEST_F(LocalPrinterHandlerChromeosTest, StartGetCapabilityValidPrinter) {
   local_printer_handler_->StartGetCapability(
       "printer1", base::BindOnce(&RecordGetCapability, &fetched_caps));
 
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_TRUE(fetched_caps);
   base::DictionaryValue* dict;
@@ -257,7 +221,7 @@ TEST_F(LocalPrinterHandlerChromeosTest, StartGetCapabilityPrinterNotInstalled) {
   local_printer_handler_->StartGetCapability(
       "printer1", base::BindOnce(&RecordGetCapability, &fetched_caps));
 
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_TRUE(fetched_caps);
   base::DictionaryValue* dict;
@@ -273,7 +237,7 @@ TEST_F(LocalPrinterHandlerChromeosTest, StartGetCapabilityInvalidPrinter) {
   local_printer_handler_->StartGetCapability(
       "invalid printer", base::BindOnce(&RecordGetCapability, &fetched_caps));
 
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_TRUE(fetched_caps);
   EXPECT_TRUE(fetched_caps->is_none());
@@ -289,20 +253,26 @@ TEST_F(LocalPrinterHandlerChromeosTest, GetNativePrinterPolicies) {
                      std::make_unique<base::Value>(0));
   prefs->SetUserPref(prefs::kPrintingAllowedPinModes,
                      std::make_unique<base::Value>(1));
+  prefs->SetUserPref(prefs::kPrintingAllowedBackgroundGraphicsModes,
+                     std::make_unique<base::Value>(2));
   prefs->SetUserPref(prefs::kPrintingColorDefault,
                      std::make_unique<base::Value>(2));
   prefs->SetUserPref(prefs::kPrintingDuplexDefault,
                      std::make_unique<base::Value>(4));
   prefs->SetUserPref(prefs::kPrintingPinDefault,
                      std::make_unique<base::Value>(0));
+  prefs->SetUserPref(prefs::kPrintingBackgroundGraphicsDefault,
+                     std::make_unique<base::Value>(0));
 
   base::Value expected_policies(base::Value::Type::DICTIONARY);
   expected_policies.SetKey(kAllowedColorModes, base::Value(1));
   expected_policies.SetKey(kAllowedDuplexModes, base::Value(0));
   expected_policies.SetKey(kAllowedPinModes, base::Value(1));
+  expected_policies.SetKey(kAllowedBackgroundGraphicsModes, base::Value(2));
   expected_policies.SetKey(kDefaultColorMode, base::Value(2));
   expected_policies.SetKey(kDefaultDuplexMode, base::Value(4));
   expected_policies.SetKey(kDefaultPinMode, base::Value(0));
+  expected_policies.SetKey(kDefaultBackgroundGraphicsMode, base::Value(0));
 
   EXPECT_EQ(expected_policies,
             local_printer_handler_->GetNativePrinterPolicies());

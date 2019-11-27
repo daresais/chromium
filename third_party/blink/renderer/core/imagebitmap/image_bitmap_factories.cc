@@ -49,14 +49,14 @@
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -298,64 +298,67 @@ void ImageBitmapFactories::ImageBitmapLoader::ContextDestroyed(
 }
 
 void ImageBitmapFactories::ImageBitmapLoader::DidFinishLoading() {
-  DOMArrayBuffer* array_buffer = loader_->ArrayBufferResult();
+  auto contents = loader_->TakeContents();
   loader_.reset();
-  if (!array_buffer) {
+  if (!contents.IsValid()) {
     RejectPromise(kAllocationFailureImageBitmapRejectionReason);
     return;
   }
-  ScheduleAsyncImageBitmapDecoding(array_buffer);
+  ScheduleAsyncImageBitmapDecoding(std::move(contents));
 }
 
 void ImageBitmapFactories::ImageBitmapLoader::DidFail(FileErrorCode) {
   RejectPromise(kUndecodableImageBitmapRejectionReason);
 }
 
-void ImageBitmapFactories::ImageBitmapLoader::ScheduleAsyncImageBitmapDecoding(
-    DOMArrayBuffer* array_buffer) {
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      Thread::Current()->GetTaskRunner();
-  worker_pool::PostTask(
-      FROM_HERE,
-      CrossThreadBindOnce(
-          &ImageBitmapFactories::ImageBitmapLoader::DecodeImageOnDecoderThread,
-          WrapCrossThreadPersistent(this), std::move(task_runner),
-          WrapCrossThreadPersistent(array_buffer), options_->premultiplyAlpha(),
-          options_->colorSpaceConversion()));
-}
-
-void ImageBitmapFactories::ImageBitmapLoader::DecodeImageOnDecoderThread(
+namespace {
+void DecodeImageOnDecoderThread(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    DOMArrayBuffer* array_buffer,
-    const String& premultiply_alpha_option,
-    const String& color_space_conversion_option) {
-  DCHECK(!IsMainThread());
-
-  ImageDecoder::AlphaOption alpha_op = ImageDecoder::kAlphaPremultiplied;
-  if (premultiply_alpha_option == "none")
-    alpha_op = ImageDecoder::kAlphaNotPremultiplied;
-  bool ignore_color_space = false;
-  if (color_space_conversion_option == "none")
-    ignore_color_space = true;
+    ArrayBufferContents contents,
+    ImageDecoder::AlphaOption alpha_option,
+    ColorBehavior color_behavior,
+    WTF::CrossThreadOnceFunction<void(sk_sp<SkImage>)> result_callback) {
   const bool data_complete = true;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
-      SegmentReader::CreateFromSkData(SkData::MakeWithoutCopy(
-          array_buffer->Data(), array_buffer->ByteLength())),
-      data_complete, alpha_op, ImageDecoder::kDefaultBitDepth,
-      ignore_color_space ? ColorBehavior::Ignore() : ColorBehavior::Tag());
+      SegmentReader::CreateFromSkData(
+          SkData::MakeWithoutCopy(contents.Data(), contents.DataLength())),
+      data_complete, alpha_option, ImageDecoder::kDefaultBitDepth,
+      color_behavior);
   sk_sp<SkImage> frame;
   if (decoder) {
     frame = ImageBitmap::GetSkImageFromDecoder(std::move(decoder));
   }
   PostCrossThreadTask(
       *task_runner, FROM_HERE,
-      CrossThreadBindOnce(&ImageBitmapFactories::ImageBitmapLoader::
-                              ResolvePromiseOnOriginalThread,
-                          WrapCrossThreadPersistent(this), std::move(frame)));
+      CrossThreadBindOnce(std::move(result_callback), std::move(frame)));
+}
+}  // namespace
+
+void ImageBitmapFactories::ImageBitmapLoader::ScheduleAsyncImageBitmapDecoding(
+    ArrayBufferContents contents) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      Thread::Current()->GetTaskRunner();
+  ImageDecoder::AlphaOption alpha_option =
+      options_->premultiplyAlpha() != "none"
+          ? ImageDecoder::AlphaOption::kAlphaPremultiplied
+          : ImageDecoder::AlphaOption::kAlphaNotPremultiplied;
+  ColorBehavior color_behavior = options_->colorSpaceConversion() == "none"
+                                     ? ColorBehavior::Ignore()
+                                     : ColorBehavior::Tag();
+  worker_pool::PostTask(
+      FROM_HERE,
+      CrossThreadBindOnce(
+          DecodeImageOnDecoderThread, std::move(task_runner),
+          std::move(contents), alpha_option, color_behavior,
+          CrossThreadBindOnce(&ImageBitmapFactories::ImageBitmapLoader::
+                                  ResolvePromiseOnOriginalThread,
+                              WrapCrossThreadWeakPersistent(this))));
 }
 
 void ImageBitmapFactories::ImageBitmapLoader::ResolvePromiseOnOriginalThread(
     sk_sp<SkImage> frame) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!frame) {
     RejectPromise(kUndecodableImageBitmapRejectionReason);
     return;
@@ -364,7 +367,7 @@ void ImageBitmapFactories::ImageBitmapLoader::ResolvePromiseOnOriginalThread(
   DCHECK(frame->height());
 
   scoped_refptr<StaticBitmapImage> image =
-      StaticBitmapImage::Create(std::move(frame));
+      UnacceleratedStaticBitmapImage::Create(std::move(frame));
   image->SetOriginClean(true);
   ImageBitmap* image_bitmap = ImageBitmap::Create(image, crop_rect_, options_);
   if (image_bitmap && image_bitmap->BitmapImage()) {

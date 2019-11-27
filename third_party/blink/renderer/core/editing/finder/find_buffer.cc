@@ -102,15 +102,16 @@ bool ShouldIgnoreContents(const Node& node) {
   if (!element)
     return false;
   return (!element->ShouldSerializeEndTag() && !IsHTMLInputElement(*element)) ||
-         IsHTMLIFrameElement(*element) || IsHTMLImageElement(*element) ||
-         IsHTMLLegendElement(*element) || IsHTMLMeterElement(*element) ||
-         IsHTMLObjectElement(*element) || IsHTMLProgressElement(*element) ||
-         (IsHTMLSelectElement(*element) &&
-          ToHTMLSelectElement(*element).UsesMenuList()) ||
-         IsHTMLStyleElement(*element) || IsHTMLScriptElement(*element) ||
-         IsHTMLVideoElement(*element) || IsHTMLAudioElement(*element) ||
+         IsA<HTMLIFrameElement>(*element) || IsHTMLImageElement(*element) ||
+         IsA<HTMLMeterElement>(*element) || IsHTMLObjectElement(*element) ||
+         IsA<HTMLProgressElement>(*element) ||
+         (IsA<HTMLSelectElement>(*element) &&
+          To<HTMLSelectElement>(*element).UsesMenuList()) ||
+         IsA<HTMLStyleElement>(*element) || IsA<HTMLScriptElement>(*element) ||
+         IsHTMLVideoElement(*element) || IsA<HTMLAudioElement>(*element) ||
          (element->GetDisplayLockContext() &&
-          !element->GetDisplayLockContext()->IsActivatable());
+          !element->GetDisplayLockContext()->IsActivatable(
+              DisplayLockActivationReason::kFindInPage));
 }
 
 Node* GetNonSearchableAncestor(const Node& node) {
@@ -224,7 +225,11 @@ EphemeralRangeInFlatTree FindBuffer::FindMatchInRange(
 std::unique_ptr<FindBuffer::Results> FindBuffer::FindMatches(
     const WebString& search_text,
     const blink::FindOptions options) const {
-  if (buffer_.IsEmpty() || search_text.length() > buffer_.size())
+  // We should return empty result if it's impossible to get a match (buffer is
+  // empty or too short), or when something went wrong in layout, in which case
+  // |offset_mapping_| is null.
+  if (buffer_.IsEmpty() || search_text.length() > buffer_.size() ||
+      !offset_mapping_)
     return std::make_unique<Results>();
   String search_text_16_bit = search_text;
   search_text_16_bit.Ensure16Bit();
@@ -234,7 +239,7 @@ std::unique_ptr<FindBuffer::Results> FindBuffer::FindMatches(
 
 bool FindBuffer::PushScopedForcedUpdateIfNeeded(const Element& element) {
   if (auto* context = element.GetDisplayLockContext()) {
-    DCHECK(context->IsActivatable());
+    DCHECK(context->IsActivatable(DisplayLockActivationReason::kFindInPage));
     scoped_forced_update_list_.push_back(context->GetScopedForcedUpdate());
     return true;
   }
@@ -244,7 +249,8 @@ bool FindBuffer::PushScopedForcedUpdateIfNeeded(const Element& element) {
 void FindBuffer::CollectScopedForcedUpdates(Node& start_node,
                                             const Node* search_range_end_node,
                                             const Node* node_after_block) {
-  if (!RuntimeEnabledFeatures::DisplayLockingEnabled())
+  if (!RuntimeEnabledFeatures::DisplayLockingEnabled(
+          start_node.GetExecutionContext()))
     return;
   if (start_node.GetDocument().LockedDisplayLockCount() ==
       start_node.GetDocument().ActivationBlockingDisplayLockCount())
@@ -320,7 +326,7 @@ void FindBuffer::CollectTextUntilBlockBoundary(
       // Move the node so we wouldn't encounter this node or its descendants
       // later.
       if (!IsHTMLWBRElement(To<HTMLElement>(*node)))
-        buffer_.push_back(kObjectReplacementCharacter);
+        buffer_.push_back(kMaxCodepoint);
       node = FlatTreeTraversal::NextSkippingChildren(*node);
       continue;
     }
@@ -455,7 +461,6 @@ void FindBuffer::AddTextToBuffer(const Text& text_node,
         mapped_text.Substring(unit.TextContentStart(),
                               unit.TextContentEnd() - unit.TextContentStart());
     text_for_unit.Ensure16Bit();
-    text_for_unit.Replace('\n', kObjectReplacementCharacter);
     buffer_.Append(text_for_unit.Characters16(), text_for_unit.length());
     last_unit_end = unit.TextContentEnd();
   }

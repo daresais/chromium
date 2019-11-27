@@ -22,6 +22,7 @@
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "base/values.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/apps_launch.h"
 #include "chrome/browser/apps/launch_service/launch_service.h"
@@ -31,6 +32,7 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/extensions/extension_checkup.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/obsolete_system/obsolete_system.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -54,12 +56,11 @@
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_tab_provider.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/welcome/helpers.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/prefs/pref_service.h"
-#include "components/rappor/public/rappor_utils.h"
-#include "components/rappor/rappor_service_impl.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/storage_partition.h"
@@ -67,10 +68,6 @@
 #include "google_apis/google_api_keys.h"
 #include "rlz/buildflags/buildflags.h"
 #include "ui/base/buildflags.h"
-
-#if !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/webui/welcome/nux_helper.h"
-#endif  // !defined(OS_CHROMEOS)
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -80,9 +77,9 @@
 #endif
 
 #if defined(OS_WIN)
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/browser/win/conflicts/incompatible_applications_updater.h"
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/browser/notifications/notification_platform_bridge_win.h"
 #include "chrome/browser/shell_integration_win.h"
 #include "chrome/browser/ui/startup/credential_provider_signin_dialog_win.h"
@@ -96,11 +93,6 @@
 #if BUILDFLAG(ENABLE_RLZ)
 #include "components/google/core/common/google_util.h"
 #include "components/rlz/rlz_tracker.h"  // nogncheck
-#endif
-
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS) && !defined(OS_ANDROID) && \
-    !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/startup/supervised_users_deprecated_infobar_delegate.h"
 #endif
 
 namespace {
@@ -255,13 +247,13 @@ void RecordLaunchModeHistogram(LaunchMode mode) {
       (mode = GetLaunchModeFast()) == LM_TO_BE_DECIDED) {
     // The mode couldn't be determined with a fast path. Perform a more
     // expensive evaluation out of the critical startup path.
-    base::PostTaskWithTraits(FROM_HERE,
-                             {base::TaskPriority::BEST_EFFORT,
-                              base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-                             base::BindOnce([]() {
-                               base::UmaHistogramSparse(kHistogramName,
-                                                        GetLaunchModeSlow());
-                             }));
+    base::PostTask(FROM_HERE,
+                   {base::ThreadPool(), base::TaskPriority::BEST_EFFORT,
+                    base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+                   base::BindOnce([]() {
+                     base::UmaHistogramSparse(kHistogramName,
+                                              GetLaunchModeSlow());
+                   }));
   } else {
     base::UmaHistogramSparse(kHistogramName, mode);
   }
@@ -339,7 +331,6 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   UMA_HISTOGRAM_COUNTS_100(
       "Startup.BrowserLaunchURLCount",
       static_cast<base::HistogramBase::Sample>(urls_to_open.size()));
-  RecordRapporOnStartupURLs(urls_to_open);
 
   DCHECK(profile);
   profile_ = profile;
@@ -464,7 +455,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
   if (!profile_ && browser)
     profile_ = browser->profile();
 
-  if (!browser || !browser->is_type_tabbed()) {
+  if (!browser || !browser->is_type_normal()) {
     // Startup browsers are not counted as being created by a user_gesture
     // because of historical accident, even though the startup browser was
     // created in response to the user clicking on chrome. There was an
@@ -518,12 +509,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
       browser->tab_strip_model()->ActivateTabAt(0);
   }
 
-  // The default behavior is to show the window, as expressed by the default
-  // value of StartupBrowserCreated::show_main_browser_window_. If this was set
-  // to true ahead of this place, it means another task must have been spawned
-  // to take care of that.
-  if (!browser_creator_ || browser_creator_->show_main_browser_window())
-    browser->window()->Show();
+  browser->window()->Show();
 
   return browser;
 }
@@ -602,15 +588,16 @@ void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
   const bool is_incognito_or_guest = profile_->IsOffTheRecord();
   bool is_post_crash_launch = HasPendingUncleanExit(profile_);
   bool has_incompatible_applications = false;
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_WIN)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (is_post_crash_launch) {
     // Check if there are any incompatible applications cached from the last
     // Chrome run.
     has_incompatible_applications =
         IncompatibleApplicationsUpdater::HasCachedApplications();
   }
-
-  nux::JoinOnboardingGroup(profile_);
+#endif
+  welcome::JoinOnboardingGroup(profile_);
 #endif
 
   // Presentation of promotional and/or educational tabs may be controlled via
@@ -633,17 +620,20 @@ void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
         !SessionStartupPref::TypeHasRecommendedValue(profile_->GetPrefs());
   }
 
-  bool onboarding_enabled = true;
+  bool welcome_enabled = true;
 #if !defined(OS_CHROMEOS)
-  onboarding_enabled = nux::IsNuxOnboardingEnabled(profile_) &&
-                       nux::DoesOnboardingHaveModulesToShow(profile_);
+  welcome_enabled =
+      welcome::IsEnabled(profile_) && welcome::HasModulesToShow(profile_);
 #endif  // !defined(OS_CHROMEOS)
 
-  StartupTabs tabs =
-      DetermineStartupTabs(StartupTabProviderImpl(), cmd_line_tabs,
-                           process_startup, is_incognito_or_guest,
-                           is_post_crash_launch, has_incompatible_applications,
-                           promotional_tabs_enabled, onboarding_enabled);
+  bool serve_extensions_page =
+      extensions::ShouldShowExtensionsCheckupOnStartup(profile_);
+
+  StartupTabs tabs = DetermineStartupTabs(
+      StartupTabProviderImpl(), cmd_line_tabs, process_startup,
+      is_incognito_or_guest, is_post_crash_launch,
+      has_incompatible_applications, promotional_tabs_enabled, welcome_enabled,
+      serve_extensions_page);
 
   // Return immediately if we start an async restore, since the remainder of
   // that process is self-contained.
@@ -695,7 +685,8 @@ StartupTabs StartupBrowserCreatorImpl::DetermineStartupTabs(
     bool is_post_crash_launch,
     bool has_incompatible_applications,
     bool promotional_tabs_enabled,
-    bool onboarding_enabled) {
+    bool welcome_enabled,
+    bool serve_extensions_page) {
   // Only the New Tab Page or command line URLs may be shown in incognito mode.
   // A similar policy exists for crash recovery launches, to prevent getting the
   // user stuck in a crash loop.
@@ -718,51 +709,60 @@ StartupTabs StartupBrowserCreatorImpl::DetermineStartupTabs(
   // may be shown alongside command-line tabs.
   StartupTabs tabs = provider.GetResetTriggerTabs(profile_);
 
-  // Maybe add any tabs which the user has previously pinned.
-  AppendTabs(provider.GetPinnedTabs(command_line_, profile_), &tabs);
-
-  // URLs passed on the command line supersede all others.
+  // URLs passed on the command line supersede all others, except pinned tabs.
   AppendTabs(cmd_line_tabs, &tabs);
-  if (!cmd_line_tabs.empty())
-    return tabs;
+  if (cmd_line_tabs.empty()) {
+    // A Master Preferences file provided with this distribution may specify
+    // tabs to be displayed on first run, overriding all non-command-line tabs,
+    // including the profile reset tab.
+    StartupTabs distribution_tabs =
+        provider.GetDistributionFirstRunTabs(browser_creator_);
+    if (!distribution_tabs.empty())
+      return distribution_tabs;
 
-  // A Master Preferences file provided with this distribution may specify
-  // tabs to be displayed on first run, overriding all non-command-line tabs,
-  // including the profile reset tab.
-  StartupTabs distribution_tabs =
-      provider.GetDistributionFirstRunTabs(browser_creator_);
-  if (!distribution_tabs.empty())
-    return distribution_tabs;
+    StartupTabs onboarding_tabs;
+    if (promotional_tabs_enabled) {
+      // This is a launch from a prompt presented to an inactive user who chose
+      // to open Chrome and is being brought to a specific URL for this one
+      // launch. Launch the browser with the desired welcome back URL in the
+      // foreground and the other ordinary URLs (e.g., a restored session) in
+      // the background.
+      StartupTabs welcome_back_tabs = provider.GetWelcomeBackTabs(
+          profile_, browser_creator_, process_startup);
+      AppendTabs(welcome_back_tabs, &tabs);
 
-  StartupTabs onboarding_tabs;
-  if (promotional_tabs_enabled) {
-    // This is a launch from a prompt presented to an inactive user who chose to
-    // open Chrome and is being brought to a specific URL for this one launch.
-    // Launch the browser with the desired welcome back URL in the foreground
-    // and the other ordinary URLs (e.g., a restored session) in the background.
-    StartupTabs welcome_back_tabs = provider.GetWelcomeBackTabs(
-        profile_, browser_creator_, process_startup);
-    AppendTabs(welcome_back_tabs, &tabs);
+      if (welcome_enabled) {
+        // Policies for welcome (e.g., first run) may show promotional and
+        // introductory content depending on a number of system status factors,
+        // including OS and whether or not this is First Run.
+        onboarding_tabs = provider.GetOnboardingTabs(profile_);
+        AppendTabs(onboarding_tabs, &tabs);
+      }
+    }
 
-    if (onboarding_enabled) {
-      // Policies for onboarding (e.g., first run) may show promotional and
-      // introductory content depending on a number of system status factors,
-      // including OS and whether or not this is First Run.
-      onboarding_tabs = provider.GetOnboardingTabs(profile_);
-      AppendTabs(onboarding_tabs, &tabs);
+    // If the user has set the preference indicating URLs to show on opening,
+    // read and add those.
+    StartupTabs prefs_tabs =
+        provider.GetPreferencesTabs(command_line_, profile_);
+    AppendTabs(prefs_tabs, &tabs);
+
+    // Potentially add the New Tab Page. Onboarding content is designed to
+    // replace (and eventually funnel the user to) the NTP.
+    if (onboarding_tabs.empty()) {
+      // Potentially show the extensions page in addition to the NTP if the user
+      // is part of the extensions checkup experiment and they have not been
+      // redirected to the extensions page upon startup before.
+      AppendTabs(provider.GetExtensionCheckupTabs(serve_extensions_page),
+                 &tabs);
+      // URLs from preferences are explicitly meant to override showing the NTP.
+      if (prefs_tabs.empty()) {
+        AppendTabs(provider.GetNewTabPageTabs(command_line_, profile_), &tabs);
+      }
     }
   }
 
-  // If the user has set the preference indicating URLs to show on opening,
-  // read and add those.
-  StartupTabs prefs_tabs = provider.GetPreferencesTabs(command_line_, profile_);
-  AppendTabs(prefs_tabs, &tabs);
-
-  // Potentially add the New Tab Page. Onboarding content is designed to
-  // replace (and eventually funnel the user to) the NTP. Likewise, URLs
-  // from preferences are explicitly meant to override showing the NTP.
-  if (onboarding_tabs.empty() && prefs_tabs.empty())
-    AppendTabs(provider.GetNewTabPageTabs(command_line_, profile_), &tabs);
+  // Maybe add any tabs which the user has previously pinned.
+  AppendTabs(provider.GetPinnedTabs(command_line_, profile_), &tabs);
 
   return tabs;
 }
@@ -827,9 +827,8 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
   if (!browser || !profile_ || browser->tab_strip_model()->count() == 0)
     return;
 
-  if (HasPendingUncleanExit(browser->profile())) {
-    SessionCrashedBubble::Show(browser);
-  }
+  if (HasPendingUncleanExit(browser->profile()))
+    SessionCrashedBubble::ShowIfNotOffTheRecordProfile(browser);
 
   bool show_bad_flags_security_warnings = ShouldShowBadFlagsSecurityWarnings();
   if (command_line_.HasSwitch(switches::kEnableAutomation) &&
@@ -868,42 +867,20 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
         ObsoleteSystemInfoBarDelegate::Create(infobar_service);
     }
 
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS) && !defined(OS_ANDROID) && \
-    !defined(OS_CHROMEOS)
-    if (profile_->IsLegacySupervised())
-      SupervisedUsersDeprecatedInfoBarDelegate::Create(infobar_service);
-#endif
-
 #if !defined(OS_CHROMEOS)
     if (!command_line_.HasSwitch(switches::kNoDefaultBrowserCheck)) {
-      // Generally, the default browser prompt should not be shown on first
-      // run. However, when the set-as-default dialog has been suppressed, we
-      // need to allow it.
-      if (!is_first_run_ ||
-          (browser_creator_ &&
-           browser_creator_->is_default_browser_dialog_suppressed())) {
+      // The default browser prompt should only be shown after the first run.
+      if (!is_first_run_)
         ShowDefaultBrowserPrompt(profile_);
-      }
     }
 #endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
-    auto* host_content_settings_map =
-        HostContentSettingsMapFactory::GetForProfile(profile_);
     if (FlashDeprecationInfoBarDelegate::ShouldDisplayFlashDeprecation(
-            host_content_settings_map)) {
-      FlashDeprecationInfoBarDelegate::Create(infobar_service,
-                                              host_content_settings_map);
+            profile_)) {
+      FlashDeprecationInfoBarDelegate::Create(infobar_service, profile_);
     }
 #endif
-  }
-}
-
-void StartupBrowserCreatorImpl::RecordRapporOnStartupURLs(
-    const std::vector<GURL>& urls_to_open) {
-  for (const GURL& url : urls_to_open) {
-    rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
-                                            "Startup.BrowserLaunchURL", url);
   }
 }
 

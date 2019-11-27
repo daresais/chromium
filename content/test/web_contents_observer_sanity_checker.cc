@@ -183,7 +183,6 @@ void WebContentsObserverSanityChecker::DidStartNavigation(
     NavigationHandle* navigation_handle) {
   CHECK(!NavigationIsOngoing(navigation_handle));
 
-  CHECK(navigation_handle->GetNetErrorCode() == net::OK);
   CHECK(!navigation_handle->HasCommitted());
   CHECK(!navigation_handle->IsErrorPage());
   CHECK_EQ(navigation_handle->GetWebContents(), web_contents());
@@ -245,10 +244,11 @@ void WebContentsObserverSanityChecker::DocumentAvailableInMainFrame() {
 }
 
 void WebContentsObserverSanityChecker::DocumentOnLoadCompletedInMainFrame() {
+  CHECK(web_contents()->IsDocumentOnLoadCompletedInMainFrame());
   AssertMainFrameExists();
 }
 
-void WebContentsObserverSanityChecker::DocumentLoadedInFrame(
+void WebContentsObserverSanityChecker::DOMContentLoaded(
     RenderFrameHost* render_frame_host) {
   AssertRenderFrameExists(render_frame_host);
 }

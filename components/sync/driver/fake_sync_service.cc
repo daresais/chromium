@@ -9,6 +9,7 @@
 #include "components/sync/driver/sync_token_status.h"
 #include "components/sync/engine/cycle/sync_cycle_snapshot.h"
 #include "components/sync/syncable/user_share.h"
+#include "crypto/ec_private_key.h"
 
 namespace syncer {
 
@@ -94,11 +95,16 @@ bool FakeSyncService::RequiresClientUpgrade() const {
   return false;
 }
 
+std::unique_ptr<crypto::ECPrivateKey>
+FakeSyncService::GetExperimentalAuthenticationKey() const {
+  return nullptr;
+}
+
 UserShare* FakeSyncService::GetUserShare() const {
   return user_share_.get();
 }
 
-void FakeSyncService::ReadyForStartChanged(ModelType type) {}
+void FakeSyncService::DataTypePreconditionChanged(ModelType type) {}
 
 syncer::SyncTokenStatus FakeSyncService::GetSyncTokenStatusForDebugging()
     const {
@@ -155,6 +161,12 @@ void FakeSyncService::GetAllNodesForDebugging(
     const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback) {}
 
 void FakeSyncService::SetInvalidationsForSessionsEnabled(bool enabled) {}
+
+UserDemographicsResult FakeSyncService::GetUserNoisedBirthYearAndGender(
+    base::Time now) {
+  return UserDemographicsResult::ForStatus(
+      UserDemographicsStatus::kIneligibleDemographicsData);
+}
 
 void FakeSyncService::Shutdown() {}
 

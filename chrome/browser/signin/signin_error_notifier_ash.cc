@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/account_manager/account_manager_util.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -48,7 +49,7 @@
 namespace {
 
 constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
-constexpr char kSecondaryAccountNotificationIdSuffix[] = "secondary-account";
+constexpr char kSecondaryAccountNotificationIdSuffix[] = "/secondary-account";
 
 void HandleDeviceAccountReauthNotificationClick(
     base::Optional<int> button_index) {
@@ -75,15 +76,13 @@ SigninErrorNotifier::SigninErrorNotifier(SigninErrorController* controller,
       identity_manager_(IdentityManagerFactory::GetForProfile(profile_)),
       account_manager_(g_browser_process->platform_part()
                            ->GetAccountManagerFactory()
-                           ->GetAccountManager(profile_->GetPath().value())),
-      weak_factory_(this) {
+                           ->GetAccountManager(profile_->GetPath().value())) {
   DCHECK(account_manager_);
   // Create a unique notification ID for this profile.
   device_account_notification_id_ =
       kProfileSigninNotificationId + profile->GetProfileUserName();
   secondary_account_notification_id_ =
-      std::string(kProfileSigninNotificationId) +
-      kSecondaryAccountNotificationIdSuffix;
+      device_account_notification_id_ + kSecondaryAccountNotificationIdSuffix;
 
   error_controller_->AddObserver(this);
   OnErrorChanged();
@@ -127,7 +126,7 @@ void SigninErrorNotifier::OnErrorChanged() {
     return;
   }
 
-  const std::string error_account_id = error_controller_->error_account_id();
+  const CoreAccountId error_account_id = error_controller_->error_account_id();
   if (error_account_id ==
       identity_manager_->GetPrimaryAccountInfo().account_id) {
     HandleDeviceAccountError();
@@ -178,7 +177,7 @@ void SigninErrorNotifier::HandleDeviceAccountError() {
 }
 
 void SigninErrorNotifier::HandleSecondaryAccountError(
-    const std::string& account_id) {
+    const CoreAccountId& account_id) {
   account_manager_->GetAccounts(base::BindOnce(
       &SigninErrorNotifier::OnGetAccounts, weak_factory_.GetWeakPtr()));
 }

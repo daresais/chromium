@@ -14,6 +14,7 @@
 
 namespace gpu {
 class CommandBufferTaskExecutor;
+class SingleTaskSequence;
 #if BUILDFLAG(ENABLE_VULKAN)
 class VulkanImplementation;
 #endif
@@ -42,17 +43,19 @@ class TestGpuServiceHolder {
   //
   // If specific feature flags or GpuPreferences are needed for a specific test,
   // a separate instance of this class can be created.
+  //
+  // By default the instance created by GetInstance() is destroyed after each
+  // gtest completes -- it only applies to gtest because it uses gtest hooks. If
+  // this isn't desired call DoNotResetOnTestExit() before first use.
   static TestGpuServiceHolder* GetInstance();
 
   // Resets the singleton instance, joining the GL thread. This is useful for
   // tests that individually initialize and tear down GL.
   static void ResetInstance();
 
-  // Calling this method ensures that GetInstance() is destroyed after each
-  // gtest completes -- it only applies to gtest because it uses gtest hooks. A
-  // subsequent call to GetInstance() will create a new instance. Safe to call
-  // more than once.
-  static void DestroyInstanceAfterEachTest();
+  // Don't reset global instance on gtest exit. Must be called before
+  // GetInstance().
+  static void DoNotResetOnTestExit();
 
   explicit TestGpuServiceHolder(const gpu::GpuPreferences& preferences);
   ~TestGpuServiceHolder();
@@ -68,6 +71,8 @@ class TestGpuServiceHolder {
   gpu::CommandBufferTaskExecutor* task_executor() {
     return task_executor_.get();
   }
+
+  void ScheduleGpuTask(base::OnceClosure callback);
 
   bool is_vulkan_enabled() {
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -90,6 +95,8 @@ class TestGpuServiceHolder {
   // These should only be created and deleted on the gpu thread.
   std::unique_ptr<GpuServiceImpl> gpu_service_;
   std::unique_ptr<gpu::CommandBufferTaskExecutor> task_executor_;
+  // This is used to schedule gpu tasks in sequence.
+  std::unique_ptr<gpu::SingleTaskSequence> gpu_task_sequence_;
 #if BUILDFLAG(ENABLE_VULKAN)
   std::unique_ptr<gpu::VulkanImplementation> vulkan_implementation_;
 #endif

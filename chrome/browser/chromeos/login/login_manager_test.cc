@@ -16,11 +16,13 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
 #include "chrome/browser/chromeos/login/test/fake_gaia_mixin.h"
+#include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/account_id/account_id.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -117,11 +119,9 @@ bool LoginManagerTest::AddUserToSession(const UserContext& user_context) {
     ADD_FAILURE();
     return false;
   }
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
+  SessionStateWaiter waiter;
   controller->Login(user_context, SigninSpecifics());
-  observer.Wait();
+  waiter.Wait();
   const user_manager::UserList& logged_users =
       user_manager::UserManager::Get()->GetLoggedInUsers();
   for (user_manager::UserList::const_iterator it = logged_users.begin();

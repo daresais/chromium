@@ -4,29 +4,33 @@
 
 #include "content/browser/indexed_db/transaction_impl.h"
 
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/task/post_task.h"
 #include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/indexed_db/indexed_db_callback_helpers.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/indexed_db/indexed_db_dispatcher_host.h"
+#include "content/browser/indexed_db/indexed_db_factory_impl.h"
 #include "content/browser/indexed_db/indexed_db_transaction.h"
 #include "content/browser/indexed_db/indexed_db_value.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/blob/blob_storage_context.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_database_exception.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 
 namespace content {
 namespace {
 const char kInvalidBlobUuid[] = "Blob does not exist";
 const char kInvalidBlobFilePath[] = "Blob file path is invalid";
 
-void LogUMAPutBlobCount(size_t blob_count) {
-  UMA_HISTOGRAM_COUNTS_1000("WebCore.IndexedDB.PutBlobsCount", blob_count);
+IndexedDBDatabaseError CreateBackendAbortError() {
+  return IndexedDBDatabaseError(blink::mojom::IDBException::kAbortError,
+                                "Backend aborted error");
 }
 
 }  // namespace
@@ -105,10 +109,11 @@ void TransactionImpl::CreateObjectStore(int64_t object_store_id,
   if (!connection->IsConnected())
     return;
 
-  // Note: This doesn't schedule a task on the transaction because the
-  // SetIndexKeys call path isn't asynchronous.
-  connection->database()->CreateObjectStore(transaction_.get(), object_store_id,
-                                            name, key_path, auto_increment);
+  transaction_->ScheduleTask(
+      blink::mojom::IDBTaskType::Preemptive,
+      BindWeakOperation(&IndexedDBDatabase::CreateObjectStoreOperation,
+                        connection->database()->AsWeakPtr(), object_store_id,
+                        name, key_path, auto_increment));
 }
 
 void TransactionImpl::DeleteObjectStore(int64_t object_store_id) {
@@ -126,8 +131,12 @@ void TransactionImpl::DeleteObjectStore(int64_t object_store_id) {
   if (!connection->IsConnected())
     return;
 
-  connection->database()->DeleteObjectStore(transaction_.get(),
-                                            object_store_id);
+  if (!connection->database()->IsObjectStoreIdInMetadata(object_store_id))
+    return;
+
+  transaction_->ScheduleTask(
+      BindWeakOperation(&IndexedDBDatabase::DeleteObjectStoreOperation,
+                        connection->database()->AsWeakPtr(), object_store_id));
 }
 
 void TransactionImpl::Put(
@@ -136,7 +145,7 @@ void TransactionImpl::Put(
     const blink::IndexedDBKey& key,
     blink::mojom::IDBPutMode mode,
     const std::vector<blink::IndexedDBIndexKeys>& index_keys,
-    blink::mojom::IDBCallbacksAssociatedPtrInfo callbacks_info) {
+    blink::mojom::IDBTransaction::PutCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(dispatcher_host_);
 
@@ -147,7 +156,6 @@ void TransactionImpl::Put(
     result.code = IOHelper::LoadResultCode::kSuccess;
     result.value = std::move(value_ptr);
     result.blob_info = std::vector<IndexedDBBlobInfo>();
-    LogUMAPutBlobCount(result.blob_info.size());
   } else {
     // TODO(crbug.com/932869): Remove IO thread hop entirely.
     base::WaitableEvent signal_when_finished(
@@ -156,7 +164,7 @@ void TransactionImpl::Put(
     // |io_helper_| is owned by |this| and this call is synchronized with a
     // WaitableEvent, so |io_helper_| is guaranteed to remain alive throughout
     // the duration of the LoadBlobsOnIOThread() invocation.
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&TransactionImpl::IOHelper::LoadBlobsOnIOThread,
                        base::Unretained(io_helper_.get()), std::move(value_ptr),
@@ -165,16 +173,19 @@ void TransactionImpl::Put(
   }
 
   switch (result.code) {
-    case IOHelper::LoadResultCode::kNoop:
+    case IOHelper::LoadResultCode::kNoop: {
+      IndexedDBDatabaseError error = CreateBackendAbortError();
+      std::move(callback).Run(
+          blink::mojom::IDBTransactionPutResult::NewErrorResult(
+              blink::mojom::IDBError::New(error.code(), error.message())));
       return;
+    }
     case IOHelper::LoadResultCode::kAbort: {
-      IndexedDBDatabaseError error(blink::kWebIDBDatabaseExceptionUnknownError,
+      IndexedDBDatabaseError error(blink::mojom::IDBException::kUnknownError,
                                    kInvalidBlobUuid);
-      scoped_refptr<IndexedDBCallbacks> callbacks(new IndexedDBCallbacks(
-          dispatcher_host_->AsWeakPtr(), origin_, std::move(callbacks_info),
-          dispatcher_host_->context()->TaskRunner()));
-
-      callbacks->OnError(error);
+      std::move(callback).Run(
+          blink::mojom::IDBTransactionPutResult::NewErrorResult(
+              blink::mojom::IDBError::New(error.code(), error.message())));
 
       if (!transaction_)
         return;
@@ -183,25 +194,36 @@ void TransactionImpl::Put(
       if (!connection->IsConnected())
         return;
 
-      connection->AbortTransaction(transaction_.get(), error);
+      connection->AbortTransactionAndTearDownOnError(transaction_.get(), error);
       return;
     }
     case IOHelper::LoadResultCode::kInvalidBlobPath: {
+      IndexedDBDatabaseError error = CreateBackendAbortError();
+      std::move(callback).Run(
+          blink::mojom::IDBTransactionPutResult::NewErrorResult(
+              blink::mojom::IDBError::New(error.code(), error.message())));
       mojo::ReportBadMessage(kInvalidBlobFilePath);
       return;
     }
     case IOHelper::LoadResultCode::kSuccess: {
-      if (!transaction_)
+      if (!transaction_) {
+        IndexedDBDatabaseError error(blink::mojom::IDBException::kUnknownError,
+                                     "Unknown transaction.");
+        std::move(callback).Run(
+            blink::mojom::IDBTransactionPutResult::NewErrorResult(
+                blink::mojom::IDBError::New(error.code(), error.message())));
         return;
+      }
 
       IndexedDBConnection* connection = transaction_->connection();
-      if (!connection->IsConnected())
+      if (!connection->IsConnected()) {
+        IndexedDBDatabaseError error(blink::mojom::IDBException::kUnknownError,
+                                     "Not connected.");
+        std::move(callback).Run(
+            blink::mojom::IDBTransactionPutResult::NewErrorResult(
+                blink::mojom::IDBError::New(error.code(), error.message())));
         return;
-
-      // Value size recorded in IDBObjectStore before we can auto-wrap in a
-      // blob. 1KB to 10MB.
-      UMA_HISTOGRAM_COUNTS_10000("WebCore.IndexedDB.PutKeySize",
-                                 key.size_estimate() / 1024);
+      }
 
       uint64_t commit_size = result.value->bits.size() + key.size_estimate();
       IndexedDBValue value;
@@ -212,12 +234,24 @@ void TransactionImpl::Put(
       // Release result.value->bits std::vector.
       result.value->bits.clear();
       swap(value.blob_info, result.blob_info);
-      scoped_refptr<IndexedDBCallbacks> callbacks(new IndexedDBCallbacks(
-          dispatcher_host_->AsWeakPtr(), origin_, std::move(callbacks_info),
-          dispatcher_host_->context()->TaskRunner()));
-      connection->database()->Put(transaction_.get(), object_store_id, &value,
-                                  std::make_unique<blink::IndexedDBKey>(key),
-                                  mode, std::move(callbacks), index_keys);
+
+      blink::mojom::IDBTransaction::PutCallback aborting_callback =
+          CreateCallbackAbortOnDestruct<
+              blink::mojom::IDBTransaction::PutCallback,
+              blink::mojom::IDBTransactionPutResultPtr>(
+              std::move(callback), transaction_->AsWeakPtr());
+
+      std::unique_ptr<IndexedDBDatabase::PutOperationParams> params(
+          std::make_unique<IndexedDBDatabase::PutOperationParams>());
+      params->object_store_id = object_store_id;
+      params->value.swap(value);
+      params->key = std::make_unique<blink::IndexedDBKey>(key);
+      params->put_mode = mode;
+      params->callback = std::move(aborting_callback);
+      params->index_keys = index_keys;
+      transaction_->ScheduleTask(BindWeakOperation(
+          &IndexedDBDatabase::PutOperation, connection->database()->AsWeakPtr(),
+          std::move(params)));
 
       // Size can't be big enough to overflow because it represents the
       // actual bytes passed through IPC.
@@ -274,14 +308,11 @@ void TransactionImpl::IOHelper::LoadBlobsOnIOThread(
     // Due to known issue crbug.com/351753, blobs can die while being passed to
     // a different process. So this case must be handled gracefully.
     // TODO(dmurph): Revert back to using mojo::ReportBadMessage once fixed.
-    UMA_HISTOGRAM_BOOLEAN("Storage.IndexedDB.PutValidBlob",
-                          handle.get() != nullptr);
     if (!handle) {
       result->code = LoadResultCode::kAbort;
       return;
     }
     uint64_t size = handle->size();
-    UMA_HISTOGRAM_MEMORY_KB("Storage.IndexedDB.PutBlobSizeKB", size / 1024ull);
     total_blob_size += size;
 
     if (info->file) {
@@ -300,13 +331,6 @@ void TransactionImpl::IOHelper::LoadBlobsOnIOThread(
       blob_info[i] =
           IndexedDBBlobInfo(std::move(handle), info->mime_type, info->size);
     }
-  }
-  LogUMAPutBlobCount(blob_info.size());
-  uint64_t blob_size = total_blob_size.ValueOrDefault(0U);
-  if (blob_size != 0) {
-    // Bytes to kilobytes.
-    UMA_HISTOGRAM_COUNTS_1M("WebCore.IndexedDB.PutBlobsTotalSize",
-                            blob_size / 1024);
   }
   result->code = LoadResultCode::kSuccess;
   result->value = std::move(value);
@@ -354,9 +378,9 @@ void TransactionImpl::OnGotUsageAndQuotaForCommit(
       usage + transaction_->size() <= quota) {
     connection->database()->Commit(transaction_.get());
   } else {
-    connection->AbortTransaction(
+    connection->AbortTransactionAndTearDownOnError(
         transaction_.get(),
-        IndexedDBDatabaseError(blink::kWebIDBDatabaseExceptionQuotaError));
+        IndexedDBDatabaseError(blink::mojom::IDBException::kQuotaError));
   }
 }
 

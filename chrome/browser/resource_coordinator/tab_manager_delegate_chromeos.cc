@@ -16,8 +16,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/memory/memory_pressure_monitor_chromeos.h"
-#include "base/memory/memory_pressure_monitor_notifying_chromeos.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"  // kNullProcessHandle.
@@ -27,6 +25,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/util/memory_pressure/system_memory_pressure_evaluator_chromeos.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/memory/memory_kills_monitor.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit.h"
@@ -242,7 +241,7 @@ int TabManagerDelegate::MemoryStat::LowMemoryMarginKB() {
   // A margin file can contain multiple values but the first one
   // represents the critical memory threshold.
   std::vector<int> margin_parts =
-      base::chromeos::MemoryPressureMonitorNotifying::GetMarginFileParts();
+      util::chromeos::SystemMemoryPressureEvaluator::GetMarginFileParts();
   if (!margin_parts.empty()) {
     return margin_parts[0] * 1024;
   }
@@ -276,8 +275,7 @@ TabManagerDelegate::TabManagerDelegate(
     TabManagerDelegate::MemoryStat* mem_stat)
     : tab_manager_(tab_manager),
       focused_process_(new FocusedProcess()),
-      mem_stat_(mem_stat),
-      weak_ptr_factory_(this) {
+      mem_stat_(mem_stat) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
@@ -452,22 +450,10 @@ void TabManagerDelegate::Observe(int type,
       // on top. So the longer the cleanup phase takes, the more tabs will
       // get discarded in parallel.
 
-      // TODO(bgeffon): Once the notifying version has become the standard
-      // this can be removed, the reason the check is here and the type safe
-      // versions exist is because a FakeMemoryPressureMonitor can be used on
-      // chromeos for testing and ScheduleEarlyCheck() is not part of the
-      // base::MemoryPressureMonitor interface.
-      auto* monitor_legacy = base::chromeos::MemoryPressureMonitor::Get();
-      if (monitor_legacy) {
-        monitor_legacy->ScheduleEarlyCheck();
-      } else {
-        auto* monitor_notifying =
-            base::chromeos::MemoryPressureMonitorNotifying::Get();
-        if (monitor_notifying) {
-          monitor_notifying->ScheduleEarlyCheck();
-        }
+      auto* monitor = util::chromeos::SystemMemoryPressureEvaluator::Get();
+      if (monitor) {
+        monitor->ScheduleEarlyCheck();
       }
-
       break;
     }
     case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED: {
@@ -511,7 +497,8 @@ void TabManagerDelegate::AdjustOomPriorities() {
     return;
 
   arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
-  if (arc_process_service) {
+  // TODO(b/135633925): Design and implement OOM handling for ARCVM.
+  if (arc_process_service && !arc::IsArcVmEnabled()) {
     arc_process_service->RequestAppProcessList(
         base::BindOnce(&TabManagerDelegate::AdjustOomPrioritiesImpl,
                        weak_ptr_factory_.GetWeakPtr()));
@@ -547,7 +534,7 @@ TabManagerDelegate::GetSortedCandidates(
   return candidates;
 }
 
-void TabManagerDelegate::SortLifecycleUnitWithTabRanker(
+void TabManagerDelegate::LogAndMaybeSortLifecycleUnitWithTabRanker(
     std::vector<Candidate>* candidates,
     LifecycleUnitSorter sorter) {
   const uint32_t num_of_tab_to_score = GetNumOldestTabsToScoreWithTabRanker();
@@ -569,18 +556,20 @@ void TabManagerDelegate::SortLifecycleUnitWithTabRanker(
     }
   }
 
-  // Re-sort them with TabRanker.
+  // log and possibly Re-sort them with TabRanker.
   std::move(sorter).Run(&oldest_lifecycle_units);
 
-  // Put the sorted lifecycle units back to their original vacancies.
-  for (auto it = candidates->rbegin(); it != candidates->rend(); ++it) {
-    const auto& candidate = *it;
-    if (oldest_lifecycle_units.empty() ||
-        candidate.process_type() < process_type)
-      break;
-    if (candidate.lifecycle_unit()) {
-      *it = Candidate(oldest_lifecycle_units.back());
-      oldest_lifecycle_units.pop_back();
+  if (base::FeatureList::IsEnabled(features::kTabRanker)) {
+    // Put the sorted lifecycle units back to their original vacancies.
+    for (auto it = candidates->rbegin(); it != candidates->rend(); ++it) {
+      const auto& candidate = *it;
+      if (oldest_lifecycle_units.empty() ||
+          candidate.process_type() < process_type)
+        break;
+      if (candidate.lifecycle_unit()) {
+        *it = Candidate(oldest_lifecycle_units.back());
+        oldest_lifecycle_units.pop_back();
+      }
     }
   }
 }
@@ -635,12 +624,13 @@ void TabManagerDelegate::LowMemoryKillImpl(
   std::vector<Candidate> candidates =
       GetSortedCandidates(GetLifecycleUnits(), arc_processes);
 
-  if (base::FeatureList::IsEnabled(features::kTabRanker)) {
-    SortLifecycleUnitWithTabRanker(
-        &candidates,
-        base::BindOnce(&TabActivityWatcher::SortLifecycleUnitWithTabRanker,
-                       base::Unretained(TabActivityWatcher::GetInstance())));
-  }
+  // Log and Re-order oldest N LifecycleUnits if TabRanker is enabled; otherwise
+  // only log N LifecycleUnits and the candidates will be unchanged.
+  LogAndMaybeSortLifecycleUnitWithTabRanker(
+      &candidates,
+      base::BindOnce(
+          &TabActivityWatcher::LogAndMaybeSortLifecycleUnitWithTabRanker,
+          base::Unretained(TabActivityWatcher::GetInstance())));
 
   // TODO(semenzato): decide if TargetMemoryToFreeKB is doing real
   // I/O and if it is, move to I/O thread (crbug.com/778703).

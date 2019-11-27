@@ -11,42 +11,7 @@
 #include "headless/lib/browser/protocol/headless_handler.h"
 #include "headless/lib/browser/protocol/page_handler.h"
 #include "headless/lib/browser/protocol/target_handler.h"
-#include "third_party/inspector_protocol/encoding/encoding.h"
-
-namespace {
-// TODO(johannes): This is very similar to the code in
-// content/browser/devtools/devtools_protocol_encoding. Once we have
-// the error / status propagation story settled, move the common parts
-// into a content public API.
-
-using ::inspector_protocol_encoding::span;
-using ::inspector_protocol_encoding::SpanFrom;
-using ::inspector_protocol_encoding::json::ConvertCBORToJSON;
-using ::inspector_protocol_encoding::json::ConvertJSONToCBOR;
-using IPEStatus = ::inspector_protocol_encoding::Status;
-
-// Platform allows us to inject the string<->double conversion
-// routines from base:: into the inspector_protocol JSON parser / serializer.
-class Platform : public ::inspector_protocol_encoding::json::Platform {
- public:
-  bool StrToD(const char* str, double* result) const override {
-    return base::StringToDouble(str, result);
-  }
-
-  // Prints |value| in a format suitable for JSON.
-  std::unique_ptr<char[]> DToStr(double value) const override {
-    std::string str = base::NumberToString(value);
-    std::unique_ptr<char[]> result(new char[str.size() + 1]);
-    memcpy(result.get(), str.c_str(), str.size() + 1);
-    return result;
-  }
-};
-
-IPEStatus ConvertCBORToJSON(span<uint8_t> cbor, std::string* json) {
-  Platform platform;
-  return ConvertCBORToJSON(platform, cbor, json);
-}
-}  // namespace
+#include "third_party/inspector_protocol/crdtp/json.h"
 
 namespace headless {
 namespace protocol {
@@ -108,13 +73,15 @@ static void SendProtocolResponseOrNotification(
     content::DevToolsAgentHostClient* client,
     content::DevToolsAgentHost* agent_host,
     std::unique_ptr<protocol::Serializable> message) {
-  std::string cbor = message->serialize(/*binary=*/true);
+  std::vector<uint8_t> cbor = std::move(*message).TakeSerialized();
   if (client->UsesBinaryProtocol()) {
-    client->DispatchProtocolMessage(agent_host, cbor);
+    client->DispatchProtocolMessage(agent_host,
+                                    std::string(cbor.begin(), cbor.end()));
     return;
   }
   std::string json;
-  IPEStatus status = ConvertCBORToJSON(SpanFrom(cbor), &json);
+  crdtp::Status status =
+      crdtp::json::ConvertCBORToJSON(crdtp::SpanFrom(cbor), &json);
   LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
   client->DispatchProtocolMessage(agent_host, json);
 }

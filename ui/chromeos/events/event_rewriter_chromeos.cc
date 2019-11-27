@@ -532,6 +532,176 @@ bool EventRewriterChromeOS::HasAssistantKeyOnKeyboard(
   return true;
 }
 
+bool EventRewriterChromeOS::RewriteModifierKeys(const ui::KeyEvent& key_event,
+                                                MutableKeyState* state) {
+  DCHECK(key_event.type() == ui::ET_KEY_PRESSED ||
+         key_event.type() == ui::ET_KEY_RELEASED);
+
+  if (!delegate_ || !delegate_->RewriteModifierKeys())
+    return false;
+
+  // Preserve a copy of the original before rewriting |state| based on
+  // user preferences, device configuration, and certain IME properties.
+  MutableKeyState incoming = *state;
+  state->flags = ui::EF_NONE;
+  int characteristic_flag = ui::EF_NONE;
+  bool exact_event = false;
+
+  // First, remap the key code.
+  const ModifierRemapping* remapped_key = nullptr;
+  // Remapping based on DomKey.
+  switch (incoming.key) {
+    case ui::DomKey::ALT_GRAPH:
+      // The Neo2 codes modifiers such that CapsLock appears as VKEY_ALTGR,
+      // but AltGraph (right Alt) also appears as VKEY_ALTGR in Neo2,
+      // as it does in other layouts. Neo2's "Mod3" is represented in
+      // EventFlags by a combination of AltGr+Mod3, while its "Mod4" is
+      // AltGr alone.
+      if (IsISOLevel5ShiftUsedByCurrentInputMethod()) {
+        if (incoming.code == ui::DomCode::CAPS_LOCK) {
+          characteristic_flag = ui::EF_ALTGR_DOWN | ui::EF_MOD3_DOWN;
+          remapped_key =
+              GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, delegate_);
+        } else {
+          characteristic_flag = ui::EF_ALTGR_DOWN;
+          remapped_key = GetSearchRemappedKey(delegate_, GetLastKeyboardType());
+        }
+      }
+      if (remapped_key && remapped_key->result.key_code == ui::VKEY_CAPITAL)
+        remapped_key = kModifierRemappingNeoMod3;
+      break;
+    case ui::DomKey::ALT_GRAPH_LATCH:
+      if (key_event.type() == ui::ET_KEY_PRESSED) {
+        pressed_modifier_latches_ |= ui::EF_ALTGR_DOWN;
+      } else {
+        pressed_modifier_latches_ &= ~ui::EF_ALTGR_DOWN;
+        if (used_modifier_latches_ & ui::EF_ALTGR_DOWN)
+          used_modifier_latches_ &= ~ui::EF_ALTGR_DOWN;
+        else
+          latched_modifier_latches_ |= ui::EF_ALTGR_DOWN;
+      }
+      // Rewrite to AltGraph. When this key is used like a regular modifier,
+      // the web-exposed result looks like a use of the regular modifier.
+      // When it's used as a latch, the web-exposed result is a vacuous
+      // modifier press-and-release, which should be harmless, but preserves
+      // the event for applications using the |code| (e.g. remoting).
+      state->key = ui::DomKey::ALT_GRAPH;
+      state->key_code = ui::VKEY_ALTGR;
+      exact_event = true;
+      break;
+    default:
+      break;
+  }
+
+  // Remapping based on DomCode.
+  switch (incoming.code) {
+    // On Chrome OS, Caps_Lock with Mod3Mask is sent when Caps Lock is pressed
+    // (with one exception: when IsISOLevel5ShiftUsedByCurrentInputMethod() is
+    // true, the key generates XK_ISO_Level3_Shift with Mod3Mask, not
+    // Caps_Lock).
+    case ui::DomCode::CAPS_LOCK:
+      // This key is already remapped to Mod3 in remapping based on DomKey. Skip
+      // more remapping.
+      if (IsISOLevel5ShiftUsedByCurrentInputMethod() && remapped_key)
+        break;
+
+      characteristic_flag = ui::EF_CAPS_LOCK_ON;
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, delegate_);
+      break;
+    case ui::DomCode::META_LEFT:
+    case ui::DomCode::META_RIGHT:
+      characteristic_flag = ui::EF_COMMAND_DOWN;
+      remapped_key = GetSearchRemappedKey(delegate_, GetLastKeyboardType());
+      // Default behavior is Super key, hence don't remap the event if the pref
+      // is unavailable.
+      break;
+    case ui::DomCode::CONTROL_LEFT:
+    case ui::DomCode::CONTROL_RIGHT:
+      characteristic_flag = ui::EF_CONTROL_DOWN;
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapControlKeyTo, delegate_);
+      break;
+    case ui::DomCode::ALT_LEFT:
+    case ui::DomCode::ALT_RIGHT:
+      // ALT key
+      characteristic_flag = ui::EF_ALT_DOWN;
+      remapped_key = GetRemappedKey(prefs::kLanguageRemapAltKeyTo, delegate_);
+      break;
+    case ui::DomCode::ESCAPE:
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapEscapeKeyTo, delegate_);
+      break;
+    case ui::DomCode::BACKSPACE:
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapBackspaceKeyTo, delegate_);
+      break;
+    case ui::DomCode::LAUNCH_ASSISTANT:
+      remapped_key =
+          GetRemappedKey(prefs::kLanguageRemapAssistantKeyTo, delegate_);
+      break;
+    default:
+      break;
+  }
+
+  if (remapped_key) {
+    state->key_code = remapped_key->result.key_code;
+    state->code = remapped_key->result.code;
+    state->key = remapped_key->result.key;
+    incoming.flags |= characteristic_flag;
+    characteristic_flag = remapped_key->flag;
+    if (incoming.key_code == ui::VKEY_CAPITAL) {
+      // Caps Lock is rewritten to another key event, remove EF_CAPS_LOCK_ON
+      // flag to prevent the keyboard's Caps Lock state being synced to the
+      // rewritten key event's flag in InputMethodChromeOS.
+      incoming.flags &= ~ui::EF_CAPS_LOCK_ON;
+    }
+    if (remapped_key->remap_to == ui::chromeos::ModifierKey::kCapsLockKey)
+      characteristic_flag |= ui::EF_CAPS_LOCK_ON;
+    state->code = RelocateModifier(
+        state->code, ui::KeycodeConverter::DomCodeToLocation(incoming.code));
+  }
+
+  // Next, remap modifier bits.
+  state->flags |= GetRemappedModifierMasks(key_event, incoming.flags);
+
+  // If the DomKey is not a modifier before remapping but is after, set the
+  // modifier latches for the later non-modifier key's modifier states.
+  bool non_modifier_to_modifier =
+      !ui::KeycodeConverter::IsDomKeyForModifier(incoming.key) &&
+      ui::KeycodeConverter::IsDomKeyForModifier(state->key);
+  if (key_event.type() == ui::ET_KEY_PRESSED) {
+    state->flags |= characteristic_flag;
+    if (non_modifier_to_modifier)
+      pressed_modifier_latches_ |= characteristic_flag;
+  } else {
+    state->flags &= ~characteristic_flag;
+    if (non_modifier_to_modifier)
+      pressed_modifier_latches_ &= ~characteristic_flag;
+  }
+
+  if (key_event.type() == ui::ET_KEY_PRESSED) {
+    if (!ui::KeycodeConverter::IsDomKeyForModifier(state->key)) {
+      used_modifier_latches_ |= pressed_modifier_latches_;
+      latched_modifier_latches_ = ui::EF_NONE;
+    }
+  }
+
+  // Implement the Caps Lock modifier here, rather than in the
+  // AcceleratorController, so that the event is visible to apps (see
+  // crbug.com/775743).
+  if (key_event.type() == ui::ET_KEY_RELEASED &&
+      state->key_code == ui::VKEY_CAPITAL) {
+    ::chromeos::input_method::ImeKeyboard* ime_keyboard =
+        ime_keyboard_for_testing_
+            ? ime_keyboard_for_testing_
+            : ::chromeos::input_method::InputMethodManager::Get()
+                  ->GetImeKeyboard();
+    ime_keyboard->SetCapsLockEnabled(!ime_keyboard->CapsLockIsEnabled());
+  }
+  return exact_event;
+}
+
 void EventRewriterChromeOS::DeviceKeyPressedOrReleased(int device_id) {
   const auto iter = device_id_to_info_.find(device_id);
   DeviceType type;
@@ -804,176 +974,6 @@ ui::EventRewriteStatus EventRewriterChromeOS::RewriteScrollEvent(
   return status;
 }
 
-bool EventRewriterChromeOS::RewriteModifierKeys(const ui::KeyEvent& key_event,
-                                                MutableKeyState* state) {
-  DCHECK(key_event.type() == ui::ET_KEY_PRESSED ||
-         key_event.type() == ui::ET_KEY_RELEASED);
-
-  if (!delegate_ || !delegate_->RewriteModifierKeys())
-    return false;
-
-  // Preserve a copy of the original before rewriting |state| based on
-  // user preferences, device configuration, and certain IME properties.
-  MutableKeyState incoming = *state;
-  state->flags = ui::EF_NONE;
-  int characteristic_flag = ui::EF_NONE;
-  bool exact_event = false;
-
-  // First, remap the key code.
-  const ModifierRemapping* remapped_key = nullptr;
-  // Remapping based on DomKey.
-  switch (incoming.key) {
-    case ui::DomKey::ALT_GRAPH:
-      // The Neo2 codes modifiers such that CapsLock appears as VKEY_ALTGR,
-      // but AltGraph (right Alt) also appears as VKEY_ALTGR in Neo2,
-      // as it does in other layouts. Neo2's "Mod3" is represented in
-      // EventFlags by a combination of AltGr+Mod3, while its "Mod4" is
-      // AltGr alone.
-      if (IsISOLevel5ShiftUsedByCurrentInputMethod()) {
-        if (incoming.code == ui::DomCode::CAPS_LOCK) {
-          characteristic_flag = ui::EF_ALTGR_DOWN | ui::EF_MOD3_DOWN;
-          remapped_key =
-              GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, delegate_);
-        } else {
-          characteristic_flag = ui::EF_ALTGR_DOWN;
-          remapped_key = GetSearchRemappedKey(delegate_, GetLastKeyboardType());
-        }
-      }
-      if (remapped_key && remapped_key->result.key_code == ui::VKEY_CAPITAL)
-        remapped_key = kModifierRemappingNeoMod3;
-      break;
-    case ui::DomKey::ALT_GRAPH_LATCH:
-      if (key_event.type() == ui::ET_KEY_PRESSED) {
-        pressed_modifier_latches_ |= ui::EF_ALTGR_DOWN;
-      } else {
-        pressed_modifier_latches_ &= ~ui::EF_ALTGR_DOWN;
-        if (used_modifier_latches_ & ui::EF_ALTGR_DOWN)
-          used_modifier_latches_ &= ~ui::EF_ALTGR_DOWN;
-        else
-          latched_modifier_latches_ |= ui::EF_ALTGR_DOWN;
-      }
-      // Rewrite to AltGraph. When this key is used like a regular modifier,
-      // the web-exposed result looks like a use of the regular modifier.
-      // When it's used as a latch, the web-exposed result is a vacuous
-      // modifier press-and-release, which should be harmless, but preserves
-      // the event for applications using the |code| (e.g. remoting).
-      state->key = ui::DomKey::ALT_GRAPH;
-      state->key_code = ui::VKEY_ALTGR;
-      exact_event = true;
-      break;
-    default:
-      break;
-  }
-
-  // Remapping based on DomCode.
-  switch (incoming.code) {
-    // On Chrome OS, Caps_Lock with Mod3Mask is sent when Caps Lock is pressed
-    // (with one exception: when IsISOLevel5ShiftUsedByCurrentInputMethod() is
-    // true, the key generates XK_ISO_Level3_Shift with Mod3Mask, not
-    // Caps_Lock).
-    case ui::DomCode::CAPS_LOCK:
-      // This key is already remapped to Mod3 in remapping based on DomKey. Skip
-      // more remapping.
-      if (IsISOLevel5ShiftUsedByCurrentInputMethod() && remapped_key)
-        break;
-
-      characteristic_flag = ui::EF_CAPS_LOCK_ON;
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, delegate_);
-      break;
-    case ui::DomCode::META_LEFT:
-    case ui::DomCode::META_RIGHT:
-      characteristic_flag = ui::EF_COMMAND_DOWN;
-      remapped_key = GetSearchRemappedKey(delegate_, GetLastKeyboardType());
-      // Default behavior is Super key, hence don't remap the event if the pref
-      // is unavailable.
-      break;
-    case ui::DomCode::CONTROL_LEFT:
-    case ui::DomCode::CONTROL_RIGHT:
-      characteristic_flag = ui::EF_CONTROL_DOWN;
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapControlKeyTo, delegate_);
-      break;
-    case ui::DomCode::ALT_LEFT:
-    case ui::DomCode::ALT_RIGHT:
-      // ALT key
-      characteristic_flag = ui::EF_ALT_DOWN;
-      remapped_key = GetRemappedKey(prefs::kLanguageRemapAltKeyTo, delegate_);
-      break;
-    case ui::DomCode::ESCAPE:
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapEscapeKeyTo, delegate_);
-      break;
-    case ui::DomCode::BACKSPACE:
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapBackspaceKeyTo, delegate_);
-      break;
-    case ui::DomCode::LAUNCH_ASSISTANT:
-      remapped_key =
-          GetRemappedKey(prefs::kLanguageRemapAssistantKeyTo, delegate_);
-      break;
-    default:
-      break;
-  }
-
-  if (remapped_key) {
-    state->key_code = remapped_key->result.key_code;
-    state->code = remapped_key->result.code;
-    state->key = remapped_key->result.key;
-    incoming.flags |= characteristic_flag;
-    characteristic_flag = remapped_key->flag;
-    if (incoming.key_code == ui::VKEY_CAPITAL) {
-      // Caps Lock is rewritten to another key event, remove EF_CAPS_LOCK_ON
-      // flag to prevent the keyboard's Caps Lock state being synced to the
-      // rewritten key event's flag in InputMethodChromeOS.
-      incoming.flags &= ~ui::EF_CAPS_LOCK_ON;
-    }
-    if (remapped_key->remap_to == ui::chromeos::ModifierKey::kCapsLockKey)
-      characteristic_flag |= ui::EF_CAPS_LOCK_ON;
-    state->code = RelocateModifier(
-        state->code, ui::KeycodeConverter::DomCodeToLocation(incoming.code));
-  }
-
-  // Next, remap modifier bits.
-  state->flags |= GetRemappedModifierMasks(key_event, incoming.flags);
-
-  // If the DomKey is not a modifier before remapping but is after, set the
-  // modifier latches for the later non-modifier key's modifier states.
-  bool non_modifier_to_modifier =
-      !ui::KeycodeConverter::IsDomKeyForModifier(incoming.key) &&
-      ui::KeycodeConverter::IsDomKeyForModifier(state->key);
-  if (key_event.type() == ui::ET_KEY_PRESSED) {
-    state->flags |= characteristic_flag;
-    if (non_modifier_to_modifier)
-      pressed_modifier_latches_ |= characteristic_flag;
-  } else {
-    state->flags &= ~characteristic_flag;
-    if (non_modifier_to_modifier)
-      pressed_modifier_latches_ &= ~characteristic_flag;
-  }
-
-  if (key_event.type() == ui::ET_KEY_PRESSED) {
-    if (!ui::KeycodeConverter::IsDomKeyForModifier(state->key)) {
-      used_modifier_latches_ |= pressed_modifier_latches_;
-      latched_modifier_latches_ = ui::EF_NONE;
-    }
-  }
-
-  // Implement the Caps Lock modifier here, rather than in the
-  // AcceleratorController, so that the event is visible to apps (see
-  // crbug.com/775743).
-  if (key_event.type() == ui::ET_KEY_RELEASED &&
-      state->key_code == ui::VKEY_CAPITAL) {
-    ::chromeos::input_method::ImeKeyboard* ime_keyboard =
-        ime_keyboard_for_testing_
-            ? ime_keyboard_for_testing_
-            : ::chromeos::input_method::InputMethodManager::Get()
-                  ->GetImeKeyboard();
-    ime_keyboard->SetCapsLockEnabled(!ime_keyboard->CapsLockIsEnabled());
-  }
-  return exact_event;
-}
-
 void EventRewriterChromeOS::RewriteNumPadKeys(const ui::KeyEvent& key_event,
                                               MutableKeyState* state) {
   DCHECK(key_event.type() == ui::ET_KEY_PRESSED ||
@@ -1117,6 +1117,38 @@ void EventRewriterChromeOS::RewriteFunctionKeys(const ui::KeyEvent& key_event,
                                                 MutableKeyState* state) {
   CHECK(key_event.type() == ui::ET_KEY_PRESSED ||
         key_event.type() == ui::ET_KEY_RELEASED);
+
+  // Some action key codes are mapped to standard VKEY and DomCode values
+  // during event to KeyEvent translation. However, in Chrome, different VKEY
+  // combinations trigger those actions. This table maps event VKEYs to the
+  // right action VKEYs.
+  // TODO(dtor): Either add proper accelerators for VKEY_ZOOM or move
+  // from VKEY_MEDIA_LAUNCH_APP2 to VKEY_ZOOM.
+  static const KeyboardRemapping kActionToActionKeys[] = {
+      // Zoom toggle is actually through VKEY_MEDIA_LAUNCH_APP2.
+      {{ui::EF_NONE, ui::VKEY_ZOOM},
+       {ui::EF_NONE, ui::DomCode::ZOOM_TOGGLE, ui::DomKey::ZOOM_TOGGLE,
+        ui::VKEY_MEDIA_LAUNCH_APP2}},
+  };
+
+  // Map certain action keys to the right VKey and modifier.
+  RewriteWithKeyboardRemappings(kActionToActionKeys,
+                                base::size(kActionToActionKeys), *state, state);
+
+  // Some key codes have a Dom code but no VKEY value assigned. They're mapped
+  // to VKEY values here.
+  if (state->key_code == ui::VKEY_UNKNOWN) {
+    if (state->code == ui::DomCode::SHOW_ALL_WINDOWS) {
+      // Show all windows is through VKEY_MEDIA_LAUNCH_APP1.
+      state->key_code = ui::VKEY_MEDIA_LAUNCH_APP1;
+      state->key = ui::DomKey::F4;
+    } else if (state->code == ui::DomCode::DISPLAY_TOGGLE_INT_EXT) {
+      // Display toggle is through control + VKEY_MEDIA_LAUNCH_APP2.
+      state->flags |= ui::EF_CONTROL_DOWN;
+      state->key_code = ui::VKEY_MEDIA_LAUNCH_APP2;
+      state->key = ui::DomKey::F12;
+    }
+  }
 
   const auto iter = device_id_to_info_.find(key_event.source_device_id());
   KeyboardTopRowLayout layout = kKbdTopRowLayoutDefault;
@@ -1525,37 +1557,6 @@ bool EventRewriterChromeOS::RewriteTopRowKeysForLayoutWilco(
       {{ui::EF_NONE, ui::VKEY_MEDIA_LAUNCH_APP2},
        {ui::EF_NONE, ui::DomCode::F3, ui::DomKey::F3, ui::VKEY_F3}},
   };
-
-  // Some action key codes are mapped to standard VKEY and DomCode values
-  // during event to KeyEvent translation. However, in Chrome, different VKEY
-  // combinations trigger those actions. This table maps event VKEYs to the
-  // right action VKEYs.
-  static const KeyboardRemapping kActionToActionKeys[] = {
-      // Zoom toggle is actually through VKEY_MEDIA_LAUNCH_APP2.
-      {{ui::EF_NONE, ui::VKEY_ZOOM},
-       {ui::EF_NONE, ui::DomCode::ZOOM_TOGGLE, ui::DomKey::ZOOM_TOGGLE,
-        ui::VKEY_MEDIA_LAUNCH_APP2}},
-  };
-
-  // Some key codes have a Dom code but no VKEY value assigned. They're mapped
-  // to VKEY values here.
-  if (state->key_code == ui::VKEY_UNKNOWN) {
-    if (state->code == ui::DomCode::SHOW_ALL_WINDOWS) {
-      // Show all windows is through VKEY_MEDIA_LAUNCH_APP1.
-      state->key_code = ui::VKEY_MEDIA_LAUNCH_APP1;
-      state->key = ui::DomKey::F4;
-    } else if (state->code == ui::DomCode::DISPLAY_TOGGLE_INT_EXT) {
-      // Display toggle is through control + VKEY_MEDIA_LAUNCH_APP2.
-      state->flags |= ui::EF_CONTROL_DOWN;
-      state->key_code = ui::VKEY_MEDIA_LAUNCH_APP2;
-      state->key = ui::DomKey::F12;
-    }
-  }
-
-  // Map certain action keys to the right VKey and modifier.
-  RewriteWithKeyboardRemappings(kActionToActionKeys,
-                                base::size(kActionToActionKeys),
-                                *state, state);
 
   ui::EventRewriterChromeOS::MutableKeyState incoming_without_command = *state;
   incoming_without_command.flags &= ~ui::EF_COMMAND_DOWN;

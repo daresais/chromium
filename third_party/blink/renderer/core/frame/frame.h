@@ -29,7 +29,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 
-#include "base/debug/stack_trace.h"
 #include "base/optional.h"
 #include "base/unguessable_token.h"
 #include "third_party/blink/public/common/feature_policy/feature_policy.h"
@@ -75,7 +74,7 @@ enum class UserGestureStatus { kActive, kNone };
 // Frame is the base class of LocalFrame and RemoteFrame and should only contain
 // functionality shared between both. In particular, any method related to
 // input, layout, or painting probably belongs on LocalFrame.
-class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
+class CORE_EXPORT Frame : public GarbageCollected<Frame> {
  public:
   virtual ~Frame();
 
@@ -89,8 +88,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   void Detach(FrameDetachType);
   void DisconnectOwnerElement();
   virtual bool ShouldClose() = 0;
-  virtual void DidFreeze() = 0;
-  virtual void DidResume() = 0;
+  virtual void HookBackForwardCacheEviction() = 0;
+  virtual void RemoveBackForwardCacheEviction() = 0;
 
   FrameClient* Client() const;
 
@@ -208,14 +207,6 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   }
   const std::string& ToTraceValue();
 
-  // TODO(dcheng): temporary for debugging https://crbug.com/838348.
-  const base::debug::StackTrace& CreateStackForDebugging() {
-    return create_stack_;
-  }
-  const base::debug::StackTrace& DetachStackForDebugging() {
-    return detach_stack_;
-  }
-
   NavigationRateLimiter& navigation_rate_limiter() {
     return navigation_rate_limiter_;
   }
@@ -243,6 +234,12 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
     return *window_agent_factory_;
   }
 
+  bool GetVisibleToHitTesting() const { return visible_to_hit_testing_; }
+  void UpdateVisibleToHitTesting();
+
+  // Called when the focus controller changes the focus to this frame.
+  virtual void DidFocus() = 0;
+
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
   // opener's WindowAgentFactory. Pass nullptr if the frame is isolated from
@@ -269,6 +266,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
     return lifecycle_.GetState() == FrameLifecycle::kDetached;
   }
 
+  virtual void DidChangeVisibleToHitTesting() = 0;
+
   mutable FrameTree tree_node_;
 
   Member<Page> page_;
@@ -288,6 +287,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
 
   TouchAction inherited_effective_touch_action_ = TouchAction::kTouchActionAuto;
 
+  bool visible_to_hit_testing_ = true;
+
  private:
   Member<FrameClient> client_;
   const Member<WindowProxyManager> window_proxy_manager_;
@@ -305,9 +306,6 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   bool is_loading_;
   base::UnguessableToken devtools_frame_token_;
   base::Optional<std::string> trace_value_;
-
-  base::debug::StackTrace create_stack_;
-  base::debug::StackTrace detach_stack_;
 };
 
 inline FrameClient* Frame::Client() const {

@@ -18,8 +18,10 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -29,14 +31,14 @@
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "chrome/test/chromedriver/constants/version.h"
 #include "chrome/test/chromedriver/logging.h"
 #include "chrome/test/chromedriver/server/http_handler.h"
-#include "chrome/test/chromedriver/version.h"
 #include "mojo/core/embedder/embedder.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -119,8 +121,11 @@ void EnsureSharedMemory(base::CommandLine* cmd_line) {
 
 class HttpServer : public net::HttpServer::Delegate {
  public:
-  explicit HttpServer(const HttpRequestHandlerFunc& handle_request_func)
-      : handle_request_func_(handle_request_func), allow_remote_(false) {}
+  explicit HttpServer(const std::string& url_base,
+                      const HttpRequestHandlerFunc& handle_request_func)
+      : url_base_(url_base),
+        handle_request_func_(handle_request_func),
+        allow_remote_(false) {}
 
   ~HttpServer() override {}
 
@@ -146,6 +151,7 @@ class HttpServer : public net::HttpServer::Delegate {
     server_->SetSendBufferSize(connection_id, kBufferSize);
     server_->SetReceiveBufferSize(connection_id, kBufferSize);
   }
+
   void OnHttpRequest(int connection_id,
                      const net::HttpServerRequestInfo& info) override {
     if (!allow_remote_ && !RequestIsSafeToServe(info)) {
@@ -162,9 +168,67 @@ class HttpServer : public net::HttpServer::Delegate {
                    connection_id,
                    !info.HasHeaderValue("connection", "close")));
   }
+
   void OnWebSocketRequest(int connection_id,
-                          const net::HttpServerRequestInfo& info) override {}
-  void OnWebSocketMessage(int connection_id, std::string data) override {}
+                          const net::HttpServerRequestInfo& info) override {
+    std::string path = info.path;
+    std::string session_id;
+
+    if (!base::StartsWith(path, url_base_, base::CompareCase::SENSITIVE)) {
+      net::HttpServerResponseInfo response(net::HTTP_BAD_REQUEST);
+      response.SetBody("invalid websocket request url path", "text/plain");
+      server_->SendResponse(connection_id, response,
+                            TRAFFIC_ANNOTATION_FOR_TESTS);
+      return;
+    }
+    path.erase(0, url_base_.length());
+
+    std::vector<std::string> path_parts = base::SplitString(
+        path, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    std::vector<std::string> command_path_parts = base::SplitString(
+        kCreateWebSocketPath, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+
+    if (path_parts.size() != command_path_parts.size()) {
+      net::HttpServerResponseInfo response(net::HTTP_BAD_REQUEST);
+      response.SetBody("invalid websocket request url path", "text/plain");
+      server_->SendResponse(connection_id, response,
+                            TRAFFIC_ANNOTATION_FOR_TESTS);
+      return;
+    }
+
+    for (size_t i = 0; i < path_parts.size(); ++i) {
+      if (command_path_parts[i][0] == ':') {
+        std::string name = command_path_parts[i];
+        name.erase(0, 1);
+        CHECK(name.length());
+        if (name == "sessionId")
+          session_id = path_parts[i];
+      } else if (command_path_parts[i] != path_parts[i]) {
+        net::HttpServerResponseInfo response(net::HTTP_BAD_REQUEST);
+        response.SetBody("invalid websocket request url path", "text/plain");
+        server_->SendResponse(connection_id, response,
+                              TRAFFIC_ANNOTATION_FOR_TESTS);
+        return;
+      }
+    }
+
+    server_->AcceptWebSocket(connection_id, info, TRAFFIC_ANNOTATION_FOR_TESTS);
+    connection_to_session_map[connection_id] = session_id;
+  }
+
+  void OnWebSocketMessage(int connection_id, std::string data) override {
+    base::Optional<base::Value> parsed_data = base::JSONReader::Read(data);
+    std::string path = url_base_ + kSendCommandFromWebSocket;
+    base::ReplaceFirstSubstringAfterOffset(
+        &path, 0, ":sessionId", connection_to_session_map[connection_id]);
+
+    net::HttpServerRequestInfo request;
+    request.method = "post";
+    request.path = path;
+    request.data = data;
+    OnHttpRequest(connection_id, request);
+  }
+
   void OnClose(int connection_id) override {}
 
  private:
@@ -179,8 +243,10 @@ class HttpServer : public net::HttpServer::Delegate {
     // this for us.
   }
 
+  const std::string url_base_;
   HttpRequestHandlerFunc handle_request_func_;
   std::unique_ptr<net::HttpServer> server_;
+  std::map<int, std::string> connection_to_session_map;
   bool allow_remote_;
   base::WeakPtrFactory<HttpServer> weak_factory_{this};  // Should be last.
 };
@@ -243,6 +309,7 @@ void StopServerOnIOThread() {
 
 void StartServerOnIOThread(uint16_t port,
                            bool allow_remote,
+                           const std::string& url_base,
                            const HttpRequestHandlerFunc& handle_request_func) {
   std::unique_ptr<HttpServer> temp_server;
 
@@ -258,7 +325,7 @@ void StartServerOnIOThread(uint16_t port,
 // ensures that we successfully listen to both IPv4 and IPv6.
 
 #if defined(OS_MACOSX)
-  temp_server.reset(new HttpServer(handle_request_func));
+  temp_server.reset(new HttpServer(url_base, handle_request_func));
   int ipv4_status = temp_server->Start(port, allow_remote, true);
   if (ipv4_status == net::OK) {
     lazy_tls_server_ipv4.Pointer()->Set(temp_server.release());
@@ -274,7 +341,7 @@ void StartServerOnIOThread(uint16_t port,
   }
 #endif
 
-  temp_server.reset(new HttpServer(handle_request_func));
+  temp_server.reset(new HttpServer(url_base, handle_request_func));
   int ipv6_status = temp_server->Start(port, allow_remote, false);
   if (ipv6_status == net::OK) {
     lazy_tls_server_ipv6.Pointer()->Set(temp_server.release());
@@ -315,8 +382,8 @@ void StartServerOnIOThread(uint16_t port,
     // https://chromium.googlesource.com/chromium/src/+/69.0.3464.0/net/socket/socket_descriptor.cc#28.
     need_ipv4 = NeedIPv4::NOT_NEEDED;
 #else
-    LOG(WARNING)
-        << "Running on a platform not officially supported by ChromeDriver.";
+    LOG(WARNING) << "Running on a platform not officially supported by "
+                 << kChromeDriverProductFullName << ".";
     need_ipv4 = NeedIPv4::UNKNOWN;
 #endif
   }
@@ -324,7 +391,7 @@ void StartServerOnIOThread(uint16_t port,
   if (need_ipv4 == NeedIPv4::NOT_NEEDED) {
     ipv4_status = ipv6_status;
   } else {
-    temp_server.reset(new HttpServer(handle_request_func));
+    temp_server.reset(new HttpServer(url_base, handle_request_func));
     ipv4_status = temp_server->Start(port, allow_remote, true);
     if (ipv4_status == net::OK) {
       lazy_tls_server_ipv4.Pointer()->Set(temp_server.release());
@@ -350,9 +417,10 @@ void RunServer(uint16_t port,
                const std::vector<net::IPAddress>& whitelisted_ips,
                const std::string& url_base,
                int adb_port) {
-  base::Thread io_thread("ChromeDriver IO");
+  base::Thread io_thread(
+      base::StringPrintf("%s IO", kChromeDriverProductShortName));
   CHECK(io_thread.StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
+      base::Thread::Options(base::MessagePumpType::IO, 0)));
 
   base::SingleThreadTaskExecutor main_task_executor;
   base::RunLoop cmd_run_loop;
@@ -362,10 +430,11 @@ void RunServer(uint16_t port,
       base::Bind(&HandleRequestOnCmdThread, &handler, whitelisted_ips);
 
   io_thread.task_runner()->PostTask(
-      FROM_HERE, base::BindOnce(&StartServerOnIOThread, port, allow_remote,
-                                base::Bind(&HandleRequestOnIOThread,
-                                           main_task_executor.task_runner(),
-                                           handle_request_func)));
+      FROM_HERE,
+      base::BindOnce(
+          &StartServerOnIOThread, port, allow_remote, url_base,
+          base::Bind(&HandleRequestOnIOThread, main_task_executor.task_runner(),
+                     handle_request_func)));
   // Run the command loop. This loop is quit after the response for a shutdown
   // request is posted to the IO loop. After the command loop quits, a task
   // is posted to the IO loop to stop the server. Lastly, the IO thread is
@@ -422,9 +491,6 @@ int main(int argc, char *argv[]) {
             "print the version number and exit",
         "url-base",
             "base URL path prefix for commands, e.g. wd/url",
-        "whitelisted-ips",
-            "comma-separated whitelist of remote IP addresses "
-            "which are allowed to connect to ChromeDriver",
         "readable-timestamp",
             "add readable timestamps to log",
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -438,12 +504,20 @@ int main(int argc, char *argv[]) {
           "  --%-30s%s\n",
           kOptionAndDescriptions[i], kOptionAndDescriptions[i + 1]);
     }
+
+    // Add helper info for whitelisted-ips since the product name may be
+    // different.
+    options += base::StringPrintf(
+        "  --%-30scomma-separated whitelist of remote IP addresses which are "
+        "allowed to connect to %s\n",
+        "whitelisted-ips", kChromeDriverProductShortName);
+
     printf("Usage: %s [OPTIONS]\n\nOptions\n%s", argv[0], options.c_str());
     return 0;
   }
   bool early_exit = false;
   if (cmd_line->HasSwitch("v") || cmd_line->HasSwitch("version")) {
-    printf("ChromeDriver %s\n", kChromeDriverVersion);
+    printf("%s %s\n", kChromeDriverProductFullName, kChromeDriverVersion);
     early_exit = true;
   }
   if (early_exit)
@@ -505,7 +579,8 @@ int main(int argc, char *argv[]) {
   }
   if (!cmd_line->HasSwitch("silent") &&
       cmd_line->GetSwitchValueASCII("log-level") != "OFF") {
-    printf("Starting ChromeDriver %s on port %u\n", kChromeDriverVersion, port);
+    printf("Starting %s %s on port %u\n", kChromeDriverProductShortName,
+           kChromeDriverVersion, port);
     if (!allow_remote) {
       printf("Only local connections are allowed.\n");
     } else if (!whitelisted_ips.empty()) {
@@ -514,11 +589,11 @@ int main(int argc, char *argv[]) {
     } else {
       printf("All remote connections are allowed. Use a whitelist instead!\n");
     }
-    printf("%s\n", kPortProtectionMessage);
+    printf("%s\n", GetPortProtectionMessage());
     fflush(stdout);
   }
 
-  if (!InitLogging()) {
+  if (!InitLogging(port)) {
     printf("Unable to initialize logging. Exiting...\n");
     return 1;
   }
@@ -529,7 +604,8 @@ int main(int argc, char *argv[]) {
 
   mojo::core::Init();
 
-  base::ThreadPoolInstance::CreateAndStartWithDefaultParams("ChromeDriver");
+  base::ThreadPoolInstance::CreateAndStartWithDefaultParams(
+      kChromeDriverProductShortName);
 
   RunServer(port, allow_remote, whitelisted_ips, url_base, adb_port);
 

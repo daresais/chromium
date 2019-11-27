@@ -188,9 +188,9 @@ WebInputEventResult PointerEventManager::DispatchPointerEvent(
     return WebInputEventResult::kNotHandled;
 
   if (event_type == event_type_names::kPointerdown) {
-    Node* node = target->ToNode();
-    if (node && IsHTMLCanvasElement(*node) &&
-        ToHTMLCanvasElement(*node).NeedsUnbufferedInputEvents()) {
+    auto* html_canvas_element = DynamicTo<HTMLCanvasElement>(target->ToNode());
+    if (html_canvas_element &&
+        html_canvas_element->NeedsUnbufferedInputEvents()) {
       frame_->GetChromeClient().RequestUnbufferedInputEvents(frame_);
     }
   }
@@ -432,7 +432,7 @@ PointerEventManager::ComputePointerEventTarget(
     Element* target = hit_test_tesult.InnerElement();
     if (target) {
       pointer_event_target.target_frame = target->GetDocument().GetFrame();
-      if (auto* canvas = ToHTMLCanvasElementOrNull(target)) {
+      if (auto* canvas = DynamicTo<HTMLCanvasElement>(target)) {
         HitTestCanvasResult* hit_test_canvas_result =
             canvas->GetControlAndIdIfHitRegionExists(
                 hit_test_tesult.PointInInnerNodeFrame());
@@ -697,7 +697,7 @@ WebInputEventResult PointerEventManager::DirectDispatchMousePointerEvent(
     // pointer_event_factory updates it.
     FloatPoint last_mouse_position =
         pointer_event_factory_.GetLastPointerPosition(
-            PointerEventFactory::kMouseId, event);
+            PointerEventFactory::kMouseId, event, event.GetType());
 
     WebInputEventResult result = CreateAndDispatchPointerEvent(
         target, mouse_event_type, event, coalesced_events, predicted_events,
@@ -710,8 +710,8 @@ WebInputEventResult PointerEventManager::DirectDispatchMousePointerEvent(
     return result;
   }
   pointer_event_factory_.SetLastPosition(
-      pointer_event_factory_.GetPointerEventId(event),
-      event.PositionInScreen());
+      pointer_event_factory_.GetPointerEventId(event), event.PositionInScreen(),
+      event.GetType());
 
   return WebInputEventResult::kHandledSuppressed;
 }
@@ -740,7 +740,8 @@ WebInputEventResult PointerEventManager::SendMousePointerEvent(
   // pointer_event_factory updates it.
   FloatPoint last_mouse_position =
       pointer_event_factory_.GetLastPointerPosition(
-          pointer_event_factory_.GetPointerEventId(mouse_event), mouse_event);
+          pointer_event_factory_.GetPointerEventId(mouse_event), mouse_event,
+          event_type);
 
   PointerEvent* pointer_event = pointer_event_factory_.Create(
       web_pointer_event, pointer_coalesced_events, pointer_predicted_events,
@@ -827,7 +828,8 @@ WebInputEventResult PointerEventManager::SendMousePointerEvent(
     if (!skip_click_dispatch && mouse_target &&
         event_type == WebInputEvent::kPointerUp) {
       mouse_event_manager_->DispatchMouseClickIfNeeded(
-          mouse_target, mouse_event, canvas_region_id);
+          mouse_target, mouse_event, canvas_region_id,
+          pointer_event->pointerId(), pointer_event->pointerType());
     }
   }
 
@@ -1086,15 +1088,10 @@ void PointerEventManager::SetLastPointerPositionForFrameBoundary(
     pointer_event_factory_.RemoveLastPosition(pointer_id);
   } else if (!last_target || new_target->GetDocument().GetFrame() !=
                                  last_target->GetDocument().GetFrame()) {
-    pointer_event_factory_.SetLastPosition(
-        pointer_id, web_pointer_event.PositionInScreen());
+    pointer_event_factory_.SetLastPosition(pointer_id,
+                                           web_pointer_event.PositionInScreen(),
+                                           web_pointer_event.GetType());
   }
-}
-
-void PointerEventManager::SetLastMousePositionForPointerUnlock(
-    FloatPoint mouse_lock_position_in_screen) {
-  pointer_event_factory_.SetLastPosition(PointerEventFactory::kMouseId,
-                                         mouse_lock_position_in_screen);
 }
 
 void PointerEventManager::RemoveLastMousePosition() {

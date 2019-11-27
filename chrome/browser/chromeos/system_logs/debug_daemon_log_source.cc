@@ -19,7 +19,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon_client.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -72,8 +72,7 @@ DebugDaemonLogSource::DebugDaemonLogSource(bool scrub)
     : SystemLogsSource("DebugDemon"),
       response_(new SystemLogsResponse()),
       num_pending_requests_(0),
-      scrub_(scrub),
-      weak_ptr_factory_(this) {}
+      scrub_(scrub) {}
 
 DebugDaemonLogSource::~DebugDaemonLogSource() {}
 
@@ -154,8 +153,9 @@ void DebugDaemonLogSource::GetLoggedInUsersLogFiles() {
 
   auto response = std::make_unique<SystemLogsResponse>();
   SystemLogsResponse* response_ptr = response.get();
-  base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+  base::PostTaskAndReply(
+      FROM_HERE,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&ReadUserLogFiles, profile_dirs, response_ptr),
       base::BindOnce(&DebugDaemonLogSource::MergeUserLogFilesResponse,
                      weak_ptr_factory_.GetWeakPtr(), std::move(response)));

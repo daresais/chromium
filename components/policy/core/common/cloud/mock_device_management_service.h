@@ -52,22 +52,12 @@ class MockDeviceManagementService : public DeviceManagementService {
 
   MOCK_METHOD1(StartJob, StartJobFunction);
 
-  // Can be used as an action when mocking the StartJob method.
-  // Will respond with the given data to the network request immediately.
-  // This call behaves the same as calling StartJobSync() with the first
+  // Can be used as an action when mocking the StartJob method. Will respond
+  // with the given data to the network request during the next idle run loop.
+  // This call behaves the same as calling StartJobAsync() with the first
   // arguments set to net::OK and DeviceManagement::kSuccess.
-  // This makes CreateJob() complete the network request before it returns.
-  testing::Action<StartJobFunction> StartJobOKSync(
+  testing::Action<StartJobFunction> StartJobOKAsync(
       const enterprise_management::DeviceManagementResponse& response);
-
-  // Can be used as an action when mocking the StartJob method.
-  // Will respond with the given data to the network request immediately.
-  // This makes CreateJob() complete the network request before it returns.
-  testing::Action<StartJobFunction> StartJobSync(
-      int net_error,
-      int response_code,
-      const enterprise_management::DeviceManagementResponse& response =
-          enterprise_management::DeviceManagementResponse());
 
   // Can be used as an action when mocking the StartJob method.
   // Will respond with the given data to the network request during the next
@@ -75,7 +65,8 @@ class MockDeviceManagementService : public DeviceManagementService {
   testing::Action<StartJobFunction> StartJobAsync(
       int net_error,
       int response_code,
-      const enterprise_management::DeviceManagementResponse& response);
+      const enterprise_management::DeviceManagementResponse& response =
+          enterprise_management::DeviceManagementResponse());
 
   // Can be used as an action when mocking the StartJob method.
   // Will respond with the given data to the network request during the next
@@ -110,6 +101,11 @@ class MockDeviceManagementService : public DeviceManagementService {
   // of the Job passed to StartJob.
   testing::Action<StartJobFunction> CaptureRequest(
       enterprise_management::DeviceManagementRequest* request);
+
+  // Can be used as an action when mocking the StartJob method.
+  // Makes a copy of the payload of the JobConfiguration
+  // of the Job passed to StartJob.
+  testing::Action<StartJobFunction> CapturePayload(std::string* payload);
 
   // Call after using StartJobFullControl() to respond to the network request.
   // If the job completed successfully, |*job| will be nulled to prevent callers

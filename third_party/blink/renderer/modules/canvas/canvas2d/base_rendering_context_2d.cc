@@ -69,6 +69,7 @@ void BaseRenderingContext2D::RealizeSaves() {
 
 void BaseRenderingContext2D::save() {
   state_stack_.back()->Save();
+  ValidateStateStack();
 }
 
 void BaseRenderingContext2D::restore() {
@@ -597,30 +598,6 @@ void BaseRenderingContext2D::beginPath() {
   path_.Clear();
 }
 
-static bool ValidateRectForCanvas(double& x,
-                                  double& y,
-                                  double& width,
-                                  double& height) {
-  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) ||
-      !std::isfinite(height))
-    return false;
-
-  if (!width && !height)
-    return false;
-
-  if (width < 0) {
-    width = -width;
-    x -= width;
-  }
-
-  if (height < 0) {
-    height = -height;
-    y -= height;
-  }
-
-  return true;
-}
-
 bool BaseRenderingContext2D::IsFullCanvasCompositeMode(SkBlendMode op) {
   // See 4.8.11.1.3 Compositing
   // CompositeSourceAtop and CompositeDestinationOut are not listed here as the
@@ -698,6 +675,7 @@ void BaseRenderingContext2D::fillRect(double x,
     return;
 
   // clamp to float to avoid float cast overflow when used as SkScalar
+  AdjustRectForCanvas(x, y, width, height);
   float fx = clampTo<float>(x);
   float fy = clampTo<float>(y);
   float fwidth = clampTo<float>(width);
@@ -747,6 +725,7 @@ void BaseRenderingContext2D::strokeRect(double x,
     return;
 
   // clamp to float to avoid float cast overflow when used as SkScalar
+  AdjustRectForCanvas(x, y, width, height);
   float fx = clampTo<float>(x);
   float fy = clampTo<float>(y);
   float fwidth = clampTo<float>(width);
@@ -755,6 +734,11 @@ void BaseRenderingContext2D::strokeRect(double x,
   SkRect rect = SkRect::MakeXYWH(fx, fy, fwidth, fheight);
   FloatRect bounds = rect;
   InflateStrokeRect(bounds);
+
+  if (!ValidateRectForCanvas(bounds.X(), bounds.Y(), bounds.Width(),
+                             bounds.Height()))
+    return;
+
   Draw([&rect](cc::PaintCanvas* c, const PaintFlags* flags)  // draw lambda
        { StrokeRectOnCanvas(rect, c, flags); },
        [](const SkIRect& clip_bounds)  // overdraw test lambda
@@ -883,6 +867,7 @@ void BaseRenderingContext2D::clearRect(double x,
   clear_flags.setStyle(PaintFlags::kFill_Style);
 
   // clamp to float to avoid float cast overflow when used as SkScalar
+  AdjustRectForCanvas(x, y, width, height);
   float fx = clampTo<float>(x);
   float fy = clampTo<float>(y);
   float fwidth = clampTo<float>(width);
@@ -1210,32 +1195,6 @@ void BaseRenderingContext2D::drawImage(ScriptState* script_state,
   ValidateStateStack();
 
   WillDrawImage(image_source);
-
-  ValidateStateStack();
-
-  // Heuristic for disabling acceleration based on anticipated texture upload
-  // overhead.
-  // See comments in canvas_heuristic_parameters.h for explanation.
-  if (CanCreateCanvas2dResourceProvider() && IsAccelerated() &&
-      !image_source->IsAccelerated() &&
-      !base::FeatureList::IsEnabled(features::kAlwaysAccelerateCanvas)) {
-    float src_area = src_rect.Width() * src_rect.Height();
-    if (src_area >
-        canvas_heuristic_parameters::kDrawImageTextureUploadHardSizeLimit) {
-      this->DisableAcceleration();
-    } else if (src_area > canvas_heuristic_parameters::
-                              kDrawImageTextureUploadSoftSizeLimit) {
-      SkRect bounds = dst_rect;
-      SkMatrix ctm = DrawingCanvas()->getTotalMatrix();
-      ctm.mapRect(&bounds);
-      float dst_area = dst_rect.Width() * dst_rect.Height();
-      if (src_area >
-          dst_area * canvas_heuristic_parameters::
-                         kDrawImageTextureUploadSoftSizeLimitScaleThreshold) {
-        this->DisableAcceleration();
-      }
-    }
-  }
 
   ValidateStateStack();
 
@@ -1619,24 +1578,46 @@ ImageData* BaseRenderingContext2D::getImageData(
     return result;
   }
 
-  WTF::ArrayBufferContents contents;
-
   const CanvasColorParams& color_params = ColorParams();
+  // Deferred offscreen canvases might have recorded commands, make sure
+  // that those get drawn here
+  FinalizeFrame();
   scoped_refptr<StaticBitmapImage> snapshot = GetImage(kPreferNoAcceleration);
 
-  if (!StaticBitmapImage::ConvertToArrayBufferContents(
-          snapshot, contents, image_data_rect, color_params, IsAccelerated())) {
+  // GetImagedata is faster in Unaccelerated canvases
+  if (IsAccelerated())
+    DisableAcceleration();
+
+  size_t size_in_bytes;
+  if (!StaticBitmapImage::GetSizeInBytes(image_data_rect, color_params)
+           .AssignIfValid(&size_in_bytes) ||
+      size_in_bytes > v8::TypedArray::kMaxLength) {
     exception_state.ThrowRangeError("Out of memory at ImageData creation");
     return nullptr;
   }
 
-  if (!!snapshot) {
-    // If source image is not null, the ConvertToArrayBufferContents function
-    // must have invoked SkImage::readPixels.
-    DidInvokeGPUReadbackInCurrentFrame();
+  bool may_have_stray_area =
+      IsAccelerated()  // GPU readback may fail silently.
+      || StaticBitmapImage::MayHaveStrayArea(snapshot, image_data_rect);
+  ArrayBufferContents::InitializationPolicy initialization_policy =
+      may_have_stray_area ? ArrayBufferContents::kZeroInitialize
+                          : ArrayBufferContents::kDontInitialize;
+
+  ArrayBufferContents contents(
+      size_in_bytes, 1, ArrayBufferContents::kNotShared, initialization_policy);
+  if (contents.DataLength() != size_in_bytes) {
+    exception_state.ThrowRangeError("Out of memory at ImageData creation");
+    return nullptr;
   }
 
-  NeedsFinalizeFrame();
+  if (!StaticBitmapImage::CopyToByteArray(
+          snapshot,
+          base::span<uint8_t>(reinterpret_cast<uint8_t*>(contents.Data()),
+                              contents.DataLength()),
+          image_data_rect, color_params)) {
+    exception_state.ThrowRangeError("Failed to copy image data");
+    return nullptr;
+  }
 
   // Convert pixels to proper storage format if needed
   if (PixelFormat() != kRGBA8CanvasPixelFormat) {
@@ -1654,7 +1635,7 @@ ImageData* BaseRenderingContext2D::getImageData(
   ImageData* imageData = ImageData::Create(
       image_data_rect.Size(),
       NotShared<DOMUint8ClampedArray>(DOMUint8ClampedArray::Create(
-          array_buffer, 0, array_buffer->ByteLength())),
+          array_buffer, 0, array_buffer->DeprecatedByteLengthAsUnsigned())),
       color_settings);
 
   if (!IsPaint2D()) {
@@ -1709,9 +1690,9 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
   usage_counters_.num_put_image_data_calls++;
   usage_counters_.area_put_image_data_calls += dirty_width * dirty_height;
 
-  if (data->BufferBase()->IsNeutered()) {
+  if (data->BufferBase()->IsDetached()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "The source data has been neutered.");
+                                      "The source data has been detached.");
     return;
   }
 
@@ -1760,7 +1741,8 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
   // additional swizzling is needed.
   CanvasColorParams data_color_params = data->GetCanvasColorParams();
   CanvasColorParams context_color_params =
-      CanvasColorParams(ColorParams().ColorSpace(), PixelFormat(), kNonOpaque);
+      CanvasColorParams(ColorParams().ColorSpace(), PixelFormat(), kNonOpaque,
+                        CanvasForceRGBA::kNotForced);
   if (data_color_params.NeedsColorConversion(context_color_params) ||
       PixelFormat() == kF16CanvasPixelFormat) {
     size_t data_length;

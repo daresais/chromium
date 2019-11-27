@@ -25,8 +25,8 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/navigation_simulator.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/web_contents_tester.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,7 +58,7 @@ class SafeBrowsingCallbackWaiter {
 
    void OnBlockingPageDoneOnIO(bool proceed) {
      DCHECK_CURRENTLY_ON(BrowserThread::IO);
-     base::PostTaskWithTraits(
+     base::PostTask(
          FROM_HERE, {BrowserThread::UI},
          base::BindOnce(&SafeBrowsingCallbackWaiter::OnBlockingPageDone,
                         base::Unretained(this), proceed));
@@ -79,7 +79,7 @@ class SafeBrowsingUIManagerTest : public ChromeRenderViewHostTestHarness {
  public:
   SafeBrowsingUIManagerTest()
       : scoped_testing_local_state_(TestingBrowserProcess::GetGlobal()) {
-    ui_manager_ = new SafeBrowsingUIManager(NULL);
+    ui_manager_ = new SafeBrowsingUIManager(nullptr);
   }
 
   ~SafeBrowsingUIManagerTest() override {}
@@ -96,9 +96,8 @@ class SafeBrowsingUIManagerTest : public ChromeRenderViewHostTestHarness {
     g_browser_process->safe_browsing_service()->Initialize();
     // A profile was created already but SafeBrowsingService wasn't around to
     // get notified of it, so include that notification now.
-    safe_browsing_service->AddPrefService(
-        Profile::FromBrowserContext(web_contents()->GetBrowserContext())
-            ->GetPrefs());
+    safe_browsing_service->OnProfileAdded(
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
     content::BrowserThread::RunAllPendingTasksOnThreadForTesting(
         content::BrowserThread::IO);
   }
@@ -325,7 +324,7 @@ TEST_F(SafeBrowsingUIManagerTest, MAYBE_UICallbackProceed) {
       base::Bind(&SafeBrowsingCallbackWaiter::OnBlockingPageDone,
                  base::Unretained(&waiter));
   resource.callback_thread =
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI});
+      base::CreateSingleThreadTaskRunner({BrowserThread::UI});
   std::vector<security_interstitials::UnsafeResource> resources;
   resources.push_back(resource);
   SimulateBlockingPageDone(resources, true);
@@ -349,7 +348,7 @@ TEST_F(SafeBrowsingUIManagerTest, MAYBE_UICallbackDontProceed) {
       base::Bind(&SafeBrowsingCallbackWaiter::OnBlockingPageDone,
                  base::Unretained(&waiter));
   resource.callback_thread =
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI});
+      base::CreateSingleThreadTaskRunner({BrowserThread::UI});
   std::vector<security_interstitials::UnsafeResource> resources;
   resources.push_back(resource);
   SimulateBlockingPageDone(resources, false);
@@ -373,7 +372,7 @@ TEST_F(SafeBrowsingUIManagerTest, MAYBE_IOCallbackProceed) {
       base::Bind(&SafeBrowsingCallbackWaiter::OnBlockingPageDoneOnIO,
                  base::Unretained(&waiter));
   resource.callback_thread =
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
+      base::CreateSingleThreadTaskRunner({BrowserThread::IO});
   std::vector<security_interstitials::UnsafeResource> resources;
   resources.push_back(resource);
   SimulateBlockingPageDone(resources, true);
@@ -397,7 +396,7 @@ TEST_F(SafeBrowsingUIManagerTest, MAYBE_IOCallbackDontProceed) {
       base::Bind(&SafeBrowsingCallbackWaiter::OnBlockingPageDoneOnIO,
                  base::Unretained(&waiter));
   resource.callback_thread =
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
+      base::CreateSingleThreadTaskRunner({BrowserThread::IO});
   std::vector<security_interstitials::UnsafeResource> resources;
   resources.push_back(resource);
   SimulateBlockingPageDone(resources, false);
@@ -448,14 +447,15 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
             unsafe_resources,
             BaseSafeBrowsingErrorUI::SBErrorDisplayOptions(
                 BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources),
-                false,                   // is_extended_reporting_opt_in_allowed
-                false,                   // is_off_the_record
-                false,                   // is_extended_reporting_enabled
-                false,                   // is_extended_reporting_policy_managed
-                false,                   // is_proceed_anyway_disabled
-                true,                    // should_open_links_in_new_tab
-                true,                    // always_show_back_to_safety
-                "cpn_safe_browsing")) {  // help_center_article_link
+                false,                 // is_extended_reporting_opt_in_allowed
+                false,                 // is_off_the_record
+                false,                 // is_extended_reporting_enabled
+                false,                 // is_extended_reporting_policy_managed
+                false,                 // is_proceed_anyway_disabled
+                true,                  // should_open_links_in_new_tab
+                true,                  // always_show_back_to_safety
+                "cpn_safe_browsing"),  // help_center_article_link
+            true) {                    // should_trigger_reporting
     // Don't delay details at all for the unittest.
     SetThreatDetailsProceedDelayForTesting(0);
     DontCreateViewForTesting();
@@ -473,8 +473,8 @@ class TestSafeBrowsingBlockingPageFactory
       BaseUIManager* delegate,
       content::WebContents* web_contents,
       const GURL& main_frame_url,
-      const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources)
-      override {
+      const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources,
+      bool should_trigger_reporting) override {
     return new TestSafeBrowsingBlockingPage(delegate, web_contents,
                                             main_frame_url, unsafe_resources);
   }
@@ -517,7 +517,7 @@ TEST_F(SafeBrowsingUIManagerTest,
       base::Bind(&SafeBrowsingCallbackWaiter::OnBlockingPageDoneOnIO,
                  base::Unretained(&waiter));
   resource.callback_thread =
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
+      base::CreateSingleThreadTaskRunner({BrowserThread::IO});
   std::vector<security_interstitials::UnsafeResource> resources;
   resources.push_back(resource);
 

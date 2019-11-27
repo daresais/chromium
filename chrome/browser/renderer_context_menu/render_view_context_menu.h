@@ -37,6 +37,7 @@ class AccessibilityLabelsMenuObserver;
 class ClickToCallContextMenuObserver;
 class PrintPreviewContextMenuObserver;
 class Profile;
+class SharedClipboardContextMenuObserver;
 class SpellingMenuObserver;
 class SpellingOptionsSubMenuObserver;
 
@@ -55,8 +56,8 @@ class Point;
 }
 
 namespace blink {
-struct WebMediaPlayerAction;
-struct WebPluginAction;
+struct PluginAction;
+struct MediaPlayerAction;
 }
 
 class RenderViewContextMenu : public RenderViewContextMenuBase {
@@ -71,8 +72,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
                                        bool is_checked);
 
   // Range of command IDs to use for the items in the send tab to self submenu.
-  static const int kMinSendTabToSelfSubMenuCommandId =
-      send_tab_to_self::SendTabToSelfSubMenuModel::kMinCommandId;
   static const int kMaxSendTabToSelfSubMenuCommandId =
       send_tab_to_self::SendTabToSelfSubMenuModel::kMaxCommandId;
 
@@ -175,6 +174,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendEditableItems();
   void AppendLanguageSettings();
   void AppendSpellingSuggestionItems();
+  void AppendSharedClipboardItems();
   // Returns true if the items were appended. This might not happen in all
   // cases, e.g. these are only appended if a screen reader is enabled.
   bool AppendAccessibilityLabelsItems();
@@ -188,6 +188,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendProtocolHandlerSubMenu();
   void AppendPasswordItems();
   void AppendPictureInPictureItem();
+  void MaybeAppendClickToCallItem();
 
   // Command enabled query functions.
   bool IsReloadEnabled() const;
@@ -233,9 +234,9 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void ExecPictureInPicture();
 
   void MediaPlayerActionAt(const gfx::Point& location,
-                           const blink::WebMediaPlayerAction& action);
+                           const blink::MediaPlayerAction& action);
   void PluginActionAt(const gfx::Point& location,
-                      const blink::WebPluginAction& action);
+                      const blink::PluginAction& action);
 
   // Returns a list of registered ProtocolHandlers that can handle the clicked
   // on URL.
@@ -292,6 +293,10 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // Click to call menu observer.
   std::unique_ptr<ClickToCallContextMenuObserver>
       click_to_call_context_menu_observer_;
+
+  // Shared clipboard menu observer.
+  std::unique_ptr<SharedClipboardContextMenuObserver>
+      shared_clipboard_context_menu_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenu);
 };

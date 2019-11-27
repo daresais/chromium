@@ -7,7 +7,9 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/task/post_task.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/resources_util.h"
 #include "chrome/browser/search/instant_io_context.h"
@@ -23,6 +25,8 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/url_data_source.h"
+#include "content/public/common/url_constants.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -78,9 +82,11 @@ std::string ThemeSource::GetSource() {
 }
 
 void ThemeSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path = content::URLDataSource::URLToRequestPath(url);
   // Default scale factor if not specified.
   float scale = 1.0f;
   // All frames by default if not specified.
@@ -100,7 +106,7 @@ void ThemeSource::StartDataRequest(
   int resource_id = -1;
   if (parsed_path == "current-channel-logo") {
     switch (chrome::GetChannel()) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
       case version_info::Channel::CANARY:
         resource_id = IDR_PRODUCT_LOGO_32_CANARY;
         break;
@@ -232,9 +238,21 @@ void ThemeSource::SendThemeImage(
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     // Fetching image data in ResourceBundle should happen on the UI thread. See
     // crbug.com/449277
-    base::PostTaskWithTraitsAndReply(
+    base::PostTaskAndReply(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&ProcessResourceOnUiThread, resource_id, scale, data),
         base::BindOnce(callback, data));
   }
+}
+
+std::string ThemeSource::GetAccessControlAllowOriginForOrigin(
+    const std::string& origin) {
+  std::string allowed_origin_prefix = content::kChromeUIScheme;
+  allowed_origin_prefix += "://";
+  if (base::StartsWith(origin, allowed_origin_prefix,
+                       base::CompareCase::SENSITIVE)) {
+    return origin;
+  }
+
+  return content::URLDataSource::GetAccessControlAllowOriginForOrigin(origin);
 }

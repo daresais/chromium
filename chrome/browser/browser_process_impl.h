@@ -180,8 +180,10 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   component_updater::ComponentUpdateService* component_updater() override;
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   component_updater::SupervisedUserWhitelistInstaller*
   supervised_user_whitelist_installer() override;
+#endif
   MediaFileSystemRegistry* media_file_system_registry() override;
   WebRtcLogUploader* webrtc_log_uploader() override;
   network_time::NetworkTimeTracker* network_time_tracker() override;
@@ -189,9 +191,6 @@ class BrowserProcessImpl : public BrowserProcess,
   resource_coordinator::TabManager* GetTabManager() override;
   resource_coordinator::ResourceCoordinatorParts* resource_coordinator_parts()
       override;
-  shell_integration::DefaultWebClientState CachedDefaultWebClientState()
-      override;
-  prefs::InProcessPrefServiceFactory* pref_service_factory() const override;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -224,8 +223,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreatePhysicalWebDataSource();
 
   void ApplyDefaultBrowserPolicy();
-
-  void CacheDefaultWebClientState();
 
   // Methods called to control our lifetime. The browser process can be "pinned"
   // to make sure it keeps running.
@@ -366,8 +363,10 @@ class BrowserProcessImpl : public BrowserProcess,
   // but some users of component updater only install per-user.
   std::unique_ptr<component_updater::ComponentUpdateService> component_updater_;
 
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   std::unique_ptr<component_updater::SupervisedUserWhitelistInstaller>
       supervised_user_whitelist_installer_;
+#endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   std::unique_ptr<PluginsResourceService> plugins_resource_service_;
@@ -392,12 +391,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<gcm::GCMDriver> gcm_driver_;
 
-  shell_integration::DefaultWebClientState cached_default_web_client_state_ =
-      shell_integration::UNKNOWN_DEFAULT;
-
   std::unique_ptr<resource_coordinator::ResourceCoordinatorParts>
       resource_coordinator_parts_;
-  std::unique_ptr<prefs::InProcessPrefServiceFactory> pref_service_factory_;
 
   std::unique_ptr<SecureOriginPrefsObserver> secure_origin_prefs_observer_;
   std::unique_ptr<SiteIsolationPrefsObserver> site_isolation_prefs_observer_;

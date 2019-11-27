@@ -11,11 +11,11 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/dip_px_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/services/app_service/public/cpp/app_service_proxy.h"
 #include "extensions/grit/extensions_browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
@@ -57,10 +57,11 @@ std::string AppIconSource::GetSource() {
 }
 
 void AppIconSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
-  std::string path_lower = base::ToLowerASCII(path);
+  const std::string path_lower =
+      base::ToLowerASCII(content::URLDataSource::URLToRequestPath(url));
   std::vector<std::string> path_parts = base::SplitString(
       path_lower, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
@@ -78,7 +79,9 @@ void AppIconSource::StartDataRequest(
     LoadDefaultImage(callback);
     return;
   }
-  int size_in_dip = apps_util::ConvertPxToDip(size);
+  constexpr bool quantize_to_supported_scale_factor = true;
+  int size_in_dip =
+      apps_util::ConvertPxToDip(size, quantize_to_supported_scale_factor);
 
   apps::AppServiceProxy* app_service_proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile_);

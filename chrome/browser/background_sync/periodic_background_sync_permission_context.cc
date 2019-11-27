@@ -10,7 +10,6 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/content_features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_string.h"
@@ -22,7 +21,7 @@
 PeriodicBackgroundSyncPermissionContext::
     PeriodicBackgroundSyncPermissionContext(Profile* profile)
     : PermissionContextBase(profile,
-                            CONTENT_SETTINGS_TYPE_PERIODIC_BACKGROUND_SYNC,
+                            ContentSettingsType::PERIODIC_BACKGROUND_SYNC,
                             blink::mojom::FeaturePolicyFeature::kNotFound) {}
 
 PeriodicBackgroundSyncPermissionContext::
@@ -62,9 +61,6 @@ PeriodicBackgroundSyncPermissionContext::GetPermissionStatusInternal(
     const GURL& embedding_origin) const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (!base::FeatureList::IsEnabled(features::kPeriodicBackgroundSync))
-    return CONTENT_SETTING_BLOCK;
-
 #if defined(OS_ANDROID)
   if (IsTwaInstalled(requesting_origin))
     return CONTENT_SETTING_ALLOW;
@@ -80,8 +76,7 @@ PeriodicBackgroundSyncPermissionContext::GetPermissionStatusInternal(
   DCHECK(host_content_settings_map);
 
   auto content_setting = host_content_settings_map->GetContentSetting(
-      requesting_origin, embedding_origin,
-      CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
+      requesting_origin, embedding_origin, ContentSettingsType::BACKGROUND_SYNC,
       /* resource_identifier= */ std::string());
   DCHECK(content_setting == CONTENT_SETTING_BLOCK ||
          content_setting == CONTENT_SETTING_ALLOW);

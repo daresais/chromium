@@ -23,7 +23,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
@@ -34,11 +33,11 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
-import org.chromium.printing.PrintDocumentAdapterWrapper;
 import org.chromium.printing.PrintDocumentAdapterWrapper.LayoutResultCallbackWrapper;
 import org.chromium.printing.PrintDocumentAdapterWrapper.WriteResultCallbackWrapper;
 import org.chromium.printing.PrintManagerDelegate;
@@ -69,14 +68,13 @@ public class PrintingControllerTest {
 
     private static final String TEMP_FILE_NAME = "temp_print";
     private static final String TEMP_FILE_EXTENSION = ".pdf";
-    private static final String PRINT_JOB_NAME = "foo";
     private static final String URL = UrlUtils.encodeHtmlDataUri(
             "<html><head></head><body>foo</body></html>");
     private static final String PDF_PREAMBLE = "%PDF-1";
     private static final long TEST_TIMEOUT = 20000L;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         // Do nothing.
     }
 
@@ -103,9 +101,8 @@ public class PrintingControllerTest {
     }
 
     private static class WaitForOnWriteHelper extends CallbackHelper {
-        @Override
-        public void waitForCallback(String msg) throws InterruptedException, TimeoutException {
-            waitForCallback(msg, 0, 1, TEST_TIMEOUT, TimeUnit.MILLISECONDS);
+        public void waitForCallback(String msg) throws TimeoutException {
+            waitForFirst(msg, TEST_TIMEOUT, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -142,10 +139,7 @@ public class PrintingControllerTest {
     private static class PrintingControllerImplPdfWritingDone extends PrintingControllerImpl {
         private WaitForOnWriteHelper mWaitForOnWrite;
 
-        public PrintingControllerImplPdfWritingDone(
-                PrintDocumentAdapterWrapper printDocumentAdapterWrapper, String errorText,
-                WaitForOnWriteHelper waitForOnWrite) {
-            super(printDocumentAdapterWrapper, errorText);
+        public PrintingControllerImplPdfWritingDone(WaitForOnWriteHelper waitForOnWrite) {
             mWaitForOnWrite = waitForOnWrite;
             sInstance = this;
         }
@@ -166,7 +160,7 @@ public class PrintingControllerTest {
     @LargeTest
     @Feature({"Printing"})
     public void testNormalPrintingFlow() throws Throwable {
-        if (!ApiCompatibilityUtils.isPrintingSupported()) return;
+        if (!(Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT)) return;
 
         mActivityTestRule.startMainActivityWithURL(URL);
         final Tab currentTab = mActivityTestRule.getActivity().getActivityTab();
@@ -234,8 +228,8 @@ public class PrintingControllerTest {
     @TargetApi(Build.VERSION_CODES.KITKAT)
     @MediumTest
     @Feature({"Printing"})
-    public void testPrintCloseWindowBeforeStart() throws Throwable {
-        if (!ApiCompatibilityUtils.isPrintingSupported()) return;
+    public void testPrintCloseWindowBeforeStart() {
+        if (!(Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT)) return;
 
         mActivityTestRule.startMainActivityWithURL(URL);
         final Tab currentTab = mActivityTestRule.getActivity().getActivityTab();
@@ -247,7 +241,8 @@ public class PrintingControllerTest {
             printingController.setPendingPrint(
                     new TabPrinter(currentTab), mockPrintManagerDelegate, -1, -1);
             TabModelUtils.closeCurrentTab(mActivityTestRule.getActivity().getCurrentTabModel());
-            Assert.assertFalse("currentTab should be closed already.", currentTab.isInitialized());
+            Assert.assertFalse(
+                    "currentTab should be closed already.", ((TabImpl) currentTab).isInitialized());
             printingController.startPendingPrint();
         });
     }
@@ -263,7 +258,7 @@ public class PrintingControllerTest {
     @LargeTest
     @Feature({"Printing"})
     public void testPrintCloseWindowBeforeOnWrite() throws Throwable {
-        if (!ApiCompatibilityUtils.isPrintingSupported()) return;
+        if (!(Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT)) return;
 
         mActivityTestRule.startMainActivityWithURL(URL);
         final Tab currentTab = mActivityTestRule.getActivity().getActivityTab();
@@ -294,8 +289,8 @@ public class PrintingControllerTest {
             TestThreadUtils.runOnUiThreadBlocking(() -> {
                 // Close tab.
                 TabModelUtils.closeCurrentTab(mActivityTestRule.getActivity().getCurrentTabModel());
-                Assert.assertFalse(
-                        "currentTab should be closed already.", currentTab.isInitialized());
+                Assert.assertFalse("currentTab should be closed already.",
+                        ((TabImpl) currentTab).isInitialized());
 
                 final WriteResultCallbackWrapper writeResultCallback =
                         new WriteResultCallbackWrapperMock() {
@@ -330,17 +325,15 @@ public class PrintingControllerTest {
     @MediumTest
     @Feature({"Printing"})
     public void testCancelPrintBeforeWriteResultCallbacks() throws Throwable {
-        if (!ApiCompatibilityUtils.isPrintingSupported()) return;
+        if (!(Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT)) return;
 
         mActivityTestRule.startMainActivityWithURL(URL);
 
         final WaitForOnWriteHelper onWriteHelper = new WaitForOnWriteHelper();
         final Tab currentTab = mActivityTestRule.getActivity().getActivityTab();
         final PrintingControllerImpl printingController =
-                TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
-                    return new PrintingControllerImplPdfWritingDone(
-                            new PrintDocumentAdapterWrapper(), PRINT_JOB_NAME, onWriteHelper);
-                });
+                TestThreadUtils.runOnUiThreadBlockingNoException(
+                        () -> new PrintingControllerImplPdfWritingDone(onWriteHelper));
 
         startControllerOnUiThread(printingController, currentTab);
         callStartOnUiThread(printingController);
@@ -388,8 +381,8 @@ public class PrintingControllerTest {
     @Test
     @SmallTest
     @Feature({"Printing"})
-    public void testPdfWritingDoneCalledWithoutInitailizePrintingTask() throws Throwable {
-        if (!ApiCompatibilityUtils.isPrintingSupported()) return;
+    public void testPdfWritingDoneCalledWithoutInitailizePrintingTask() {
+        if (!(Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT)) return;
 
         mActivityTestRule.startMainActivityWithURL(URL);
         final PrintingControllerImpl controller = createControllerOnUiThread();
@@ -400,10 +393,8 @@ public class PrintingControllerTest {
     }
 
     private PrintingControllerImpl createControllerOnUiThread() {
-        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
-            return (PrintingControllerImpl) PrintingControllerImpl.create(
-                    new PrintDocumentAdapterWrapper(), PRINT_JOB_NAME);
-        });
+        return TestThreadUtils.runOnUiThreadBlockingNoException(
+                () -> (PrintingControllerImpl) PrintingControllerImpl.getInstance());
     }
 
     @TargetApi(Build.VERSION_CODES.KITKAT)

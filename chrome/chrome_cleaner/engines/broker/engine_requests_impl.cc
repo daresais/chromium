@@ -64,18 +64,17 @@ EngineRequestsImpl::EngineRequestsImpl(
     scoped_refptr<MojoTaskRunner> mojo_task_runner,
     InterfaceMetadataObserver* metadata_observer)
     : mojo_task_runner_(mojo_task_runner),
-      metadata_observer_(metadata_observer),
-      binding_(this) {}
+      metadata_observer_(metadata_observer) {}
 
 EngineRequestsImpl::~EngineRequestsImpl() = default;
 
 void EngineRequestsImpl::Bind(
-    mojom::EngineRequestsAssociatedPtrInfo* ptr_info) {
-  if (binding_.is_bound())
-    binding_.Unbind();
+    mojo::PendingAssociatedRemote<mojom::EngineRequests>* remote) {
+  if (receiver_.is_bound())
+    receiver_.reset();
 
-  binding_.Bind(mojo::MakeRequest(ptr_info));
-  // There's no need to call set_connection_error_handler on this since it's an
+  receiver_.Bind(remote->InitWithNewEndpointAndPassReceiver());
+  // There's no need to call set_disconnect_handler on this since it's an
   // associated interface. Any errors will be handled on the main EngineCommands
   // interface.
 }
@@ -83,11 +82,10 @@ void EngineRequestsImpl::Bind(
 void EngineRequestsImpl::SandboxGetFileAttributes(
     const base::FilePath& file_name,
     SandboxGetFileAttributesCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&EngineRequestsImpl::GetFileAttributes,
-                     base::Unretained(this), file_name,
-                     std::move(result_callback)));
+  base::PostTask(FROM_HERE, {base::ThreadPool(), base::MayBlock()},
+                 base::BindOnce(&EngineRequestsImpl::GetFileAttributes,
+                                base::Unretained(this), file_name,
+                                std::move(result_callback)));
 }
 
 void EngineRequestsImpl::GetFileAttributes(
@@ -106,11 +104,10 @@ void EngineRequestsImpl::GetFileAttributes(
 void EngineRequestsImpl::SandboxGetKnownFolderPath(
     mojom::KnownFolder folder_id,
     SandboxGetKnownFolderPathCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&EngineRequestsImpl::GetKnownFolderPath,
-                     base::Unretained(this), folder_id,
-                     std::move(result_callback)));
+  base::PostTask(FROM_HERE, {base::ThreadPool(), base::MayBlock()},
+                 base::BindOnce(&EngineRequestsImpl::GetKnownFolderPath,
+                                base::Unretained(this), folder_id,
+                                std::move(result_callback)));
 }
 
 void EngineRequestsImpl::GetKnownFolderPath(
@@ -128,8 +125,8 @@ void EngineRequestsImpl::GetKnownFolderPath(
 
 void EngineRequestsImpl::SandboxGetProcesses(
     SandboxGetProcessesCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetProcesses, base::Unretained(this),
                      std::move(result_callback)));
 }
@@ -147,8 +144,8 @@ void EngineRequestsImpl::GetProcesses(
 
 void EngineRequestsImpl::SandboxGetTasks(
     SandboxGetTasksCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetTasks, base::Unretained(this),
                      std::move(result_callback)));
 }
@@ -183,8 +180,8 @@ void EngineRequestsImpl::GetTasks(SandboxGetTasksCallback result_callback) {
 void EngineRequestsImpl::SandboxGetProcessImagePath(
     base::ProcessId pid,
     SandboxGetProcessImagePathCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetProcessImagePath,
                      base::Unretained(this), pid, std::move(result_callback)));
 }
@@ -206,8 +203,8 @@ void EngineRequestsImpl::GetProcessImagePath(
 void EngineRequestsImpl::SandboxGetLoadedModules(
     base::ProcessId pid,
     SandboxGetLoadedModulesCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetLoadedModules,
                      base::Unretained(this), pid, std::move(result_callback)));
 }
@@ -229,8 +226,8 @@ void EngineRequestsImpl::GetLoadedModules(
 void EngineRequestsImpl::SandboxGetProcessCommandLine(
     base::ProcessId pid,
     SandboxGetProcessCommandLineCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetProcessCommandLine,
                      base::Unretained(this), pid, std::move(result_callback)));
 }
@@ -253,11 +250,10 @@ void EngineRequestsImpl::GetProcessCommandLine(
 void EngineRequestsImpl::SandboxGetUserInfoFromSID(
     mojom::StringSidPtr string_sid,
     SandboxGetUserInfoFromSIDCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&EngineRequestsImpl::GetUserInfoFromSID,
-                     base::Unretained(this), std::move(string_sid),
-                     std::move(result_callback)));
+  base::PostTask(FROM_HERE, {base::ThreadPool(), base::MayBlock()},
+                 base::BindOnce(&EngineRequestsImpl::GetUserInfoFromSID,
+                                base::Unretained(this), std::move(string_sid),
+                                std::move(result_callback)));
 }
 
 void EngineRequestsImpl::GetUserInfoFromSID(
@@ -285,8 +281,8 @@ void EngineRequestsImpl::SandboxOpenReadOnlyRegistry(
     const base::string16& sub_key,
     uint32_t dw_access,
     SandboxOpenReadOnlyRegistryCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::OpenReadOnlyRegistry,
                      base::Unretained(this), root_key_handle, sub_key,
                      dw_access, std::move(result_callback)));
@@ -319,8 +315,8 @@ void EngineRequestsImpl::SandboxNtOpenReadOnlyRegistry(
     const String16EmbeddedNulls& sub_key,
     uint32_t dw_access,
     SandboxNtOpenReadOnlyRegistryCallback result_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTask(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::NtOpenReadOnlyRegistry,
                      base::Unretained(this), root_key_handle, sub_key,
                      dw_access, std::move(result_callback)));

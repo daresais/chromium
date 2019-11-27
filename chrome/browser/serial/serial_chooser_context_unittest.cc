@@ -10,7 +10,7 @@
 #include "chrome/browser/serial/serial_chooser_context_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "services/device/public/mojom/serial.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,7 +31,7 @@ class SerialChooserContextTest : public testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
   MockPermissionObserver mock_observer_;
 };
@@ -48,8 +48,8 @@ TEST_F(SerialChooserContextTest, GrantAndRevokeEphemeralPermission) {
   EXPECT_FALSE(context->HasPortPermission(origin, origin, *port));
 
   EXPECT_CALL(observer(), OnChooserObjectPermissionChanged(
-                              CONTENT_SETTINGS_TYPE_SERIAL_GUARD,
-                              CONTENT_SETTINGS_TYPE_SERIAL_CHOOSER_DATA));
+                              ContentSettingsType::SERIAL_GUARD,
+                              ContentSettingsType::SERIAL_CHOOSER_DATA));
 
   context->GrantPortPermission(origin, origin, *port);
   EXPECT_TRUE(context->HasPortPermission(origin, origin, *port));
@@ -69,8 +69,8 @@ TEST_F(SerialChooserContextTest, GrantAndRevokeEphemeralPermission) {
   EXPECT_FALSE(objects[0]->incognito);
 
   EXPECT_CALL(observer(), OnChooserObjectPermissionChanged(
-                              CONTENT_SETTINGS_TYPE_SERIAL_GUARD,
-                              CONTENT_SETTINGS_TYPE_SERIAL_CHOOSER_DATA));
+                              ContentSettingsType::SERIAL_GUARD,
+                              ContentSettingsType::SERIAL_CHOOSER_DATA));
   EXPECT_CALL(observer(), OnPermissionRevoked(origin, origin));
 
   context->RevokeObjectPermission(origin, origin, objects[0]->value);
@@ -93,7 +93,7 @@ TEST_F(SerialChooserContextTest, GuardPermission) {
 
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
   map->SetContentSettingDefaultScope(origin.GetURL(), origin.GetURL(),
-                                     CONTENT_SETTINGS_TYPE_SERIAL_GUARD,
+                                     ContentSettingsType::SERIAL_GUARD,
                                      std::string(), CONTENT_SETTING_BLOCK);
   EXPECT_FALSE(context->HasPortPermission(origin, origin, *port));
 

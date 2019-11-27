@@ -192,8 +192,14 @@ static CompositingReasons SubtreeReasonsForCompositing(
   // there are descendant layers that will be affected by the preserve-3d or
   // perspective.
   if (has3d_transformed_descendants) {
-    subtree_reasons |= layer->PotentialCompositingReasonsFromStyle() &
-                       CompositingReason::kCombo3DDescendants;
+    const ComputedStyle& style = layer->GetLayoutObject().StyleRef();
+    if (style.UsedTransformStyle3D() == ETransformStyle3D::kPreserve3d)
+      subtree_reasons |= CompositingReason::kPreserve3DWith3DDescendants;
+
+    // Perspective (specified either by perspective or transform properties)
+    // with 3d descendants need a render surface for flattening purposes.
+    if (style.HasPerspective() || style.Transform().HasPerspective())
+      subtree_reasons |= CompositingReason::kPerspectiveWith3DDescendants;
   }
 
   return subtree_reasons;
@@ -291,7 +297,7 @@ void CompositingRequirementsUpdater::UpdateRecursive(
 
   if (layer->GetScrollableArea() &&
       layer->GetScrollableArea()->NeedsCompositedScrolling())
-    direct_reasons |= CompositingReason::kOverflowScrollingTouch;
+    direct_reasons |= CompositingReason::kOverflowScrolling;
 
   bool can_be_composited = compositor->CanBeComposited(layer);
   if (can_be_composited)

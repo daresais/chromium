@@ -29,6 +29,9 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
 #import "ios/chrome/browser/passwords/save_passwords_consumer.h"
+#import "ios/chrome/browser/signin/authentication_service.h"
+#include "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/chrome_identity_service_observer_bridge.h"
 #include "ios/chrome/browser/system_flags.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
@@ -36,6 +39,7 @@
 #import "ios/chrome/browser/ui/settings/password/password_details_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/password/password_details_table_view_controller_delegate.h"
 #import "ios/chrome/browser/ui/settings/password/password_exporter.h"
+#import "ios/chrome/browser/ui/settings/password/passwords_table_view_constants.h"
 #import "ios/chrome/browser/ui/settings/password/reauthentication_module.h"
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
 #import "ios/chrome/browser/ui/settings/utils/settings_utils.h"
@@ -48,6 +52,7 @@
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -58,17 +63,12 @@
 #error "This file requires ARC support."
 #endif
 
-NSString* const kPasswordsTableViewId = @"PasswordsTableViewId";
-NSString* const kPasswordsExportConfirmViewId = @"PasswordsExportConfirmViewId";
-NSString* const kPasswordsSearchBarId = @"PasswordsSearchBar";
-NSString* const kPasswordsScrimViewId = @"PasswordsScrimViewId";
-
 namespace {
 
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierSavePasswordsSwitch = kSectionIdentifierEnumZero,
   SectionIdentifierSavedPasswords,
-  SectionIdentifierBlacklist,
+  SectionIdentifierBlocked,
   SectionIdentifierExportPasswordsButton,
 };
 
@@ -77,7 +77,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeHeader,
   ItemTypeSavePasswordsSwitch,
   ItemTypeSavedPassword,  // This is a repeated item type.
-  ItemTypeBlacklisted,    // This is a repeated item type.
+  ItemTypeBlocked,        // This is a repeated item type.
   ItemTypeExportPasswordsButton,
 };
 
@@ -99,14 +99,14 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 @implementation PasswordFormContentItem
 @end
 
-// Use the type of the items to convey the Saved/Blacklisted status.
+// Use the type of the items to convey the Saved/Blocked status.
 @interface SavedFormContentItem : PasswordFormContentItem
 @end
 @implementation SavedFormContentItem
 @end
-@interface BlacklistedFormContentItem : PasswordFormContentItem
+@interface BlockedFormContentItem : PasswordFormContentItem
 @end
-@implementation BlacklistedFormContentItem
+@implementation BlockedFormContentItem
 @end
 
 @protocol PasswordExportActivityViewControllerDelegate <NSObject>
@@ -150,6 +150,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 
 @interface PasswordsTableViewController () <
     BooleanObserver,
+    ChromeIdentityServiceObserver,
     PasswordDetailsTableViewControllerDelegate,
     PasswordExporterDelegate,
     PasswordExportActivityViewControllerDelegate,
@@ -173,14 +174,16 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   std::unique_ptr<ios::SavePasswordsConsumer> savedPasswordsConsumer_;
   // The list of the user's saved passwords.
   std::vector<std::unique_ptr<autofill::PasswordForm>> savedForms_;
-  // The list of the user's blacklisted sites.
-  std::vector<std::unique_ptr<autofill::PasswordForm>> blacklistedForms_;
+  // The list of the user's blocked sites.
+  std::vector<std::unique_ptr<autofill::PasswordForm>> blockedForms_;
   // Map containing duplicates of saved passwords.
   password_manager::DuplicatesMap savedPasswordDuplicates_;
-  // Map containing duplicates of blacklisted passwords.
-  password_manager::DuplicatesMap blacklistedPasswordDuplicates_;
+  // Map containing duplicates of blocked passwords.
+  password_manager::DuplicatesMap blockedPasswordDuplicates_;
   // The current Chrome browser state.
   ios::ChromeBrowserState* browserState_;
+  // Authentication Service Observer.
+  std::unique_ptr<ChromeIdentityServiceObserverBridge> identityServiceObserver_;
   // Object storing the time of the previous successful re-authentication.
   // This is meant to be used by the |ReauthenticationModule| for keeping
   // re-authentications valid for a certain time interval within the scope
@@ -264,7 +267,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   searchController.obscuresBackgroundDuringPresentation = NO;
   searchController.delegate = self;
   searchController.searchBar.delegate = self;
-  searchController.searchBar.backgroundColor = [UIColor clearColor];
+  searchController.searchBar.backgroundColor = UIColor.clearColor;
   searchController.searchBar.accessibilityIdentifier = kPasswordsSearchBarId;
   // Center search bar and cancel button vertically so it looks centered
   // in the header when searching.
@@ -362,14 +365,14 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   }
 
   // Blacklisted passwords.
-  if (!blacklistedForms_.empty()) {
-    [model addSectionWithIdentifier:SectionIdentifierBlacklist];
+  if (!blockedForms_.empty()) {
+    [model addSectionWithIdentifier:SectionIdentifierBlocked];
     TableViewTextHeaderFooterItem* headerItem =
         [[TableViewTextHeaderFooterItem alloc] initWithType:ItemTypeHeader];
     headerItem.text =
         l10n_util::GetNSString(IDS_IOS_SETTINGS_PASSWORDS_EXCEPTIONS_HEADING);
     [model setHeader:headerItem
-        forSectionWithIdentifier:SectionIdentifierBlacklist];
+        forSectionWithIdentifier:SectionIdentifierBlocked];
   }
 
   // Export passwords button.
@@ -397,7 +400,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 
 - (BOOL)editButtonEnabled {
   DCHECK([self shouldShowEditButton]);
-  return !savedForms_.empty() || !blacklistedForms_.empty();
+  return !savedForms_.empty() || !blockedForms_.empty();
 }
 
 #pragma mark - SettingsControllerProtocol
@@ -437,7 +440,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   TableViewTextItem* exportPasswordsItem =
       [[TableViewTextItem alloc] initWithType:ItemTypeExportPasswordsButton];
   exportPasswordsItem.text = l10n_util::GetNSString(IDS_IOS_EXPORT_PASSWORDS);
-  exportPasswordsItem.textColor = UIColorFromRGB(kTableViewTextLabelColorBlue);
+  exportPasswordsItem.textColor = [UIColor colorNamed:kBlueColor];
   exportPasswordsItem.accessibilityIdentifier = @"exportPasswordsItem_button";
   exportPasswordsItem.accessibilityTraits = UIAccessibilityTraitButton;
   return exportPasswordsItem;
@@ -456,11 +459,11 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   return passwordItem;
 }
 
-- (BlacklistedFormContentItem*)
-    blacklistedFormItemWithText:(NSString*)text
-                        forForm:(autofill::PasswordForm*)form {
-  BlacklistedFormContentItem* passwordItem =
-      [[BlacklistedFormContentItem alloc] initWithType:ItemTypeBlacklisted];
+- (BlockedFormContentItem*)blockedFormItemWithText:(NSString*)text
+                                           forForm:
+                                               (autofill::PasswordForm*)form {
+  BlockedFormContentItem* passwordItem =
+      [[BlockedFormContentItem alloc] initWithType:ItemTypeBlocked];
   passwordItem.text = text;
   passwordItem.form = form;
   passwordItem.accessibilityTraits |= UIAccessibilityTraitButton;
@@ -471,16 +474,18 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 #pragma mark - BooleanObserver
 
 - (void)booleanDidChange:(id<ObservableBoolean>)observableBoolean {
-  DCHECK_EQ(observableBoolean, passwordManagerEnabled_);
+  if (observableBoolean == passwordManagerEnabled_) {
+    // Update the item.
+    savePasswordsItem_.on = [passwordManagerEnabled_ value];
 
-  // Update the item.
-  savePasswordsItem_.on = [passwordManagerEnabled_ value];
-
-  // Update the cell if it's not removed by presenting search controller.
-  if ([self.tableViewModel
-          hasItemForItemType:ItemTypeSavePasswordsSwitch
-           sectionIdentifier:SectionIdentifierSavePasswordsSwitch]) {
-    [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
+    // Update the cell if it's not removed by presenting search controller.
+    if ([self.tableViewModel
+            hasItemForItemType:ItemTypeSavePasswordsSwitch
+             sectionIdentifier:SectionIdentifierSavePasswordsSwitch]) {
+      [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
+    }
+  } else {
+    NOTREACHED();
   }
 }
 
@@ -503,15 +508,15 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   }
   for (auto& form : results) {
     if (form->blacklisted_by_user)
-      blacklistedForms_.push_back(std::move(form));
+      blockedForms_.push_back(std::move(form));
     else
       savedForms_.push_back(std::move(form));
   }
 
   password_manager::SortEntriesAndHideDuplicates(&savedForms_,
                                                  &savedPasswordDuplicates_);
-  password_manager::SortEntriesAndHideDuplicates(
-      &blacklistedForms_, &blacklistedPasswordDuplicates_);
+  password_manager::SortEntriesAndHideDuplicates(&blockedForms_,
+                                                 &blockedPasswordDuplicates_);
 
   [self updateUIForEditState];
   [self reloadData];
@@ -622,6 +627,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
     // a scrollView and it seems that we get an empty frame when attaching to
     // it.
     AddSameConstraints(self.scrimView, self.view.superview);
+    self.tableView.accessibilityElementsHidden = YES;
     self.tableView.scrollEnabled = NO;
     [UIView animateWithDuration:kTableViewNavigationScrimFadeDuration
                      animations:^{
@@ -640,6 +646,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
         }
         completion:^(BOOL finished) {
           [self.scrimView removeFromSuperview];
+          self.tableView.accessibilityElementsHidden = NO;
           self.tableView.scrollEnabled = YES;
         }];
   }
@@ -656,20 +663,21 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
         [model sectionForSectionIdentifier:SectionIdentifierSavedPasswords];
     [indexSet addIndex:passwordSection];
   }
-  if ([model hasSectionForSectionIdentifier:SectionIdentifierBlacklist]) {
-    NSInteger blacklistedSection =
-        [model sectionForSectionIdentifier:SectionIdentifierBlacklist];
-    [indexSet addIndex:blacklistedSection];
+  if ([model hasSectionForSectionIdentifier:SectionIdentifierBlocked]) {
+    NSInteger blockedSection =
+        [model sectionForSectionIdentifier:SectionIdentifierBlocked];
+    [indexSet addIndex:blockedSection];
   }
   if (indexSet.count > 0) {
+    BOOL animationsWereEnabled = [UIView areAnimationsEnabled];
     [UIView setAnimationsEnabled:NO];
     [self.tableView reloadSections:indexSet
                   withRowAnimation:UITableViewRowAnimationAutomatic];
-    [UIView setAnimationsEnabled:YES];
+    [UIView setAnimationsEnabled:animationsWereEnabled];
   }
 }
 
-// Builds the filtered list of passwords/blacklisted based on given
+// Builds the filtered list of passwords/blocked based on given
 // |searchTerm|.
 - (void)filterItems:(NSString*)searchTerm {
   TableViewModel* model = self.tableViewModel;
@@ -694,22 +702,22 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
     }
   }
 
-  if (!blacklistedForms_.empty()) {
-    [model deleteAllItemsFromSectionWithIdentifier:SectionIdentifierBlacklist];
-    for (const auto& form : blacklistedForms_) {
+  if (!blockedForms_.empty()) {
+    [model deleteAllItemsFromSectionWithIdentifier:SectionIdentifierBlocked];
+    for (const auto& form : blockedForms_) {
       NSString* text = base::SysUTF8ToNSString(
           password_manager::GetShownOriginAndLinkUrl(*form).first);
       bool hidden = searchTerm.length > 0 &&
                     ![text localizedCaseInsensitiveContainsString:searchTerm];
       if (hidden)
         continue;
-      [model addItem:[self blacklistedFormItemWithText:text forForm:form.get()]
-          toSectionWithIdentifier:SectionIdentifierBlacklist];
+      [model addItem:[self blockedFormItemWithText:text forForm:form.get()]
+          toSectionWithIdentifier:SectionIdentifierBlocked];
     }
   }
 }
 
-// Starts requests for saved and blacklisted passwords to the store.
+// Starts requests for saved and blocked passwords to the store.
 - (void)getLoginsFromPasswordStore {
   savedPasswordsConsumer_.reset(new ios::SavePasswordsConsumer(self));
   passwordStore_->GetAllLogins(savedPasswordsConsumer_.get());
@@ -733,12 +741,10 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 - (void)setExportPasswordsButtonEnabled:(BOOL)enabled {
   if (enabled) {
     DCHECK(exportReady_ && !self.editing);
-    exportPasswordsItem_.textColor =
-        UIColorFromRGB(kTableViewTextLabelColorBlue);
+    exportPasswordsItem_.textColor = [UIColor colorNamed:kBlueColor];
     exportPasswordsItem_.accessibilityTraits &= ~UIAccessibilityTraitNotEnabled;
   } else {
-    exportPasswordsItem_.textColor =
-        UIColorFromRGB(kTableViewTextLabelColorLightGrey);
+    exportPasswordsItem_.textColor = UIColor.cr_labelColor;
     exportPasswordsItem_.accessibilityTraits |= UIAccessibilityTraitNotEnabled;
   }
   [self reconfigureCellsForItems:@[ exportPasswordsItem_ ]];
@@ -809,21 +815,21 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
       [indexPaths sortedArrayUsingSelector:@selector(compare:)];
   auto passwordIterator = savedForms_.begin();
   auto passwordEndIterator = savedForms_.end();
-  auto blacklistedIterator = blacklistedForms_.begin();
-  auto blacklistedEndIterator = blacklistedForms_.end();
+  auto blockedIterator = blockedForms_.begin();
+  auto blockedEndIterator = blockedForms_.end();
   for (NSIndexPath* indexPath in sortedIndexPaths) {
     // Only form items are editable.
     PasswordFormContentItem* item =
         base::mac::ObjCCastStrict<PasswordFormContentItem>(
             [self.tableViewModel itemAtIndexPath:indexPath]);
-    BOOL blacklisted = [item isKindOfClass:[BlacklistedFormContentItem class]];
-    auto& forms = blacklisted ? blacklistedForms_ : savedForms_;
+    BOOL blocked = [item isKindOfClass:[BlockedFormContentItem class]];
+    auto& forms = blocked ? blockedForms_ : savedForms_;
     auto& duplicates =
-        blacklisted ? blacklistedPasswordDuplicates_ : savedPasswordDuplicates_;
+        blocked ? blockedPasswordDuplicates_ : savedPasswordDuplicates_;
 
     const autofill::PasswordForm& deletedForm = *item.form;
-    auto begin = blacklisted ? blacklistedIterator : passwordIterator;
-    auto end = blacklisted ? blacklistedEndIterator : passwordEndIterator;
+    auto begin = blocked ? blockedIterator : passwordIterator;
+    auto end = blocked ? blockedEndIterator : passwordEndIterator;
 
     auto formIterator = std::find_if(
         begin, end,
@@ -845,8 +851,8 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
     passwordStore_->RemoveLogin(*form);
 
     // Keep track of where we are in the current list.
-    if (blacklisted) {
-      blacklistedIterator = formIterator;
+    if (blocked) {
+      blockedIterator = formIterator;
     } else {
       passwordIterator = formIterator;
     }
@@ -868,8 +874,8 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
         // Delete in reverse order of section indexes (bottom up of section
         // displayed), so that indexes in model matches those in the view.  if
         // we don't we'll cause a crash.
-        if (strongSelf->blacklistedForms_.empty()) {
-          [self clearSectionWithIdentifier:SectionIdentifierBlacklist
+        if (strongSelf->blockedForms_.empty()) {
+          [self clearSectionWithIdentifier:SectionIdentifierBlocked
                           withRowAnimation:UITableViewRowAnimationAutomatic];
         }
         if (strongSelf->savedForms_.empty()) {
@@ -884,7 +890,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
           return;
         // If both lists are empty, exit editing mode.
         if (strongSelf->savedForms_.empty() &&
-            strongSelf->blacklistedForms_.empty())
+            strongSelf->blockedForms_.empty())
           [strongSelf setEditing:NO animated:YES];
         [strongSelf updateUIForEditState];
         [strongSelf updateExportPasswordsButton];
@@ -918,13 +924,13 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
       [self openDetailedViewForForm:*saveFormItem.form];
       break;
     }
-    case ItemTypeBlacklisted: {
-      DCHECK_EQ(SectionIdentifierBlacklist,
+    case ItemTypeBlocked: {
+      DCHECK_EQ(SectionIdentifierBlocked,
                 [model sectionIdentifierForSection:indexPath.section]);
-      BlacklistedFormContentItem* blacklistedItem =
-          base::mac::ObjCCastStrict<BlacklistedFormContentItem>(
+      BlockedFormContentItem* blockedItem =
+          base::mac::ObjCCastStrict<BlockedFormContentItem>(
               [model itemAtIndexPath:indexPath]);
-      [self openDetailedViewForForm:*blacklistedItem.form];
+      [self openDetailedViewForForm:*blockedItem.form];
       break;
     }
     case ItemTypeExportPasswordsButton:
@@ -963,7 +969,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   // Only password cells are editable.
   TableViewItem* item = [self.tableViewModel itemAtIndexPath:indexPath];
   return [item isKindOfClass:[SavedFormContentItem class]] ||
-         [item isKindOfClass:[BlacklistedFormContentItem class]];
+         [item isKindOfClass:[BlockedFormContentItem class]];
 }
 
 - (void)tableView:(UITableView*)tableView
@@ -999,7 +1005,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   passwordStore_->RemoveLogin(form);
 
   std::vector<std::unique_ptr<autofill::PasswordForm>>& forms =
-      form.blacklisted_by_user ? blacklistedForms_ : savedForms_;
+      form.blacklisted_by_user ? blockedForms_ : savedForms_;
   auto iterator = std::find_if(
       forms.begin(), forms.end(),
       [&form](const std::unique_ptr<autofill::PasswordForm>& value) {
@@ -1008,9 +1014,9 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   DCHECK(iterator != forms.end());
   forms.erase(iterator);
 
-  password_manager::DuplicatesMap& duplicates =
-      form.blacklisted_by_user ? blacklistedPasswordDuplicates_
-                               : savedPasswordDuplicates_;
+  password_manager::DuplicatesMap& duplicates = form.blacklisted_by_user
+                                                    ? blockedPasswordDuplicates_
+                                                    : savedPasswordDuplicates_;
   std::string key = password_manager::CreateSortKey(form);
   auto duplicatesRange = duplicates.equal_range(key);
   for (auto iterator = duplicatesRange.first;
@@ -1191,6 +1197,16 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 
 - (PasswordExporter*)getPasswordExporter {
   return _passwordExporter;
+}
+
+#pragma mark - ChromeIdentityServiceObserver
+
+- (void)identityListChanged {
+  [self reloadData];
+}
+
+- (void)chromeIdentityServiceWillBeDestroyed {
+  identityServiceObserver_.reset();
 }
 
 @end

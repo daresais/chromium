@@ -16,16 +16,18 @@ import android.view.ViewGroup.MarginLayoutParams;
 import android.view.ViewStub;
 import android.widget.FrameLayout;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
+import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabAttributeKeys;
 import org.chromium.chrome.browser.tab.TabAttributes;
-import org.chromium.chrome.browser.tab.TabBrowserControlsState;
+import org.chromium.chrome.browser.tab.TabBrowserControlsConstraintsHelper;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.BrowserControlsState;
@@ -128,9 +130,11 @@ public class TabModalPresenter
     protected void addDialogView(PropertyModel model) {
         if (mDialogContainer == null) initDialogContainer();
         updateContainerLayoutParams();
+        int style = model.get(ModalDialogProperties.PRIMARY_BUTTON_FILLED)
+                ? R.style.Theme_Chromium_ModalDialog_FilledPrimaryButton
+                : R.style.Theme_Chromium_ModalDialog_TextPrimaryButton;
         mDialogView = (ModalDialogView) LayoutInflater
-                              .from(new ContextThemeWrapper(
-                                      mChromeActivity, R.style.Theme_Chromium_ModalDialog))
+                              .from(new ContextThemeWrapper(mChromeActivity, style))
                               .inflate(R.layout.modal_dialog_view, null);
         mModelChangeProcessor =
                 PropertyModelChangeProcessor.create(model, mDialogView, new ViewBinder());
@@ -215,6 +219,23 @@ public class TabModalPresenter
         }
     }
 
+    // Calculate the top margin of the dialog container and the dialog scrim
+    // so that the scrim doesn't overlap the toolbar.
+    public static int getContainerTopMargin(Resources resources, int containerHeightResource) {
+        int scrimVerticalMargin =
+                resources.getDimensionPixelSize(R.dimen.tab_modal_scrim_vertical_margin);
+        int containerVerticalMargin = -scrimVerticalMargin;
+        if (containerHeightResource != ChromeActivity.NO_CONTROL_CONTAINER) {
+            containerVerticalMargin += resources.getDimensionPixelSize(containerHeightResource);
+        }
+        return containerVerticalMargin;
+    }
+
+    // Calculate the bottom margin of the dialog container.
+    public static int getContainerBottomMargin(ChromeFullscreenManager manager) {
+        return manager.getBottomControlsHeight();
+    }
+
     /**
      * Inflate the dialog container in the dialog container view stub.
      */
@@ -236,25 +257,18 @@ public class TabModalPresenter
                 mChromeActivity.findViewById(R.id.tab_modal_dialog_container_sibling_view);
         assert mDefaultNextSiblingView != null;
 
-        // Set the margin of the container and the dialog scrim so that the scrim doesn't overlap
-        // the toolbar.
         Resources resources = mChromeActivity.getResources();
-        int scrimVerticalMargin =
-                resources.getDimensionPixelSize(R.dimen.tab_modal_scrim_vertical_margin);
-
-        int containerVerticalMargin = -scrimVerticalMargin;
-        int containerHeightResource = mChromeActivity.getControlContainerHeightResource();
-        if (containerHeightResource != ChromeActivity.NO_CONTROL_CONTAINER) {
-            containerVerticalMargin += resources.getDimensionPixelSize(containerHeightResource);
-        }
 
         MarginLayoutParams params = (MarginLayoutParams) mDialogContainer.getLayoutParams();
         params.width = ViewGroup.MarginLayoutParams.MATCH_PARENT;
         params.height = ViewGroup.MarginLayoutParams.MATCH_PARENT;
-        params.topMargin = containerVerticalMargin;
-        params.bottomMargin = mChromeActivity.getFullscreenManager().getBottomControlsHeight();
+        params.topMargin = getContainerTopMargin(
+                resources, mChromeActivity.getControlContainerHeightResource());
+        params.bottomMargin = getContainerBottomMargin(mChromeActivity.getFullscreenManager());
         mDialogContainer.setLayoutParams(params);
 
+        int scrimVerticalMargin =
+                resources.getDimensionPixelSize(R.dimen.tab_modal_scrim_vertical_margin);
         View scrimView = mDialogContainer.findViewById(R.id.scrim);
         params = (MarginLayoutParams) scrimView.getLayoutParams();
         params.width = MarginLayoutParams.MATCH_PARENT;
@@ -277,6 +291,8 @@ public class TabModalPresenter
      * @param restricted Whether the browser controls access should be restricted.
      */
     private void setBrowserControlsAccess(boolean restricted) {
+        if (mChromeActivity.getToolbarManager() == null) return;
+
         View menuButton = mChromeActivity.getToolbarManager().getMenuButtonView();
 
         if (restricted) {
@@ -304,15 +320,11 @@ public class TabModalPresenter
                 mDidClearTextControls = true;
             }
 
-            // TODO(https://crbug.com/956260): Provide AppMenuHandler rather than pulling off
-            // ToolbarManager.
-            // Hide app menu in case it is opened.
-            mChromeActivity.getToolbarManager().getAppMenuHandler().hideAppMenu();
-
             // Force toolbar to show and disable overflow menu.
             onTabModalDialogStateChanged(true);
 
-            mChromeActivity.getToolbarManager().setUrlBarFocus(false);
+            mChromeActivity.getToolbarManager().setUrlBarFocus(
+                    false, LocationBar.OmniboxFocusReason.UNFOCUS);
 
             menuButton.setEnabled(false);
         } else {
@@ -343,12 +355,16 @@ public class TabModalPresenter
         if (isShowing) mActiveTab.exitFullscreenMode();
 
         // Also need to update browser control state after dismissal to refresh the constraints.
-        if (isShowing && mActiveTab.areRendererInputEventsIgnored()) {
+        if (isShowing && areRendererInputEventsIgnored()) {
             mChromeFullscreenManager.showAndroidControls(true);
         } else {
-            TabBrowserControlsState.update(mActiveTab, BrowserControlsState.SHOWN,
+            TabBrowserControlsConstraintsHelper.update(mActiveTab, BrowserControlsState.SHOWN,
                     !mChromeFullscreenManager.offsetOverridden());
         }
+    }
+
+    private boolean areRendererInputEventsIgnored() {
+        return mActiveTab.getWebContents().getMainFrame().areInputEventsIgnored();
     }
 
     /**

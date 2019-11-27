@@ -4,11 +4,11 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.util.List;
@@ -25,8 +25,8 @@ public interface TabModelSelector {
      *         {@link Tab}.
      */
     public static TabModelSelector from(Tab tab) {
-        if (tab == null || tab.getActivity() == null) return null;
-        return tab.getActivity().getTabModelSelector();
+        if (tab == null || ((TabImpl) tab).getActivity() == null) return null;
+        return ((TabImpl) tab).getActivity().getTabModelSelector();
     }
 
     /**
@@ -63,12 +63,6 @@ public interface TabModelSelector {
      * @return a list for the underlying models
      */
     List<TabModel> getModels();
-
-    /**
-     * @return the model at {@code index} or null if no model exist for that index.
-     */
-    @VisibleForTesting
-    TabModel getModelAt(int index);
 
     /**
      * Get the current tab model.

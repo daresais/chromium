@@ -28,10 +28,11 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.datareduction.DataReductionProxyUma;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
@@ -58,11 +59,6 @@ public class DataReductionStatsPreference extends Preference {
      */
     private static final String PREF_DATA_REDUCTION_SITE_BREAKDOWN_ALLOWED_DATE =
             "data_reduction_site_breakdown_allowed_date";
-    /**
-     * The threshold at which to start showing real data usage and savings, in
-     * kilobytes.
-     */
-    private static final long SHOW_REAL_DATA_USED_KB_THRESHOLD = 100;
 
     private NetworkStatsHistory mOriginalNetworkStatsHistory;
     private NetworkStatsHistory mReceivedNetworkStatsHistory;
@@ -123,11 +119,6 @@ public class DataReductionStatsPreference extends Preference {
         setWidgetLayoutResource(R.layout.data_reduction_stats_layout);
     }
 
-    @Override
-    public boolean isEnabled() {
-        return super.isEnabled();
-    }
-
     /**
      * Updates the preference screen to convey current statistics on data reduction.
      */
@@ -173,7 +164,7 @@ public class DataReductionStatsPreference extends Preference {
 
         mShouldShowRealData =
                 ConversionUtils.bytesToKilobytes(mReceivedNetworkStatsHistory.getTotalBytes())
-                >= SHOW_REAL_DATA_USED_KB_THRESHOLD;
+                >= DataReductionProxySettings.DATA_REDUCTION_SHOW_CHART_KB_THRESHOLD;
 
         // Determine the visible start and end points based on the available data and when it was
         // last updated.
@@ -251,10 +242,12 @@ public class DataReductionStatsPreference extends Preference {
                         ? context.getString(R.string.data_reduction_end_date_content_description,
                                   mEndDatePhrase)
                         : "");
-        if (mDataUsageTextView != null)
+        if (mDataUsageTextView != null) {
             mDataUsageTextView.setText(mShouldShowRealData ? mReceivedTotalPhrase : "");
-        if (mDataSavingsTextView != null)
+        }
+        if (mDataSavingsTextView != null) {
             mDataSavingsTextView.setText(mShouldShowRealData ? mSavingsTotalPhrase : "");
+        }
     }
 
     /**

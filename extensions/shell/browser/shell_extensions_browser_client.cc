@@ -15,7 +15,6 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/common/user_agent.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/core_extensions_browser_api_provider.h"
@@ -130,11 +129,11 @@ base::FilePath ShellExtensionsBrowserClient::GetBundleResourcePath(
 
 void ShellExtensionsBrowserClient::LoadResourceFromResourceBundle(
     const network::ResourceRequest& request,
-    network::mojom::URLLoaderRequest loader,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader,
     const base::FilePath& resource_relative_path,
     int resource_id,
     const std::string& content_security_policy,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     bool send_cors_header) {
   NOTREACHED() << "Load resources from bundles not supported.";
 }
@@ -236,13 +235,14 @@ ShellExtensionsBrowserClient::GetComponentExtensionResourceManager() {
 void ShellExtensionsBrowserClient::BroadcastEventToRenderers(
     events::HistogramValue histogram_value,
     const std::string& event_name,
-    std::unique_ptr<base::ListValue> args) {
+    std::unique_ptr<base::ListValue> args,
+    bool dispatch_to_off_the_record_profiles) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&ShellExtensionsBrowserClient::BroadcastEventToRenderers,
                        base::Unretained(this), histogram_value, event_name,
-                       std::move(args)));
+                       std::move(args), dispatch_to_off_the_record_profiles));
     return;
   }
 

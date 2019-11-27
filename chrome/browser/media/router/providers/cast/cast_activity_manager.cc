@@ -10,12 +10,11 @@
 
 #include "base/bind.h"
 #include "base/optional.h"
-#include "chrome/browser/media/router/data_decoder_util.h"
 #include "chrome/browser/media/router/providers/cast/cast_activity_record.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_client.h"
 #include "chrome/browser/media/router/providers/cast/mirroring_activity_record.h"
 #include "chrome/common/media_router/media_source.h"
-#include "chrome/common/media_router/mojo/media_router.mojom.h"
+#include "chrome/common/media_router/mojom/media_router.mojom.h"
 #include "url/origin.h"
 
 using blink::mojom::PresentationConnectionCloseReason;
@@ -28,13 +27,11 @@ CastActivityManager::CastActivityManager(
     CastSessionTracker* session_tracker,
     cast_channel::CastMessageHandler* message_handler,
     mojom::MediaRouter* media_router,
-    std::unique_ptr<DataDecoder> data_decoder,
     const std::string& hash_token)
     : media_sink_service_(media_sink_service),
       session_tracker_(session_tracker),
       message_handler_(message_handler),
       media_router_(media_router),
-      data_decoder_(std::move(data_decoder)),
       hash_token_(hash_token) {
   DCHECK(media_sink_service_);
   DCHECK(message_handler_);
@@ -89,6 +86,9 @@ void CastActivityManager::LaunchSession(
   MediaRoute route(route_id, source, sink_id, /* description */ std::string(),
                    /* is_local */ true, /* for_display */ true);
   route.set_incognito(incognito);
+  route.set_controller_type(RouteControllerType::kGeneric);
+  DVLOG(1) << "LaunchSession: source_id=" << cast_source.source_id()
+           << ", route_id: " << route_id << ", sink_id=" << sink_id;
   DoLaunchSessionParams params(route, cast_source, sink, origin, tab_id,
                                std::move(callback));
   // If there is currently a session on the sink, it must be terminated before
@@ -261,9 +261,12 @@ void CastActivityManager::JoinSession(
     activity = FindActivityForAutoJoin(cast_source, origin, tab_id);
     if (!activity && cast_source.default_action_policy() !=
                          DefaultActionPolicy::kCastThisTab) {
-      // TODO(crbug.com/951057): Try to convert a mirroring route matching the
-      // tab to a Cast route.
-      DLOG(ERROR) << "Conversion to a Cast route is not implemented.";
+      auto sink = ConvertMirrorToCast(tab_id);
+      if (sink) {
+        LaunchSession(cast_source, *sink, presentation_id, origin, tab_id,
+                      incognito, std::move(callback));
+        return;
+      }
     }
   } else {
     activity = FindActivityForSessionJoin(cast_source, presentation_id);
@@ -382,6 +385,18 @@ void CastActivityManager::TerminateSession(
       hash_token_, std::move(callback));
 }
 
+bool CastActivityManager::CreateMediaController(
+    const std::string& route_id,
+    mojo::PendingReceiver<mojom::MediaController> media_controller,
+    mojo::PendingRemote<mojom::MediaStatusObserver> observer) {
+  auto activity_it = activities_.find(route_id);
+  if (activity_it == activities_.end())
+    return false;
+  activity_it->second->CreateMediaController(std::move(media_controller),
+                                             std::move(observer));
+  return true;
+}
+
 CastActivityManager::ActivityMap::iterator
 CastActivityManager::FindActivityByChannelId(int channel_id) {
   return std::find_if(
@@ -411,7 +426,7 @@ ActivityRecord* CastActivityManager::AddCastActivityRecord(
   } else {
     activity.reset(new CastActivityRecord(route, app_id, media_sink_service_,
                                           message_handler_, session_tracker_,
-                                          data_decoder_.get(), this));
+                                          this));
   }
   auto* activity_ptr = activity.get();
   activities_.emplace(route.media_route_id(), std::move(activity));
@@ -424,8 +439,8 @@ ActivityRecord* CastActivityManager::AddMirroringActivityRecord(
     int tab_id,
     const CastSinkExtraData& cast_data) {
   auto activity = std::make_unique<MirroringActivityRecord>(
-      route, app_id, message_handler_, session_tracker_, data_decoder_.get(),
-      tab_id, cast_data, media_router_,
+      route, app_id, message_handler_, session_tracker_, tab_id, cast_data,
+      media_router_, media_sink_service_, this,
       // We could theoretically use base::Unretained() below instead of
       // GetWeakPtr(), the that seems like an unnecessary optimization here.
       // --jrw
@@ -668,12 +683,23 @@ void CastActivityManager::HandleStopSessionResponse(
 void CastActivityManager::SendFailedToCastIssue(
     const MediaSink::Id& sink_id,
     const MediaRoute::Id& route_id) {
-  // TODO(imcheng): i18n-ize the title string.
+  // TODO(crbug.com/989237): i18n-ize the title string.
   IssueInfo info("Failed to cast. Please try again.",
                  IssueInfo::Action::DISMISS, IssueInfo::Severity::WARNING);
   info.sink_id = sink_id;
   info.route_id = route_id;
   media_router_->OnIssue(info);
+}
+
+base::Optional<MediaSinkInternal> CastActivityManager::ConvertMirrorToCast(
+    int tab_id) {
+  for (const auto& pair : activities_) {
+    if (pair.second->mirroring_tab_id() == tab_id) {
+      return pair.second->sink();
+    }
+  }
+
+  return base::nullopt;
 }
 
 CastActivityManager::DoLaunchSessionParams::DoLaunchSessionParams(

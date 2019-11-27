@@ -82,6 +82,7 @@ class CONTENT_EXPORT BrowserAccessibilityDelegate {
 
   virtual void AccessibilityPerformAction(const ui::AXActionData& data) = 0;
   virtual bool AccessibilityViewHasFocus() const = 0;
+  virtual void AccessibilityViewSetFocus() = 0;
   virtual gfx::Rect AccessibilityGetViewBounds() const = 0;
   virtual float AccessibilityGetDeviceScaleFactor() const = 0;
   virtual void AccessibilityFatalError() = 0;
@@ -248,7 +249,9 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
       ax::mojom::ScrollAlignment horizontal_scroll_alignment =
           ax::mojom::ScrollAlignment::kScrollAlignmentCenter,
       ax::mojom::ScrollAlignment vertical_scroll_alignment =
-          ax::mojom::ScrollAlignment::kScrollAlignmentCenter);
+          ax::mojom::ScrollAlignment::kScrollAlignmentCenter,
+      ax::mojom::ScrollBehavior scroll_behavior =
+          ax::mojom::ScrollBehavior::kDoNotScrollIfVisible);
   void ScrollToPoint(const BrowserAccessibility& node, gfx::Point point);
   void SetAccessibilityFocus(const BrowserAccessibility& node);
   void SetFocus(const BrowserAccessibility& node);
@@ -287,12 +290,12 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
 
   // Called when a new find in page result is received. We hold on to this
   // information and don't activate it until the user requests it.
-  void OnFindInPageResult(int request_id,
-                          int match_index,
-                          int start_id,
-                          int start_offset,
-                          int end_id,
-                          int end_offset);
+  virtual void OnFindInPageResult(int request_id,
+                                  int match_index,
+                                  int start_id,
+                                  int start_offset,
+                                  int end_id,
+                                  int end_offset);
 
   // This is called when the user has committed to a find in page query,
   // e.g. by pressing enter or tapping on the next / previous result buttons.
@@ -301,6 +304,10 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   // has not been received, we hold onto this request id and update it
   // when OnFindInPageResult is called.
   void ActivateFindInPageResult(int request_id);
+
+  // This is called when the user finishes a find in page query and all
+  // highlighted matches are deactivated.
+  virtual void OnFindInPageTermination() {}
 
 #if defined(OS_WIN)
   BrowserAccessibilityManagerWin* ToBrowserAccessibilityManagerWin();
@@ -398,8 +405,8 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeCreated(ui::AXTree* tree, ui::AXNode* node) override;
+  void OnNodeDeleted(ui::AXTree* tree, int32_t node_id) override;
   void OnNodeReparented(ui::AXTree* tree, ui::AXNode* node) override;
-  void OnNodeChanged(ui::AXTree* tree, ui::AXNode* node) override;
   void OnAtomicUpdateFinished(
       ui::AXTree* tree,
       bool root_changed,
@@ -408,10 +415,6 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeObserver,
   // AXTreeManager implementation.
   ui::AXNode* GetNodeFromTree(ui::AXTreeID tree_id,
                               int32_t node_id) const override;
-  ui::AXPlatformNodeDelegate* GetDelegate(const ui::AXTreeID tree_id,
-                                          const int32_t node_id) const override;
-  ui::AXPlatformNodeDelegate* GetRootDelegate(
-      const ui::AXTreeID tree_id) const override;
   AXTreeID GetTreeID() const override;
   AXTreeID GetParentTreeID() const override;
   ui::AXNode* GetRootAsAXNode() const override;

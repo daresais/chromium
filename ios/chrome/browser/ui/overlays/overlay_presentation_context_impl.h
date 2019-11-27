@@ -12,8 +12,8 @@
 #import "ios/chrome/browser/overlays/public/overlay_presentation_context.h"
 #import "ios/chrome/browser/overlays/public/overlay_user_data.h"
 #import "ios/chrome/browser/ui/overlays/overlay_request_coordinator.h"
+#import "ios/chrome/browser/ui/overlays/overlay_request_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/overlays/overlay_request_ui_state.h"
-#import "ios/chrome/browser/ui/overlays/overlay_ui_dismissal_delegate.h"
 
 @class OverlayRequestCoordinatorFactory;
 @class OverlayContainerCoordinator;
@@ -51,17 +51,25 @@ class OverlayPresentationContextImpl : public OverlayPresentationContext {
   };
 
   // The OverlayContainerCoordinator is used to present the overlay UI at the
-  // correct modality in the app.  Should only be set when the coordinator's
-  // presentation context is able to present.
+  // correct modality in the app.  Should only be set when the coordinator is
+  // started.
   OverlayContainerCoordinator* coordinator() const { return coordinator_; }
   void SetCoordinator(OverlayContainerCoordinator* coordinator);
+
+  // Called when |coordinator_|'s view was moved to a new window.
+  void WindowDidChange();
 
   // OverlayPresentationContext:
   void AddObserver(OverlayPresentationContextObserver* observer) override;
   void RemoveObserver(OverlayPresentationContextObserver* observer) override;
-  bool IsActive() const override;
+  UIPresentationCapabilities GetPresentationCapabilities() const override;
+  bool CanShowUIForRequest(
+      OverlayRequest* request,
+      UIPresentationCapabilities capabilities) const override;
+  bool CanShowUIForRequest(OverlayRequest* request) const override;
   void ShowOverlayUI(OverlayPresenter* presenter,
                      OverlayRequest* request,
+                     OverlayPresentationCallback presentation_callback,
                      OverlayDismissalCallback dismissal_callback) override;
   void HideOverlayUI(OverlayPresenter* presenter,
                      OverlayRequest* request) override;
@@ -78,8 +86,15 @@ class OverlayPresentationContextImpl : public OverlayPresentationContext {
   // Returns the UI state for |request|.
   OverlayRequestUIState* GetRequestUIState(OverlayRequest* request);
 
+  // Updates |coordinator_| and |presentation_capabilities_| using
+  // |coordinator|.
+  void UpdateForCoordinator(OverlayContainerCoordinator* coordinator);
+
   // Shows the UI for the presented request using the container coordinator.
   void ShowUIForPresentedRequest();
+
+  // Called when the UI for |request_| has finished being presented.
+  void OverlayUIWasPresented();
 
   // Dismisses the UI for the presented request for |reason|.
   void DismissPresentedUI(OverlayDismissalReason reason);
@@ -102,13 +117,15 @@ class OverlayPresentationContextImpl : public OverlayPresentationContext {
   };
 
   // Helper object that listens for UI dismissal events.
-  class OverlayDismissalHelper : public OverlayUIDismissalDelegate {
+  class OverlayRequestCoordinatorDelegateImpl
+      : public OverlayRequestCoordinatorDelegate {
    public:
-    OverlayDismissalHelper(
+    OverlayRequestCoordinatorDelegateImpl(
         OverlayPresentationContextImpl* presentation_context);
-    ~OverlayDismissalHelper() override;
+    ~OverlayRequestCoordinatorDelegateImpl() override;
 
     // OverlayUIDismissalDelegate:
+    void OverlayUIDidFinishPresentation(OverlayRequest* request) override;
     void OverlayUIDidFinishDismissal(OverlayRequest* request) override;
 
    private:
@@ -119,13 +136,17 @@ class OverlayPresentationContextImpl : public OverlayPresentationContext {
   OverlayPresenter* presenter_ = nullptr;
   // The cleanup helper.
   BrowserShutdownHelper shutdown_helper_;
-  // The UI dismissal helper.
-  OverlayDismissalHelper ui_dismissal_helper_;
+  // The delegate used to intercept presentation/dismissal events from
+  // OverlayRequestCoordinators.
+  OverlayRequestCoordinatorDelegateImpl coordinator_delegate_;
   // The coordinator factory that provides the UI for the overlays at this
   // modality.
   OverlayRequestCoordinatorFactory* coordinator_factory_ = nil;
   // The coordinator responsible for presenting the UI delegate's UI.
   OverlayContainerCoordinator* coordinator_ = nil;
+  // The presentation capabilities of |coordinator_|'s view controller.
+  UIPresentationCapabilities presentation_capabilities_ =
+      UIPresentationCapabilities::kNone;
   // The request that is currently presented by |presenter_|.  The UI for this
   // request might not yet be visible if no OverlayContainerCoordinator has been
   // provided.  When a new request is presented, the UI state for the request

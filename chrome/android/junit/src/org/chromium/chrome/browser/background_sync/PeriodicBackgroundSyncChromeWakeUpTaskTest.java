@@ -31,12 +31,12 @@ import org.chromium.base.BaseSwitches;
 import org.chromium.base.Callback;
 import org.chromium.base.CommandLine;
 import org.chromium.base.SysUtils;
+import org.chromium.base.metrics.test.DisableHistogramsRule;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.chrome.browser.ShadowDeviceConditions;
 import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
-import org.chromium.chrome.test.support.DisableHistogramsRule;
 import org.chromium.components.background_task_scheduler.BackgroundTask;
 import org.chromium.components.background_task_scheduler.BackgroundTaskScheduler;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
@@ -75,7 +75,7 @@ public class PeriodicBackgroundSyncChromeWakeUpTaskTest {
     private ArgumentCaptor<TaskInfo> mTaskInfo;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
         BackgroundTaskSchedulerFactory.setSchedulerForTesting(mTaskScheduler);
 
@@ -94,7 +94,7 @@ public class PeriodicBackgroundSyncChromeWakeUpTaskTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         // Clean up static state for subsequent Robolectric tests.
         CommandLine.reset();
         SysUtils.resetForTesting();
@@ -148,6 +148,36 @@ public class PeriodicBackgroundSyncChromeWakeUpTaskTest {
                 RuntimeEnvironment.application, params, mTaskFinishedCallback);
 
         verify(mNativeMock).firePeriodicBackgroundSyncEvents(any(Runnable.class));
+        verify(mTaskFinishedCallback, times(0)).taskFinished(anyBoolean());
+        verify(mTaskScheduler, times(0)).schedule(any(Context.class), any(TaskInfo.class));
+    }
+
+    @Test
+    @Feature("BackgroundSync")
+    public void onStopTaskBeforeNativeLoaded() {
+        TaskParameters params =
+                TaskParameters.create(TaskIds.PERIODIC_BACKGROUND_SYNC_CHROME_WAKEUP_TASK_JOB_ID)
+                        .addExtras(mTaskExtras)
+                        .build();
+
+        new PeriodicBackgroundSyncChromeWakeUpTask().onStopTaskBeforeNativeLoaded(
+                RuntimeEnvironment.application, params);
+
+        verify(mTaskFinishedCallback, times(0)).taskFinished(anyBoolean());
+        verify(mTaskScheduler, times(0)).schedule(any(Context.class), any(TaskInfo.class));
+    }
+
+    @Test
+    @Feature("BackgroundSync")
+    public void testOnStopTaskWithNative() {
+        TaskParameters params =
+                TaskParameters.create(TaskIds.PERIODIC_BACKGROUND_SYNC_CHROME_WAKEUP_TASK_JOB_ID)
+                        .addExtras(mTaskExtras)
+                        .build();
+
+        new PeriodicBackgroundSyncChromeWakeUpTask().onStopTaskWithNative(
+                RuntimeEnvironment.application, params);
+
         verify(mTaskFinishedCallback, times(0)).taskFinished(anyBoolean());
         verify(mTaskScheduler, times(0)).schedule(any(Context.class), any(TaskInfo.class));
     }

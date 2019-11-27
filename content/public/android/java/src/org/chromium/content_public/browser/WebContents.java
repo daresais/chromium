@@ -7,10 +7,11 @@ package org.chromium.content_public.browser;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Parcelable;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.ViewAndroidDelegate;
@@ -306,18 +307,16 @@ public interface WebContents extends Parcelable {
     void addMessageToDevToolsConsole(int level, String message);
 
     /**
-     * Post a message to a frame.
+     * Post a message to main frame.
      *
-     * @param frameName The name of the frame. If the name is null the message is posted
-     *                  to the main frame.
      * @param message   The message
      * @param targetOrigin  The target origin. If the target origin is a "*" or a
      *                  empty string, it indicates a wildcard target origin.
      * @param ports The sent message ports, if any. Pass null if there is no
      *                  message ports to pass.
      */
-    void postMessageToFrame(@Nullable String frameName, String message, String sourceOrigin,
-            String targetOrigin, @Nullable MessagePort[] ports);
+    void postMessageToMainFrame(String message, String sourceOrigin, String targetOrigin,
+            @Nullable MessagePort[] ports);
 
     /**
      * Creates a message channel for sending postMessage requests and returns the ports for
@@ -345,9 +344,9 @@ public interface WebContents extends Parcelable {
     int getThemeColor();
 
     /**
-     * @return Current page load progress on a scale of 0 to 100.
+     * @return Current page load progress on a scale of 0 to 1.
      */
-    int getLoadProgress();
+    float getLoadProgress();
 
     /**
      * Initiate extraction of text, HTML, and other information for clipping puposes (smart clip)
@@ -400,11 +399,6 @@ public interface WebContents extends Parcelable {
      * @param disable True if spatial navigation should never be used.
      */
     void setSpatialNavigationDisabled(boolean disabled);
-
-    /**
-     * Reloads all the Lo-Fi images in this WebContents.
-     */
-    void reloadLoFiImages();
 
     /**
      * Sends a request to download the given image {@link url}.
@@ -464,16 +458,16 @@ public interface WebContents extends Parcelable {
     void setSize(int width, int height);
 
     /**
-     * Gets the view size width of the WebContents. The size is in physical pixels.
+     * Gets the view size width of the WebContents.
      *
-     * @return The width of the view.
+     * @return The width of the view in dip.
      */
     int getWidth();
 
     /**
-     * Gets the view size width of the WebContents. The size is in physical pixels.
+     * Gets the view size width of the WebContents.
      *
-     * @return The width of the view.
+     * @return The width of the view in dip.
      */
     int getHeight();
 

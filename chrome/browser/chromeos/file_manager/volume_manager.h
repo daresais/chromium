@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/file_manager/documents_provider_root_manager.h"
 #include "chrome/browser/chromeos/file_system_provider/icon_set.h"
@@ -63,6 +63,7 @@ enum VolumeType {
   VOLUME_TYPE_CROSTINI,
   VOLUME_TYPE_ANDROID_FILES,
   VOLUME_TYPE_DOCUMENTS_PROVIDER,
+  VOLUME_TYPE_SMB,
   // The enum values must be kept in sync with FileManagerVolumeType in
   // tools/metrics/histograms/enums.xml. Since enums for histograms are
   // append-only (for keeping the number consistent across versions), new values
@@ -280,6 +281,9 @@ class VolumeManager : public KeyedService,
       const std::string&,
       device::mojom::MtpManager::GetStorageInfoCallback)>;
 
+  // Callback for |RemoveSshfsCrostiniVolume|.
+  using RemoveSshfsCrostiniVolumeCallback = base::OnceCallback<void(bool)>;
+
   VolumeManager(
       Profile* profile,
       drive::DriveIntegrationService* drive_integration_service,
@@ -316,8 +320,11 @@ class VolumeManager : public KeyedService,
   // Add sshfs crostini volume mounted at specified path.
   void AddSshfsCrostiniVolume(const base::FilePath& sshfs_mount_path);
 
-  // Removes specified sshfs crostini mount.
-  void RemoveSshfsCrostiniVolume(const base::FilePath& sshfs_mount_path);
+  // Removes specified sshfs crostini mount. Runs |callback| with true if the
+  // mount was removed successfully or wasn't mounted to begin with. Runs
+  // |callback| with false in all other cases.
+  void RemoveSshfsCrostiniVolume(const base::FilePath& sshfs_mount_path,
+                                 RemoveSshfsCrostiniVolumeCallback callback);
 
   // Removes Downloads volume used for testing.
   void RemoveDownloadsDirectoryForTesting();
@@ -442,6 +449,11 @@ class VolumeManager : public KeyedService,
   // Returns the path of the mount point for drive.
   base::FilePath GetDriveMountPointPath() const;
 
+  void OnSshfsCrostiniUnmountCallback(
+      const base::FilePath& sshfs_mount_path,
+      RemoveSshfsCrostiniVolumeCallback callback,
+      chromeos::MountError error_code);
+
   Profile* profile_;
   drive::DriveIntegrationService* drive_integration_service_;  // Not owned.
   chromeos::disks::DiskMountManager* disk_mount_manager_;      // Not owned.
@@ -458,7 +470,7 @@ class VolumeManager : public KeyedService,
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<VolumeManager> weak_ptr_factory_;
+  base::WeakPtrFactory<VolumeManager> weak_ptr_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(VolumeManager);
 };
 

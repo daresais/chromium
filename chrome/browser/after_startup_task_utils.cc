@@ -21,10 +21,11 @@
 #include "build/build_config.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/page_visibility_state.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/page_visibility_state.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/browser.h"
@@ -101,9 +102,9 @@ void QueueTask(std::unique_ptr<AfterStartupTask> queued_task) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     // Posted with USER_VISIBLE priority to avoid this becoming an after startup
     // task itself.
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI, base::TaskPriority::USER_VISIBLE},
-        base::BindOnce(QueueTask, std::move(queued_task)));
+    base::PostTask(FROM_HERE,
+                   {BrowserThread::UI, base::TaskPriority::USER_VISIBLE},
+                   base::BindOnce(QueueTask, std::move(queued_task)));
     return;
   }
 
@@ -180,6 +181,14 @@ class StartupObserver : public WebContentsObserver {
       OnStartupComplete();
   }
 
+  // Starting the browser with a file download url will not result in
+  // DidFinishLoad firing, so watch for this case too. crbug.com/1006954
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override {
+    if (navigation_handle->IsInMainFrame() && navigation_handle->IsDownload())
+      OnStartupComplete();
+  }
+
   void WebContentsDestroyed() override { OnStartupComplete(); }
 
   SEQUENCE_CHECKER(sequence_checker_);
@@ -218,11 +227,10 @@ void StartupObserver::Start() {
   delay = base::TimeDelta::FromMinutes(kLongerDelayMins);
 #endif  // !defined(OS_ANDROID)
 
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&StartupObserver::OnFailsafeTimeout,
-                     weak_factory_.GetWeakPtr()),
-      delay);
+  base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
+                        base::BindOnce(&StartupObserver::OnFailsafeTimeout,
+                                       weak_factory_.GetWeakPtr()),
+                        delay);
 }
 
 }  // namespace

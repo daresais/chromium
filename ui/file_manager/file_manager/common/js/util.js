@@ -219,9 +219,10 @@ util.removeFileOrDirectory = (entry, onSuccess, onError) => {
  * number separators.
  *
  * @param {number} bytes The number of bytes.
+ * @param {number=} addedPrecision The number of precision digits to add.
  * @return {string} Localized string.
  */
-util.bytesToString = bytes => {
+util.bytesToString = (bytes, addedPrecision = 0) => {
   // Translation identifiers for size units.
   const UNITS = [
     'SIZE_BYTES',
@@ -242,12 +243,18 @@ util.bytesToString = bytes => {
     Math.pow(2, 50),
   ];
 
+  // Rounding with precision.
+  const round = (value, decimals) => {
+    const scale = Math.pow(10, decimals);
+    return Math.round(value * scale) / scale;
+  };
+
   const str = (n, u) => {
     return strf(u, n.toLocaleString());
   };
 
   const fmt = (s, u) => {
-    const rounded = Math.round(bytes / s * 10) / 10;
+    const rounded = round(bytes / s, 1 + addedPrecision);
     return str(rounded, u);
   };
 
@@ -256,9 +263,11 @@ util.bytesToString = bytes => {
     return str(bytes, UNITS[0]);
   }
 
-  // Up to 1MB is displayed as rounded up number of KBs.
+  // Up to 1MB is displayed as rounded up number of KBs, or with the desired
+  // number of precision digits.
   if (bytes < STEPS[2]) {
-    const rounded = Math.ceil(bytes / STEPS[1]);
+    const rounded = addedPrecision ? round(bytes / STEPS[1], addedPrecision) :
+                                     Math.ceil(bytes / STEPS[1]);
     return str(rounded, UNITS[1]);
   }
 
@@ -383,6 +392,9 @@ function str(id) {
 function strf(id, var_args) {
   return loadTimeData.getStringF.apply(loadTimeData, arguments);
 }
+
+// Export strf() into the util namespace.
+util.strf = strf;
 
 /**
  * @return {boolean} True if the Files app is running as an open files or a
@@ -1132,6 +1144,7 @@ util.getRootTypeLabel = locationInfo => {
     case VolumeManagerCommon.RootType.PROVIDED:
     case VolumeManagerCommon.RootType.ANDROID_FILES:
     case VolumeManagerCommon.RootType.DOCUMENTS_PROVIDER:
+    case VolumeManagerCommon.RootType.SMB:
       return locationInfo.volumeInfo.label;
     default:
       console.error('Unsupported root type: ' + locationInfo.rootType);
@@ -1147,14 +1160,20 @@ util.getRootTypeLabel = locationInfo => {
  * @return {string} The localized name.
  */
 util.getEntryLabel = (locationInfo, entry) => {
-  if (locationInfo && locationInfo.hasFixedLabel) {
-    return util.getRootTypeLabel(locationInfo);
+  if (locationInfo) {
+    if (locationInfo.hasFixedLabel) {
+      return util.getRootTypeLabel(locationInfo);
+    }
+
+    if (entry.filesystem && entry.filesystem.root === entry) {
+      return util.getRootTypeLabel(locationInfo);
+    }
   }
 
   // Special case for MyFiles/Downloads and MyFiles/PvmDefault.
   if (locationInfo &&
       locationInfo.rootType == VolumeManagerCommon.RootType.DOWNLOADS) {
-    if (util.isMyFilesVolumeEnabled() && entry.fullPath == '/Downloads') {
+    if (entry.fullPath == '/Downloads') {
       return str('DOWNLOADS_DIRECTORY_LABEL');
     }
     if (util.isPluginVmEnabled() && entry.fullPath == '/PvmDefault') {
@@ -1193,7 +1212,7 @@ util.isNonModifiable = (volumeManager, entry) => {
   }
 
   if (volumeInfo.volumeType === VolumeManagerCommon.RootType.DOWNLOADS) {
-    if (util.isMyFilesVolumeEnabled() && entry.fullPath === '/Downloads') {
+    if (entry.fullPath === '/Downloads') {
       return true;
     }
     if (util.isPluginVmEnabled() && entry.fullPath === '/PvmDefault') {
@@ -1385,6 +1404,14 @@ util.isFeedbackPanelEnabled = () => {
 };
 
 /**
+ * Returns true when FilesNG is enabled.
+ * @return {boolean}
+ */
+util.isFilesNg = () => {
+  return loadTimeData.getBoolean('FILES_NG_ENABLED');
+};
+
+/**
  * Retrieves all entries inside the given |rootEntry|.
  * @param {!DirectoryEntry} rootEntry
  * @param {function(!Array<!Entry>)} entriesCallback Called when some chunk of
@@ -1547,12 +1574,6 @@ util.unwrapEntry = entry => {
 util.isArcUsbStorageUIEnabled = () => {
   return loadTimeData.valueExists('ARC_USB_STORAGE_UI_ENABLED') &&
       loadTimeData.getBoolean('ARC_USB_STORAGE_UI_ENABLED');
-};
-
-/** @return {boolean} */
-util.isMyFilesVolumeEnabled = () => {
-  return loadTimeData.valueExists('MY_FILES_VOLUME_ENABLED') &&
-      loadTimeData.getBoolean('MY_FILES_VOLUME_ENABLED');
 };
 
 /** @return {boolean} */

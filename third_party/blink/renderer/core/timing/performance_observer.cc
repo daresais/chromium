@@ -57,13 +57,13 @@ Vector<AtomicString> PerformanceObserver::supportedEntryTypes(
   Vector<AtomicString> supportedEntryTypes;
   auto* execution_context = ExecutionContext::From(script_state);
   if (execution_context->IsDocument()) {
-    if (RuntimeEnabledFeatures::ElementTimingEnabled(execution_context))
-      supportedEntryTypes.push_back(performance_entry_names::kElement);
+    supportedEntryTypes.push_back(performance_entry_names::kElement);
     if (RuntimeEnabledFeatures::EventTimingEnabled(execution_context))
       supportedEntryTypes.push_back(performance_entry_names::kEvent);
     supportedEntryTypes.push_back(performance_entry_names::kFirstInput);
-    if (RuntimeEnabledFeatures::LayoutInstabilityAPIEnabled(execution_context))
-      supportedEntryTypes.push_back(performance_entry_names::kLayoutShift);
+    supportedEntryTypes.push_back(
+        performance_entry_names::kLargestContentfulPaint);
+    supportedEntryTypes.push_back(performance_entry_names::kLayoutShift);
     supportedEntryTypes.push_back(performance_entry_names::kLongtask);
   }
   supportedEntryTypes.push_back(performance_entry_names::kMark);
@@ -101,15 +101,16 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
   bool is_buffered = false;
   if (observer_init->hasEntryTypes()) {
     if (observer_init->hasType()) {
-      exception_state.ThrowDOMException(
-          DOMExceptionCode::kSyntaxError,
-          "An observe() call MUST NOT include both entryTypes and type.");
+      exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
+                                        "An observe() call must not include "
+                                        "both entryTypes and type arguments.");
       return;
     }
     if (type_ == PerformanceObserverType::kTypeObserver) {
       exception_state.ThrowDOMException(
           DOMExceptionCode::kInvalidModificationError,
-          "This observer has performed observe({type:...}, therefore it cannot "
+          "This PerformanceObserver has performed observe({type:...}, "
+          "therefore it cannot "
           "perform observe({entryTypes:...})");
       return;
     }
@@ -117,24 +118,25 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
     PerformanceEntryTypeMask entry_types = PerformanceEntry::kInvalid;
     const Vector<String>& sequence = observer_init->entryTypes();
     for (const auto& entry_type_string : sequence) {
-      entry_types |=
+      PerformanceEntryType entry_type =
           PerformanceEntry::ToEntryTypeEnum(AtomicString(entry_type_string));
+      if (entry_type == PerformanceEntry::kInvalid) {
+        String message = "The entry type '" + entry_type_string +
+                         "' does not exist or isn't supported.";
+        GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
+            mojom::ConsoleMessageSource::kJavaScript,
+            mojom::ConsoleMessageLevel::kWarning, message));
+      }
+      entry_types |= entry_type;
     }
     if (entry_types == PerformanceEntry::kInvalid) {
-      String message =
-          "The Performance Observer MUST have at least one valid entryType in "
-          "its "
-          "entryTypes attribute.";
-      GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
-          mojom::ConsoleMessageSource::kJavaScript,
-          mojom::ConsoleMessageLevel::kWarning, message));
       return;
     }
     if (RuntimeEnabledFeatures::PerformanceObserverBufferedFlagEnabled() &&
         observer_init->buffered()) {
       String message =
-          "The Performance Observer does not support buffered flag with "
-          "entryTypes. ";
+          "The PerformanceObserver does not support buffered flag with "
+          "the entryTypes argument.";
       GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
           mojom::ConsoleMessageSource::kJavaScript,
           mojom::ConsoleMessageLevel::kWarning, message));
@@ -142,9 +144,9 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
     filter_options_ = entry_types;
   } else {
     if (!observer_init->hasType()) {
-      exception_state.ThrowDOMException(
-          DOMExceptionCode::kSyntaxError,
-          "An observe() call MUST include either entryTypes or type.");
+      exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
+                                        "An observe() call must include either "
+                                        "entryTypes or type arguments.");
       return;
     }
     if (type_ == PerformanceObserverType::kEntryTypesObserver) {
@@ -158,9 +160,8 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
     PerformanceEntryType entry_type =
         PerformanceEntry::ToEntryTypeEnum(AtomicString(observer_init->type()));
     if (entry_type == PerformanceEntry::kInvalid) {
-      String message =
-          "The Performance Observer MUST have a valid entryType in its "
-          "type attribute.";
+      String message = "The entry type '" + observer_init->type() +
+                       "' does not exist or isn't supported.";
       GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
           mojom::ConsoleMessageSource::kJavaScript,
           mojom::ConsoleMessageLevel::kWarning, message));
@@ -168,8 +169,9 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
     }
     if (filter_options_ & entry_type) {
       String message =
-          "The Performance Observer has already been called with this "
-          "entryType";
+          "The PerformanceObserver has already been called with the entry type "
+          "'" +
+          observer_init->type() + "'.";
       GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
           mojom::ConsoleMessageSource::kJavaScript,
           mojom::ConsoleMessageLevel::kWarning, message));
@@ -179,7 +181,7 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
         observer_init->buffered()) {
       if (entry_type == PerformanceEntry::kLongTask) {
         String message =
-            "Buffered flag does not support the long task entry type ";
+            "Buffered flag does not support the 'longtask' entry type.";
         GetExecutionContext()->AddConsoleMessage(ConsoleMessage::Create(
             mojom::ConsoleMessageSource::kJavaScript,
             mojom::ConsoleMessageLevel::kWarning, message));
@@ -200,12 +202,22 @@ void PerformanceObserver::observe(const PerformanceObserverInit* observer_init,
     UseCounter::Count(GetExecutionContext(),
                       WebFeature::kLayoutShiftExplicitlyRequested);
   }
+  if (filter_options_ & PerformanceEntry::kElement) {
+    UseCounter::Count(GetExecutionContext(),
+                      WebFeature::kElementTimingExplicitlyRequested);
+  }
+  if (filter_options_ & PerformanceEntry::kLargestContentfulPaint) {
+    UseCounter::Count(GetExecutionContext(),
+                      WebFeature::kLargestContentfulPaintExplicitlyRequested);
+  }
   if (is_registered_)
     performance_->UpdatePerformanceObserverFilterOptions();
   else
     performance_->RegisterPerformanceObserver(*this);
   is_registered_ = true;
   if (is_buffered) {
+    UseCounter::Count(GetExecutionContext(),
+                      WebFeature::kPerformanceObserverBufferedFlag);
     performance_->ActivateObserver(*this);
   }
 }

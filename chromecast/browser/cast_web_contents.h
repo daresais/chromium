@@ -56,7 +56,7 @@ struct RendererFeature {
 // We consider the CastWebContents to be in a LOADED state when the content of
 // the main frame is fully loaded and running (all resources fetched, JS is
 // running). Iframes might still be loading in this case, but in general we
-// consider the page to be in a presentable state at this stage. It is
+// consider the page to be in a presentable state at this stage, so it is
 // appropriate to display the WebContents to the user.
 //
 // During or after the page is loaded, there are multiple error conditions that
@@ -184,8 +184,10 @@ class CastWebContents {
 
   // Initialization parameters for CastWebContents.
   struct InitParams {
-    // Delegate for CastWebContents. This can be null for an inner WebContents.
-    Delegate* delegate = nullptr;
+    // The delegate for the CastWebContents. Must be non-null. If the delegate
+    // is destroyed before CastWebContents, the WeakPtr will be invalidated on
+    // the main UI thread.
+    base::WeakPtr<Delegate> delegate = nullptr;
     // Enable development mode for this CastWebCastWebContents. Whitelists
     // certain functionality for the WebContents, like remote debugging and
     // debugging interfaces.
@@ -204,6 +206,10 @@ class CastWebContents {
     // Background color for the WebContents view. If not provided, the color
     // will fall back to the platform default.
     BackgroundColor background_color = BackgroundColor::NONE;
+
+    InitParams();
+    InitParams(const InitParams& other);
+    ~InitParams();
   };
 
   // Page state for the main frame.
@@ -233,9 +239,6 @@ class CastWebContents {
   // ===========================================================================
   // Initialization and Setup
   // ===========================================================================
-
-  // Set the delegate. SetDelegate(nullptr) can be used to stop notifications.
-  virtual void SetDelegate(Delegate* delegate) = 0;
 
   // Add a set of features for all renderers in the WebContents. Features are
   // configured when `CastWebContents::RenderFrameCreated` is invoked.
@@ -301,6 +304,19 @@ class CastWebContents {
   // Removes a previously added JavaScript snippet identified by |id|.
   // This is a no-op if there is no JavaScript snippet identified by |id|.
   virtual void RemoveBeforeLoadJavaScript(base::StringPiece id) = 0;
+
+  // Posts a message to the frame's onMessage handler.
+  //
+  // `target_origin` restricts message delivery to the specified origin.
+  // If `target_origin` is "*", then the message will be sent to the
+  // document regardless of its origin.
+  // See html.spec.whatwg.org/multipage/web-messaging.html sect. 9.4.3
+  // for more details on how the target origin policy is applied.
+  // Should be called on UI thread.
+  virtual void PostMessageToMainFrame(
+      const std::string& target_origin,
+      const std::string& data,
+      std::vector<mojo::ScopedMessagePipeHandle> channels) = 0;
 
   // ===========================================================================
   // Utility Methods

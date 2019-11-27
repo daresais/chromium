@@ -206,11 +206,9 @@ ArcAppReinstallSearchProvider::ArcAppReinstallSearchProvider(
     unsigned int max_result_count)
     : profile_(profile),
       max_result_count_(max_result_count),
-      icon_dimension_(
-          app_list::AppListConfig::instance().GetPreferredIconDimension(
-              ash::SearchResultDisplayType::kRecommendation)),
-      app_fetch_timer_(std::make_unique<base::RepeatingTimer>()),
-      weak_ptr_factory_(this) {
+      icon_dimension_(ash::AppListConfig::instance().GetPreferredIconDimension(
+          ash::SearchResultDisplayType::kRecommendation)),
+      app_fetch_timer_(std::make_unique<base::RepeatingTimer>()) {
   DCHECK(profile_ != nullptr);
   ArcAppListPrefs::Get(profile_)->AddObserver(this);
   MaybeUpdateFetching();
@@ -362,7 +360,7 @@ void ArcAppReinstallSearchProvider::UpdateResults() {
           loading_icon_it == loading_icon_urls_.end()) {
         // this icon is not loaded, nor is it in the loading set. Add it.
         loading_icon_urls_[icon_url] = gfx::ImageSkia(
-            std::make_unique<app_list::UrlIconSource>(
+            std::make_unique<UrlIconSource>(
                 base::BindRepeating(
                     &ArcAppReinstallSearchProvider::OnIconLoaded,
                     weak_ptr_factory_.GetWeakPtr(), icon_url),

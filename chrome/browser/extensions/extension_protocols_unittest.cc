@@ -26,9 +26,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/common/previews_state.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
@@ -46,6 +45,7 @@
 #include "extensions/common/file_util.h"
 #include "extensions/common/value_builder.h"
 #include "extensions/test/test_extension_dir.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/test/test_url_loader_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -132,7 +132,6 @@ network::ResourceRequest CreateResourceRequest(const std::string& method,
   request.referrer_policy = content::Referrer::GetDefaultReferrerPolicy();
   request.resource_type = static_cast<int>(resource_type);
   request.is_main_frame = resource_type == content::ResourceType::kMainFrame;
-  request.allow_download = true;
   return request;
 }
 
@@ -140,22 +139,22 @@ network::ResourceRequest CreateResourceRequest(const std::string& method,
 // depending on the on test type.
 class GetResult {
  public:
-  GetResult(const network::ResourceResponseHead& response, int result)
-      : resource_response_(response), result_(result) {}
+  GetResult(network::mojom::URLResponseHeadPtr response, int result)
+      : response_(std::move(response)), result_(result) {}
   GetResult(GetResult&& other) : result_(other.result_) {}
   ~GetResult() = default;
 
   std::string GetResponseHeaderByName(const std::string& name) const {
     std::string value;
-    if (resource_response_.headers)
-      resource_response_.headers->GetNormalizedHeader(name, &value);
+    if (response_ && response_->headers)
+      response_->headers->GetNormalizedHeader(name, &value);
     return value;
   }
 
   int result() const { return result_; }
 
  private:
-  const network::ResourceResponseHead resource_response_;
+  network::mojom::URLResponseHeadPtr response_;
   int result_;
 
   DISALLOW_COPY_AND_ASSIGN(GetResult);
@@ -169,7 +168,7 @@ class GetResult {
 class ExtensionProtocolsTestBase : public testing::Test {
  public:
   explicit ExtensionProtocolsTestBase(bool force_incognito)
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         rvh_test_enabler_(new content::RenderViewHostTestEnabler()),
         force_incognito_(force_incognito) {}
 
@@ -264,13 +263,12 @@ class ExtensionProtocolsTestBase : public testing::Test {
     constexpr int32_t kRoutingId = 81;
     constexpr int32_t kRequestId = 28;
 
-    network::mojom::URLLoaderPtr loader;
+    mojo::PendingRemote<network::mojom::URLLoader> loader;
     network::TestURLLoaderClient client;
     loader_factory_->CreateLoaderAndStart(
-        mojo::MakeRequest(&loader), kRoutingId, kRequestId,
+        loader.InitWithNewPipeAndPassReceiver(), kRoutingId, kRequestId,
         network::mojom::kURLLoadOptionNone,
-        CreateResourceRequest("GET", resource_type, url),
-        client.CreateInterfacePtr(),
+        CreateResourceRequest("GET", resource_type, url), client.CreateRemote(),
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
 
     if (power_monitor_source_) {
@@ -279,7 +277,7 @@ class ExtensionProtocolsTestBase : public testing::Test {
     }
 
     client.RunUntilComplete();
-    return GetResult(client.response_head(),
+    return GetResult(client.response_head().Clone(),
                      client.completion_status().error_code);
   }
 
@@ -295,7 +293,7 @@ class ExtensionProtocolsTestBase : public testing::Test {
     return web_contents()->GetMainFrame();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<content::RenderViewHostTestEnabler> rvh_test_enabler_;
   std::unique_ptr<network::mojom::URLLoaderFactory> loader_factory_;
   std::unique_ptr<TestingProfile> testing_profile_;

@@ -9,11 +9,10 @@
 #include <tuple>
 #include <utility>
 
-#include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_rtc_dtmf_sender_handler.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
+#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_dtls_transport.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_dtmf_sender.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_error_util.h"
@@ -25,8 +24,11 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_dtmf_sender_handler.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_stats.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_void_request.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
@@ -276,6 +278,14 @@ webrtc::RtpEncodingParameters ToRtpEncodingParameters(
     webrtc_encoding.scale_resolution_down_by =
         encoding->scaleResolutionDownBy();
   }
+  // https://w3c.github.io/webrtc-svc/
+  if (encoding->hasScalabilityMode()) {
+    if (encoding->scalabilityMode() == "L1T2") {
+      webrtc_encoding.num_temporal_layers = 2;
+    } else if (encoding->scalabilityMode() == "L1T3") {
+      webrtc_encoding.num_temporal_layers = 3;
+    }
+  }
   return webrtc_encoding;
 }
 
@@ -311,7 +321,7 @@ RTCRtpCodecParameters* ToRtpCodecParameters(
 }
 
 RTCRtpSender::RTCRtpSender(RTCPeerConnection* pc,
-                           std::unique_ptr<WebRTCRtpSender> sender,
+                           std::unique_ptr<RTCRtpSenderPlatform> sender,
                            String kind,
                            MediaStreamTrack* track,
                            MediaStreamVector streams)
@@ -393,6 +403,16 @@ RTCRtpSendParameters* RTCRtpSender::getParameters() {
         PriorityFromDouble(webrtc_encoding.bitrate_priority).c_str());
     encoding->setNetworkPriority(
         PriorityFromDouble(webrtc_encoding.network_priority).c_str());
+    if (webrtc_encoding.num_temporal_layers) {
+      if (*webrtc_encoding.num_temporal_layers == 2) {
+        encoding->setScalabilityMode("L1T2");
+      } else if (*webrtc_encoding.num_temporal_layers == 3) {
+        encoding->setScalabilityMode("L1T3");
+      } else {
+        LOG(ERROR) << "Not understood value of num_temporal_layers: "
+                   << *webrtc_encoding.num_temporal_layers;
+      }
+    }
     encodings.push_back(encoding);
   }
   parameters->setEncodings(encodings);
@@ -468,7 +488,7 @@ ScriptPromise RTCRtpSender::getStats(ScriptState* script_state) {
   return promise;
 }
 
-WebRTCRtpSender* RTCRtpSender::web_sender() {
+RTCRtpSenderPlatform* RTCRtpSender::web_sender() {
   return sender_.get();
 }
 
@@ -555,7 +575,8 @@ RTCRtpCapabilities* RTCRtpSender::getCapabilities(const String& kind) {
       HeapVector<Member<RTCRtpHeaderExtensionCapability>>());
 
   std::unique_ptr<webrtc::RtpCapabilities> rtc_capabilities =
-      blink::Platform::Current()->GetRtpSenderCapabilities(kind);
+      PeerConnectionDependencyFactory::GetInstance()->GetSenderCapabilities(
+          kind.Utf8());
 
   HeapVector<Member<RTCRtpCodecCapability>> codecs;
   codecs.ReserveInitialCapacity(
@@ -575,6 +596,13 @@ RTCRtpCapabilities* RTCRtpSender::getCapabilities(const String& kind) {
         sdp_fmtp_line += parameter.first + "=" + parameter.second;
       }
       codec->setSdpFmtpLine(sdp_fmtp_line.c_str());
+    }
+    if (rtc_codec.mime_type() == "video/VP8" ||
+        rtc_codec.mime_type() == "video/VP9") {
+      Vector<String> modes;
+      modes.push_back("L1T2");
+      modes.push_back("L1T3");
+      codec->setScalabilityModes(modes);
     }
     codecs.push_back(codec);
   }

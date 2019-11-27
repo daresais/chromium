@@ -94,8 +94,7 @@ void FetchParameters::SetResourceWidth(ResourceWidth resource_width) {
 }
 
 void FetchParameters::SetSpeculativePreloadType(
-    SpeculativePreloadType speculative_preload_type,
-    double discovery_time) {
+    SpeculativePreloadType speculative_preload_type) {
   speculative_preload_type_ = speculative_preload_type;
 }
 
@@ -108,12 +107,6 @@ void FetchParameters::MakeSynchronous() {
   if (IsMainThread())
     resource_request_.SetSkipServiceWorker(true);
   options_.synchronous_policy = kRequestSynchronously;
-}
-
-void FetchParameters::SetClientLoFiPlaceholder() {
-  resource_request_.SetPreviewsState(resource_request_.GetPreviewsState() |
-                                     WebURLRequest::kClientLoFiOn);
-  SetAllowImagePlaceholder();
 }
 
 void FetchParameters::SetLazyImagePlaceholder() {
@@ -142,10 +135,8 @@ void FetchParameters::SetAllowImagePlaceholder() {
     // Make sure that the request isn't marked as using an image preview type,
     // since without loading an image placeholder, Client Lo-Fi isn't really
     // in use.
-    resource_request_.SetPreviewsState(
-        resource_request_.GetPreviewsState() &
-        ~(WebURLRequest::kClientLoFiOn |
-          WebURLRequest::kLazyImageLoadDeferred));
+    resource_request_.SetPreviewsState(resource_request_.GetPreviewsState() &
+                                       ~WebURLRequest::kLazyImageLoadDeferred);
     return;
   }
 

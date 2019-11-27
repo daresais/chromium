@@ -141,9 +141,8 @@ class SelectFileDialogExtensionBrowserTest
   };
 
   void SetUp() override {
-    feature_list_.InitAndEnableFeature(chromeos::features::kMyFilesVolume);
     // Create the dialog wrapper and listener objects.
-    listener_.reset(new MockSelectFileDialogListener());
+    listener_ = std::make_unique<MockSelectFileDialogListener>();
     dialog_ = new SelectFileDialogExtension(listener_.get(), NULL);
 
     // One mount point will be needed. Files app looks for the "Downloads"
@@ -191,9 +190,9 @@ class SelectFileDialogExtensionBrowserTest
     extensions::ExtensionBrowserTest::TearDown();
 
     // Delete the dialogs first since they hold a pointer to their listener.
-    dialog_ = NULL;
+    dialog_.reset();
     listener_.reset();
-    second_dialog_ = NULL;
+    second_dialog_.reset();
     second_listener_.reset();
   }
 
@@ -286,7 +285,7 @@ class SelectFileDialogExtensionBrowserTest
   }
 
   void TryOpeningSecondDialog(const gfx::NativeWindow& owning_window) {
-    second_listener_.reset(new MockSelectFileDialogListener());
+    second_listener_ = std::make_unique<MockSelectFileDialogListener>();
     second_dialog_ = new SelectFileDialogExtension(second_listener_.get(),
                                                    NULL);
 
@@ -326,7 +325,6 @@ class SelectFileDialogExtensionBrowserTest
       ASSERT_FALSE(dialog_->IsRunning(owning_window));
   }
 
-  base::test::ScopedFeatureList feature_list_;
   base::ScopedTempDir tmp_dir_;
   base::FilePath downloads_dir_;
 

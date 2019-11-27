@@ -37,7 +37,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "chrome/browser/signin/scoped_account_consistency.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
@@ -67,7 +66,7 @@
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "media/base/media_switches.h"
-#include "media/mojo/interfaces/media_types.mojom.h"
+#include "media/mojo/mojom/media_types.mojom.h"
 #include "media/mojo/services/video_decode_perf_history.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/dns/mock_host_resolver.h"
@@ -257,27 +256,24 @@ std::string GetCookiesTreeModelInfo(const CookieTreeNode* root) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
 // Sets the APISID Gaia cookie, which is monitored by the AccountReconcilor.
 bool SetGaiaCookieForProfile(Profile* profile) {
-  GURL google_url = GaiaUrls::GetInstance()->google_url();
-  net::CanonicalCookie cookie("APISID", std::string(), "." + google_url.host(),
-                              "/", base::Time(), base::Time(), base::Time(),
-                              false, false, net::CookieSameSite::NO_RESTRICTION,
-                              net::COOKIE_PRIORITY_DEFAULT);
-
+  GURL google_url = GaiaUrls::GetInstance()->secure_google_url();
+  net::CanonicalCookie cookie(
+      "SAPISID", std::string(), "." + google_url.host(), "/", base::Time(),
+      base::Time(), base::Time(), true /* secure */, false /* httponly */,
+      net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT);
   bool success = false;
   base::RunLoop loop;
   base::OnceCallback<void(net::CanonicalCookie::CookieInclusionStatus)>
       callback = base::BindLambdaForTesting(
           [&success, &loop](net::CanonicalCookie::CookieInclusionStatus s) {
-            success =
-                (s == net::CanonicalCookie::CookieInclusionStatus::INCLUDE);
+            success = s.IsInclude();
             loop.Quit();
           });
   network::mojom::CookieManager* cookie_manager =
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetCookieManagerForBrowserProcess();
-  net::CookieOptions options;
-  options.set_include_httponly();
-  cookie_manager->SetCanonicalCookie(cookie, "https", options,
+  cookie_manager->SetCanonicalCookie(cookie, google_url.scheme(),
+                                     net::CookieOptions::MakeAllInclusive(),
                                      std::move(callback));
   loop.Run();
   return success;
@@ -581,18 +577,15 @@ class DiceBrowsingDataRemoverBrowserTest
     auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
     if (is_primary) {
       DCHECK(!identity_manager->HasPrimaryAccount());
-      return identity::MakePrimaryAccountAvailable(identity_manager,
-                                                   account_id + "@gmail.com");
+      return signin::MakePrimaryAccountAvailable(identity_manager,
+                                                 account_id + "@gmail.com");
     }
     auto account_info =
-        identity::MakeAccountAvailable(identity_manager, account_id);
+        signin::MakeAccountAvailable(identity_manager, account_id);
     DCHECK(
         identity_manager->HasAccountWithRefreshToken(account_info.account_id));
     return account_info;
   }
-
- private:
-  ScopedAccountConsistencyDice dice_;
 };
 #endif
 
@@ -627,7 +620,7 @@ IN_PROC_BROWSER_TEST_F(DiceBrowsingDataRemoverBrowserTest, SyncToken) {
   // Clear cookies.
   RemoveAndWait(content::BrowsingDataRemover::DATA_TYPE_COOKIES);
   // Check that the Sync account was not removed and Sync was paused.
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   EXPECT_TRUE(
       identity_manager->HasAccountWithRefreshToken(primary_account.account_id));
@@ -685,7 +678,7 @@ IN_PROC_BROWSER_TEST_F(DiceBrowsingDataRemoverBrowserTest, SyncTokenError) {
   AccountInfo primary_account =
       AddAccountToProfile(kAccountId, profile, /*is_primary=*/true);
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-  identity::UpdatePersistentErrorOfRefreshTokenForAccount(
+  signin::UpdatePersistentErrorOfRefreshTokenForAccount(
       identity_manager, primary_account.account_id,
       GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
           GoogleServiceAuthError::InvalidGaiaCredentialsReason::
@@ -1374,7 +1367,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
   // not supported by the CookieTreeModel yet.
   ExpectCookieTreeModelCount(kSessionOnlyStorageTestTypes.size() - 1);
   HostContentSettingsMapFactory::GetForProfile(GetBrowser()->profile())
-      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
+      ->SetDefaultContentSetting(ContentSettingsType::COOKIES,
                                  CONTENT_SETTING_SESSION_ONLY);
 }
 

@@ -45,12 +45,11 @@ ToolbarActionView* GetExtensionAnchorView(const std::string& extension_id,
   if (!browser_view)
     return nullptr;
   DCHECK(browser_view->toolbar_button_provider());
-  BrowserActionsContainer* const browser_actions_container =
-      browser_view->toolbar_button_provider()->GetBrowserActionsContainer();
-  if (!browser_actions_container)
-    return nullptr;
+  // TODO(pbos): Pop out extensions so that they can become visible before
+  // showing the uninstall dialog.
   ToolbarActionView* const reference_view =
-      browser_actions_container->GetViewForId(extension_id);
+      browser_view->toolbar_button_provider()->GetToolbarActionViewForId(
+          extension_id);
   return reference_view && reference_view->GetVisible() ? reference_view
                                                         : nullptr;
 }
@@ -103,7 +102,6 @@ class ExtensionUninstallDialogDelegateView
 
  private:
   // views::DialogDelegateView:
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool Accept() override;
   bool Cancel() override;
   gfx::Size CalculatePreferredSize() const override;
@@ -196,6 +194,10 @@ ExtensionUninstallDialogDelegateView::ExtensionUninstallDialogDelegateView(
           skia::ImageOperations::ResizeMethod::RESIZE_GOOD,
           gfx::Size(extension_misc::EXTENSION_ICON_SMALL,
                     extension_misc::EXTENSION_ICON_SMALL))) {
+  DialogDelegate::set_button_label(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON));
+
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets(),
@@ -213,7 +215,7 @@ ExtensionUninstallDialogDelegateView::ExtensionUninstallDialogDelegateView(
         l10n_util::GetStringFUTF16(
             IDS_EXTENSION_PROMPT_UNINSTALL_TRIGGERED_BY_EXTENSION,
             base::UTF8ToUTF16(triggering_extension->name())),
-        CONTEXT_BODY_TEXT_LARGE, STYLE_SECONDARY);
+        CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
     heading_->SetMultiLine(true);
     heading_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     heading_->SetAllowCharacterBreak(true);
@@ -250,12 +252,6 @@ ExtensionUninstallDialogDelegateView::~ExtensionUninstallDialogDelegateView() {
     reinterpret_cast<ToolbarActionView*>(anchor_view)
         ->AnimateInkDrop(views::InkDropState::DEACTIVATED, nullptr);
   }
-}
-
-base::string16 ExtensionUninstallDialogDelegateView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16((button == ui::DIALOG_BUTTON_OK) ?
-      IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON : IDS_CANCEL);
 }
 
 bool ExtensionUninstallDialogDelegateView::Accept() {

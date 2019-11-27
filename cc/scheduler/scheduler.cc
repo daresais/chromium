@@ -13,7 +13,8 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/base/devtools_instrumentation.h"
-#include "cc/scheduler/compositor_timing_history.h"
+#include "cc/metrics/begin_main_frame_metrics.h"
+#include "cc/metrics/compositor_timing_history.h"
 #include "components/viz/common/frame_sinks/delay_based_time_source.h"
 
 namespace cc {
@@ -168,9 +169,10 @@ void Scheduler::SetTreePrioritiesAndScrollState(
   ProcessScheduledActions();
 }
 
-void Scheduler::NotifyReadyToCommit() {
+void Scheduler::NotifyReadyToCommit(
+    std::unique_ptr<BeginMainFrameMetrics> details) {
   TRACE_EVENT0("cc", "Scheduler::NotifyReadyToCommit");
-  compositor_timing_history_->NotifyReadyToCommit();
+  compositor_timing_history_->NotifyReadyToCommit(std::move(details));
   state_machine_.NotifyReadyToCommit();
   ProcessScheduledActions();
 }
@@ -196,10 +198,10 @@ void Scheduler::DidPrepareTiles() {
   state_machine_.DidPrepareTiles();
 }
 
-void Scheduler::DidPresentCompositorFrame(uint32_t frame_token,
-                                          base::TimeTicks presentation_time) {
-  compositor_timing_history_->DidPresentCompositorFrame(frame_token,
-                                                        presentation_time);
+void Scheduler::DidPresentCompositorFrame(
+    uint32_t frame_token,
+    const viz::FrameTimingDetails& details) {
+  compositor_timing_history_->DidPresentCompositorFrame(frame_token, details);
 }
 
 void Scheduler::DidLoseLayerTreeFrameSink() {
@@ -589,7 +591,6 @@ void Scheduler::SendDidNotProduceFrame(const viz::BeginFrameArgs& args) {
   if (last_begin_frame_ack_.source_id == args.source_id &&
       last_begin_frame_ack_.sequence_number == args.sequence_number)
     return;
-  compositor_timing_history_->DidNotProduceFrame();
   last_begin_frame_ack_ = viz::BeginFrameAck(args, false /* has_damage */);
   client_->DidNotProduceFrame(last_begin_frame_ack_);
 }
@@ -732,8 +733,9 @@ void Scheduler::DrawIfPossible() {
       drawing_with_new_active_tree,
       begin_impl_frame_tracker_.DangerousMethodCurrentOrLast().frame_time,
       client_->CompositedAnimationsCount(),
-      client_->MainThreadAnimationsCount(),
-      client_->CurrentFrameHadRAF(), client_->NextFrameHasPendingRAF());
+      client_->MainThreadAnimationsCount(), client_->CurrentFrameHadRAF(),
+      client_->NextFrameHasPendingRAF(),
+      client_->HasCustomPropertyAnimations());
 }
 
 void Scheduler::DrawForced() {
@@ -750,8 +752,9 @@ void Scheduler::DrawForced() {
       drawing_with_new_active_tree,
       begin_impl_frame_tracker_.DangerousMethodCurrentOrLast().frame_time,
       client_->CompositedAnimationsCount(),
-      client_->MainThreadAnimationsCount(),
-      client_->CurrentFrameHadRAF(), client_->NextFrameHasPendingRAF());
+      client_->MainThreadAnimationsCount(), client_->CurrentFrameHadRAF(),
+      client_->NextFrameHasPendingRAF(),
+      client_->HasCustomPropertyAnimations());
 }
 
 void Scheduler::SetDeferBeginMainFrame(bool defer_begin_main_frame) {

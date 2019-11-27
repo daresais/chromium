@@ -17,7 +17,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_content_browser_client.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
@@ -26,6 +25,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view_observer.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_views.h"
 #include "chrome/browser/ui/views/chrome_constrained_window_views_client.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
@@ -42,7 +42,6 @@
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/test/test_browser_thread.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -280,16 +279,18 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   ~BookmarkBarViewEventTestBase() override = default;
 
   void SetUp() override {
-    content_client_.reset(new ChromeContentClient);
+    content_client_ = std::make_unique<ChromeContentClient>();
     content::SetContentClient(content_client_.get());
-    browser_content_client_.reset(new ChromeContentBrowserClient());
+    browser_content_client_ = std::make_unique<ChromeContentBrowserClient>();
     content::SetBrowserClientForTesting(browser_content_client_.get());
 
     views::MenuController::TurnOffMenuSelectionHoldForTest();
     BookmarkBarView::DisableAnimationsForTesting(true);
     SetConstrainedWindowViewsClient(CreateChromeConstrainedWindowViewsClient());
 
-    profile_.reset(new TestingProfile());
+    local_state_.reset(
+        new ScopedTestingLocalState(TestingBrowserProcess::GetGlobal()));
+    profile_ = std::make_unique<TestingProfile>();
     profile_->CreateBookmarkModel(true);
     model_ = BookmarkModelFactory::GetForBrowserContext(profile_.get());
     bookmarks::test::WaitForBookmarkModelToLoad(model_);
@@ -298,11 +299,9 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     Browser::CreateParams native_params(profile_.get(), true);
     browser_ = CreateBrowserWithTestWindowForParams(&native_params);
 
-    local_state_.reset(new ScopedTestingLocalState(
-        TestingBrowserProcess::GetGlobal()));
     model_->ClearStore();
 
-    bb_view_.reset(new BookmarkBarView(browser_.get(), NULL));
+    bb_view_ = std::make_unique<BookmarkBarView>(browser_.get(), nullptr);
     bb_view_->set_owned_by_client();
     // Real bookmark bars get a BookmarkBarViewBackground. Set an opaque
     // background here just to avoid triggering subpixel rendering issues.
@@ -326,8 +325,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     // On desktop Linux, the bookmark bar context menu blocks on retrieving the
     // clipboard selection from the X server (for the 'paste' item), so mock it
     // out.
-    ui::Clipboard::SetClipboardForCurrentThread(
-        std::make_unique<ui::TestClipboard>());
+    ui::TestClipboard::CreateForCurrentThread();
     GetWidget()->Activate();
 #endif
   }
@@ -721,25 +719,21 @@ VIEW_TEST(BookmarkBarViewTest3, Submenus)
 // which invokes the event loop.
 // Because |task| is a OnceClosure, callers should use a separate observer
 // instance for each successive context menu creation they wish to observe.
-class BookmarkContextMenuNotificationObserver
-    : public content::NotificationObserver {
+class BookmarkContextMenuNotificationObserver {
  public:
   explicit BookmarkContextMenuNotificationObserver(base::OnceClosure task)
       : task_(std::move(task)) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_BOOKMARK_CONTEXT_MENU_SHOWN,
-                   content::NotificationService::AllSources());
+    BookmarkContextMenu::InstallPreRunCallback(base::BindOnce(
+        &BookmarkContextMenuNotificationObserver::ScheduleCallback,
+        base::Unretained(this)));
   }
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
+  void ScheduleCallback() {
     DCHECK(!task_.is_null());
     base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, std::move(task_));
   }
 
  private:
-  content::NotificationRegistrar registrar_;
   base::OnceClosure task_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkContextMenuNotificationObserver);
@@ -999,7 +993,7 @@ class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
     ASSERT_TRUE(scroll_container != NULL);
     scroll_container = scroll_container->parent();
     ASSERT_TRUE(scroll_container != NULL);
-    views::View* scroll_down_button = scroll_container->children()[1];
+    views::View* scroll_down_button = scroll_container->children()[2];
     ASSERT_TRUE(scroll_down_button);
     gfx::Point loc(scroll_down_button->width() / 2,
                    scroll_down_button->height() / 2);
@@ -1800,6 +1794,7 @@ class BookmarkBarViewTest20 : public BookmarkBarViewEventTestBase {
   void DoTestOnMessageLoop() override {
     // Add |test_view_| next to |bb_view_|.
     views::View* parent = bb_view_->parent();
+    parent->RemoveChildView(bb_view_.get());
     container_view_ = std::make_unique<ContainerViewForMenuExit>();
     container_view_->set_owned_by_client();
     container_view_->AddChildView(bb_view_.get());

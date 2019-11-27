@@ -23,7 +23,7 @@
 #include "components/signin/public/identity_manager/accounts_in_cookie_jar_info.h"
 #include "components/signin/public/identity_manager/diagnostics_provider.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
+#include "components/signin/public/identity_manager/load_credentials_state.h"
 #include "net/base/backoff_entry.h"
 
 namespace {
@@ -112,27 +112,27 @@ std::string SigninStatusFieldToLabel(
 }
 
 std::string TokenServiceLoadCredentialsStateToLabel(
-    OAuth2TokenServiceDelegate::LoadCredentialsState state) {
+    signin::LoadCredentialsState state) {
   switch (state) {
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_NOT_STARTED:
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_NOT_STARTED:
       return "Load credentials not started";
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_IN_PROGRESS:
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS:
       return "Load credentials in progress";
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS:
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS:
       return "Load credentials finished with success";
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_DB_CANNOT_BE_OPENED:
       return "Load credentials failed with datase cannot be opened error";
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_FINISHED_WITH_DB_ERRORS:
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_DB_ERRORS:
       return "Load credentials failed with database errors";
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_DECRYPT_ERRORS:
       return "Load credentials failed with decrypt errors";
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_NO_TOKEN_FOR_PRIMARY_ACCOUNT:
       return "Load credentials failed with no refresh token for signed in "
              "account";
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_UNKNOWN_ERRORS:
       return "Load credentials failed with unknown errors";
   }
@@ -194,8 +194,6 @@ std::string GetAccountConsistencyDescription(
       return "None";
     case signin::AccountConsistencyMethod::kMirror:
       return "Mirror";
-    case signin::AccountConsistencyMethod::kDiceMigration:
-      return "DICE migration";
     case signin::AccountConsistencyMethod::kDice:
       return "DICE";
   }
@@ -206,7 +204,7 @@ std::string GetAccountConsistencyDescription(
 }  // anonymous namespace
 
 AboutSigninInternals::AboutSigninInternals(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     SigninErrorController* signin_error_controller,
     signin::AccountConsistencyMethod account_consistency)
     : identity_manager_(identity_manager),
@@ -335,7 +333,7 @@ void AboutSigninInternals::OnContentSettingChanged(
     ContentSettingsType content_type,
     const std::string& resource_identifier) {
   // If this is not a change to cookie settings, just ignore.
-  if (content_type != CONTENT_SETTINGS_TYPE_COOKIES)
+  if (content_type != ContentSettingsType::COOKIES)
     return;
 
   NotifyObservers();
@@ -418,7 +416,7 @@ void AboutSigninInternals::OnRefreshTokenRemovedForAccountFromSource(
 
 void AboutSigninInternals::OnRefreshTokensLoaded() {
   RefreshTokenEvent event;
-  // event.account_id = CoreAccountId("All accounts");
+  // This event concerns all accounts, so it does not have any account id.
   event.type = AboutSigninInternals::RefreshTokenEventType::kAllTokensLoaded;
   signin_status_.AddRefreshTokenEvent(event);
   NotifyObservers();
@@ -465,7 +463,7 @@ void AboutSigninInternals::OnPrimaryAccountCleared(
 }
 
 void AboutSigninInternals::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   if (error.state() != GoogleServiceAuthError::NONE)
     return;
@@ -596,7 +594,7 @@ void AboutSigninInternals::SigninStatus::AddRefreshTokenEvent(
 
 std::unique_ptr<base::DictionaryValue>
 AboutSigninInternals::SigninStatus::ToValue(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     SigninErrorController* signin_error_controller,
     SigninClient* signin_client,
     signin::AccountConsistencyMethod account_consistency) {
@@ -606,14 +604,12 @@ AboutSigninInternals::SigninStatus::ToValue(
   // A summary of signin related info first.
   base::ListValue* basic_info =
       AddSection(signin_info.get(), "Basic Information");
-  AddSectionEntry(basic_info, "Chrome Version",
-                  signin_client->GetProductVersion());
   AddSectionEntry(basic_info, "Account Consistency",
                   GetAccountConsistencyDescription(account_consistency));
   AddSectionEntry(
       basic_info, "Signin Status",
       identity_manager->HasPrimaryAccount() ? "Signed In" : "Not Signed In");
-  OAuth2TokenServiceDelegate::LoadCredentialsState load_tokens_state =
+  signin::LoadCredentialsState load_tokens_state =
       identity_manager->GetDiagnosticsProvider()
           ->GetDetailedStateOfLoadingOfRefreshTokens();
   AddSectionEntry(basic_info, "TokenService Load Status",
@@ -638,7 +634,7 @@ AboutSigninInternals::SigninStatus::ToValue(
           signin_error_controller->error_account_id();
       const base::Optional<AccountInfo> error_account_info =
           identity_manager
-              ->FindAccountInfoForAccountWithRefreshTokenByAccountId(
+              ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
                   error_account_id);
       AddSectionEntry(basic_info, "Auth Error",
           signin_error_controller->auth_error().ToString());

@@ -21,14 +21,11 @@ class SaveCardManageCardsBubbleViews : public SaveCardBubbleViews,
  public:
   // Bubble will be anchored to |anchor_view|.
   SaveCardManageCardsBubbleViews(views::View* anchor_view,
-                                 const gfx::Point& anchor_point,
                                  content::WebContents* web_contents,
                                  SaveCardBubbleController* controller);
 
   // views::WidgetDelegate:
   std::unique_ptr<views::View> CreateFootnoteView() override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-  int GetDialogButtons() const override;
 
  private:
   std::unique_ptr<views::View> CreateMainContentView() override;

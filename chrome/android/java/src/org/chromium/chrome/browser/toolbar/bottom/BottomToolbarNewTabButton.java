@@ -9,22 +9,23 @@ import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.StringRes;
 import android.support.graphics.drawable.VectorDrawableCompat;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import androidx.annotation.StringRes;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ThemeColorProvider;
 import org.chromium.chrome.browser.ThemeColorProvider.ThemeColorObserver;
 import org.chromium.chrome.browser.ThemeColorProvider.TintObserver;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.toolbar.IncognitoStateProvider;
 import org.chromium.chrome.browser.toolbar.IncognitoStateProvider.IncognitoStateObserver;
-import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.toolbar.ToolbarColors;
 import org.chromium.ui.widget.ChromeImageButton;
 
 /**
@@ -69,7 +70,11 @@ class BottomToolbarNewTabButton extends ChromeImageButton
     public void setWrapperView(ViewGroup wrapper) {
         mWrapper = wrapper;
         mLabel = mWrapper.findViewById(R.id.new_tab_button_label);
-        if (FeatureUtilities.isLabeledBottomToolbarEnabled()) mLabel.setVisibility(View.VISIBLE);
+        if (FeatureUtilities.isLabeledBottomToolbarEnabled()) {
+            mLabel.setVisibility(View.VISIBLE);
+        } else {
+            mWrapper.setBackground(null);
+        }
     }
 
     @Override
@@ -132,7 +137,7 @@ class BottomToolbarNewTabButton extends ChromeImageButton
         if (mThemeColorProvider == null || mIncognitoStateProvider == null) return;
 
         mBackground.setColorFilter(
-                ColorUtils.getTextBoxColorForToolbarBackground(mResources, false,
+                ToolbarColors.getTextBoxColorForToolbarBackgroundInNonNativePage(mResources,
                         mThemeColorProvider.getThemeColor(),
                         mThemeColorProvider.useLight()
                                 && mIncognitoStateProvider.isIncognitoSelected()),

@@ -8,9 +8,7 @@ import android.content.Intent;
 import android.os.Build;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.browser.ShortcutHelper;
-import org.chromium.chrome.browser.SingleTabActivity;
 import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.fullscreen.ComposedBrowserControlsVisibilityDelegate;
@@ -22,11 +20,12 @@ import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
 import org.chromium.chrome.browser.tab_activity_glue.ActivityTabWebContentsDelegateAndroid;
 import org.chromium.chrome.browser.tab_activity_glue.TabDelegateFactoryImpl;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.components.embedder_support.delegate.WebContentsDelegateAndroid;
 import org.chromium.webapk.lib.client.WebApkNavigationClient;
 
 /**
  * A {@link TabDelegateFactory} class to be used in all {@link Tab} instances owned by a
- * {@link SingleTabActivity}.
+ * {@link WebappActivity}.
  */
 public class WebappDelegateFactory extends TabDelegateFactoryImpl {
     private static class WebappWebContentsDelegateAndroid
@@ -49,7 +48,7 @@ public class WebappDelegateFactory extends TabDelegateFactoryImpl {
 
         @Override
         protected String getManifestScope() {
-            return mActivity.getWebappInfo().scopeUri().toString();
+            return mActivity.getWebappInfo().scopeUrl();
         }
 
         @Override
@@ -58,7 +57,7 @@ public class WebappDelegateFactory extends TabDelegateFactoryImpl {
             // will fire an Intent to launch the correct WebappActivity or WebApkActivity. On L+
             // this could probably be changed to call AppTask.moveToFront(), but for backwards
             // compatibility we relaunch it the hard way.
-            String startUrl = mActivity.getWebappInfo().uri().toString();
+            String startUrl = mActivity.getWebappInfo().url();
 
             WebappInfo webappInfo = mActivity.getWebappInfo();
             if (webappInfo.isForWebApk()) {
@@ -88,9 +87,17 @@ public class WebappDelegateFactory extends TabDelegateFactoryImpl {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             IntentUtils.safeStartActivity(ContextUtils.getApplicationContext(), intent);
         }
+
+        @Override
+        public boolean canShowAppBanners() {
+            // Do not show banners when we are in a standalone activity.
+            return false;
+        }
     }
 
     private final WebappActivity mActivity;
+
+    private TabWebContentsDelegateAndroid mWebContentsDelegateAndroid;
 
     public WebappDelegateFactory(WebappActivity activity) {
         super(activity);
@@ -100,12 +107,13 @@ public class WebappDelegateFactory extends TabDelegateFactoryImpl {
     @Override
     public ContextMenuPopulator createContextMenuPopulator(Tab tab) {
         return new ChromeContextMenuPopulator(new TabContextMenuItemDelegate(tab),
-                ChromeContextMenuPopulator.ContextMenuMode.WEB_APP);
+                mActivity.getShareDelegate(), ChromeContextMenuPopulator.ContextMenuMode.WEB_APP);
     }
 
     @Override
     public TabWebContentsDelegateAndroid createWebContentsDelegate(Tab tab) {
-        return new WebappWebContentsDelegateAndroid(mActivity, tab);
+        mWebContentsDelegateAndroid = new WebappWebContentsDelegateAndroid(mActivity, tab);
+        return mWebContentsDelegateAndroid;
     }
 
     @Override
@@ -116,9 +124,7 @@ public class WebappDelegateFactory extends TabDelegateFactoryImpl {
                 mActivity.getFullscreenManager().getBrowserVisibilityDelegate());
     }
 
-    @Override
-    public boolean canShowAppBanners() {
-        // Do not show banners when we are in a standalone activity.
-        return false;
+    WebContentsDelegateAndroid getWebContentsDelegate() {
+        return mWebContentsDelegateAndroid;
     }
 }

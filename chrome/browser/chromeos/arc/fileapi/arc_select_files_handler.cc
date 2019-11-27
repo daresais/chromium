@@ -29,8 +29,8 @@
 #include "content/public/common/url_constants.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_util.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "ui/aura/window.h"
 #include "url/gurl.h"
 
@@ -159,7 +159,7 @@ void BuildFileTypeInfo(const mojom::SelectFilesRequestPtr& request,
 
 ArcSelectFilesHandlersManager::ArcSelectFilesHandlersManager(
     content::BrowserContext* context)
-    : context_(context), weak_ptr_factory_(this) {}
+    : context_(context) {}
 
 ArcSelectFilesHandlersManager::~ArcSelectFilesHandlersManager() = default;
 

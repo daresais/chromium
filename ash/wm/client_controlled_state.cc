@@ -11,7 +11,6 @@
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/screen_pinning_controller.h"
-#include "ash/wm/window_parenting_utils.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_delegate.h"
@@ -25,7 +24,6 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace wm {
 
 namespace {
 // |kMinimumOnScreenArea + 1| is used to avoid adjusting loop.
@@ -46,6 +44,10 @@ ClientControlledState::ClientControlledState(std::unique_ptr<Delegate> delegate)
     : BaseState(WindowStateType::kDefault), delegate_(std::move(delegate)) {}
 
 ClientControlledState::~ClientControlledState() = default;
+
+void ClientControlledState::ResetDelegate() {
+  delegate_.reset();
+}
 
 void ClientControlledState::HandleTransitionEvents(WindowState* window_state,
                                                    const WMEvent* event) {
@@ -129,6 +131,8 @@ void ClientControlledState::DetachState(WindowState* window_state) {}
 
 void ClientControlledState::HandleWorkspaceEvents(WindowState* window_state,
                                                   const WMEvent* event) {
+  if (!delegate_)
+    return;
   // Client is responsible for adjusting bounds after workspace bounds change.
   if (window_state->IsSnapped()) {
     gfx::Rect bounds = GetSnappedWindowBoundsInParent(
@@ -136,6 +140,14 @@ void ClientControlledState::HandleWorkspaceEvents(WindowState* window_state,
     // Then ask delegate to set the desired bounds for the snap state.
     delegate_->HandleBoundsRequest(window_state, window_state->GetStateType(),
                                    bounds, window_state->GetDisplay().id());
+  } else if (event->type() == WM_EVENT_DISPLAY_BOUNDS_CHANGED) {
+    // Explicitly handle the primary change because it can change the display id
+    // with no bounds change.
+    if (event->AsDisplayMetricsChangedWMEvent()->primary_changed()) {
+      const gfx::Rect bounds = window_state->window()->bounds();
+      delegate_->HandleBoundsRequest(window_state, window_state->GetStateType(),
+                                     bounds, window_state->GetDisplay().id());
+    }
   } else if (event->type() == WM_EVENT_ADDED_TO_WORKSPACE) {
     aura::Window* window = window_state->window();
     gfx::Rect bounds = window->bounds();
@@ -154,7 +166,7 @@ void ClientControlledState::HandleCompoundEvents(WindowState* window_state,
   switch (event->type()) {
     case WM_EVENT_TOGGLE_MAXIMIZE_CAPTION:
       if (window_state->IsFullscreen()) {
-        const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
+        const WMEvent event(WM_EVENT_TOGGLE_FULLSCREEN);
         window_state->OnWMEvent(&event);
       } else if (window_state->IsMaximized()) {
         window_state->Restore();
@@ -165,7 +177,7 @@ void ClientControlledState::HandleCompoundEvents(WindowState* window_state,
       break;
     case WM_EVENT_TOGGLE_MAXIMIZE:
       if (window_state->IsFullscreen()) {
-        const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
+        const WMEvent event(WM_EVENT_TOGGLE_FULLSCREEN);
         window_state->OnWMEvent(&event);
       } else if (window_state->IsMaximized()) {
         window_state->Restore();
@@ -198,7 +210,8 @@ void ClientControlledState::HandleBoundsEvents(WindowState* window_state,
     return;
   switch (event->type()) {
     case WM_EVENT_SET_BOUNDS: {
-      const auto* set_bounds_event = static_cast<const SetBoundsEvent*>(event);
+      const auto* set_bounds_event =
+          static_cast<const SetBoundsWMEvent*>(event);
       const gfx::Rect& bounds = set_bounds_event->requested_bounds();
       if (set_bounds_locally_) {
         switch (next_bounds_change_animation_type_) {
@@ -256,7 +269,7 @@ void ClientControlledState::HandleBoundsEvents(WindowState* window_state,
 }
 
 void ClientControlledState::OnWindowDestroying(WindowState* window_state) {
-  delegate_.reset();
+  ResetDelegate();
 }
 
 bool ClientControlledState::EnterNextState(WindowState* window_state,
@@ -291,5 +304,4 @@ bool ClientControlledState::EnterNextState(WindowState* window_state,
   return true;
 }
 
-}  // namespace wm
 }  // namespace ash

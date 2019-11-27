@@ -17,7 +17,7 @@
 #include "ash/public/cpp/accessibility_focus_ring_controller.h"
 #include "ash/public/cpp/accessibility_focus_ring_info.h"
 #include "ash/public/cpp/ash_pref_names.h"
-#include "ash/public/interfaces/constants.mojom.h"
+#include "ash/public/mojom/constants.mojom.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/sticky_keys/sticky_keys_controller.h"
@@ -48,7 +48,6 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/api/braille_display_private/stub_braille_controller.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/singleton_tabs.h"
@@ -77,7 +76,6 @@
 #include "content/public/browser/tts_controller.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_switches.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
@@ -89,6 +87,7 @@
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_enum_util.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/widget/widget.h"
@@ -153,7 +152,7 @@ void EnableSwitchAccessAfterChromeVoxMetric(bool val) {
 // brltty.
 void RestartBrltty(const std::string& address) {
   chromeos::UpstartClient* client = chromeos::UpstartClient::Get();
-  client->StopJob(kBrlttyUpstartJobName, EmptyVoidDBusMethodCallback());
+  client->StopJob(kBrlttyUpstartJobName, {}, EmptyVoidDBusMethodCallback());
 
   std::vector<std::string> args;
   if (address.empty())
@@ -237,34 +236,16 @@ void AccessibilityManager::ShowAccessibilityHelp(Browser* browser) {
   ShowSingletonTab(browser, GURL(chrome::kChromeAccessibilityHelpURL));
 }
 
-AccessibilityManager::AccessibilityManager()
-    : profile_(NULL),
-      spoken_feedback_enabled_(false),
-      select_to_speak_enabled_(false),
-      switch_access_enabled_(false),
-      autoclick_enabled_(false),
-      braille_display_connected_(false),
-      scoped_braille_observer_(this),
-      braille_ime_current_(false),
-      chromevox_panel_(nullptr),
-      switch_access_panel_(nullptr),
-      extension_registry_observer_(this),
-      weak_ptr_factory_(this) {
+AccessibilityManager::AccessibilityManager() {
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-                              content::NotificationService::AllSources());
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
-                              content::NotificationService::AllSources());
-  notification_registrar_.Add(this, chrome::NOTIFICATION_SESSION_STARTED,
-                              content::NotificationService::AllSources());
-  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                               content::NotificationService::AllSources());
   notification_registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                               content::NotificationService::AllSources());
   notification_registrar_.Add(this, content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
                               content::NotificationService::AllSources());
   input_method::InputMethodManager::Get()->AddObserver(this);
+  user_manager::UserManager::Get()->AddSessionStateObserver(this);
 
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   audio::SoundsManager* manager = audio::SoundsManager::Get();
@@ -331,8 +312,9 @@ AccessibilityManager::AccessibilityManager()
                           weak_ptr_factory_.GetWeakPtr())));
 
   // Connect to the media session service.
-  content::GetSystemConnector()->BindInterface(
-      media_session::mojom::kServiceName, &audio_focus_manager_ptr_);
+  content::GetSystemConnector()->Connect(
+      media_session::mojom::kServiceName,
+      audio_focus_manager_.BindNewPipeAndPassReceiver());
 
   ash::AcceleratorController::SetVolumeAdjustmentSoundCallback(
       base::BindRepeating(&AccessibilityManager::PlayVolumeAdjustSound,
@@ -347,6 +329,7 @@ AccessibilityManager::~AccessibilityManager() {
                                           false);
   NotifyAccessibilityStatusChanged(details);
   CrasAudioHandler::Get()->RemoveAudioObserver(this);
+  user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
   input_method::InputMethodManager::Get()->RemoveObserver(this);
 
   if (chromevox_panel_) {
@@ -923,7 +906,7 @@ bool AccessibilityManager::IsSwitchAccessEnabled() const {
   return switch_access_enabled_;
 }
 
-void AccessibilityManager::UpdateSwitchAccessFromPref() {
+void AccessibilityManager::OnSwitchAccessChanged() {
   if (!profile_)
     return;
 
@@ -936,8 +919,8 @@ void AccessibilityManager::UpdateSwitchAccessFromPref() {
   if (!command_line->HasSwitch(
           ::switches::kEnableExperimentalAccessibilitySwitchAccess)) {
     if (enabled) {
-      LOG(WARNING) << "Switch access enabled but experimental accessibility "
-                   << "switch access flag is not set.";
+      LOG(WARNING) << "Switch Access enabled but experimental accessibility "
+                   << "Switch Access flag is not set.";
     }
     return;
   }
@@ -985,7 +968,7 @@ void AccessibilityManager::CheckBrailleState() {
   BrailleController* braille_controller = GetBrailleController();
   if (!scoped_braille_observer_.IsObserving(braille_controller))
     scoped_braille_observer_.Add(braille_controller);
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE, {BrowserThread::IO},
       base::Bind(&BrailleController::GetDisplayState,
                  base::Unretained(braille_controller)),
@@ -1066,13 +1049,18 @@ void AccessibilityManager::OnActiveOutputNodeChanged() {
   }
 }
 
+void AccessibilityManager::OnProfileWillBeDestroyed(Profile* profile) {
+  DCHECK_EQ(profile_, profile);
+  SetProfile(nullptr);
+}
+
 void AccessibilityManager::SetProfile(Profile* profile) {
-  // Do nothing if this is called for the current profile. This can happen. For
-  // example, ChromeSessionManager fires both
-  // NOTIFICATION_LOGIN_USER_PROFILE_PREPARED and NOTIFICATION_SESSION_STARTED,
-  // and we are observing both events.
   if (profile_ == profile)
     return;
+
+  if (profile_)
+    profile_observer_.Remove(profile_);
+  DCHECK(!profile_observer_.IsObservingSources());
 
   pref_change_registrar_.reset();
   local_state_pref_change_registrar_.reset();
@@ -1134,7 +1122,7 @@ void AccessibilityManager::SetProfile(Profile* profile) {
                    base::Unretained(this)));
     pref_change_registrar_->Add(
         ash::prefs::kAccessibilitySwitchAccessEnabled,
-        base::Bind(&AccessibilityManager::UpdateSwitchAccessFromPref,
+        base::Bind(&AccessibilityManager::OnSwitchAccessChanged,
                    base::Unretained(this)));
     pref_change_registrar_->Add(
         ash::prefs::kAccessibilityAutoclickEnabled,
@@ -1159,6 +1147,8 @@ void AccessibilityManager::SetProfile(Profile* profile) {
         extensions::ExtensionRegistry::Get(profile);
     if (!extension_registry_observer_.IsObserving(registry))
       extension_registry_observer_.Add(registry);
+
+    profile_observer_.Add(profile);
   }
 
   bool had_profile = (profile_ != NULL);
@@ -1169,19 +1159,28 @@ void AccessibilityManager::SetProfile(Profile* profile) {
   else
     UpdateBrailleImeState();
   UpdateAlwaysShowMenuFromPref();
-  UpdateSwitchAccessFromPref();
 
   // TODO(warx): reconcile to ash once the prefs registration above is moved to
   // ash.
   OnSpokenFeedbackChanged();
+  OnSwitchAccessChanged();
   OnSelectToSpeakChanged();
   OnAutoclickChanged();
 }
 
-void AccessibilityManager::ActiveUserChanged(
-    const user_manager::User* active_user) {
-  if (active_user && active_user->is_profile_created())
-    SetProfile(ProfileManager::GetActiveUserProfile());
+void AccessibilityManager::SetProfileByUser(const user_manager::User* user) {
+  Profile* profile = ProfileHelper::Get()->GetProfileByUser(user);
+  DCHECK(profile);
+  SetProfile(profile);
+}
+
+void AccessibilityManager::ActiveUserChanged(user_manager::User* active_user) {
+  if (!active_user)
+    return;
+
+  active_user->AddProfileCreatedObserver(
+      base::BindOnce(&AccessibilityManager::SetProfileByUser,
+                     weak_ptr_factory_.GetWeakPtr(), active_user));
 }
 
 base::TimeDelta AccessibilityManager::PlayShutdownSound() {
@@ -1287,28 +1286,6 @@ void AccessibilityManager::Observe(
         SetProfile(profile);
       break;
     }
-    case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED:
-      // Update |profile_| when login user profile is prepared.
-      // NOTIFICATION_SESSION_STARTED is not fired from UserSessionManager, but
-      // profile may be changed by UserSessionManager in OOBE flow.
-      SetProfile(ProfileManager::GetActiveUserProfile());
-      break;
-    case chrome::NOTIFICATION_SESSION_STARTED:
-      // Update |profile_| when entering a session.
-      SetProfile(ProfileManager::GetActiveUserProfile());
-
-      // Add a session state observer to be able to monitor session changes.
-      if (!session_state_observer_.get())
-        session_state_observer_.reset(
-            new user_manager::ScopedUserSessionStateObserver(this));
-      break;
-    case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      // Update |profile_| when exiting a session or shutting down.
-      Profile* profile = content::Source<Profile>(source).ptr();
-      if (profile_ == profile)
-        SetProfile(NULL);
-      break;
-    }
     case chrome::NOTIFICATION_APP_TERMINATING: {
       app_terminating_ = true;
       break;
@@ -1366,10 +1343,18 @@ void AccessibilityManager::PostLoadChromeVox() {
     return;
 
   // Do any setup work needed immediately after ChromeVox actually loads.
-  // Maybe start brltty, if we have a bluetooth device stored for connection.
   const std::string& address = GetBluetoothBrailleDisplayAddress();
-  if (!address.empty())
+  if (!address.empty()) {
+    // Maybe start brltty, when we have a bluetooth device stored for
+    // connection.
     RestartBrltty(address);
+  } else {
+    // Otherwise, start brltty without an address. This covers cases when
+    // ChromeVox is toggled off then back on all while a usb braille display is
+    // connected.
+    chromeos::UpstartClient::Get()->StartJob(kBrlttyUpstartJobName, {},
+                                             EmptyVoidDBusMethodCallback());
+  }
 
   PlayEarcon(SOUND_SPOKEN_FEEDBACK_ENABLED, PlaySoundOption::ALWAYS);
 
@@ -1394,7 +1379,7 @@ void AccessibilityManager::PostLoadChromeVox() {
                        base::Unretained(this))));
   }
 
-  audio_focus_manager_ptr_->SetEnforcementMode(
+  audio_focus_manager_->SetEnforcementMode(
       media_session::mojom::EnforcementMode::kNone);
 
   InitializeFocusRings(extension_id);
@@ -1403,7 +1388,7 @@ void AccessibilityManager::PostLoadChromeVox() {
 void AccessibilityManager::PostUnloadChromeVox() {
   // Do any teardown work needed immediately after ChromeVox actually unloads.
   // Stop brltty.
-  chromeos::UpstartClient::Get()->StopJob(kBrlttyUpstartJobName,
+  chromeos::UpstartClient::Get()->StopJob(kBrlttyUpstartJobName, {},
                                           EmptyVoidDBusMethodCallback());
 
   PlayEarcon(SOUND_SPOKEN_FEEDBACK_DISABLED, PlaySoundOption::ALWAYS);
@@ -1421,7 +1406,7 @@ void AccessibilityManager::PostUnloadChromeVox() {
   // Stop speech.
   content::TtsController::GetInstance()->Stop();
 
-  audio_focus_manager_ptr_->SetEnforcementMode(
+  audio_focus_manager_->SetEnforcementMode(
       media_session::mojom::EnforcementMode::kDefault);
 }
 
@@ -1673,6 +1658,17 @@ void AccessibilityManager::SetSelectToSpeakStateObserverForTest(
 void AccessibilityManager::SetCaretBoundsObserverForTest(
     base::RepeatingCallback<void(const gfx::Rect&)> observer) {
   caret_bounds_observer_for_test_ = observer;
+}
+
+void AccessibilityManager::SetSwitchAccessKeysForTest(
+    const std::vector<int>& keys) {
+  // Sets all keys to "Select" command.
+  ListPrefUpdate update(profile_->GetPrefs(),
+                        ash::prefs::kAccessibilitySwitchAccessSelectKeyCodes);
+  for (int key : keys)
+    update->AppendInteger(key);
+
+  profile_->GetPrefs()->CommitPendingWrite();
 }
 
 }  // namespace chromeos

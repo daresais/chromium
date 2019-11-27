@@ -5,6 +5,7 @@
 #include "ash/app_list/views/app_list_view.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -19,8 +20,10 @@
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
+#include "ash/public/cpp/app_list/app_list_config_provider.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/app_list_types.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/wallpaper_types.h"
 #include "base/macros.h"
@@ -60,9 +63,7 @@
 #include "ui/wm/core/ime_util_chromeos.h"
 #include "ui/wm/core/shadow_types.h"
 
-using ash::ColorProfileType;
-
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -80,10 +81,9 @@ constexpr int kAppListBezelMargin = 50;
 constexpr int kAppInfoDialogWidth = 512;
 constexpr int kAppInfoDialogHeight = 384;
 
-// The animation duration for app list movement.
-constexpr float kAppListAnimationDurationImmediateMs = 0;
-constexpr float kAppListAnimationDurationMs = 200;
-constexpr float kAppListAnimationDurationFromFullscreenMs = 250;
+// The duration of app list animations when |short_animations_for_testing| are
+// enabled.
+constexpr int kAppListAnimationDurationImmediateMs = 0;
 
 // Events within this threshold from the top of the view will be reserved for
 // home launcher gestures, if they can be processed.
@@ -107,6 +107,30 @@ constexpr char kAppListDragInTabletHistogram[] =
     "Apps.StateTransition.Drag.PresentationTime.TabletMode";
 constexpr char kAppListDragInTabletMaxLatencyHistogram[] =
     "Apps.StateTransition.Drag.PresentationTime.MaxLatency.TabletMode";
+
+// Returns whether AppList's rounded corners should be hidden based on
+// the app list view state and app list view bounds.
+bool ShouldHideRoundedCorners(ash::AppListViewState app_list_state,
+                              const gfx::Rect& bounds) {
+  switch (app_list_state) {
+    case ash::AppListViewState::kClosed:
+      return false;
+    case ash::AppListViewState::kFullscreenAllApps:
+    case ash::AppListViewState::kFullscreenSearch:
+      // Hide rounded corners in fullscreen state.
+      return true;
+
+    case ash::AppListViewState::kPeeking:
+    case ash::AppListViewState::kHalf:
+      // When the virtual keyboard shows, the AppListView is moved upward to
+      // avoid the overlapping area with the virtual keyboard. As a result, its
+      // bottom side may be on the display edge. Stop showing the rounded
+      // corners under this circumstance.
+      return bounds.y() == 0;
+  }
+  NOTREACHED();
+  return false;
+}
 
 // This view forwards the focus to the search box widget by providing it as a
 // FocusTraversable when a focus search is provided.
@@ -134,8 +158,8 @@ SkColor GetBackgroundShieldColor(const std::vector<SkColor>& colors,
                                  float color_opacity) {
   const U8CPU sk_opacity_value = static_cast<U8CPU>(255 * color_opacity);
 
-  const SkColor default_color = SkColorSetA(
-      app_list::AppListView::kDefaultBackgroundColor, sk_opacity_value);
+  const SkColor default_color =
+      SkColorSetA(AppListView::kDefaultBackgroundColor, sk_opacity_value);
 
   if (colors.empty())
     return default_color;
@@ -156,16 +180,33 @@ SkColor GetBackgroundShieldColor(const std::vector<SkColor>& colors,
 
 DEFINE_UI_CLASS_PROPERTY_KEY(bool, kExcludeWindowFromEventHandling, false)
 
+// Gets radius for app list background corners when the app list has the
+// provided height. The rounded corner should match the current app list height
+// (so the rounded corners bottom edge matches the shelf top), until it reaches
+// the app list background radius (i.e. background radius in peeking app list
+// state).
+// |height|: App list view height, relative to the shelf top (i.e. distance
+//           between app list top and shelf top edge).
+double GetBackgroundRadiusForAppListHeight(double height,
+                                           int shelf_background_corner_radius) {
+  return std::min(static_cast<double>(shelf_background_corner_radius),
+                  std::max(height, 0.));
+}
+
 // This targeter prevents routing events to sub-windows, such as
 // RenderHostWindow in order to handle events in context of app list.
 class AppListEventTargeter : public aura::WindowTargeter {
  public:
-  AppListEventTargeter() = default;
+  explicit AppListEventTargeter(AppListViewDelegate* delegate)
+      : delegate_(delegate) {}
   ~AppListEventTargeter() override = default;
 
   // aura::WindowTargeter:
   bool SubtreeShouldBeExploredForEvent(aura::Window* window,
                                        const ui::LocatedEvent& event) override {
+    if (delegate_ && !delegate_->CanProcessEventsOnApplistViews())
+      return false;
+
     if (window->GetProperty(kExcludeWindowFromEventHandling)) {
       // Allow routing to sub-windows for ET_MOUSE_MOVED event which is used by
       // accessibility to enter the mode of exploration of WebView contents.
@@ -184,6 +225,8 @@ class AppListEventTargeter : public aura::WindowTargeter {
   }
 
  private:
+  AppListViewDelegate* delegate_;  // Weak. Owned by AppListService.
+
   DISALLOW_COPY_AND_ASSIGN(AppListEventTargeter);
 };
 
@@ -307,6 +350,16 @@ void AppListView::StateAnimationMetricsReporter::RecordMetricsInTablet(
           "EnterFullscreenSearch",
           value);
       break;
+    case TabletModeAnimationTransition::kFadeInOverview:
+      UMA_HISTOGRAM_PERCENTAGE(
+          "Apps.HomeLauncherTransition.AnimationSmoothness.FadeInOverview",
+          value);
+      break;
+    case TabletModeAnimationTransition::kFadeOutOverview:
+      UMA_HISTOGRAM_PERCENTAGE(
+          "Apps.HomeLauncherTransition.AnimationSmoothness.FadeOutOverview",
+          value);
+      break;
   }
 }
 
@@ -378,25 +431,60 @@ class BoundsAnimationObserver : public ui::ImplicitAnimationObserver {
 // The view for the app list background shield which changes color and radius.
 class AppListBackgroundShieldView : public views::View {
  public:
-  AppListBackgroundShieldView()
-      : color_(AppListView::kDefaultBackgroundColor) {}
+  explicit AppListBackgroundShieldView(int shelf_background_corner_radius)
+      : color_(AppListView::kDefaultBackgroundColor),
+        shelf_background_corner_radius_(shelf_background_corner_radius) {
+    SetPaintToLayer(ui::LAYER_SOLID_COLOR);
+    layer()->SetFillsBoundsOpaquely(false);
+    SetBackgroundRadius(shelf_background_corner_radius_);
+    layer()->SetColor(color_);
+  }
 
   ~AppListBackgroundShieldView() override = default;
 
   void UpdateBackground(bool use_blur) {
-    DestroyLayer();
-    SetPaintToLayer(use_blur ? ui::LAYER_SOLID_COLOR : ui::LAYER_TEXTURED);
-    layer()->SetFillsBoundsOpaquely(false);
+    if (blur_value_ == use_blur)
+      return;
+    blur_value_ = use_blur;
+
     if (use_blur) {
-      layer()->SetColor(color_);
       layer()->SetBackgroundBlur(AppListConfig::instance().blur_radius());
       layer()->SetBackdropFilterQuality(kAppListBlurQuality);
-      layer()->SetRoundedCornerRadius(
-          {AppListConfig::instance().background_radius(),
-           AppListConfig::instance().background_radius(), 0, 0});
     } else {
       layer()->SetBackgroundBlur(0);
     }
+  }
+
+  void UpdateBackgroundRadius(
+      ash::AppListViewState state,
+      bool shelf_has_rounded_corners,
+      base::Optional<base::TimeTicks> animation_end_timestamp) {
+    const double target_corner_radius =
+        (state == ash::AppListViewState::kClosed && !shelf_has_rounded_corners)
+            ? 0
+            : shelf_background_corner_radius_;
+    if (radius_ == target_corner_radius)
+      return;
+
+    layer()->GetAnimator()->StopAnimatingProperty(
+        ui::LayerAnimationElement::ROUNDED_CORNERS);
+
+    std::unique_ptr<ui::ScopedLayerAnimationSettings> settings;
+    if (animation_end_timestamp.has_value()) {
+      settings = std::make_unique<ui::ScopedLayerAnimationSettings>(
+          layer()->GetAnimator());
+      settings->SetTransitionDuration((*animation_end_timestamp) -
+                                      base::TimeTicks::Now());
+      settings->SetTweenType(gfx::Tween::EASE_OUT);
+      settings->SetPreemptionStrategy(
+          ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
+    }
+    SetBackgroundRadius(target_corner_radius);
+  }
+
+  void SetBackgroundRadius(double radius) {
+    radius_ = radius;
+    layer()->SetRoundedCornerRadius({radius, radius, 0, 0});
   }
 
   void UpdateColor(SkColor color) {
@@ -404,10 +492,7 @@ class AppListBackgroundShieldView : public views::View {
       return;
 
     color_ = color;
-    if (layer()->type() == ui::LAYER_SOLID_COLOR)
-      layer()->SetColor(color);
-    else
-      SchedulePaint();
+    layer()->SetColor(color);
   }
 
   void UpdateBounds(const gfx::Rect& bounds) {
@@ -416,18 +501,8 @@ class AppListBackgroundShieldView : public views::View {
     // add the inset to the bottom to keep padding at the top of the AppList the
     // same.
     gfx::Rect new_bounds = bounds;
-    new_bounds.Inset(0, 0, 0,
-                     -AppListConfig::instance().background_radius() * 2);
+    new_bounds.Inset(0, 0, 0, -shelf_background_corner_radius_ * 2);
     SetBoundsRect(new_bounds);
-  }
-
-  // Overridden from views::View:
-  void OnPaint(gfx::Canvas* canvas) override {
-    cc::PaintFlags flags;
-    flags.setStyle(cc::PaintFlags::kFill_Style);
-    flags.setColor(color_);
-    canvas->DrawRoundRect(GetContentsBounds(),
-                          AppListConfig::instance().background_radius(), flags);
   }
 
   SkColor GetColorForTest() const { return color_; }
@@ -437,56 +512,16 @@ class AppListBackgroundShieldView : public views::View {
   }
 
  private:
+  // Whether the background blur has been set on the background shield.
+  bool blur_value_ = false;
+
+  double radius_ = 0.f;
+
   SkColor color_;
 
+  int shelf_background_corner_radius_ = 0;
+
   DISALLOW_COPY_AND_ASSIGN(AppListBackgroundShieldView);
-};
-
-// Animation used to translate AppListView as well as its child views. The
-// location and opacity of child views' are updated in each animation frame so
-// it is expensive.
-class PeekingResetAnimation : public ui::LayerAnimationElement {
- public:
-  PeekingResetAnimation(int y_offset,
-                        base::TimeDelta duration_ms,
-                        AppListView* view)
-      : ui::LayerAnimationElement(ui::LayerAnimationElement::TRANSFORM,
-                                  duration_ms),
-        transform_(std::make_unique<ui::InterpolatedTranslation>(
-            gfx::PointF(0, y_offset),
-            gfx::PointF())),
-        view_(view) {
-    DCHECK(view_->is_in_drag());
-    DCHECK_EQ(view_->app_list_state(), ash::AppListViewState::kPeeking);
-    DCHECK(!view_->is_tablet_mode());
-  }
-
-  ~PeekingResetAnimation() override = default;
-
-  // ui::LayerAnimationElement:
-  void OnStart(ui::LayerAnimationDelegate* delegate) override {}
-  bool OnProgress(double current,
-                  ui::LayerAnimationDelegate* delegate) override {
-    const double progress =
-        gfx::Tween::CalculateValue(gfx::Tween::EASE_OUT, current);
-    delegate->SetTransformFromAnimation(
-        transform_->Interpolate(progress),
-        ui::PropertyChangeReason::FROM_ANIMATION);
-
-    // Update child views' location and opacity at each animation frame because
-    // child views' padding changes along with the app list view's bounds.
-    view_->app_list_main_view()->contents_view()->UpdateYPositionAndOpacity();
-
-    return true;
-  }
-  void OnGetTarget(TargetValue* target) const override {}
-  void OnAbort(ui::LayerAnimationDelegate* delegate) override {}
-
- private:
-  std::unique_ptr<ui::InterpolatedTransform> transform_;
-  AppListView* view_;
-
-  DISALLOW_COPY_AND_ASSIGN(PeekingResetAnimation);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -509,12 +544,11 @@ AppListView::AppListView(AppListViewDelegate* delegate)
     : delegate_(delegate),
       model_(delegate->GetModel()),
       search_model_(delegate->GetSearchModel()),
-      is_background_blur_enabled_(app_list_features::IsBackgroundBlurEnabled()),
+      is_background_blur_enabled_(ash::features::IsBackgroundBlurEnabled()),
       bounds_animation_observer_(
           std::make_unique<BoundsAnimationObserver>(this)),
       state_animation_metrics_reporter_(
-          std::make_unique<StateAnimationMetricsReporter>(this)),
-      weak_ptr_factory_(this) {
+          std::make_unique<StateAnimationMetricsReporter>(this)) {
   CHECK(delegate);
 }
 
@@ -530,6 +564,22 @@ void AppListView::ExcludeWindowFromEventHandling(aura::Window* window) {
 }
 
 // static
+float AppListView::GetTransitionProgressForState(ash::AppListViewState state) {
+  switch (state) {
+    case ash::AppListViewState::kClosed:
+      return 0.0f;
+    case ash::AppListViewState::kPeeking:
+    case ash::AppListViewState::kHalf:
+      return 1.0f;
+    case ash::AppListViewState::kFullscreenAllApps:
+    case ash::AppListViewState::kFullscreenSearch:
+      return 2.0f;
+  }
+  NOTREACHED();
+  return 0.0f;
+}
+
+// static
 void AppListView::SetShortAnimationForTesting(bool enabled) {
   short_animations_for_testing = enabled;
 }
@@ -539,12 +589,19 @@ bool AppListView::ShortAnimationsForTesting() {
   return short_animations_for_testing;
 }
 
-void AppListView::InitView(bool is_tablet_mode, gfx::NativeView parent) {
+void AppListView::InitView(
+    bool is_tablet_mode,
+    gfx::NativeView parent,
+    base::RepeatingClosure on_bounds_animation_ended_callback) {
   base::AutoReset<bool> auto_reset(&is_building_, true);
   time_shown_ = base::Time::Now();
+  UpdateAppListConfig(parent);
   InitContents(is_tablet_mode);
   InitWidget(parent);
   InitChildWidget();
+
+  on_bounds_animation_ended_callback_ =
+      std::move(on_bounds_animation_ended_callback);
 }
 
 void AppListView::InitContents(bool is_tablet_mode) {
@@ -553,7 +610,8 @@ void AppListView::InitContents(bool is_tablet_mode) {
   DCHECK(!search_box_view_);
   DCHECK(!announcement_view_);
 
-  app_list_background_shield_ = new AppListBackgroundShieldView();
+  app_list_background_shield_ =
+      new AppListBackgroundShieldView(delegate_->GetShelfHeight() / 2);
   app_list_background_shield_->UpdateBackground(/*use_blur*/ !is_tablet_mode &&
                                                 is_background_blur_enabled_);
   AddChildView(app_list_background_shield_);
@@ -575,20 +633,26 @@ void AppListView::InitWidget(gfx::NativeView parent) {
   params.name = "AppList";
   params.parent = parent;
   params.delegate = this;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.layer_type = ui::LAYER_NOT_DRAWN;
 
   views::Widget* widget = new views::Widget;
-  widget->Init(params);
+  widget->Init(std::move(params));
   DCHECK_EQ(widget, GetWidget());
   widget->GetNativeWindow()->SetEventTargeter(
-      std::make_unique<AppListEventTargeter>());
+      std::make_unique<AppListEventTargeter>(delegate_));
 
   // Enable arrow key in FocusManager. Arrow left/right and up/down triggers
   // the same focus movement as tab/shift+tab.
   widget->GetFocusManager()->set_arrow_key_traversal_enabled_for_widget(true);
 
   widget->GetNativeView()->AddObserver(this);
+
+  // Directs A11y focus ring from search box view to AppListView's descendants
+  // (like ExpandArrowView) without focusing on the whole app list window when
+  // using search + arrow button.
+  search_box_view_->GetViewAccessibility().OverrideNextFocus(GetWidget());
+  search_box_view_->GetViewAccessibility().OverridePreviousFocus(GetWidget());
 }
 
 void AppListView::InitChildWidget() {
@@ -599,12 +663,12 @@ void AppListView::InitChildWidget() {
       views::Widget::InitParams::TYPE_CONTROL);
   search_box_widget_params.parent = GetWidget()->GetNativeView();
   search_box_widget_params.opacity =
-      views::Widget::InitParams::TRANSLUCENT_WINDOW;
+      views::Widget::InitParams::WindowOpacity::kTranslucent;
   search_box_widget_params.name = "SearchBoxView";
   search_box_widget_params.delegate = search_box_view_;
 
   views::Widget* search_box_widget = new views::Widget;
-  search_box_widget->Init(search_box_widget_params);
+  search_box_widget->Init(std::move(search_box_widget_params));
   DCHECK_EQ(search_box_widget, search_box_view_->GetWidget());
 
   // Assign an accessibility role to the native window of |search_box_widget|,
@@ -623,6 +687,12 @@ void AppListView::InitChildWidget() {
   search_box_widget->SetFocusTraversableParentView(search_box_focus_host);
   search_box_widget->SetFocusTraversableParent(
       GetWidget()->GetFocusTraversable());
+
+  // Directs A11y focus ring from AppListView's descendants (like
+  // ExpandArrowView) to search box view without focusing on the whole app list
+  // window when using search + arrow button.
+  GetViewAccessibility().OverrideNextFocus(search_box_widget);
+  GetViewAccessibility().OverridePreviousFocus(search_box_widget);
 }
 
 void AppListView::Show(bool is_side_shelf, bool is_tablet_mode) {
@@ -648,7 +718,8 @@ void AppListView::Show(bool is_side_shelf, bool is_tablet_mode) {
   CloseKeyboardIfVisible();
 
   OnTabletModeChanged(is_tablet_mode);
-  app_list_main_view_->ShowAppListWhenReady();
+  // Widget may be activated by |on_bounds_animation_ended_callback_|.
+  GetWidget()->ShowInactive();
 
   UMA_HISTOGRAM_TIMES(kAppListCreationTimeHistogram,
                       base::Time::Now() - time_shown_.value());
@@ -695,21 +766,10 @@ bool AppListView::Back() {
 
 void AppListView::OnPaint(gfx::Canvas* canvas) {
   views::WidgetDelegateView::OnPaint(canvas);
-  if (!next_paint_callback_.is_null()) {
-    next_paint_callback_.Run();
-    next_paint_callback_.Reset();
-  }
 }
 
 const char* AppListView::GetClassName() const {
   return "AppListView";
-}
-
-bool AppListView::CanProcessEventsWithinSubtree() const {
-  if (!delegate_->CanProcessEventsOnApplistViews())
-    return false;
-
-  return views::View::CanProcessEventsWithinSubtree();
 }
 
 bool AppListView::AcceleratorPressed(const ui::Accelerator& accelerator) {
@@ -746,35 +806,19 @@ void AppListView::Layout() {
   // Exclude the shelf height from the contents bounds to avoid apps grid from
   // overlapping with shelf.
   gfx::Rect main_bounds = contents_bounds;
-  main_bounds.Inset(0, 0, 0, AppListConfig::instance().shelf_height());
-
-  // The AppListMainView's size is supposed to be the same as AppsContainerView.
-  const gfx::Size min_main_size = GetAppsContainerView()->GetMinimumSize();
-
-  if ((main_bounds.width() > 0 && main_bounds.height() > 0) &&
-      (main_bounds.width() < min_main_size.width() ||
-       main_bounds.height() < min_main_size.height())) {
-    // Scale down the AppListMainView if AppsContainerView does not fit in the
-    // display.
-    const float scale = std::min(
-        (main_bounds.width()) / static_cast<float>(min_main_size.width()),
-        main_bounds.height() / static_cast<float>(min_main_size.height()));
-    DCHECK_GT(scale, 0);
-    const gfx::RectF scaled_main_bounds(main_bounds.x(), main_bounds.y(),
-                                        main_bounds.width() / scale,
-                                        main_bounds.height() / scale);
-    gfx::Transform transform;
-    transform.Scale(scale, scale);
-    app_list_main_view_->SetTransform(transform);
-    app_list_main_view_->SetBoundsRect(gfx::ToEnclosedRect(scaled_main_bounds));
+  if (is_side_shelf()) {
+    // Set both horizontal insets so the app list remains centered on the
+    // screen.
+    main_bounds.Inset(delegate_->GetShelfHeight(), 0);
   } else {
-    app_list_main_view_->SetTransform(gfx::Transform());
-    app_list_main_view_->SetBoundsRect(main_bounds);
+    main_bounds.Inset(0, 0, 0, delegate_->GetShelfHeight());
   }
+
+  app_list_main_view_->SetBoundsRect(main_bounds);
 
   app_list_background_shield_->UpdateBounds(contents_bounds);
 
-  UpdateAppListBackgroundYPosition();
+  UpdateAppListBackgroundYPosition(app_list_state_);
 }
 
 ax::mojom::Role AppListView::GetAccessibleWindowRole() {
@@ -784,12 +828,53 @@ ax::mojom::Role AppListView::GetAccessibleWindowRole() {
   return ax::mojom::Role::kGroup;
 }
 
+const AppListConfig& AppListView::GetAppListConfig() const {
+  return *app_list_config_;
+}
+
 views::View* AppListView::GetAppListBackgroundShieldForTest() {
   return app_list_background_shield_;
 }
 
 SkColor AppListView::GetAppListBackgroundShieldColorForTest() {
   return app_list_background_shield_->GetColorForTest();
+}
+
+bool AppListView::IsShowingEmbeddedAssistantUI() const {
+  return app_list_main_view()->contents_view()->IsShowingEmbeddedAssistantUI();
+}
+
+void AppListView::UpdateAppListConfig(aura::Window* parent_window) {
+  // For side shelf, extra horizontal margin is needed to ensure the apps grid
+  // does not overlap with shelf.
+  const int margin_for_side_shelf =
+      is_side_shelf() ? delegate_->GetShelfHeight() : 0;
+  // Create the app list configuration override if it's needed for the current
+  // display bounds and the available apps grid size.
+  std::unique_ptr<AppListConfig> new_config =
+      AppListConfigProvider::Get().CreateForAppListWidget(
+          display::Screen::GetScreen()
+              ->GetDisplayNearestView(parent_window)
+              .work_area()
+              .size(),
+          AppsContainerView::GetMinimumGridHorizontalMargin() +
+              margin_for_side_shelf,
+          delegate_->GetShelfHeight(), app_list_config_.get());
+
+  if (!new_config)
+    return;
+
+  const bool is_initial_config = !app_list_config_.get();
+  app_list_config_ = std::move(new_config);
+
+  // Initial config should be set before the app list main view is initialized.
+  DCHECK(!is_initial_config || !app_list_main_view_);
+
+  // If the config changed, notify apps grids the config has changed.
+  if (!is_initial_config) {
+    GetFolderAppsGridView()->OnAppListConfigUpdated();
+    GetRootAppsGridView()->OnAppListConfigUpdated();
+  }
 }
 
 void AppListView::UpdateWidget() {
@@ -809,7 +894,7 @@ void AppListView::HandleClickOrTap(ui::LocatedEvent* event) {
   }
 
   // Close embedded Assistant UI if it is shown.
-  if (app_list_main_view()->contents_view()->IsShowingEmbeddedAssistantUI()) {
+  if (IsShowingEmbeddedAssistantUI()) {
     Back();
     search_box_view_->ClearSearchAndDeactivateSearchBox();
     return;
@@ -874,14 +959,25 @@ void AppListView::UpdateDrag(const gfx::Point& location) {
 }
 
 void AppListView::EndDrag(const gfx::Point& location) {
+  // |is_in_drag_| might have been cleared if the app list was dismissed while
+  // drag was still in progress. Nothing to do here in that case.
+  if (!is_in_drag_) {
+    DCHECK_EQ(ash::AppListViewState::kClosed, app_list_state_);
+    return;
+  }
+
+  // Remember the last fling velocity, as the value gets reset in SetIsInDrag.
+  const int last_fling_velocity = last_fling_velocity_;
+  SetIsInDrag(false);
+
   // Change the app list state based on where the drag ended. If fling velocity
   // was over the threshold, snap to the next state in the direction of the
   // fling.
-  if (std::abs(last_fling_velocity_) >= kDragVelocityThreshold) {
+  if (std::abs(last_fling_velocity) >= kDragVelocityThreshold) {
     // If the user releases drag with velocity over the threshold, snap to
     // the next state, ignoring the drag release position.
 
-    if (last_fling_velocity_ > 0) {
+    if (last_fling_velocity > 0) {
       switch (app_list_state_) {
         case ash::AppListViewState::kPeeking:
         case ash::AppListViewState::kHalf:
@@ -987,8 +1083,6 @@ void AppListView::EndDrag(const gfx::Point& location) {
       }
     }
   }
-  SetIsInDrag(false);
-  UpdateChildViewsYPositionAndOpacity();
   initial_drag_point_ = gfx::Point();
 }
 
@@ -996,6 +1090,7 @@ void AppListView::SetChildViewsForStateTransition(
     ash::AppListViewState target_state) {
   if (target_state != ash::AppListViewState::kPeeking &&
       target_state != ash::AppListViewState::kFullscreenAllApps &&
+      target_state != ash::AppListViewState::kFullscreenSearch &&
       target_state != ash::AppListViewState::kHalf &&
       target_state != ash::AppListViewState::kClosed) {
     return;
@@ -1004,8 +1099,10 @@ void AppListView::SetChildViewsForStateTransition(
   app_list_main_view_->contents_view()->OnAppListViewTargetStateChanged(
       target_state);
 
-  if (target_state == ash::AppListViewState::kHalf)
+  if (target_state == ash::AppListViewState::kHalf ||
+      target_state == ash::AppListViewState::kFullscreenSearch) {
     return;
+  }
 
   if (GetAppsContainerView()->IsInFolderView())
     GetAppsContainerView()->ResetForShowApps();
@@ -1107,6 +1204,21 @@ void AppListView::MaybeCreateAccessibilityEvent(
   }
   announcement_view_->GetViewAccessibility().OverrideName(state_announcement);
   announcement_view_->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
+}
+
+void AppListView::EnsureWidgetBoundsMatchCurrentState() {
+  const gfx::Rect new_target_bounds =
+      GetPreferredWidgetBoundsForState(app_list_state_);
+  aura::Window* window = GetWidget()->GetNativeView();
+  if (new_target_bounds == window->GetTargetBounds())
+    return;
+
+  // Set the widget size to fit the new display metrics.
+  GetWidget()->GetNativeView()->SetBounds(new_target_bounds);
+
+  // Update the widget bounds to accomodate the new work
+  // area.
+  SetState(app_list_state_);
 }
 
 int AppListView::GetRemainingBoundsAnimationDistance() const {
@@ -1226,6 +1338,10 @@ void AppListView::OnScrollEvent(ui::ScrollEvent* event) {
 }
 
 void AppListView::OnMouseEvent(ui::MouseEvent* event) {
+  // Ignore events if the app list is closing or closed.
+  if (app_list_state_ == ash::AppListViewState::kClosed)
+    return;
+
   switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
       event->SetHandled();
@@ -1275,6 +1391,10 @@ void AppListView::OnMouseEvent(ui::MouseEvent* event) {
 }
 
 void AppListView::OnGestureEvent(ui::GestureEvent* event) {
+  // Ignore events if the app list is closing or closed.
+  if (app_list_state_ == ash::AppListViewState::kClosed)
+    return;
+
   switch (event->type()) {
     case ui::ET_GESTURE_TAP:
     case ui::ET_GESTURE_LONG_PRESS:
@@ -1291,7 +1411,7 @@ void AppListView::OnGestureEvent(ui::GestureEvent* event) {
         search_box_view_->NotifyGestureEvent();
 
       if (event->location().y() < kAppListHomeLaucherGesturesThreshold) {
-        if (delegate_->ProcessHomeLauncherGesture(event, gfx::Point())) {
+        if (delegate_->ProcessHomeLauncherGesture(event)) {
           SetIsInDrag(false);
           event->SetHandled();
           HandleClickOrTap(event);
@@ -1313,9 +1433,7 @@ void AppListView::OnGestureEvent(ui::GestureEvent* event) {
       break;
     }
     case ui::ET_GESTURE_SCROLL_UPDATE: {
-      gfx::Point location_in_screen = event->location();
-      views::View::ConvertPointToScreen(this, &location_in_screen);
-      if (delegate_->ProcessHomeLauncherGesture(event, location_in_screen)) {
+      if (delegate_->ProcessHomeLauncherGesture(event)) {
         SetIsInDrag(true);
         event->SetHandled();
         return;
@@ -1331,9 +1449,7 @@ void AppListView::OnGestureEvent(ui::GestureEvent* event) {
       break;
     }
     case ui::ET_GESTURE_END: {
-      gfx::Point location_in_screen = event->location();
-      views::View::ConvertPointToScreen(this, &location_in_screen);
-      if (delegate_->ProcessHomeLauncherGesture(event, location_in_screen)) {
+      if (delegate_->ProcessHomeLauncherGesture(event)) {
         SetIsInDrag(false);
         event->SetHandled();
         return;
@@ -1380,13 +1496,6 @@ void AppListView::OnTabletModeChanged(bool started) {
   // Refresh the state if the view is not in a fullscreen state.
   if (started && !is_fullscreen())
     SetState(app_list_state_);
-
-  // In tablet mode, AppListView should not be moved because of the change in
-  // virtual keyboard's visibility.
-  if (started) {
-    GetWidget()->GetNativeView()->ClearProperty(
-        wm::kVirtualKeyboardRestoreBoundsKey);
-  }
 
   app_list_background_shield_->UpdateBackground(
       /*use_blur*/ is_background_blur_enabled_ && !started);
@@ -1451,6 +1560,9 @@ void AppListView::SetState(ash::AppListViewState new_state) {
   ash::AppListViewState new_state_override = new_state;
   ConvertAppListStateToFullscreenEquivalent(&new_state_override);
   MaybeCreateAccessibilityEvent(new_state_override);
+  // Clear the drag state before closing the view.
+  if (new_state_override == ash::AppListViewState::kClosed)
+    SetIsInDrag(false);
   SetChildViewsForStateTransition(new_state_override);
   StartAnimationForState(new_state_override);
   MaybeIncreaseAssistantPrivacyInfoRowShownCount(new_state_override);
@@ -1458,15 +1570,10 @@ void AppListView::SetState(ash::AppListViewState new_state) {
   model_->SetStateFullscreen(new_state_override);
   app_list_state_ = new_state_override;
 
-  if (!update_childview_each_frame_ &&
-      app_list_state_ != ash::AppListViewState::kClosed) {
-    // Layout is called on animation completion, which makes the child views
-    // jump. Update y positions in advance here to avoid that.
+  if (is_in_drag_ && app_list_state_ != ash::AppListViewState::kClosed)
     app_list_main_view_->contents_view()->UpdateYPositionAndOpacity();
-    UpdateAppListBackgroundYPosition();
-  }
 
-  if (GetWidget()->IsActive()) {
+  if (GetWidget()->IsActive() && !IsShowingEmbeddedAssistantUI()) {
     // Reset the focus to initially focused view. This should be
     // done before updating visibility of views, because setting
     // focused view invisible automatically moves focus to next
@@ -1479,57 +1586,89 @@ void AppListView::SetState(ash::AppListViewState new_state) {
   GetAppsContainerView()->UpdateControlVisibility(app_list_state_, is_in_drag_);
 }
 
-void AppListView::StartAnimationForState(ash::AppListViewState target_state) {
-  int animation_duration = kAppListAnimationDurationMs;
+base::TimeDelta AppListView::GetStateTransitionAnimationDuration(
+    ash::AppListViewState target_state) {
   if (ShortAnimationsForTesting() || is_side_shelf_ ||
       (target_state == ash::AppListViewState::kClosed &&
        delegate_->ShouldDismissImmediately())) {
-    animation_duration = kAppListAnimationDurationImmediateMs;
-  } else if (is_fullscreen() ||
-             target_state == ash::AppListViewState::kFullscreenAllApps ||
-             target_state == ash::AppListViewState::kFullscreenSearch) {
-    // Animate over more time to or from a fullscreen state, to maintain a
-    // similar speed.
-    animation_duration = kAppListAnimationDurationFromFullscreenMs;
-  }
-  if (target_state == ash::AppListViewState::kClosed) {
-    // On closing, animate the opacity twice as fast so the SearchBoxView does
-    // not flash behind the shelf.
-    const int child_animation_duration = animation_duration / 2;
-    app_list_main_view_->contents_view()->FadeOutOnClose(
-        base::TimeDelta::FromMilliseconds(child_animation_duration));
-  } else if (GetWidget()->GetNativeView()->bounds().y() ==
-             GetDisplayNearestView().work_area().bottom()) {
-    // If the animation start position is the bottom of the screen, activate the
-    // fade in animation. This prevents the search box from flashing at the
-    // bottom of the screen as it goes behind the shelf.
-    app_list_main_view_->contents_view()->FadeInOnOpen(
-        base::TimeDelta::FromMilliseconds(animation_duration));
+    return base::TimeDelta::FromMilliseconds(
+        kAppListAnimationDurationImmediateMs);
   }
 
-  ApplyBoundsAnimation(target_state,
-                       base::TimeDelta::FromMilliseconds(animation_duration));
+  if (is_fullscreen() ||
+      target_state == ash::AppListViewState::kFullscreenAllApps ||
+      target_state == ash::AppListViewState::kFullscreenSearch) {
+    // Animate over more time to or from a fullscreen state, to maintain a
+    // similar speed.
+    return base::TimeDelta::FromMilliseconds(
+        kAppListAnimationDurationFromFullscreenMs);
+  }
+
+  return base::TimeDelta::FromMilliseconds(kAppListAnimationDurationMs);
+}
+
+void AppListView::StartAnimationForState(ash::AppListViewState target_state) {
+  base::TimeDelta animation_duration =
+      GetStateTransitionAnimationDuration(target_state);
+
+  ApplyBoundsAnimation(target_state, animation_duration);
+  if (!is_in_drag_) {
+    app_list_main_view_->contents_view()->AnimateToViewState(
+        target_state, animation_duration);
+  }
 }
 
 void AppListView::ApplyBoundsAnimation(ash::AppListViewState target_state,
                                        base::TimeDelta duration_ms) {
-  base::AutoReset<bool> auto_reset(
-      &update_childview_each_frame_,
-      ShouldUpdateChildViewsDuringAnimation(target_state));
-
-  // Reset animation metrics reporter when animation is started.
-  ResetTransitionMetricsReporter();
-
   ui::ImplicitAnimationObserver* animation_observer =
       delegate_->GetAnimationObserver(target_state);
 
-  if (is_side_shelf_) {
+  if (is_side_shelf_ || is_in_drag_) {
     // There is no animation in side shelf.
     OnBoundsAnimationCompleted();
+    UpdateAppListBackgroundYPosition(target_state);
     if (animation_observer)
       animation_observer->OnImplicitAnimationsCompleted();
     return;
   }
+
+  gfx::Rect target_bounds = GetPreferredWidgetBoundsForState(target_state);
+
+  // When closing the view should animate to the shelf bounds. The workspace
+  // area will not reflect an autohidden shelf so ask for the proper bounds.
+  const int y_for_closed_state =
+      delegate_->GetTargetYForAppListHide(GetWidget()->GetNativeView());
+  if (target_state == ash::AppListViewState::kClosed) {
+    target_bounds.set_y(y_for_closed_state);
+  }
+
+  // Record the current transform before removing it because this bounds
+  // animation could be pre-empting another bounds animation.
+  ui::Layer* layer = GetWidget()->GetLayer();
+
+  // Adjust the closed state y to account for auto-hidden shelf.
+  const int current_bounds_y = app_list_state_ == ash::AppListViewState::kClosed
+                                   ? y_for_closed_state
+                                   : layer->bounds().y();
+  const int current_y_with_transform =
+      current_bounds_y + GetRemainingBoundsAnimationDistance();
+
+  const gfx::Transform current_shield_transform =
+      app_list_background_shield_->layer()->transform();
+
+  // Schedule the animation; set to the target bounds, and make the transform
+  // to make this appear in the original location. Then set an empty transform
+  // with the animation.
+  layer->SetBounds(target_bounds);
+
+  gfx::Transform transform;
+  const int y_offset = current_y_with_transform - target_bounds.y();
+  transform.Translate(0, y_offset);
+  layer->SetTransform(transform);
+  animation_end_timestamp_ = base::TimeTicks::Now() + duration_ms;
+
+  // Reset animation metrics reporter when animation is started.
+  ResetTransitionMetricsReporter();
 
   if (is_tablet_mode_ && target_state != ash::AppListViewState::kClosed) {
     DCHECK(target_state == ash::AppListViewState::kFullscreenAllApps ||
@@ -1544,31 +1683,7 @@ void AppListView::ApplyBoundsAnimation(ash::AppListViewState target_state,
     state_animation_metrics_reporter_->SetTargetState(target_state);
   }
 
-  gfx::Rect target_bounds = GetPreferredWidgetBoundsForState(target_state);
-  if (target_state == ash::AppListViewState::kClosed) {
-    // When closing the view should animate to the shelf bounds. The workspace
-    // area will not reflect an autohidden shelf so ask for the proper bounds.
-    target_bounds.set_y(
-        delegate_->GetTargetYForAppListHide(GetWidget()->GetNativeView()));
-  }
-
-  // Record the current transform before removing it because this bounds
-  // animation could be pre-empting another bounds animation.
-  ui::Layer* layer = GetWidget()->GetLayer();
-  const int current_y_with_transform =
-      layer->bounds().y() + GetRemainingBoundsAnimationDistance();
-
-  layer->SetTransform(gfx::Transform());
-  layer->SetBounds(target_bounds);
-
-  gfx::Transform transform;
-  const int y_offset = current_y_with_transform - target_bounds.y();
-  transform.Translate(0, y_offset);
-  layer->SetTransform(transform);
-
   ui::ScopedLayerAnimationSettings animation(layer->GetAnimator());
-  animation.SetTransitionDuration(duration_ms);
-  animation.SetTweenType(gfx::Tween::EASE_OUT);
   animation.SetPreemptionStrategy(
       ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
   animation.SetAnimationMetricsReporter(GetStateTransitionMetricsReporter());
@@ -1582,12 +1697,37 @@ void AppListView::ApplyBoundsAnimation(ash::AppListViewState target_state,
     animation.AddObserver(animation_observer);
   }
 
-  if (update_childview_each_frame_) {
-    layer->GetAnimator()->StartAnimation(new ui::LayerAnimationSequence(
-        std::make_unique<PeekingResetAnimation>(y_offset, duration_ms, this)));
-  } else {
-    layer->SetTransform(gfx::Transform());
+  // In fullscreen state, or peeking state with restricted vertical space, the
+  // background shield is translated upwards to ensure background radius is not
+  // visible.
+  // NOTE: layer->SetBounds() changes shield transform, so reset the transform
+  // to the value before the |layer| bounds are set before starting the
+  // animation.
+  app_list_background_shield_->SetTransform(current_shield_transform);
+  ui::ScopedLayerAnimationSettings shield_animation(
+      app_list_background_shield_->layer()->GetAnimator());
+  shield_animation.SetTransitionDuration(duration_ms);
+  shield_animation.SetTweenType(gfx::Tween::EASE_OUT);
+  shield_animation.SetPreemptionStrategy(
+      ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
+
+  gfx::Transform shield_transform;
+  if (ShouldHideRoundedCorners(target_state, target_bounds)) {
+    shield_transform.Translate(0, -(delegate_->GetShelfHeight() / 2));
   }
+  app_list_background_shield_->SetTransform(shield_transform);
+
+  animation.SetTransitionDuration(duration_ms);
+  animation.SetTweenType(gfx::Tween::EASE_OUT);
+  layer->SetTransform(gfx::Transform());
+
+  // Schedule animations of the rounded corners. When running on linux
+  // workstation, the rounded corner animation sometimes looks out-of-sync. This
+  // does not happen on actual devices.
+
+  // TODO(mukai): fix the out-of-sync problem.
+  app_list_background_shield_->UpdateBackgroundRadius(
+      target_state, shelf_has_rounded_corners_, animation_end_timestamp_);
 }
 
 void AppListView::SetStateFromSearchBoxView(bool search_box_is_empty,
@@ -1613,17 +1753,11 @@ void AppListView::SetStateFromSearchBoxView(bool search_box_is_empty,
       break;
     case ash::AppListViewState::kFullscreenSearch:
       if (app_list_features::IsZeroStateSuggestionsEnabled()) {
-        if (search_box_is_empty && !triggered_by_contents_change) {
+        if (search_box_is_empty && !triggered_by_contents_change)
           SetState(ash::AppListViewState::kFullscreenAllApps);
-          app_list_main_view()->contents_view()->SetActiveState(
-              ash::AppListState::kStateApps);
-        }
       } else {
-        if (search_box_is_empty) {
+        if (search_box_is_empty)
           SetState(ash::AppListViewState::kFullscreenAllApps);
-          app_list_main_view()->contents_view()->SetActiveState(
-              ash::AppListState::kStateApps);
-        }
       }
       break;
     case ash::AppListViewState::kFullscreenAllApps:
@@ -1662,7 +1796,7 @@ void AppListView::UpdateYPositionAndOpacity(int y_position_in_screen,
   gfx::Rect new_widget_bounds = GetWidget()->GetWindowBoundsInScreen();
   app_list_y_position_in_screen_ = std::min(
       std::max(y_position_in_screen, GetDisplayNearestView().work_area().y()),
-      GetScreenBottom() - AppListConfig::instance().shelf_height());
+      GetScreenBottom() - delegate_->GetShelfHeight());
   new_widget_bounds.set_y(app_list_y_position_in_screen_);
   gfx::NativeView native_view = GetWidget()->GetNativeView();
   ::wm::ConvertRectFromScreen(native_view->parent(), &new_widget_bounds);
@@ -1697,12 +1831,16 @@ void AppListView::SetIsInDrag(bool is_in_drag) {
   if (is_in_drag == is_in_drag_)
     return;
 
-  is_in_drag_ = is_in_drag;
+  // Reset |last_fling_velocity_| if it was set during the drag.
+  if (!is_in_drag)
+    last_fling_velocity_ = 0;
 
   // Don't allow dragging to interrupt the close animation, it probably is not
   // intentional.
   if (app_list_state_ == ash::AppListViewState::kClosed)
     return;
+
+  is_in_drag_ = is_in_drag;
 
   if (is_in_drag && !is_tablet_mode_) {
     presentation_time_recorder_.reset();
@@ -1732,15 +1870,44 @@ int AppListView::GetScreenBottom() const {
 
 int AppListView::GetCurrentAppListHeight() const {
   if (!GetWidget())
-    return AppListConfig::instance().shelf_height();
+    return delegate_->GetShelfHeight();
   return GetScreenBottom() - GetWidget()->GetWindowBoundsInScreen().y();
 }
 
-float AppListView::GetAppListTransitionProgress() const {
-  const float current_height = GetCurrentAppListHeight();
-  const float peeking_height =
-      AppListConfig::instance().peeking_app_list_height();
-  if (current_height <= peeking_height) {
+float AppListView::GetAppListTransitionProgress(int flags) const {
+  // During transition between home and overview in tablet mode, the app list
+  // widget gets scaled down from full screen state - if this is the case,
+  // the app list layout should match the current app list state, so return
+  // the progress for the current app list state.
+  const gfx::Transform transform = GetWidget()->GetLayer()->transform();
+  if (is_tablet_mode_ && transform.IsScaleOrTranslation() &&
+      !transform.IsIdentityOrTranslation()) {
+    return GetTransitionProgressForState(app_list_state_);
+  }
+
+  int current_height = GetCurrentAppListHeight();
+  if (flags & kProgressFlagWithTransform) {
+    current_height -=
+        GetWidget()->GetLayer()->transform().To2dTranslation().y();
+  }
+
+  const int fullscreen_height = GetFullscreenStateHeight();
+  const int baseline_height =
+      std::min(fullscreen_height,
+               (flags & kProgressFlagSearchResults)
+                   ? kHalfAppListHeight
+                   : AppListConfig::instance().peeking_app_list_height());
+
+  // If vertical space is limited, the baseline and fullscreen height might be
+  // the same. To handle this case, if the height has reached the
+  // baseline/fullscreen height, return either 1.0 or 2.0 progress, depending on
+  // the current target state.
+  if (baseline_height == fullscreen_height &&
+      current_height >= fullscreen_height) {
+    return GetTransitionProgressForState(app_list_state_);
+  }
+
+  if (current_height <= baseline_height) {
     // Currently transition progress is between closed and peeking state.
     // Calculate the progress of this transition.
     const float shelf_height =
@@ -1750,17 +1917,17 @@ float AppListView::GetAppListTransitionProgress() const {
     // height for just one moment, which results in negative progress. So force
     // the progress to be non-negative.
     return std::max(0.0f, (current_height - shelf_height) /
-                              (peeking_height - shelf_height));
+                              (baseline_height - shelf_height));
   }
 
   // Currently transition progress is between peeking and fullscreen state.
   // Calculate the progress of this transition.
-  const float fullscreen_height_above_peeking =
-      GetFullscreenStateHeight() - peeking_height;
-  const float current_height_above_peeking = current_height - peeking_height;
-  DCHECK_GT(fullscreen_height_above_peeking, 0);
-  DCHECK_LE(current_height_above_peeking, fullscreen_height_above_peeking);
-  return 1 + current_height_above_peeking / fullscreen_height_above_peeking;
+  const float fullscreen_height_above_baseline =
+      fullscreen_height - baseline_height;
+  const float current_height_above_baseline = current_height - baseline_height;
+  DCHECK_GT(fullscreen_height_above_baseline, 0);
+  DCHECK_LE(current_height_above_baseline, fullscreen_height_above_baseline);
+  return 1 + current_height_above_baseline / fullscreen_height_above_baseline;
 }
 
 int AppListView::GetFullscreenStateHeight() const {
@@ -1775,7 +1942,7 @@ ash::AppListViewState AppListView::CalculateStateAfterShelfDrag(
   ash::AppListViewState app_list_state = ash::AppListViewState::kPeeking;
   if (event_in_screen.type() == ui::ET_SCROLL_FLING_START &&
       fabs(event_in_screen.AsGestureEvent()->details().velocity_y()) >
-          kDragVelocityThreshold) {
+          kDragVelocityFromShelfThreshold) {
     // If the scroll sequence terminates with a fling, show the fullscreen app
     // list if the fling was fast enough and in the correct direction, otherwise
     // close it.
@@ -1850,12 +2017,18 @@ void AppListView::OnWindowBoundsChanged(aura::Window* window,
                                         ui::PropertyChangeReason reason) {
   DCHECK_EQ(GetWidget()->GetNativeView(), window);
 
-  gfx::Transform transform;
-  if (ShouldHideRoundedCorners(new_bounds))
-    transform.Translate(0, -AppListConfig::instance().background_radius());
+  UpdateAppListConfig(window);
 
-  app_list_background_shield_->SetTransform(transform);
-  app_list_background_shield_->SchedulePaint();
+  gfx::Transform transform;
+  if (ShouldHideRoundedCorners(app_list_state_, new_bounds))
+    transform.Translate(0, -(delegate_->GetShelfHeight() / 2));
+
+  // Avoid setting new transform if the shield is animating to (or already has)
+  // the target value.
+  if (app_list_background_shield_->layer()->GetTargetTransform() != transform) {
+    app_list_background_shield_->SetTransform(transform);
+    app_list_background_shield_->SchedulePaint();
+  }
 }
 
 void AppListView::OnBoundsAnimationCompleted() {
@@ -1868,22 +2041,43 @@ void AppListView::OnBoundsAnimationCompleted() {
     auto* contents_view = app_list_main_view()->contents_view();
     if (contents_view->IsShowingEmbeddedAssistantUI())
       contents_view->ShowEmbeddedAssistantUI(false);
-
-    // Reset the search box to be shown again. This is done after the animation
-    // is complete in order to minimize work during the animation.
-    search_box_view_->ClearSearchAndDeactivateSearchBox();
   }
 
   // Layout if the animation was completed.
   if (!was_animation_interrupted)
     Layout();
+
+  if (on_bounds_animation_ended_callback_)
+    on_bounds_animation_ended_callback_.Run();
+}
+
+gfx::Rect AppListView::GetItemScreenBoundsInFirstGridPage(
+    const std::string& id) const {
+  const AppsGridView* apps_grid_view = app_list_main_view_->contents_view()
+                                           ->GetAppsContainerView()
+                                           ->apps_grid_view();
+  gfx::Rect item_bounds = apps_grid_view->GetExpectedItemBoundsInFirstPage(id);
+  ConvertRectToScreen(apps_grid_view, &item_bounds);
+  return item_bounds;
+}
+
+void AppListView::SetShelfHasRoundedCorners(bool shelf_has_rounded_corners) {
+  if (shelf_has_rounded_corners_ == shelf_has_rounded_corners)
+    return;
+  shelf_has_rounded_corners_ = shelf_has_rounded_corners;
+  base::Optional<base::TimeTicks> animation_end_timestamp;
+  if (GetWidget() && GetWidget()->GetLayer()->GetAnimator()->is_animating()) {
+    animation_end_timestamp = animation_end_timestamp_;
+  }
+  app_list_background_shield_->UpdateBackgroundRadius(
+      app_list_state_, shelf_has_rounded_corners_, animation_end_timestamp);
 }
 
 void AppListView::UpdateChildViewsYPositionAndOpacity() {
   if (app_list_state_ == ash::AppListViewState::kClosed)
     return;
 
-  UpdateAppListBackgroundYPosition();
+  UpdateAppListBackgroundYPosition(app_list_state_);
 
   // Update the opacity of the background shield.
   SetBackgroundShieldColor();
@@ -1897,7 +2091,7 @@ void AppListView::RedirectKeyEventToSearchBox(ui::KeyEvent* event) {
     return;
 
   // Allow text input inside the Assistant page.
-  if (app_list_main_view()->contents_view()->IsShowingEmbeddedAssistantUI())
+  if (IsShowingEmbeddedAssistantUI())
     return;
 
   views::Textfield* search_box = search_box_view_->search_box();
@@ -1946,14 +2140,31 @@ void AppListView::OnScreenKeyboardShown(bool shown) {
   if (shown && GetAppsContainerView()->IsInFolderView()) {
     // Move the app list up to prevent folders being blocked by the
     // on-screen keyboard.
-    OffsetYPositionOfAppList(
-        GetAppsContainerView()->app_list_folder_view()->GetYOffsetForFolder());
-  } else {
+    const int folder_offset =
+        GetAppsContainerView()->app_list_folder_view()->GetYOffsetForFolder();
+    if (folder_offset != 0) {
+      OffsetYPositionOfAppList(folder_offset);
+      offset_to_show_folder_with_onscreen_keyboard_ = true;
+      app_list_main_view_->contents_view()->NotifySearchBoxBoundsUpdated();
+    }
+  } else if (offset_to_show_folder_with_onscreen_keyboard_) {
     // If the keyboard is closing or a folder isn't being shown, reset
     // the app list's position
     OffsetYPositionOfAppList(0);
+    offset_to_show_folder_with_onscreen_keyboard_ = false;
+    app_list_main_view_->contents_view()->NotifySearchBoxBoundsUpdated();
   }
-  app_list_main_view_->contents_view()->NotifySearchBoxBoundsUpdated();
+
+  if (!shown) {
+    // When the virtual keyboard is hidden, it will attempt to restore the app
+    // list bounds from when the keyboard was first shown - this might misplace
+    // the app list view if its intended bounds changed in the mean time. To
+    // avoid that, clear saved "restore bounds", and call SetState() to make
+    // sure app list bounds match the current app list view state.
+    GetWidget()->GetNativeView()->ClearProperty(
+        wm::kVirtualKeyboardRestoreBoundsKey);
+    EnsureWidgetBoundsMatchCurrentState();
+  }
 }
 
 bool AppListView::CloseKeyboardIfVisible() {
@@ -1970,18 +2181,12 @@ bool AppListView::CloseKeyboardIfVisible() {
 }
 
 void AppListView::OnParentWindowBoundsChanged() {
-  // Set the widget size to fit the new display metrics.
-  GetWidget()->GetNativeView()->SetBounds(
-      GetPreferredWidgetBoundsForState(app_list_state_));
-
-  // Update the widget bounds to accomodate the new work
-  // area.
-  SetState(app_list_state_);
+  EnsureWidgetBoundsMatchCurrentState();
 }
 
 float AppListView::GetAppListBackgroundOpacityDuringDragging() {
   float top_of_applist = GetWidget()->GetWindowBoundsInScreen().y();
-  const int shelf_height = AppListConfig::instance().shelf_height();
+  const int shelf_height = delegate_->GetShelfHeight();
   float dragging_height =
       std::max((GetScreenBottom() - shelf_height - top_of_applist), 0.f);
   float coefficient =
@@ -2053,6 +2258,17 @@ int AppListView::GetPreferredWidgetYForState(
   // container's y as the top of display.
   const display::Display display = GetDisplayNearestView();
   const gfx::Rect work_area_bounds = display.work_area();
+
+  // The ChromeVox panel as well as the Docked Magnifier viewport affect the
+  // workarea of the display. We need to account for that when applist is in
+  // fullscreen to avoid being shown below them.
+  const int fullscreen_height = work_area_bounds.y() - display.bounds().y();
+
+  // Force fullscreen height if onscreen keyboard is shown to match the UI state
+  // that's set by default when the onscreen keyboard is first shown.
+  if (onscreen_keyboard_shown_ && state != ash::AppListViewState::kClosed)
+    return fullscreen_height;
+
   switch (state) {
     case ash::AppListViewState::kPeeking:
       return display.bounds().height() -
@@ -2062,10 +2278,7 @@ int AppListView::GetPreferredWidgetYForState(
                       display.bounds().height() - kHalfAppListHeight);
     case ash::AppListViewState::kFullscreenAllApps:
     case ash::AppListViewState::kFullscreenSearch:
-      // The ChromeVox panel as well as the Docked Magnifier viewport affect the
-      // workarea of the display. We need to account for that when applist is in
-      // fullscreen to avoid being shown below them.
-      return work_area_bounds.y() - display.bounds().y();
+      return fullscreen_height;
     case ash::AppListViewState::kClosed:
       // Align the widget y with shelf y to avoid flicker in show animation. In
       // side shelf mode, the widget y is the top of work area because the
@@ -2083,62 +2296,47 @@ gfx::Rect AppListView::GetPreferredWidgetBoundsForState(
   CHECK(GetWidget());
   aura::Window* parent = GetWidget()->GetNativeView()->parent();
   CHECK(parent);
-  return gfx::Rect(0, GetPreferredWidgetYForState(state),
-                   parent->bounds().width(), GetFullscreenStateHeight());
+  return delegate_->SnapBoundsToDisplayEdge(
+      gfx::Rect(0, GetPreferredWidgetYForState(state), parent->bounds().width(),
+                GetFullscreenStateHeight()));
 }
 
-void AppListView::UpdateAppListBackgroundYPosition() {
+void AppListView::UpdateAppListBackgroundYPosition(
+    ash::AppListViewState state) {
+  const int app_list_background_corner_radius = delegate_->GetShelfHeight() / 2;
+
   // Update the y position of the background shield.
   gfx::Transform transform;
   if (is_in_drag_) {
-    float app_list_transition_progress = GetAppListTransitionProgress();
-    if (app_list_transition_progress >= 1 &&
-        app_list_transition_progress <= 2) {
+    // For the purpose of determining background shield offset, use progress
+    // with kHalf baseline so the background shield does not start translating
+    // up before it reaches kHalf height (which is larger than kPeeking height).
+    // If the shield transform started at kPeeking height, the app list view
+    // background would jump up when starting drag from the kHalf state.
+    float app_list_transition_progress =
+        GetAppListTransitionProgress(kProgressFlagSearchResults);
+    if (app_list_transition_progress < 1 && !shelf_has_rounded_corners()) {
+      const float shelf_height =
+          GetScreenBottom() - GetDisplayNearestView().work_area().bottom();
+      app_list_background_shield_->SetBackgroundRadius(
+          GetBackgroundRadiusForAppListHeight(
+              GetCurrentAppListHeight() - shelf_height,
+              app_list_background_corner_radius));
+    } else if (app_list_transition_progress >= 1 &&
+               app_list_transition_progress <= 2) {
       // Translate background shield so that it ends drag at a y position
       // according to the background radius in peeking and fullscreen.
-      transform.Translate(0, -AppListConfig::instance().background_radius() *
+      transform.Translate(0, -app_list_background_corner_radius *
                                  (app_list_transition_progress - 1));
     }
-  } else if (is_fullscreen() || ShouldHideRoundedCorners(GetBoundsInScreen())) {
-    // AppListView::Layout may be called after OnWindowBoundsChanged. It may
-    // reset the transform of |app_list_background_shield_|. So hide the rounded
-    // corners here when ShouldHideRoundedCorners returns true.
-    transform.Translate(0, -AppListConfig::instance().background_radius());
-  }
-  app_list_background_shield_->SetTransform(transform);
-}
-
-bool AppListView::ShouldUpdateChildViewsDuringAnimation(
-    ash::AppListViewState target_state) const {
-  // Return true when following conditions are all satisfied:
-  // (1) In Clamshell mode.
-  // (2) AppListView is in drag and both the current state and the target state
-  // are Peeking. For example, drag AppListView from Peeking state by a little
-  // offset then release the drag.
-  // (3) The top of AppListView's current bounds is lower than that of
-  // AppList in Peeking state. Because UI janks obviously in this situation
-  // wihtout updating child views in each animation frame.
-
-  if (is_tablet_mode_)
-    return false;
-
-  if (target_state != ash::AppListViewState::kPeeking || !is_in_drag_ ||
-      app_list_state_ != target_state) {
-    return false;
+  } else if (ShouldHideRoundedCorners(state, GetBoundsInScreen())) {
+    transform.Translate(0, -app_list_background_corner_radius);
   }
 
-  return GetWidget()->GetNativeView()->bounds().origin().y() >
-         GetPreferredWidgetYForState(target_state);
-}
-
-bool AppListView::ShouldHideRoundedCorners(const gfx::Rect& bounds) const {
-  // When the virtual keyboard shows, the AppListView is moved upward to avoid
-  // the overlapping area with the virtual keyboard. As a result, its bottom
-  // side may be on the display edge. Stop showing the rounded corners under
-  // this circumstance.
-  return (app_list_state_ == ash::AppListViewState::kPeeking ||
-          app_list_state_ == ash::AppListViewState::kHalf) &&
-         bounds.y() == 0;
+  // Avoid setting new transform if the shield is animating to (or already has)
+  // the target value.
+  if (app_list_background_shield_->layer()->GetTargetTransform() != transform)
+    app_list_background_shield_->SetTransform(transform);
 }
 
 void AppListView::OnStateTransitionAnimationCompleted() {
@@ -2152,14 +2350,15 @@ void AppListView::OnTabletModeAnimationTransitionNotified(
 }
 
 void AppListView::EndDragFromShelf(ash::AppListViewState app_list_state) {
+  SetIsInDrag(false);
+
   if (app_list_state == ash::AppListViewState::kClosed ||
       app_list_state_ == ash::AppListViewState::kClosed) {
     Dismiss();
   } else {
     SetState(app_list_state);
   }
-  SetIsInDrag(false);
   UpdateChildViewsYPositionAndOpacity();
 }
 
-}  // namespace app_list
+}  // namespace ash

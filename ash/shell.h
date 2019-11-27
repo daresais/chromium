@@ -18,7 +18,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/display/screen.h"
@@ -92,7 +91,6 @@ class AccessibilityControllerImpl;
 class AccessibilityDelegate;
 class AccessibilityFocusRingControllerImpl;
 class AmbientController;
-class AshDBusHelper;
 class AshDBusServices;
 class AshFocusRules;
 class AppListControllerImpl;
@@ -148,6 +146,7 @@ class OverlayEventFilter;
 class OverviewController;
 class PartialMagnificationController;
 class PeripheralBatteryNotifier;
+class PeripheralBatteryTracker;
 class PersistentWindowController;
 class PolicyRecommendationRestorer;
 class PowerButtonController;
@@ -164,6 +163,7 @@ class ScreenPinningController;
 class ScreenPositionController;
 class ScreenSwitchCheckController;
 class SessionControllerImpl;
+class ShelfConfig;
 class ShelfController;
 class ShelfWindowWatcher;
 class ShellDelegate;
@@ -173,7 +173,6 @@ class ShellState;
 class ShutdownControllerImpl;
 class SmsObserver;
 class SnapController;
-class SplitViewController;
 class StickyKeysController;
 class SystemGestureEventFilter;
 class SystemModalContainerEventFilter;
@@ -187,8 +186,6 @@ class TrayAction;
 class TrayBluetoothHelper;
 class VideoActivityNotifier;
 class VideoDetector;
-class VoiceInteractionController;
-class VpnList;
 class WallpaperControllerImpl;
 class WaylandServerController;
 class WindowCycleController;
@@ -311,10 +308,7 @@ class ASH_EXPORT Shell : public SessionObserver,
     return app_list_controller_.get();
   }
   AmbientController* ambient_controller() { return ambient_controller_.get(); }
-  AssistantController* assistant_controller() {
-    DCHECK(chromeos::switches::IsAssistantEnabled());
-    return assistant_controller_.get();
-  }
+  AssistantController* assistant_controller();
   AutoclickController* autoclick_controller() {
     return autoclick_controller_.get();
   }
@@ -455,14 +449,12 @@ class ASH_EXPORT Shell : public SessionObserver,
   ::wm::ShadowController* shadow_controller() {
     return shadow_controller_.get();
   }
+  ShelfConfig* shelf_config() { return shelf_config_.get(); }
   ShelfController* shelf_controller() { return shelf_controller_.get(); }
   ShellDelegate* shell_delegate() { return shell_delegate_.get(); }
   ShellState* shell_state() { return shell_state_.get(); }
   ShutdownControllerImpl* shutdown_controller() {
     return shutdown_controller_.get();
-  }
-  SplitViewController* split_view_controller() {
-    return split_view_controller_.get();
   }
   StickyKeysController* sticky_keys_controller() {
     return sticky_keys_controller_.get();
@@ -493,7 +485,6 @@ class ASH_EXPORT Shell : public SessionObserver,
   }
   UserMetricsRecorder* metrics() { return user_metrics_recorder_.get(); }
   VideoDetector* video_detector() { return video_detector_.get(); }
-  VpnList* vpn_list() { return vpn_list_.get(); }
   WallpaperControllerImpl* wallpaper_controller() {
     return wallpaper_controller_.get();
   }
@@ -537,25 +528,12 @@ class ASH_EXPORT Shell : public SessionObserver,
   void ShowContextMenu(const gfx::Point& location_in_screen,
                        ui::MenuSourceType source_type);
 
-  // Removes the AppListController.
-  void RemoveAppListController();
-
   void AddShellObserver(ShellObserver* observer);
   void RemoveShellObserver(ShellObserver* observer);
 
   // Called when the login status changes.
   // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
   void UpdateAfterLoginStatusChange(LoginStatus status);
-
-  // Notifies observers that split view mode is about to be started (before the
-  // window gets snapped and activated).
-  void NotifySplitViewModeStarting();
-
-  // Notifies observers that split view mode has been started.
-  void NotifySplitViewModeStarted();
-
-  // Notifies observers that split view mode has ended.
-  void NotifySplitViewModeEnded();
 
   // Notifies observers that fullscreen mode has changed for |container|.
   // |container| is always the active desk container.
@@ -644,7 +622,8 @@ class ASH_EXPORT Shell : public SessionObserver,
       accessibility_focus_ring_controller_;
   std::unique_ptr<AmbientController> ambient_controller_;
   std::unique_ptr<AppListControllerImpl> app_list_controller_;
-  std::unique_ptr<AshDBusHelper> ash_dbus_helper_;
+  // May be null in tests or when running on linux-chromeos.
+  scoped_refptr<dbus::Bus> dbus_bus_;
   std::unique_ptr<AshDBusServices> ash_dbus_services_;
   std::unique_ptr<AssistantController> assistant_controller_;
   std::unique_ptr<BacklightsForcedOffSetter> backlights_forced_off_setter_;
@@ -674,10 +653,12 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<MultiDeviceNotificationPresenter>
       multidevice_notification_presenter_;
   std::unique_ptr<ResizeShadowController> resize_shadow_controller_;
+  std::unique_ptr<AshColorProvider> ash_color_provider_;
   std::unique_ptr<SessionControllerImpl> session_controller_;
   std::unique_ptr<NightLightControllerImpl> night_light_controller_;
   std::unique_ptr<PolicyRecommendationRestorer> policy_recommendation_restorer_;
   std::unique_ptr<ScreenSwitchCheckController> screen_switch_check_controller_;
+  std::unique_ptr<ShelfConfig> shelf_config_;
   std::unique_ptr<ShelfController> shelf_controller_;
   std::unique_ptr<ShelfWindowWatcher> shelf_window_watcher_;
   std::unique_ptr<ShellDelegate> shell_delegate_;
@@ -689,8 +670,6 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<ToastManagerImpl> toast_manager_;
   std::unique_ptr<TouchDevicesController> touch_devices_controller_;
   std::unique_ptr<TrayAction> tray_action_;
-  std::unique_ptr<VoiceInteractionController> voice_interaction_controller_;
-  std::unique_ptr<VpnList> vpn_list_;
   std::unique_ptr<WallpaperControllerImpl> wallpaper_controller_;
   std::unique_ptr<WindowCycleController> window_cycle_controller_;
   std::unique_ptr<OverviewController> overview_controller_;
@@ -743,6 +722,7 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<ScreenPinningController> screen_pinning_controller_;
 
   std::unique_ptr<PeripheralBatteryNotifier> peripheral_battery_notifier_;
+  std::unique_ptr<PeripheralBatteryTracker> peripheral_battery_tracker_;
   std::unique_ptr<PowerEventObserver> power_event_observer_;
   std::unique_ptr<PowerPrefs> power_prefs_;
   std::unique_ptr<ui::UserActivityPowerManagerNotifier> user_activity_notifier_;
@@ -783,9 +763,6 @@ class ASH_EXPORT Shell : public SessionObserver,
 
   std::unique_ptr<DockedMagnifierControllerImpl> docked_magnifier_controller_;
 
-  // The split view controller for Chrome OS in tablet mode.
-  std::unique_ptr<SplitViewController> split_view_controller_;
-
   std::unique_ptr<SnapController> snap_controller_;
 
   // |native_cursor_manager_| is owned by |cursor_manager_|, but we keep a
@@ -800,9 +777,6 @@ class ASH_EXPORT Shell : public SessionObserver,
   // volume keys.
   std::unique_ptr<KeyAccessibilityEnabler> key_accessibility_enabler_;
 
-  // Color provider for ash.
-  std::unique_ptr<AshColorProvider> ash_color_provider_;
-
   // For testing only: simulate that a modal window is open
   bool simulate_modal_window_open_for_test_ = false;
 
@@ -810,7 +784,7 @@ class ASH_EXPORT Shell : public SessionObserver,
 
   base::ObserverList<ShellObserver>::Unchecked shell_observers_;
 
-  base::WeakPtrFactory<Shell> weak_factory_;
+  base::WeakPtrFactory<Shell> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(Shell);
 };

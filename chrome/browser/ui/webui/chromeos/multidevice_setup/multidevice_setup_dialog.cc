@@ -59,6 +59,12 @@ MultiDeviceSetupDialog* MultiDeviceSetupDialog::Get() {
   return current_instance_;
 }
 
+// static
+void MultiDeviceSetupDialog::SetInstanceForTesting(
+    MultiDeviceSetupDialog* instance) {
+  current_instance_ = instance;
+}
+
 void MultiDeviceSetupDialog::AddOnCloseCallback(base::OnceClosure callback) {
   on_close_callbacks_.push_back(std::move(callback));
 }
@@ -91,7 +97,7 @@ MultiDeviceSetupDialogUI::MultiDeviceSetupDialogUI(content::WebUI* web_ui)
       content::WebUIDataSource::Create(chrome::kChromeUIMultiDeviceSetupHost);
 
   chromeos::multidevice_setup::AddLocalizedStrings(source);
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
   source->SetDefaultResource(
       IDR_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_DIALOG_HTML);
 
@@ -115,14 +121,15 @@ MultiDeviceSetupDialogUI::MultiDeviceSetupDialogUI(content::WebUI* web_ui)
 MultiDeviceSetupDialogUI::~MultiDeviceSetupDialogUI() = default;
 
 void MultiDeviceSetupDialogUI::BindMultiDeviceSetup(
-    chromeos::multidevice_setup::mojom::MultiDeviceSetupRequest request) {
+    mojo::PendingReceiver<chromeos::multidevice_setup::mojom::MultiDeviceSetup>
+        receiver) {
   service_manager::Connector* connector =
       content::BrowserContext::GetConnectorFor(
           web_ui()->GetWebContents()->GetBrowserContext());
   DCHECK(connector);
 
-  connector->BindInterface(chromeos::multidevice_setup::mojom::kServiceName,
-                           std::move(request));
+  connector->Connect(chromeos::multidevice_setup::mojom::kServiceName,
+                     std::move(receiver));
 }
 
 }  // namespace multidevice_setup

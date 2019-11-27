@@ -19,6 +19,7 @@
 #include "ui/platform_window/platform_window_init_properties.h"
 
 #if defined(OS_FUCHSIA)
+#include "ui/ozone/public/ozone_platform.h"  // nogncheck
 #include "ui/platform_window/fuchsia/initialize_presenter_api_view.h"
 #endif
 
@@ -50,7 +51,11 @@ WindowTreeHost* TestScreen::CreateHostForPrimaryDisplay() {
   ui::PlatformWindowInitProperties properties(
       gfx::Rect(GetPrimaryDisplay().GetSizeInPixel()));
 #if defined(OS_FUCHSIA)
-  ui::fuchsia::InitializeViewTokenAndPresentView(&properties);
+  if (ui::OzonePlatform::GetInstance()
+          ->GetPlatformProperties()
+          .needs_view_token) {
+    ui::fuchsia::InitializeViewTokenAndPresentView(&properties);
+  }
 #endif
   host_ = WindowTreeHost::Create(std::move(properties)).release();
   // Some tests don't correctly manage window focus/activation states.
@@ -90,7 +95,7 @@ void TestScreen::SetDisplayRotation(display::Display::Rotation rotation) {
   display.set_rotation(rotation);
   display.SetScaleAndBounds(display.device_scale_factor(), new_bounds);
   display_list().UpdateDisplay(display);
-  host_->SetRootTransform(GetRotationTransform() * GetUIScaleTransform());
+  host_->SetRootTransform(GetUIScaleTransform() * GetRotationTransform());
 }
 
 void TestScreen::SetUIScale(float ui_scale) {
@@ -101,7 +106,7 @@ void TestScreen::SetUIScale(float ui_scale) {
       gfx::ScaleRect(gfx::RectF(bounds_in_pixel), 1.0f / ui_scale));
   display.SetScaleAndBounds(display.device_scale_factor(), new_bounds);
   display_list().UpdateDisplay(display);
-  host_->SetRootTransform(GetRotationTransform() * GetUIScaleTransform());
+  host_->SetRootTransform(GetUIScaleTransform() * GetRotationTransform());
 }
 
 void TestScreen::SetWorkAreaInsets(const gfx::Insets& insets) {
@@ -111,26 +116,9 @@ void TestScreen::SetWorkAreaInsets(const gfx::Insets& insets) {
 }
 
 gfx::Transform TestScreen::GetRotationTransform() const {
-  gfx::Transform rotate;
-  display::Display display(GetPrimaryDisplay());
-  switch (display.rotation()) {
-    case display::Display::ROTATE_0:
-      break;
-    case display::Display::ROTATE_90:
-      rotate.Translate(display.bounds().height(), 0);
-      rotate.Rotate(90);
-      break;
-    case display::Display::ROTATE_270:
-      rotate.Translate(0, display.bounds().width());
-      rotate.Rotate(270);
-      break;
-    case display::Display::ROTATE_180:
-      rotate.Translate(display.bounds().width(), display.bounds().height());
-      rotate.Rotate(180);
-      break;
-  }
-
-  return rotate;
+  display::Display display = GetPrimaryDisplay();
+  return display::Display::GetRotationTransform(display.rotation(),
+                                                gfx::SizeF(display.size()));
 }
 
 gfx::Transform TestScreen::GetUIScaleTransform() const {

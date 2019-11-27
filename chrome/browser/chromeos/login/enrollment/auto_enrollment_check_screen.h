@@ -82,10 +82,10 @@ class AutoEnrollmentCheckScreen
   bool UpdateCaptivePortalStatus(
       NetworkPortalDetector::CaptivePortalStatus new_captive_portal_status);
 
-  // Configures the UI to reflect |auto_enrollment_state|. Returns true if and
-  // only if a UI change has been made.
+  // Configures the UI to reflect |new_auto_enrollment_state|. Returns true if
+  // and only if a UI change has been made.
   bool UpdateAutoEnrollmentState(
-      policy::AutoEnrollmentState auto_enrollment_state);
+      policy::AutoEnrollmentState new_auto_enrollment_state);
 
   // Configures the error screen.
   void ShowErrorScreen(NetworkError::ErrorState error_state);
@@ -126,7 +126,7 @@ class AutoEnrollmentCheckScreen
 
   ErrorScreen::ConnectRequestCallbackSubscription connect_request_subscription_;
 
-  base::WeakPtrFactory<AutoEnrollmentCheckScreen> weak_ptr_factory_;
+  base::WeakPtrFactory<AutoEnrollmentCheckScreen> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AutoEnrollmentCheckScreen);
 };

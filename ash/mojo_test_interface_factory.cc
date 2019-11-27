@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "ash/public/interfaces/status_area_widget_test_api.test-mojom.h"
+#include "ash/public/mojom/status_area_widget_test_api.test-mojom.h"
 #include "ash/system/status_area_widget_test_api.h"
 #include "base/bind.h"
 #include "base/single_thread_task_runner.h"
@@ -28,8 +28,9 @@ void BindStatusAreaWidgetTestApiOnMainThread(
 void RegisterInterfaces(
     service_manager::BinderRegistry* registry,
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner) {
-  registry->AddInterface(base::Bind(&BindStatusAreaWidgetTestApiOnMainThread),
-                         main_thread_task_runner);
+  registry->AddInterface(
+      base::BindRepeating(&BindStatusAreaWidgetTestApiOnMainThread),
+      main_thread_task_runner);
 }
 
 }  // namespace mojo_test_interface_factory

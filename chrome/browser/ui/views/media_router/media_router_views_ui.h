@@ -13,17 +13,15 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/observer_list.h"
-#include "chrome/browser/ui/media_router/cast_dialog_controller.h"
-#include "chrome/browser/ui/media_router/cast_dialog_model.h"
-
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/media/router/issues_observer.h"
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
 #include "chrome/browser/media/router/presentation/presentation_service_delegate_impl.h"
+#include "chrome/browser/ui/media_router/cast_dialog_controller.h"
+#include "chrome/browser/ui/media_router/cast_dialog_model.h"
 #include "chrome/browser/ui/media_router/media_cast_mode.h"
 #include "chrome/browser/ui/media_router/media_router_file_dialog.h"
 #include "chrome/browser/ui/media_router/media_router_ui_helper.h"
@@ -115,10 +113,6 @@ class MediaRouterViewsUI
 
   // Calls MediaRouter to terminate the given route.
   void TerminateRoute(const MediaRoute::Id& route_id);
-
-  // Logs a UMA stat for the source that was cast if the result is successful.
-  void MaybeReportCastingSource(MediaCastMode cast_mode,
-                                const RouteRequestResult& result);
 
   // Returns a subset of |sinks_| that should be listed in the dialog. This
   // excludes the wired display that the initiator WebContents is on.
@@ -262,6 +256,10 @@ class MediaRouterViewsUI
   void SendIssueForUnableToCast(MediaCastMode cast_mode,
                                 const MediaSink::Id& sink_id);
 
+  // Creates and sends an issue for notifying the user that the tab audio cannot
+  // be mirrored from their device.
+  void SendIssueForTabAudioNotSupported(const MediaSink::Id& sink_id);
+
   // Returns the IssueManager associated with |router_|.
   IssueManager* GetIssueManager();
 
@@ -404,7 +402,7 @@ class MediaRouterViewsUI
   base::WeakPtr<PresentationServiceDelegateImpl> presentation_service_delegate_;
 
   // WebContents for the tab for which the Cast dialog is shown.
-  content::WebContents* initiator_;
+  content::WebContents* initiator_ = nullptr;
 
   // The dialog that handles opening the file dialog and validating and
   // returning the results.
@@ -419,7 +417,7 @@ class MediaRouterViewsUI
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   // Therefore |weak_factory_| must be placed at the end.
-  base::WeakPtrFactory<MediaRouterViewsUI> weak_factory_;
+  base::WeakPtrFactory<MediaRouterViewsUI> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterViewsUI);
 };

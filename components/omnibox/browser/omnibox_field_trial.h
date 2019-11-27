@@ -159,17 +159,10 @@ base::TimeDelta StopTimerFieldTrialDuration();
 // ---------------------------------------------------------
 // For the ZeroSuggestProvider field trial.
 
-// Returns the configured "ZeroSuggestVariant" parameter for
+// Returns the configured "ZeroSuggestVariant" parameter values for
 // |page_classification|.
-std::string GetZeroSuggestVariant(
+std::vector<std::string> GetZeroSuggestVariants(
     metrics::OmniboxEventProto::PageClassification page_classification);
-
-// Returns the server address associated with the current field trial.
-std::string GetOnFocusSuggestionsCustomEndpointURL();
-
-// Returns the server-side experiment ID to use for contextual suggestions.
-// Returns -1 if there is no associated experiment ID.
-int GetOnFocusSuggestionsCustomEndpointExperimentId();
 
 // ---------------------------------------------------------
 // For the ShortcutsScoringMaxRelevance experiment that's part of the
@@ -396,8 +389,12 @@ bool IsShortBookmarkSuggestionsEnabled();
 // Returns true if either the tab switch suggestions flag is enabled.
 bool IsTabSwitchSuggestionsEnabled();
 
-// Returns true if the feature of reversing the tab switch logic is enabled.
-bool IsTabSwitchLogicReversed();
+// Returns true if dedicated rows for tab switch suggestions is enabled.
+bool IsTabSwitchSuggestionsDedicatedRowEnabled();
+
+// Returns true if feature is enabled to not count submatches towards the
+// max suggestion limit.
+bool IsLooseMaxLimitOnDedicatedRowsEnabled();
 
 // Returns true if the #omnibox-pedal-suggestions feature is enabled.
 bool IsPedalSuggestionsEnabled();
@@ -408,11 +405,6 @@ bool IsHideSteadyStateUrlSchemeEnabled();
 // Returns true if either the steady-state elision flag for trivial
 // subdomains is enabled.
 bool IsHideSteadyStateUrlTrivialSubdomainsEnabled();
-
-// Returns the field trial override for the vertical margin size that should be
-// used in the suggestion view. Returns base::nullopt if the UI code should use
-// the default vertical margin.
-base::Optional<int> GetSuggestionVerticalMarginFieldTrialOverride();
 
 // Simply a convenient wrapper for testing a flag. Used downstream for an
 // assortment of keyword mode experiments.
@@ -425,10 +417,6 @@ bool IsGroupSuggestionsBySearchVsUrlFeatureEnabled();
 // Returns whether the feature to limit the number of shown URL matches
 // is enabled.
 bool IsMaxURLMatchesFeatureEnabled();
-
-// Returns whether the feature to allow the Omnibox pop-up position to wrap
-// between top and bottom is enabled.
-bool IsOmniboxWrapPopupPositionEnabled();
 
 // ---------------------------------------------------------
 // Clipboard URL suggestions:
@@ -492,11 +480,6 @@ extern const char kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevicesParam[];
 // Parameter names used by UI experiments.
 extern const char kUIMaxAutocompleteMatchesParam[];
 extern const char kUIMaxAutocompleteMatchesByProviderParam[];
-extern const char kUIVerticalMarginParam[];
-
-// Parameter names used by On Focus Suggestions Custom Endpoint.
-extern const char kOnFocusSuggestionsEndpointExperimentIdParam[];
-extern const char kOnFocusSuggestionsEndpointURLParam[];
 
 // The amount of time to wait before sending a new suggest request after the
 // previous one unless overridden by a field trial parameter.

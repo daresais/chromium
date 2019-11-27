@@ -6,6 +6,8 @@
 #include "base/bind.h"
 #include "base/threading/thread.h"
 #include "content/renderer/loader/sync_load_response.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -20,20 +22,23 @@ class TestSharedURLLoaderFactory : public network::TestURLLoaderFactory,
                                    public network::SharedURLLoaderFactory {
  public:
   // mojom::URLLoaderFactory implementation.
-  void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
-                            int32_t routing_id,
-                            int32_t request_id,
-                            uint32_t options,
-                            const network::ResourceRequest& url_request,
-                            network::mojom::URLLoaderClientPtr client,
-                            const net::MutableNetworkTrafficAnnotationTag&
-                                traffic_annotation) override {
+  void CreateLoaderAndStart(
+      mojo::PendingReceiver<network::mojom::URLLoader> receiver,
+      int32_t routing_id,
+      int32_t request_id,
+      uint32_t options,
+      const network::ResourceRequest& url_request,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
+      override {
     network::TestURLLoaderFactory::CreateLoaderAndStart(
-        std::move(request), routing_id, request_id, options, url_request,
+        std::move(receiver), routing_id, request_id, options, url_request,
         std::move(client), traffic_annotation);
   }
 
-  void Clone(network::mojom::URLLoaderFactoryRequest) override { NOTREACHED(); }
+  void Clone(mojo::PendingReceiver<network::mojom::URLLoaderFactory>) override {
+    NOTREACHED();
+  }
 
   std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override {
     NOTREACHED();
@@ -98,14 +103,15 @@ class SyncLoadContextTest : public testing::Test {
       base::WaitableEvent* redirect_or_response_event) {
     loading_thread_.task_runner()->PostTask(
         FROM_HERE,
-        base::BindOnce(
-            &SyncLoadContext::StartAsyncWithWaitableEvent, std::move(request),
-            MSG_ROUTING_NONE, loading_thread_.task_runner(),
-            TRAFFIC_ANNOTATION_FOR_TESTS, std::move(factory_info),
-            std::vector<std::unique_ptr<URLLoaderThrottle>>(), out_response,
-            redirect_or_response_event, nullptr /* terminate_sync_load_event */,
-            base::TimeDelta::FromSeconds(60) /* timeout */,
-            nullptr /* download_to_blob_registry */));
+        base::BindOnce(&SyncLoadContext::StartAsyncWithWaitableEvent,
+                       std::move(request), MSG_ROUTING_NONE,
+                       loading_thread_.task_runner(),
+                       TRAFFIC_ANNOTATION_FOR_TESTS, std::move(factory_info),
+                       std::vector<std::unique_ptr<blink::URLLoaderThrottle>>(),
+                       out_response, redirect_or_response_event,
+                       nullptr /* terminate_sync_load_event */,
+                       base::TimeDelta::FromSeconds(60) /* timeout */,
+                       mojo::NullRemote() /* download_to_blob_registry */));
   }
 
   static void RunSyncLoadContextViaDataPipe(
@@ -119,7 +125,7 @@ class SyncLoadContextTest : public testing::Test {
         request, std::make_unique<MockSharedURLLoaderFactoryInfo>(), response,
         redirect_or_response_event, nullptr /* terminate_sync_load_event */,
         base::TimeDelta::FromSeconds(60) /* timeout */,
-        nullptr /* download_to_blob_registry */, task_runner);
+        mojo::NullRemote() /* download_to_blob_registry */, task_runner);
 
     // Override |resource_dispatcher_| for testing.
     auto dispatcher = std::make_unique<MockResourceDispatcher>();
@@ -128,7 +134,7 @@ class SyncLoadContextTest : public testing::Test {
     context->resource_dispatcher_ = std::move(dispatcher);
 
     // Simulate the response.
-    context->OnReceivedResponse(network::ResourceResponseInfo());
+    context->OnReceivedResponse(network::mojom::URLResponseHead::New());
     mojo::ScopedDataPipeProducerHandle producer_handle;
     mojo::ScopedDataPipeConsumerHandle consumer_handle;
     EXPECT_EQ(MOJO_RESULT_OK,

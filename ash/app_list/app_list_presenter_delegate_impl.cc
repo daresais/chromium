@@ -5,8 +5,8 @@
 #include "ash/app_list/app_list_presenter_delegate_impl.h"
 
 #include "ash/app_list/app_list_controller_impl.h"
+#include "ash/app_list/app_list_presenter_impl.h"
 #include "ash/app_list/app_list_util.h"
-#include "ash/app_list/presenter/app_list_presenter_impl.h"
 #include "ash/app_list/views/app_list_main_view.h"
 #include "ash/app_list/views/app_list_view.h"
 #include "ash/app_list/views/contents_view.h"
@@ -17,14 +17,13 @@
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
-#include "ash/screen_util.h"
 #include "ash/shelf/back_button.h"
 #include "ash/shelf/home_button.h"
-#include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/system/status_area_widget.h"
+#include "ash/wm/container_finder.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/command_line.h"
 #include "chromeos/constants/chromeos_switches.h"
@@ -34,13 +33,13 @@
 #include "ui/events/keycodes/keyboard_codes_posix.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace ash {
 namespace {
 
 // Whether the shelf is oriented on the side, not on the bottom.
-bool IsSideShelf(aura::Window* root_window) {
-  Shelf* shelf = Shelf::ForWindow(root_window);
+bool IsSideShelf(Shelf* shelf) {
   switch (shelf->alignment()) {
     case SHELF_ALIGNMENT_BOTTOM:
     case SHELF_ALIGNMENT_BOTTOM_LOCKED:
@@ -52,6 +51,25 @@ bool IsSideShelf(aura::Window* root_window) {
   return false;
 }
 
+// Whether the shelf background type indicates that shelf has rounded corners.
+bool IsShelfBackgroundTypeWithRoundedCorners(
+    ShelfBackgroundType background_type) {
+  switch (background_type) {
+    case SHELF_BACKGROUND_DEFAULT:
+    case SHELF_BACKGROUND_APP_LIST:
+    case SHELF_BACKGROUND_OVERVIEW:
+      return true;
+    case SHELF_BACKGROUND_MAXIMIZED:
+    case SHELF_BACKGROUND_MAXIMIZED_WITH_APP_LIST:
+    case SHELF_BACKGROUND_OOBE:
+    case SHELF_BACKGROUND_HOME_LAUNCHER:
+    case SHELF_BACKGROUND_LOGIN:
+    case SHELF_BACKGROUND_LOGIN_NONBLURRED_WALLPAPER:
+    case SHELF_BACKGROUND_IN_APP:
+      return false;
+  }
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -59,7 +77,7 @@ bool IsSideShelf(aura::Window* root_window) {
 
 AppListPresenterDelegateImpl::AppListPresenterDelegateImpl(
     AppListControllerImpl* controller)
-    : controller_(controller), display_observer_(this) {
+    : controller_(controller) {
   display_observer_.Add(display::Screen::GetScreen());
 }
 
@@ -68,17 +86,17 @@ AppListPresenterDelegateImpl::~AppListPresenterDelegateImpl() {
 }
 
 void AppListPresenterDelegateImpl::SetPresenter(
-    app_list::AppListPresenterImpl* presenter) {
+    AppListPresenterImpl* presenter) {
   presenter_ = presenter;
 }
 
-void AppListPresenterDelegateImpl::Init(app_list::AppListView* view,
-                                        int64_t display_id) {
+void AppListPresenterDelegateImpl::Init(AppListView* view, int64_t display_id) {
   view_ = view;
-  view->InitView(IsTabletMode(),
-                 controller_->GetContainerForDisplayId(display_id));
-
-  SnapAppListBoundsToDisplayEdge();
+  view->InitView(
+      IsTabletMode(), controller_->GetContainerForDisplayId(display_id),
+      base::BindRepeating(
+          &AppListPresenterDelegateImpl::OnViewBoundsChangedAnimationEnded,
+          weak_ptr_factory_.GetWeakPtr()));
 
   // By setting us as DnD recipient, the app list knows that we can
   // handle items.
@@ -97,8 +115,19 @@ void AppListPresenterDelegateImpl::ShowForDisplay(int64_t display_id) {
   Shell::GetPrimaryRootWindowController()
       ->GetShelfLayoutManager()
       ->UpdateAutoHideState();
-  view_->Show(IsSideShelf(view_->GetWidget()->GetNativeView()->GetRootWindow()),
-              IsTabletMode());
+
+  Shelf* shelf =
+      Shelf::ForWindow(view_->GetWidget()->GetNativeView()->GetRootWindow());
+  if (!shelf_observer_.IsObserving(shelf))
+    shelf_observer_.Add(shelf);
+
+  view_->SetShelfHasRoundedCorners(
+      IsShelfBackgroundTypeWithRoundedCorners(shelf->GetBackgroundType()));
+  view_->Show(IsSideShelf(shelf), IsTabletMode());
+  view_->GetWidget()->ShowInactive();
+
+  SnapAppListBoundsToDisplayEdge();
+
   Shell::Get()->AddPreTargetHandler(this);
   controller_->ViewShown(display_id);
 }
@@ -112,6 +141,8 @@ void AppListPresenterDelegateImpl::OnClosing() {
 }
 
 void AppListPresenterDelegateImpl::OnClosed() {
+  if (!is_visible_)
+    shelf_observer_.RemoveAll();
   controller_->ViewClosed();
 }
 
@@ -119,13 +150,17 @@ bool AppListPresenterDelegateImpl::IsTabletMode() const {
   return Shell::Get()->tablet_mode_controller()->InTabletMode();
 }
 
-app_list::AppListViewDelegate*
-AppListPresenterDelegateImpl::GetAppListViewDelegate() {
+AppListViewDelegate* AppListPresenterDelegateImpl::GetAppListViewDelegate() {
   return controller_;
 }
 
 bool AppListPresenterDelegateImpl::GetOnScreenKeyboardShown() {
   return controller_->onscreen_keyboard_shown();
+}
+
+aura::Window* AppListPresenterDelegateImpl::GetContainerForWindow(
+    aura::Window* window) {
+  return ash::GetContainerForWindow(window);
 }
 
 aura::Window* AppListPresenterDelegateImpl::GetRootWindowForDisplayId(
@@ -135,11 +170,16 @@ aura::Window* AppListPresenterDelegateImpl::GetRootWindowForDisplayId(
 
 void AppListPresenterDelegateImpl::OnVisibilityChanged(bool visible,
                                                        int64_t display_id) {
-  controller_->NotifyAppListVisibilityChanged(visible, display_id);
+  controller_->OnVisibilityChanged(visible, display_id);
 }
 
-void AppListPresenterDelegateImpl::OnTargetVisibilityChanged(bool visible) {
-  controller_->NotifyAppListTargetVisibilityChanged(visible);
+void AppListPresenterDelegateImpl::OnVisibilityWillChange(bool visible,
+                                                          int64_t display_id) {
+  controller_->OnVisibilityWillChange(visible, display_id);
+}
+
+bool AppListPresenterDelegateImpl::IsVisible() {
+  return controller_->IsVisible();
 }
 
 void AppListPresenterDelegateImpl::OnDisplayMetricsChanged(
@@ -150,6 +190,13 @@ void AppListPresenterDelegateImpl::OnDisplayMetricsChanged(
 
   view_->OnParentWindowBoundsChanged();
   SnapAppListBoundsToDisplayEdge();
+}
+
+void AppListPresenterDelegateImpl::OnBackgroundTypeChanged(
+    ShelfBackgroundType background_type,
+    AnimationChangeType change_type) {
+  view_->SetShelfHasRoundedCorners(
+      IsShelfBackgroundTypeWithRoundedCorners(background_type));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -199,10 +246,9 @@ void AppListPresenterDelegateImpl::ProcessLocatedEvent(
 
   aura::Window* window = view_->GetWidget()->GetNativeView()->parent();
   if (!window->Contains(target) && !presenter_->HandleCloseOpenFolder() &&
-      !app_list::switches::ShouldNotDismissOnBlur() && !IsTabletMode()) {
+      !switches::ShouldNotDismissOnBlur() && !IsTabletMode()) {
     const aura::Window* status_window =
         shelf->shelf_widget()->status_area_widget()->GetNativeWindow();
-    const aura::Window* shelf_window = shelf->shelf_widget()->GetNativeWindow();
     // Don't dismiss the auto-hide shelf if event happened in status area. Then
     // the event can still be propagated to the status area tray to open the
     // corresponding tray bubble.
@@ -210,8 +256,10 @@ void AppListPresenterDelegateImpl::ProcessLocatedEvent(
     if (status_window && status_window->Contains(target))
       auto_hide_lock.emplace(shelf);
 
-    // Keep app list opened if event happened in the shelf area.
-    if (!shelf_window || !shelf_window->Contains(target))
+    // Keep the app list open if the event happened in the shelf area.
+    const aura::Window* hotseat_window =
+        shelf->shelf_widget()->hotseat_widget()->GetNativeWindow();
+    if (!hotseat_window || !hotseat_window->Contains(target))
       presenter_->Dismiss(event->time_stamp());
   }
 
@@ -258,16 +306,19 @@ void AppListPresenterDelegateImpl::OnKeyEvent(ui::KeyEvent* event) {
     return;
 
   // If the home launcher is not shown in tablet mode, ignore events.
-  if (IsTabletMode() && !presenter_->home_launcher_shown())
+  if (IsTabletMode() && !IsVisible())
     return;
 
   // Don't absorb the first event for the search box while it is open
   if (view_->search_box_view()->is_search_box_active())
     return;
 
+  // Don't absorb the first event when showing Assistant.
+  if (view_->IsShowingEmbeddedAssistantUI())
+    return;
+
   // Arrow keys or Tab will engage the traversal mode.
-  if ((app_list::IsUnhandledArrowKeyEvent(*event) ||
-       event->key_code() == ui::VKEY_TAB)) {
+  if ((IsUnhandledArrowKeyEvent(*event) || event->key_code() == ui::VKEY_TAB)) {
     // Handle the first arrow key event to just show the focus rings.
     event->SetHandled();
     controller_->SetKeyboardTraversalMode(true);
@@ -278,8 +329,27 @@ void AppListPresenterDelegateImpl::SnapAppListBoundsToDisplayEdge() {
   CHECK(view_ && view_->GetWidget());
   aura::Window* window = view_->GetWidget()->GetNativeView();
   const gfx::Rect bounds =
-      ash::screen_util::SnapBoundsToDisplayEdge(window->bounds(), window);
+      controller_->SnapBoundsToDisplayEdge(window->bounds());
   window->SetBounds(bounds);
+}
+
+void AppListPresenterDelegateImpl::OnViewBoundsChangedAnimationEnded() {
+  views::Widget* widget = view_->GetWidget();
+  // If we are currently dragging the applist from the shelf, do not update
+  // window activation to avoid redrawing during dragging which is also a heavy
+  // operation. The activation will be handled when this callback is run again
+  // after the state bounds animation finishes.
+  if (Shelf::ForWindow(widget->GetNativeWindow())
+          ->shelf_layout_manager()
+          ->IsDraggingApplist()) {
+    return;
+  }
+
+  // Deactivation after dragging or animating is not supported.
+  if (!is_visible_)
+    return;
+
+  UpdateActivationForAppListView(view_, IsTabletMode());
 }
 
 }  // namespace ash

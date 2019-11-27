@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #import "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -21,9 +22,9 @@
 #import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/driver/sync_service.h"
-#include "components/unified_consent/feature.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#include "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/search_engines/search_engine_observer_bridge.h"
@@ -57,6 +58,7 @@
 #import "ios/chrome/browser/ui/settings/password/passwords_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/privacy_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/search_engine_table_view_controller.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller_constants.h"
 #import "ios/chrome/browser/ui/settings/sync/utils/sync_util.h"
 #import "ios/chrome/browser/ui/settings/table_cell_catalog_view_controller.h"
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
@@ -83,12 +85,6 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-NSString* const kSettingsTableViewId = @"kSettingsTableViewId";
-NSString* const kSettingsSignInCellId = @"kSettingsSignInCellId";
-NSString* const kSettingsAccountCellId = @"kSettingsAccountCellId";
-NSString* const kSettingsSearchEngineCellId = @"Search Engine";
-NSString* const kSettingsVoiceSearchCellId = @"Voice Search Settings";
 
 namespace {
 
@@ -150,9 +146,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeArticlesForYou,
 };
 
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 NSString* kDevViewSourceKey = @"DevViewSource";
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 }  // namespace
 
@@ -170,11 +166,13 @@ NSString* kDevViewSourceKey = @"DevViewSource";
     SigninPresenter,
     SigninPromoViewConsumer,
     SyncObserverModelBridge> {
-  // The current browser state that hold the settings. Never off the record.
+  // The browser where the settings are being displayed.
+  Browser* _browser;
+  // The browser state for |_browser|. Never off the record.
   ios::ChromeBrowserState* _browserState;  // weak
   // Bridge for TemplateURLServiceObserver.
   std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserverBridge;
-  std::unique_ptr<identity::IdentityManagerObserverBridge>
+  std::unique_ptr<signin::IdentityManagerObserverBridge>
       _identityObserverBridge;
   std::unique_ptr<SyncObserverBridge> _syncObserverBridge;
   // Whether the impression of the Signin button has already been recorded.
@@ -223,7 +221,8 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   BOOL _settingsHasBeenDismissed;
 }
 
-@property(nonatomic, readonly, weak) id<ApplicationCommands> dispatcher;
+@property(nonatomic, readonly, weak) id<ApplicationCommands, BrowserCommands>
+    dispatcher;
 
 // The SigninInteractionCoordinator that presents Sign In UI for the
 // Settings page.
@@ -243,27 +242,30 @@ NSString* kDevViewSourceKey = @"DevViewSource";
 
 #pragma mark Initialization
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                          dispatcher:(id<ApplicationCommands>)dispatcher {
-  DCHECK(!browserState->IsOffTheRecord());
+- (instancetype)initWithBrowser:(Browser*)browser
+                     dispatcher:
+                         (id<ApplicationCommands, BrowserCommands>)dispatcher {
+  DCHECK(browser);
+  DCHECK(!browser->GetBrowserState()->IsOffTheRecord());
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
                                : UITableViewStyleGrouped;
   self = [super initWithTableViewStyle:style
                            appBarStyle:ChromeTableViewControllerStyleNoAppBar];
   if (self) {
-    _browserState = browserState;
+    _browser = browser;
+    _browserState = _browser->GetBrowserState();
     self.title = l10n_util::GetNSStringWithFixup(IDS_IOS_SETTINGS_TITLE);
     _searchEngineObserverBridge.reset(new SearchEngineObserverBridge(
         self,
         ios::TemplateURLServiceFactory::GetForBrowserState(_browserState)));
-    identity::IdentityManager* identityManager =
+    signin::IdentityManager* identityManager =
         IdentityManagerFactory::GetForBrowserState(_browserState);
     // It is expected that |identityManager| should never be nil except in
     // tests. In that case, the tests should be fixed.
     DCHECK(identityManager);
     _identityObserverBridge.reset(
-        new identity::IdentityManagerObserverBridge(identityManager, self));
+        new signin::IdentityManagerObserverBridge(identityManager, self));
     syncer::SyncService* syncService =
         ProfileSyncServiceFactory::GetForBrowserState(_browserState);
     _syncObserverBridge.reset(new SyncObserverBridge(self, syncService));
@@ -366,7 +368,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
         _signinPromoViewMediator.consumer = self;
       }
     } else {
-      [_signinPromoViewMediator signinPromoViewRemoved];
+      [_signinPromoViewMediator signinPromoViewIsRemoved];
       _signinPromoViewMediator = nil;
     }
     [model addItem:[self signInTextItem]
@@ -375,20 +377,18 @@ NSString* kDevViewSourceKey = @"DevViewSource";
     // Account section
     [model addSectionWithIdentifier:SectionIdentifierAccount];
     _hasRecordedSigninImpression = NO;
-    [_signinPromoViewMediator signinPromoViewRemoved];
+    [_signinPromoViewMediator signinPromoViewIsRemoved];
     _signinPromoViewMediator = nil;
     [model addItem:[self accountCellItem]
         toSectionWithIdentifier:SectionIdentifierAccount];
   }
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    if (![model hasSectionForSectionIdentifier:SectionIdentifierAccount]) {
-      // Add the Account section for the Google services cell, if the user is
-      // signed-out.
-      [model addSectionWithIdentifier:SectionIdentifierAccount];
-    }
-    [model addItem:[self googleServicesCellItem]
-        toSectionWithIdentifier:SectionIdentifierAccount];
+  if (![model hasSectionForSectionIdentifier:SectionIdentifierAccount]) {
+    // Add the Account section for the Google services cell, if the user is
+    // signed-out.
+    [model addSectionWithIdentifier:SectionIdentifierAccount];
   }
+  [model addItem:[self googleServicesCellItem]
+      toSectionWithIdentifier:SectionIdentifierAccount];
 
   // Basics section
   [model addSectionWithIdentifier:SectionIdentifierBasics];
@@ -435,14 +435,14 @@ NSString* kDevViewSourceKey = @"DevViewSource";
         toSectionWithIdentifier:SectionIdentifierDebug];
   }
 
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
   [model addItem:[self viewSourceSwitchItem]
       toSectionWithIdentifier:SectionIdentifierDebug];
   [model addItem:[self collectionViewCatalogDetailItem]
       toSectionWithIdentifier:SectionIdentifierDebug];
   [model addItem:[self tableViewCatalogDetailItem]
       toSectionWithIdentifier:SectionIdentifierDebug];
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 }
 
 #pragma mark - Model Items
@@ -451,17 +451,12 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   if (_signinPromoViewMediator) {
     TableViewSigninPromoItem* signinPromoItem =
         [[TableViewSigninPromoItem alloc] initWithType:ItemTypeSigninPromo];
-    if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-      signinPromoItem.text =
-          l10n_util::GetNSString(IDS_IOS_SIGNIN_PROMO_SETTINGS_WITH_UNITY);
-    } else {
-      signinPromoItem.text =
-          l10n_util::GetNSString(IDS_IOS_SIGNIN_PROMO_SETTINGS);
-    }
+    signinPromoItem.text =
+        l10n_util::GetNSString(IDS_IOS_SIGNIN_PROMO_SETTINGS_WITH_UNITY);
     signinPromoItem.configurator =
         [_signinPromoViewMediator createConfigurator];
     signinPromoItem.delegate = _signinPromoViewMediator;
-    [_signinPromoViewMediator signinPromoViewVisible];
+    [_signinPromoViewMediator signinPromoViewIsVisible];
     return signinPromoItem;
   }
   if (!_hasRecordedSigninImpression) {
@@ -645,7 +640,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
 
   return articlesForYouSwitchItem;
 }
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 - (SettingsSwitchItem*)viewSourceSwitchItem {
   return [self switchItemWithType:ItemTypeViewSource
@@ -667,7 +662,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
                        detailText:nil
                     iconImageName:kSettingsDebugImageName];
 }
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 #pragma mark Item Constructors
 
@@ -751,7 +746,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
       break;
     }
     case ItemTypeViewSource: {
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
       SettingsSwitchCell* switchCell =
           base::mac::ObjCCastStrict<SettingsSwitchCell>(cell);
       [switchCell.switchView addTarget:self
@@ -759,7 +754,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
                       forControlEvents:UIControlEventValueChanged];
 #else
       NOTREACHED();
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
       break;
     }
     default:
@@ -795,9 +790,8 @@ NSString* kDevViewSourceKey = @"DevViewSource";
                         completion:nil];
       break;
     case ItemTypeAccount:
-      controller = [[AccountsTableViewController alloc]
-               initWithBrowserState:_browserState
-          closeSettingsOnAddAccount:NO];
+      controller = [[AccountsTableViewController alloc] initWithBrowser:_browser
+                                              closeSettingsOnAddAccount:NO];
       break;
     case ItemGoogleServices:
       [self showSyncGoogleService];
@@ -901,7 +895,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   [_articlesEnabled setValue:newSwitchValue];
 }
 
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 - (void)viewSourceSwitchToggled:(UISwitch*)sender {
   NSIndexPath* switchPath =
       [self.tableViewModel indexPathForItemType:ItemTypeViewSource
@@ -915,7 +909,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   switchItem.on = newSwitchValue;
   [self setBooleanNSUserDefaultsValue:newSwitchValue forKey:kDevViewSourceKey];
 }
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 #pragma mark Private methods
 
@@ -924,7 +918,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   _googleServicesSettingsCoordinator =
       [[GoogleServicesSettingsCoordinator alloc]
           initWithBaseViewController:self.navigationController
-                        browserState:_browserState
+                             browser:_browser
                                 mode:GoogleServicesSettingsModeSettings];
   _googleServicesSettingsCoordinator.dispatcher = self.dispatcher;
   _googleServicesSettingsCoordinator.navigationController =
@@ -944,14 +938,14 @@ NSString* kDevViewSourceKey = @"DevViewSource";
 // Chromium builds, but for official builds it is gated by an experimental flag
 // because the "Debug" section should never be showing in stable channel.
 - (BOOL)hasDebugSection {
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
   return YES;
 #else
   if (experimental_flags::IsMemoryDebuggingEnabled()) {
     return YES;
   }
   return NO;
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 }
 
 // Updates the identity cell.
@@ -966,33 +960,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   }
   identityAccountItem.image = [self userAccountImage];
   identityAccountItem.text = [_identity userFullName];
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    identityAccountItem.detailText = _identity.userEmail;
-    return;
-  }
-
-  SyncSetupService* syncSetupService =
-      SyncSetupServiceFactory::GetForBrowserState(_browserState);
-  if (!syncSetupService->HasFinishedInitialSetup()) {
-    identityAccountItem.detailText =
-        l10n_util::GetNSString(IDS_IOS_SYNC_SETUP_IN_PROGRESS);
-    identityAccountItem.shouldDisplayError = NO;
-    return;
-  }
-  identityAccountItem.shouldDisplayError =
-      !IsTransientSyncError(syncSetupService->GetSyncServiceState());
-  if (identityAccountItem.shouldDisplayError) {
-    identityAccountItem.detailText =
-        GetSyncErrorDescriptionForSyncSetupService(syncSetupService);
-  } else {
-    identityAccountItem.detailText =
-        syncSetupService->IsSyncEnabled()
-            ? l10n_util::GetNSStringF(
-                  IDS_IOS_SIGN_IN_TO_CHROME_SETTING_SYNCING,
-                  base::SysNSStringToUTF16([_identity userEmail]))
-            : l10n_util::GetNSString(
-                  IDS_IOS_SIGN_IN_TO_CHROME_SETTING_SYNC_OFF);
-  }
+  identityAccountItem.detailText = _identity.userEmail;
 }
 
 - (void)reloadAccountCell {
@@ -1033,14 +1001,13 @@ NSString* kDevViewSourceKey = @"DevViewSource";
         IDS_IOS_GOOGLE_SERVICES_SETTINGS_SYNC_DISABLBED_BY_ADMINISTRATOR_STATUS);
     googleServicesItem.image =
         [UIImage imageNamed:kSyncAndGoogleServicesSyncOffImageName];
-  } else if (!syncSetupService->HasFinishedInitialSetup()) {
+  } else if (!syncSetupService->IsFirstSetupComplete()) {
     googleServicesItem.detailText =
         l10n_util::GetNSString(IDS_IOS_SYNC_SETUP_IN_PROGRESS);
     googleServicesItem.image =
         [UIImage imageNamed:kSyncAndGoogleServicesSyncOnImageName];
   } else if (!IsTransientSyncError(syncSetupService->GetSyncServiceState())) {
-    googleServicesItem.detailTextColor =
-        [UIColor colorNamed:kDestructiveTintColor];
+    googleServicesItem.detailTextColor = [UIColor colorNamed:kRedColor];
     googleServicesItem.detailText =
         GetSyncErrorDescriptionForSyncSetupService(syncSetupService);
     googleServicesItem.image =
@@ -1085,9 +1052,9 @@ NSString* kDevViewSourceKey = @"DevViewSource";
                     completion:(ShowSigninCommandCompletionCallback)completion {
   DCHECK(![self.signinInteractionCoordinator isActive]);
   if (!self.signinInteractionCoordinator) {
-    self.signinInteractionCoordinator = [[SigninInteractionCoordinator alloc]
-        initWithBrowserState:_browserState
-                  dispatcher:self.dispatcher];
+    self.signinInteractionCoordinator =
+        [[SigninInteractionCoordinator alloc] initWithBrowser:_browser
+                                                   dispatcher:self.dispatcher];
   }
 
   __weak SettingsTableViewController* weakSelf = self;
@@ -1128,7 +1095,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
   _googleServicesSettingsCoordinator = nil;
   _settingsHasBeenDismissed = YES;
   [self.signinInteractionCoordinator cancel];
-  [_signinPromoViewMediator signinPromoViewRemoved];
+  [_signinPromoViewMediator signinPromoViewIsRemoved];
   _signinPromoViewMediator = nil;
   [self stopBrowserStateServiceObservers];
 }
@@ -1136,11 +1103,7 @@ NSString* kDevViewSourceKey = @"DevViewSource";
 #pragma mark SyncObserverModelBridge
 
 - (void)onSyncStateChanged {
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    [self reloadGoogleServicesCell];
-  } else {
-    [self reloadAccountCell];
-  }
+  [self reloadGoogleServicesCell];
 }
 
 #pragma mark - IdentityRefreshLogic

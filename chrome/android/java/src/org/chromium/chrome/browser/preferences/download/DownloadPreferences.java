@@ -5,15 +5,16 @@
 package org.chromium.chrome.browser.preferences.download;
 
 import android.os.Bundle;
-import android.support.annotation.Nullable;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceFragmentCompat;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.download.DownloadPromptStatus;
+import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.offlinepages.prefetch.PrefetchConfiguration;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 
 /**
@@ -26,8 +27,8 @@ public class DownloadPreferences
     private static final String PREF_PREFETCHING_ENABLED = "prefetching_enabled";
 
     private DownloadLocationPreference mLocationChangePref;
-    private ChromeSwitchPreferenceCompat mLocationPromptEnabledPref;
-    private ChromeSwitchPreferenceCompat mPrefetchingEnabled;
+    private ChromeSwitchPreference mLocationPromptEnabledPref;
+    private ChromeSwitchPreference mPrefetchingEnabled;
 
     @Override
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, String s) {
@@ -35,14 +36,13 @@ public class DownloadPreferences
         PreferenceUtils.addPreferencesFromResource(this, R.xml.download_preferences);
 
         mLocationPromptEnabledPref =
-                (ChromeSwitchPreferenceCompat) findPreference(PREF_LOCATION_PROMPT_ENABLED);
+                (ChromeSwitchPreference) findPreference(PREF_LOCATION_PROMPT_ENABLED);
         mLocationPromptEnabledPref.setOnPreferenceChangeListener(this);
 
         mLocationChangePref = (DownloadLocationPreference) findPreference(PREF_LOCATION_CHANGE);
 
         if (PrefetchConfiguration.isPrefetchingFlagEnabled()) {
-            mPrefetchingEnabled =
-                    (ChromeSwitchPreferenceCompat) findPreference(PREF_PREFETCHING_ENABLED);
+            mPrefetchingEnabled = (ChromeSwitchPreference) findPreference(PREF_PREFETCHING_ENABLED);
             mPrefetchingEnabled.setOnPreferenceChangeListener(this);
 
             updatePrefetchSummary();
@@ -78,8 +78,7 @@ public class DownloadPreferences
         if (mLocationPromptEnabledPref != null) {
             // Location prompt is marked enabled if the prompt status is not DONT_SHOW.
             boolean isLocationPromptEnabled =
-                    PrefServiceBridge.getInstance().getPromptForDownloadAndroid()
-                    != DownloadPromptStatus.DONT_SHOW;
+                    DownloadUtils.getPromptForDownloadAndroid() != DownloadPromptStatus.DONT_SHOW;
             mLocationPromptEnabledPref.setChecked(isLocationPromptEnabled);
         }
 
@@ -114,14 +113,12 @@ public class DownloadPreferences
         if (PREF_LOCATION_PROMPT_ENABLED.equals(preference.getKey())) {
             if ((boolean) newValue) {
                 // Only update if the interstitial has been shown before.
-                if (PrefServiceBridge.getInstance().getPromptForDownloadAndroid()
+                if (DownloadUtils.getPromptForDownloadAndroid()
                         != DownloadPromptStatus.SHOW_INITIAL) {
-                    PrefServiceBridge.getInstance().setPromptForDownloadAndroid(
-                            DownloadPromptStatus.SHOW_PREFERENCE);
+                    DownloadUtils.setPromptForDownloadAndroid(DownloadPromptStatus.SHOW_PREFERENCE);
                 }
             } else {
-                PrefServiceBridge.getInstance().setPromptForDownloadAndroid(
-                        DownloadPromptStatus.DONT_SHOW);
+                DownloadUtils.setPromptForDownloadAndroid(DownloadPromptStatus.DONT_SHOW);
             }
         } else if (PREF_PREFETCHING_ENABLED.equals(preference.getKey())) {
             PrefetchConfiguration.setPrefetchingEnabledInSettings((boolean) newValue);

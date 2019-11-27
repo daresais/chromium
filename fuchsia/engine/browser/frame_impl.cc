@@ -4,27 +4,36 @@
 
 #include "fuchsia/engine/browser/frame_impl.h"
 
+#include <lib/sys/cpp/component_context.h>
+#include <lib/ui/scenic/cpp/view_ref_pair.h>
 #include <limits>
 
 #include "base/bind_helpers.h"
+#include "base/fuchsia/default_context.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/json/json_writer.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/message_port_provider.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/renderer_preferences_util.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/was_activated_option.h"
+#include "content/public/common/was_activated_option.mojom.h"
 #include "fuchsia/base/mem_buffer_util.h"
 #include "fuchsia/base/message_port.h"
+#include "fuchsia/engine/browser/accessibility_bridge.h"
 #include "fuchsia/engine/browser/context_impl.h"
+#include "fuchsia/engine/browser/web_engine_devtools_controller.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/logging/logging_utils.h"
+#include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host_platform.h"
@@ -40,8 +49,19 @@ namespace {
 const logging::LogSeverity kLogSeverityNone =
     std::numeric_limits<logging::LogSeverity>::min();
 
-// Layout manager that allows only one child window and stretches it to fill the
-// parent.
+// Used for attaching popup-related metadata to a WebContents.
+constexpr char kPopupCreationInfo[] = "popup-creation-info";
+class PopupFrameCreationInfoUserData : public base::SupportsUserData::Data {
+ public:
+  fuchsia::web::PopupFrameCreationInfo info;
+};
+
+// Layout manager used for the root window that hosts the WebContents window.
+// The main WebContents window is stretched to occupy the whole parent. Note
+// that the root window may host other windows (particularly menus for drop-down
+// boxes). These windows get the location and size they request. The main
+// window for the web content is identified by window.type() ==
+// WINDOW_TYPE_CONTROL (set in WebContentsViewAura).
 class LayoutManagerImpl : public aura::LayoutManager {
  public:
   LayoutManagerImpl() = default;
@@ -49,31 +69,43 @@ class LayoutManagerImpl : public aura::LayoutManager {
 
   // aura::LayoutManager implementation.
   void OnWindowResized() override {
-    // Resize the child to match the size of the parent
-    if (child_) {
-      SetChildBoundsDirect(child_,
-                           gfx::Rect(child_->parent()->bounds().size()));
+    // Resize the child to match the size of the parent.
+    if (main_child_) {
+      SetChildBoundsDirect(main_child_,
+                           gfx::Rect(main_child_->parent()->bounds().size()));
     }
   }
+
   void OnWindowAddedToLayout(aura::Window* child) override {
-    DCHECK(!child_);
-    child_ = child;
-    SetChildBoundsDirect(child_, gfx::Rect(child_->parent()->bounds().size()));
+    if (child->type() == aura::client::WINDOW_TYPE_CONTROL) {
+      DCHECK(!main_child_);
+      main_child_ = child;
+      SetChildBoundsDirect(main_child_,
+                           gfx::Rect(main_child_->parent()->bounds().size()));
+    }
   }
 
   void OnWillRemoveWindowFromLayout(aura::Window* child) override {
-    DCHECK_EQ(child, child_);
-    child_ = nullptr;
+    if (child->type() == aura::client::WINDOW_TYPE_CONTROL) {
+      DCHECK_EQ(child, main_child_);
+      main_child_ = nullptr;
+    }
   }
 
   void OnWindowRemovedFromLayout(aura::Window* child) override {}
+
   void OnChildWindowVisibilityChanged(aura::Window* child,
                                       bool visible) override {}
+
   void SetChildBounds(aura::Window* child,
-                      const gfx::Rect& requested_bounds) override {}
+                      const gfx::Rect& requested_bounds) override {
+    if (child != main_child_)
+      SetChildBoundsDirect(child, requested_bounds);
+  }
 
  private:
-  aura::Window* child_ = nullptr;
+  // The main window used for the WebContents.
+  aura::Window* main_child_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(LayoutManagerImpl);
 };
@@ -122,12 +154,36 @@ bool IsOriginWhitelisted(const GURL& url,
   return false;
 }
 
-class ScenicWindowTreeHost : public aura::WindowTreeHostPlatform {
+class WindowParentingClientImpl : public aura::client::WindowParentingClient {
  public:
-  explicit ScenicWindowTreeHost(ui::PlatformWindowInitProperties properties)
-      : aura::WindowTreeHostPlatform(std::move(properties)) {}
+  explicit WindowParentingClientImpl(aura::Window* root_window)
+      : root_window_(root_window) {
+    aura::client::SetWindowParentingClient(root_window_, this);
+  }
+  ~WindowParentingClientImpl() override {
+    aura::client::SetWindowParentingClient(root_window_, nullptr);
+  }
 
-  ~ScenicWindowTreeHost() override = default;
+  // WindowParentingClient implementation.
+  aura::Window* GetDefaultParent(aura::Window* window,
+                                 const gfx::Rect& bounds) override {
+    return root_window_;
+  }
+
+ private:
+  aura::Window* root_window_;
+
+  DISALLOW_COPY_AND_ASSIGN(WindowParentingClientImpl);
+};
+
+// WindowTreeHost that hosts web frames.
+class FrameWindowTreeHost : public aura::WindowTreeHostPlatform {
+ public:
+  explicit FrameWindowTreeHost(ui::PlatformWindowInitProperties properties)
+      : aura::WindowTreeHostPlatform(std::move(properties)),
+        window_parenting_client_(window()) {}
+
+  ~FrameWindowTreeHost() override = default;
 
   // Route focus & blur events to the window's focus observer and its
   // InputMethod.
@@ -142,7 +198,9 @@ class ScenicWindowTreeHost : public aura::WindowTreeHostPlatform {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScenicWindowTreeHost);
+  WindowParentingClientImpl window_parenting_client_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameWindowTreeHost);
 };
 
 logging::LogSeverity ConsoleLogLevelToLoggingSeverity(
@@ -174,9 +232,11 @@ FrameImpl::FrameImpl(std::unique_ptr<content::WebContents> web_contents,
       context_(context),
       navigation_controller_(web_contents_.get()),
       log_level_(kLogSeverityNone),
+      url_request_rewrite_rules_manager_(web_contents_.get()),
       binding_(this, std::move(frame_request)) {
   web_contents_->SetDelegate(this);
   Observe(web_contents_.get());
+
   binding_.set_error_handler([this](zx_status_t status) {
     ZX_LOG_IF(ERROR, status != ZX_ERR_PEER_CLOSED, status)
         << " Frame disconnected.";
@@ -189,6 +249,7 @@ FrameImpl::FrameImpl(std::unique_ptr<content::WebContents> web_contents,
 
 FrameImpl::~FrameImpl() {
   TearDownView();
+  context_->devtools_controller()->OnFrameDestroyed(web_contents_.get());
 }
 
 zx::unowned_channel FrameImpl::GetBindingChannelForTest() const {
@@ -223,8 +284,8 @@ void FrameImpl::TearDownView() {
 
     // Allows posted focus events to process before the FocusController is torn
     // down.
-    content::BrowserThread::DeleteSoon(content::BrowserThread::UI, FROM_HERE,
-                                       std::move(focus_controller_));
+    base::DeleteSoon(FROM_HERE, {content::BrowserThread::UI},
+                     std::move(focus_controller_));
   }
 }
 
@@ -266,8 +327,8 @@ void FrameImpl::ExecuteJavaScriptInternal(std::vector<std::string> origins,
           }
 
           fuchsia::web::Frame_ExecuteJavaScript_Response response;
-          response.result =
-              cr_fuchsia::MemBufferFromString(std::move(result_json));
+          response.result = cr_fuchsia::MemBufferFromString(
+              std::move(result_json), "cr-execute-js-response");
           result.set_response(std::move(response));
           callback(std::move(result));
         },
@@ -285,15 +346,151 @@ void FrameImpl::ExecuteJavaScriptInternal(std::vector<std::string> origins,
   }
 }
 
+bool FrameImpl::IsWebContentsCreationOverridden(
+    content::SiteInstance* source_site_instance,
+    content::mojom::WindowContainerType window_container_type,
+    const GURL& opener_url,
+    const std::string& frame_name,
+    const GURL& target_url) {
+  // Specify a generous upper bound for unacknowledged popup windows, so that we
+  // can catch bad client behavior while not interfering with normal operation.
+  constexpr size_t kMaxPendingWebContentsCount = 10;
+
+  if (!popup_listener_)
+    return true;
+
+  if (pending_popups_.size() >= kMaxPendingWebContentsCount) {
+    // The content is producing popups faster than the embedder can process
+    // them. Drop the popups so as to prevent resource exhaustion.
+    LOG(WARNING) << "Too many pending popups, ignoring request.";
+
+    // Don't produce a WebContents for this popup.
+    return true;
+  }
+
+  return false;
+}
+
+void FrameImpl::AddNewContents(
+    content::WebContents* source,
+    std::unique_ptr<content::WebContents> new_contents,
+    WindowOpenDisposition disposition,
+    const gfx::Rect& initial_rect,
+    bool user_gesture,
+    bool* was_blocked) {
+  DCHECK_EQ(source, web_contents_.get());
+
+  // TODO(crbug.com/995395): Add window disposition to the FIDL interface.
+  switch (disposition) {
+    case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+    case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+    case WindowOpenDisposition::NEW_POPUP:
+    case WindowOpenDisposition::NEW_WINDOW: {
+      if (url_request_rewrite_rules_manager_.GetCachedRules()) {
+        // There is no support for URL request rules rewriting with popups.
+        *was_blocked = true;
+        return;
+      }
+
+      PopupFrameCreationInfoUserData* popup_creation_info =
+          reinterpret_cast<PopupFrameCreationInfoUserData*>(
+              new_contents->GetUserData(kPopupCreationInfo));
+      popup_creation_info->info.set_initiated_by_user(user_gesture);
+      pending_popups_.emplace_back(std::move(new_contents));
+      MaybeSendPopup();
+      return;
+    }
+
+    // These kinds of windows don't produce Frames.
+    case WindowOpenDisposition::CURRENT_TAB:
+    case WindowOpenDisposition::SINGLETON_TAB:
+    case WindowOpenDisposition::SAVE_TO_DISK:
+    case WindowOpenDisposition::OFF_THE_RECORD:
+    case WindowOpenDisposition::IGNORE_ACTION:
+    case WindowOpenDisposition::SWITCH_TO_TAB:
+    case WindowOpenDisposition::UNKNOWN:
+      NOTIMPLEMENTED() << "Dropped new web contents (disposition: "
+                       << static_cast<int>(disposition) << ")";
+      return;
+  }
+}
+
+void FrameImpl::WebContentsCreated(content::WebContents* source_contents,
+                                   int opener_render_process_id,
+                                   int opener_render_frame_id,
+                                   const std::string& frame_name,
+                                   const GURL& target_url,
+                                   content::WebContents* new_contents) {
+  auto creation_info = std::make_unique<PopupFrameCreationInfoUserData>();
+  creation_info->info.set_initial_url(target_url.spec());
+  new_contents->SetUserData(kPopupCreationInfo, std::move(creation_info));
+}
+
+void FrameImpl::MaybeSendPopup() {
+  if (!popup_listener_)
+    return;
+
+  if (popup_ack_outstanding_ || pending_popups_.empty())
+    return;
+
+  std::unique_ptr<content::WebContents> popup =
+      std::move(pending_popups_.front());
+  pending_popups_.pop_front();
+
+  fuchsia::web::PopupFrameCreationInfo creation_info =
+      std::move(reinterpret_cast<PopupFrameCreationInfoUserData*>(
+                    popup->GetUserData(kPopupCreationInfo))
+                    ->info);
+
+  // The PopupFrameCreationInfo won't be needed anymore, so clear it out.
+  popup->SetUserData(kPopupCreationInfo, nullptr);
+
+  popup_listener_->OnPopupFrameCreated(
+      context_->CreateFrameForPopupWebContents(std::move(popup)),
+      std::move(creation_info), [this] {
+        popup_ack_outstanding_ = false;
+        MaybeSendPopup();
+      });
+  popup_ack_outstanding_ = true;
+}
+
+void FrameImpl::OnPopupListenerDisconnected(zx_status_t status) {
+  ZX_LOG_IF(WARNING, status != ZX_ERR_PEER_CLOSED, status)
+      << "Popup listener disconnected.";
+  pending_popups_.clear();
+}
+
 void FrameImpl::CreateView(fuchsia::ui::views::ViewToken view_token) {
   // If a View to this Frame is already active then disconnect it.
   TearDownView();
 
   ui::PlatformWindowInitProperties properties;
   properties.view_token = std::move(view_token);
+  properties.view_ref_pair = scenic::ViewRefPair::New();
+
+  // Create a ViewRef and register it to the Fuchsia SemanticsManager.
+  fuchsia::ui::views::ViewRef accessibility_view_ref;
+  zx_status_t status = properties.view_ref_pair.view_ref.reference.duplicate(
+      ZX_RIGHT_SAME_RIGHTS, &accessibility_view_ref.reference);
+  if (status == ZX_OK) {
+    fuchsia::accessibility::semantics::SemanticsManagerPtr semantics_manager;
+    if (test_semantics_manager_ptr_) {
+      semantics_manager = std::move(test_semantics_manager_ptr_);
+    } else {
+      semantics_manager =
+          base::fuchsia::ComponentContextForCurrentProcess()
+              ->svc()
+              ->Connect<fuchsia::accessibility::semantics::SemanticsManager>();
+    }
+    accessibility_bridge_ = std::make_unique<AccessibilityBridge>(
+        std::move(semantics_manager), std::move(accessibility_view_ref),
+        web_contents_.get());
+  } else {
+    ZX_LOG(ERROR, status) << "zx_object_duplicate";
+  }
 
   window_tree_host_ =
-      std::make_unique<ScenicWindowTreeHost>(std::move(properties));
+      std::make_unique<FrameWindowTreeHost>(std::move(properties));
   window_tree_host_->InitHost();
 
   window_tree_host_->window()->GetHost()->AddEventRewriter(
@@ -372,7 +569,7 @@ void FrameImpl::AddBeforeLoadJavaScript(
 
   // Create a read-only VMO from |script|.
   fuchsia::mem::Buffer script_buffer =
-      cr_fuchsia::MemBufferFromString16(script_utf16);
+      cr_fuchsia::MemBufferFromString16(script_utf16, "cr-before-load-js");
 
   // Wrap the VMO into a read-only shared-memory container that Mojo can work
   // with.
@@ -485,6 +682,22 @@ void FrameImpl::SetEnableInput(bool enable_input) {
   discarding_event_filter_.set_discard_events(!enable_input);
 }
 
+void FrameImpl::SetPopupFrameCreationListener(
+    fidl::InterfaceHandle<fuchsia::web::PopupFrameCreationListener> listener) {
+  popup_listener_ = listener.Bind();
+  popup_listener_.set_error_handler(
+      fit::bind_member(this, &FrameImpl::OnPopupListenerDisconnected));
+}
+
+void FrameImpl::SetUrlRequestRewriteRules(
+    std::vector<fuchsia::web::UrlRequestRewriteRule> rules,
+    SetUrlRequestRewriteRulesCallback callback) {
+  zx_status_t error = url_request_rewrite_rules_manager_.OnRulesUpdated(
+      std::move(rules), std::move(callback));
+  if (error != ZX_OK)
+    binding_.Close(error);
+}
+
 void FrameImpl::CloseContents(content::WebContents* source) {
   DCHECK_EQ(source, web_contents_.get());
   context_->DestroyFrame(this);
@@ -529,29 +742,6 @@ bool FrameImpl::DidAddMessageToConsole(
   return true;
 }
 
-bool FrameImpl::ShouldCreateWebContents(
-    content::WebContents* web_contents,
-    content::RenderFrameHost* opener,
-    content::SiteInstance* source_site_instance,
-    int32_t route_id,
-    int32_t main_frame_route_id,
-    int32_t main_frame_widget_route_id,
-    content::mojom::WindowContainerType window_container_type,
-    const GURL& opener_url,
-    const std::string& frame_name,
-    const GURL& target_url,
-    const std::string& partition_id,
-    content::SessionStorageNamespace* session_storage_namespace) {
-  DCHECK_EQ(web_contents, web_contents_.get());
-
-  // Prevent any child WebContents (popup windows, tabs, etc.) from spawning.
-  // TODO(crbug.com/888131): Implement support for popup windows.
-  NOTIMPLEMENTED() << "Ignored popup window request for URL: "
-                   << target_url.spec();
-
-  return false;
-}
-
 void FrameImpl::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
   if (before_load_scripts_.empty())
@@ -561,7 +751,8 @@ void FrameImpl::ReadyToCommitNavigation(
       navigation_handle->IsSameDocument() || navigation_handle->IsErrorPage())
     return;
 
-  mojom::OnLoadScriptInjectorAssociatedPtr before_load_script_injector;
+  mojo::AssociatedRemote<mojom::OnLoadScriptInjector>
+      before_load_script_injector;
   navigation_handle->GetRenderFrameHost()
       ->GetRemoteAssociatedInterfaces()
       ->GetInterface(&before_load_script_injector);
@@ -580,5 +771,5 @@ void FrameImpl::ReadyToCommitNavigation(
 
 void FrameImpl::DidFinishLoad(content::RenderFrameHost* render_frame_host,
                               const GURL& validated_url) {
-  context_->OnDebugDevToolsPortReady();
+  context_->devtools_controller()->OnFrameLoaded(web_contents_.get());
 }

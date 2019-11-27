@@ -176,7 +176,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       l10n_util::GetNSString(IDS_IOS_SEND_TAB_TO_SELF_TARGET_DEVICE_ACTION);
   self.sendToDevice.buttonTextColor =
       [UIColor colorNamed:kSolidButtonTextColor];
-  self.sendToDevice.buttonBackgroundColor = [UIColor colorNamed:kTintColor];
+  self.sendToDevice.buttonBackgroundColor = [UIColor colorNamed:kBlueColor];
   self.sendToDevice.boldButtonText = NO;
   self.sendToDevice.accessibilityIdentifier = kSendTabToSelfModalSendButton;
   [model addItem:self.sendToDevice
@@ -236,7 +236,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (void)sendTabWhenPressed:(UIButton*)sender {
   base::UmaHistogramEnumeration(kClickResultHistogramName,
                                 SendTabToSelfClickResult::kClickItem);
-  [self.delegate sendTabToTargetDeviceCacheGUID:self.selectedItem.cacheGuid];
+  [self.delegate sendTabToTargetDeviceCacheGUID:self.selectedItem.cacheGuid
+                               targetDeviceName:self.selectedItem.text];
   [self.delegate dismissViewControllerAnimated:YES completion:nil];
 }
 

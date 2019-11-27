@@ -11,6 +11,8 @@
 #include <utility>
 
 #include "base/macros.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
@@ -37,9 +39,9 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundleInfo
       std::map<std::string,
                mojo::PendingRemote<network::mojom::URLLoaderFactory>>;
 
-  // Map from origin of request initiator to PendingRemote<URLLoaderFactory> for
-  // handling this initiator's requests (e.g., for relaxing CORB for requests
-  // initiated from content scripts).
+  // Map from origin of isolated world to PendingRemote<URLLoaderFactory> for
+  // handling this isolated world's requests (e.g., for relaxing CORB for
+  // requests initiated from content scripts).
   using OriginMap =
       std::map<url::Origin,
                mojo::PendingRemote<network::mojom::URLLoaderFactory>>;
@@ -49,7 +51,7 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundleInfo
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           pending_default_factory,
       SchemeMap scheme_specific_factory_infos,
-      OriginMap initiator_specific_factory_infos,
+      OriginMap isolated_world_factory_infos,
       bool bypass_redirect_checks);
   ~URLLoaderFactoryBundleInfo() override;
 
@@ -66,8 +68,8 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundleInfo
   SchemeMap& pending_scheme_specific_factories() {
     return pending_scheme_specific_factories_;
   }
-  OriginMap& pending_initiator_specific_factories() {
-    return pending_initiator_specific_factories_;
+  OriginMap& pending_isolated_world_factories() {
+    return pending_isolated_world_factories_;
   }
 
   bool bypass_redirect_checks() const { return bypass_redirect_checks_; }
@@ -84,7 +86,7 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundleInfo
   mojo::PendingRemote<network::mojom::URLLoaderFactory>
       pending_appcache_factory_;
   SchemeMap pending_scheme_specific_factories_;
-  OriginMap pending_initiator_specific_factories_;
+  OriginMap pending_isolated_world_factories_;
   bool bypass_redirect_checks_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(URLLoaderFactoryBundleInfo);
@@ -101,15 +103,17 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundle
       std::unique_ptr<URLLoaderFactoryBundleInfo> pending_factories);
 
   // SharedURLLoaderFactory implementation.
-  void CreateLoaderAndStart(network::mojom::URLLoaderRequest loader,
-                            int32_t routing_id,
-                            int32_t request_id,
-                            uint32_t options,
-                            const network::ResourceRequest& request,
-                            network::mojom::URLLoaderClientPtr client,
-                            const net::MutableNetworkTrafficAnnotationTag&
-                                traffic_annotation) override;
-  void Clone(network::mojom::URLLoaderFactoryRequest request) override;
+  void CreateLoaderAndStart(
+      mojo::PendingReceiver<network::mojom::URLLoader> loader,
+      int32_t routing_id,
+      int32_t request_id,
+      uint32_t options,
+      const network::ResourceRequest& request,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
+      override;
+  void Clone(mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
+      override;
   std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override;
   bool BypassRedirectChecks() const override;
 
@@ -141,16 +145,15 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundle
     return output;
   }
 
-  // TODO(crbug.com/955171): Replace URLLoaderFactoryPtr with Remote below.
   // |default_factory_| is the default factory used by the bundle. It usually
   // goes to "network", but it's possible it was overriden in case when the
   // context should not be given access to the network.
-  network::mojom::URLLoaderFactoryPtr default_factory_;
+  mojo::Remote<network::mojom::URLLoaderFactory> default_factory_;
 
   // |appcache_factory_| is a special loader factory that intercepts
   // requests when the context has AppCache. See also
   // AppCacheSubresourceURLFactory.
-  network::mojom::URLLoaderFactoryPtr appcache_factory_;
+  mojo::Remote<network::mojom::URLLoaderFactory> appcache_factory_;
 
   // Map from URL scheme to Remote<URLLoaderFactory> for handling URL requests
   // for schemes not handled by the |default_factory_|.  See also
@@ -160,12 +163,12 @@ class BLINK_COMMON_EXPORT URLLoaderFactoryBundle
       std::map<std::string, mojo::Remote<network::mojom::URLLoaderFactory>>;
   SchemeMap scheme_specific_factories_;
 
-  // Map from origin of request initiator to Remote<URLLoaderFactory> for
-  // handling this initiator's requests. See also
+  // Map from origin of isolated world to Remote<URLLoaderFactory> for handling
+  // this isolated world's requests. See also
   // URLLoaderFactoryBundleInfo::OriginMap.
   using OriginMap =
       std::map<url::Origin, mojo::Remote<network::mojom::URLLoaderFactory>>;
-  OriginMap initiator_specific_factories_;
+  OriginMap isolated_world_factories_;
 
   bool bypass_redirect_checks_ = false;
 };

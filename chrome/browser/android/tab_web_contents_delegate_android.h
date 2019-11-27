@@ -17,13 +17,16 @@
 
 namespace content {
 struct FileChooserParams;
-class SmsDialog;
 class WebContents;
 }
 
 namespace gfx {
 class Rect;
 class RectF;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace android {
@@ -44,14 +47,17 @@ class TabWebContentsDelegateAndroid
   std::unique_ptr<content::BluetoothChooser> RunBluetoothChooser(
       content::RenderFrameHost* frame,
       const content::BluetoothChooser::EventHandler& event_handler) override;
-  std::unique_ptr<content::SmsDialog> CreateSmsDialog() override;
+  void CreateSmsPrompt(content::RenderFrameHost*,
+                       const url::Origin&,
+                       const std::string& one_time_code,
+                       base::OnceClosure on_confirm,
+                       base::OnceClosure on_cancel) override;
   std::unique_ptr<content::BluetoothScanningPrompt> ShowBluetoothScanningPrompt(
       content::RenderFrameHost* frame,
       const content::BluetoothScanningPrompt::EventHandler& event_handler)
       override;
-  void CloseContents(content::WebContents* web_contents) override;
   bool ShouldFocusLocationBarByDefault(content::WebContents* source) override;
-  blink::WebDisplayMode GetDisplayMode(
+  blink::mojom::DisplayMode GetDisplayMode(
       const content::WebContents* web_contents) override;
   void FindReply(content::WebContents* web_contents,
                  int request_id,
@@ -91,7 +97,7 @@ class TabWebContentsDelegateAndroid
                       const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
-  blink::WebSecurityStyle GetSecurityStyle(
+  blink::SecurityStyle GetSecurityStyle(
       content::WebContents* web_contents,
       content::SecurityStyleExplanations* security_style_explanations) override;
   void OnDidBlockNavigation(content::WebContents* web_contents,
@@ -121,10 +127,17 @@ class TabWebContentsDelegateAndroid
 
   // FindResultObserver:
   void OnFindResultAvailable(content::WebContents* web_contents) override;
+  void OnFindTabHelperDestroyed(FindTabHelper* helper) override;
 
   bool ShouldEnableEmbeddedMediaExperience() const;
   bool IsPictureInPictureEnabled() const;
   bool IsNightModeEnabled() const;
+  bool CanShowAppBanners() const;
+
+  // Returns true if this tab is currently presented in the context of custom
+  // tabs. Tabs can be moved between different activities so the returned value
+  // might change over the lifetime of the tab.
+  bool IsCustomTab() const;
   const GURL GetManifestScope() const;
 
  private:

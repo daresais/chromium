@@ -25,13 +25,13 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "ppapi/shared_impl/ppapi_constants.h"
-#include "storage/browser/fileapi/async_file_util.h"
-#include "storage/browser/fileapi/async_file_util_adapter.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/isolated_context.h"
-#include "storage/browser/fileapi/obfuscated_file_util.h"
+#include "storage/browser/file_system/async_file_util.h"
+#include "storage/browser/file_system/async_file_util_adapter.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/isolated_context.h"
+#include "storage/browser/file_system/obfuscated_file_util.h"
 #include "storage/browser/quota/special_storage_policy.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/common/file_system/file_system_util.h"
 
 namespace content {
 
@@ -327,7 +327,7 @@ void PluginPrivateDataDeletionHelper::CheckOriginsOnFileTaskRunner(
               filesystem_context_.get(), origin.GetOrigin(),
               plugin_path.BaseName().MaybeAsASCII(), begin_, end_,
               decrement_callback);
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {BrowserThread::IO},
           base::BindOnce(
               &PluginPrivateDataByOriginChecker::CheckFilesOnIOThread,

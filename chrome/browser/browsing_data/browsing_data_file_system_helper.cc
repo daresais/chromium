@@ -16,9 +16,9 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/buildflags/buildflags.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_quota_util.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_quota_util.h"
+#include "storage/common/file_system/file_system_types.h"
 
 using content::BrowserThread;
 
@@ -98,8 +98,8 @@ void BrowsingDataFileSystemHelper::FetchFileSystemInfoInFileThread(
   for (const auto& iter : file_system_info_map)
     result.push_back(iter.second);
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(std::move(callback), result));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(std::move(callback), result));
 }
 
 void BrowsingDataFileSystemHelper::DeleteFileSystemOriginInFileThread(
@@ -157,8 +157,8 @@ void CannedBrowsingDataFileSystemHelper::StartFetching(FetchCallback callback) {
   for (const auto& origin : pending_origins_)
     result.emplace_back(origin);
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(std::move(callback), result));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(std::move(callback), result));
 }
 
 void CannedBrowsingDataFileSystemHelper::DeleteFileSystemOrigin(

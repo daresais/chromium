@@ -5,20 +5,25 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_FORCED_EXTENSIONS_INSTALLATION_REPORTER_H_
 #define CHROME_BROWSER_EXTENSIONS_FORCED_EXTENSIONS_INSTALLATION_REPORTER_H_
 
+#include <map>
 #include <utility>
 
+#include "base/macros.h"
 #include "base/optional.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/install/crx_install_error.h"
 #include "extensions/browser/updater/extension_downloader_delegate.h"
 #include "extensions/common/extension_id.h"
 
-class Profile;
+namespace content {
+class BrowserContext;
+}  // namespace content
 
 namespace extensions {
 
 // Helper class to save and retrieve extension installation stage and failure
 // reasons.
-class InstallationReporter {
+class InstallationReporter : public KeyedService {
  public:
   // Stage of extension installing process. Typically forced extensions from
   // policies should go through all stages in this order, other extensions skip
@@ -30,6 +35,26 @@ class InstallationReporter {
     // Extension found in ForceInstall policy and added to
     // ExtensionManagement::settings_by_id_.
     CREATED = 0,
+
+    // TODO(crbug.com/989526): stages from NOTIFIED_FROM_MANAGEMENT to
+    // SEEN_BY_EXTERNAL_PROVIDER are temporary ones for investigation. Remove
+    // then after investigation will complete and we'll be confident in
+    // extension handling between CREATED and PENDING.
+
+    // ExtensionManagement class is about to pass extension with
+    // INSTALLATION_FORCED mode to its observers.
+    NOTIFIED_FROM_MANAGEMENT = 5,
+
+    // ExtensionManagement class is about to pass extension with other mode to
+    // its observers.
+    NOTIFIED_FROM_MANAGEMENT_NOT_FORCED = 6,
+
+    // ExternalPolicyLoader with FORCED type fetches extension from
+    // ExtensionManagement.
+    SEEN_BY_POLICY_LOADER = 7,
+
+    // ExternalProviderImpl receives extension.
+    SEEN_BY_EXTERNAL_PROVIDER = 8,
 
     // Extension added to PendingExtensionManager.
     PENDING = 1,
@@ -45,7 +70,7 @@ class InstallationReporter {
 
     // Magic constant used by the histogram macros.
     // Always update it to the max value.
-    kMaxValue = COMPLETE,
+    kMaxValue = SEEN_BY_EXTERNAL_PROVIDER,
   };
 
   // Enum used for UMA. Do NOT reorder or remove entries. Don't forget to
@@ -149,33 +174,57 @@ class InstallationReporter {
     base::Optional<extensions::InstallationReporter::Stage> install_stage;
     base::Optional<extensions::ExtensionDownloaderDelegate::Stage>
         downloading_stage;
+    base::Optional<extensions::ExtensionDownloaderDelegate::CacheStatus>
+        downloading_cache_status;
     base::Optional<extensions::InstallationReporter::FailureReason>
         failure_reason;
     base::Optional<extensions::CrxInstallErrorDetail> install_error_detail;
   };
 
+  class TestObserver {
+   public:
+    virtual ~TestObserver();
+    virtual void OnExtensionDataChanged(const ExtensionId& id,
+                                        const content::BrowserContext* context,
+                                        const InstallationData& data) = 0;
+  };
+
+  explicit InstallationReporter(const content::BrowserContext* context);
+
+  ~InstallationReporter() override;
+
+  // Convenience function to get the InstallationReporter for a BrowserContext.
+  static InstallationReporter* Get(content::BrowserContext* context);
+
   // Remembers failure reason and in-progress stages in memory.
-  static void ReportInstallationStage(const Profile* profile,
-                                      const ExtensionId& id,
-                                      Stage stage);
-  static void ReportFailure(const Profile* profile,
-                            const ExtensionId& id,
-                            FailureReason reason);
-  static void ReportDownloadingStage(const Profile* profile,
-                                     const ExtensionId& id,
-                                     ExtensionDownloaderDelegate::Stage stage);
-  static void ReportCrxInstallError(const Profile* profile,
-                                    const ExtensionId& id,
-                                    FailureReason reason,
-                                    CrxInstallErrorDetail crx_install_error);
+  void ReportInstallationStage(const ExtensionId& id, Stage stage);
+  void ReportFailure(const ExtensionId& id, FailureReason reason);
+  void ReportDownloadingStage(const ExtensionId& id,
+                              ExtensionDownloaderDelegate::Stage stage);
+  void ReportDownloadingCacheStatus(
+      const ExtensionId& id,
+      ExtensionDownloaderDelegate::CacheStatus cache_status);
+  void ReportCrxInstallError(const ExtensionId& id,
+                             FailureReason reason,
+                             CrxInstallErrorDetail crx_install_error);
 
   // Retrieves known information for installation of extension |id|.
   // Returns empty data if not found.
-  static InstallationData Get(const Profile* profile, const ExtensionId& id);
+  InstallationData Get(const ExtensionId& id);
   static std::string GetFormattedInstallationData(const InstallationData& data);
 
-  // Clears all failures for the given profile.
-  static void Clear(const Profile* profile);
+  // Clears all collected failures and stages.
+  void Clear();
+
+  static void SetTestObserver(TestObserver* observer);
+
+ private:
+  const content::BrowserContext* browser_context_;
+
+  std::map<ExtensionId, InstallationReporter::InstallationData>
+      installation_data_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(InstallationReporter);
 };
 
 }  // namespace extensions

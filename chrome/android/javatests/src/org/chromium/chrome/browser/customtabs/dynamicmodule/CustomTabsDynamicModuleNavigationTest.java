@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.customtabs.dynamicmodule;
 
 import android.content.Intent;
-import android.support.customtabs.CustomTabsCallback;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 
@@ -48,6 +47,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
+import androidx.browser.customtabs.CustomTabsCallback;
+
 /**
  * Instrumentation tests for the CustomTabsDynamicModuleNavigationObserver.
  */
@@ -83,7 +84,7 @@ public class CustomTabsDynamicModuleNavigationTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
 
         // Module managed hosts only work with HTTPS.
@@ -111,7 +112,7 @@ public class CustomTabsDynamicModuleNavigationTest {
     @Test
     @SmallTest
     @EnableFeatures(ChromeFeatureList.CCT_MODULE)
-    public void testModuleNavigationNotification() throws TimeoutException, InterruptedException {
+    public void testModuleNavigationNotification() throws TimeoutException {
         Intent intent = new IntentBuilder(mTestPage).build();
 
         mActivityRule.startCustomTabActivityWithIntent(intent);

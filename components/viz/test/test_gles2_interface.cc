@@ -396,8 +396,10 @@ void TestGLES2Interface::GetQueryObjectuivEXT(GLuint id,
                                               GLenum pname,
                                               GLuint* params) {
   // If the context is lost, behave as if result is available.
-  if (pname == GL_QUERY_RESULT_AVAILABLE_EXT)
+  if (pname == GL_QUERY_RESULT_AVAILABLE_EXT ||
+      pname == GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT) {
     *params = 1;
+  }
 }
 
 void TestGLES2Interface::ProduceTextureDirectCHROMIUM(GLuint texture,
@@ -522,10 +524,6 @@ void TestGLES2Interface::set_avoid_stencil_buffers(bool avoid_stencil_buffers) {
   test_capabilities_.avoid_stencil_buffers = avoid_stencil_buffers;
 }
 
-void TestGLES2Interface::set_enable_dc_layers(bool support) {
-  test_capabilities_.dc_layers = support;
-}
-
 void TestGLES2Interface::set_support_multisample_compatibility(bool support) {
   test_capabilities_.multisample_compatibility = support;
 }
@@ -540,6 +538,10 @@ void TestGLES2Interface::set_support_texture_npot(bool support) {
 
 void TestGLES2Interface::set_max_texture_size(int size) {
   test_capabilities_.max_texture_size = size;
+}
+
+void TestGLES2Interface::set_supports_oop_raster(bool support) {
+  test_capabilities_.supports_oop_raster = support;
 }
 
 size_t TestGLES2Interface::NumTextures() const {

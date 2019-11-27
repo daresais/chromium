@@ -27,6 +27,7 @@
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
+#include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -193,10 +194,13 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
   if (state_ != kOfferGeneration)
     return;
 
-  driver_->GetPasswordManager()->OnGeneratedPasswordAccepted(
-      driver_.get(), form_.form_data, generation_element_id_,
-      current_password_);
-  Hide();
+  base::WeakPtr<PasswordGenerationPopupControllerImpl> weak_this = GetWeakPtr();
+  driver_->GeneratedPasswordAccepted(form_.form_data, generation_element_id_,
+                                     current_password_);
+  // |this| can be destroyed here because GeneratedPasswordAccepted pops up
+  // another UI and generates some event to close the dropdown.
+  if (weak_this)
+    weak_this->Hide();
 }
 
 void PasswordGenerationPopupControllerImpl::Show(GenerationUIState state) {
@@ -208,10 +212,6 @@ void PasswordGenerationPopupControllerImpl::Show(GenerationUIState state) {
         driver_->GetPasswordGenerationHelper()->GeneratePassword(
             web_contents()->GetLastCommittedURL().GetOrigin(), form_signature_,
             field_signature_, max_length_, &spec_priority);
-    if (driver_ && driver_->GetPasswordManager()) {
-      driver_->GetPasswordManager()->ReportSpecPriorityForGeneratedPassword(
-          form_, spec_priority);
-    }
   }
   state_ = state;
 
@@ -335,9 +335,6 @@ PasswordGenerationPopupControllerImpl::GetSuggestions() {
 }
 
 #if !defined(OS_ANDROID)
-void PasswordGenerationPopupControllerImpl::SetTypesetter(
-    gfx::Typesetter typesetter) {}
-
 int PasswordGenerationPopupControllerImpl::GetElidedValueWidthForRow(int row) {
   return 0;
 }

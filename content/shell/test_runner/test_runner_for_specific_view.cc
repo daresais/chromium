@@ -55,7 +55,6 @@
 #include "third_party/blink/public/web/web_security_policy.h"
 #include "third_party/blink/public/web/web_serialized_script_value.h"
 #include "third_party/blink/public/web/web_settings.h"
-#include "third_party/blink/public/web/web_surrounding_text.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -98,7 +97,6 @@ void TestRunnerForSpecificView::Reset() {
   if (web_view()->MainFrame()->IsWebLocalFrame()) {
     web_view()->MainFrame()->ToWebLocalFrame()->EnableViewSourceMode(false);
     web_view()->SetTextZoomFactor(1);
-    web_view()->SetZoomLevel(0);
     // As would the browser via IPC, set visibility on the RenderWidget then on
     // the Page.
     // TODO(danakj): This should set visibility on all RenderWidgets not just
@@ -107,8 +105,9 @@ void TestRunnerForSpecificView::Reset() {
     // LayerTreeView.
     main_frame_render_widget()->layer_tree_view()->SetVisible(true);
   }
-  web_view_test_proxy_->ApplyPageHidden(/*hidden=*/false,
-                                        /*initial_setting=*/true);
+  web_view_test_proxy_->ApplyPageVisibilityState(
+      content::PageVisibilityState::kVisible,
+      /*initial_setting=*/true);
 }
 
 bool TestRunnerForSpecificView::RequestPointerLock() {
@@ -490,13 +489,14 @@ void TestRunnerForSpecificView::ForceRedSelectionColors() {
 
 void TestRunnerForSpecificView::SetPageVisibility(
     const std::string& new_visibility) {
-  bool hidden;
-  if (new_visibility == "visible")
-    hidden = false;
-  else if (new_visibility == "hidden")
-    hidden = true;
-  else
+  content::PageVisibilityState visibility;
+  if (new_visibility == "visible") {
+    visibility = content::PageVisibilityState::kVisible;
+  } else if (new_visibility == "hidden") {
+    visibility = content::PageVisibilityState::kHidden;
+  } else {
     return;
+  }
 
   // As would the browser via IPC, set visibility on the RenderWidget then on
   // the Page.
@@ -504,9 +504,10 @@ void TestRunnerForSpecificView::SetPageVisibility(
   // main frame.
   // TODO(danakj): This should set visible on the RenderWidget not just the
   // LayerTreeView.
-  main_frame_render_widget()->layer_tree_view()->SetVisible(!hidden);
-  web_view_test_proxy_->ApplyPageHidden(/*hidden=*/hidden,
-                                        /*initial_setting=*/false);
+  main_frame_render_widget()->layer_tree_view()->SetVisible(
+      visibility == content::PageVisibilityState::kVisible);
+  web_view_test_proxy_->ApplyPageVisibilityState(visibility,
+                                                 /*initial_setting=*/false);
 }
 
 void TestRunnerForSpecificView::SetTextDirection(
@@ -603,7 +604,7 @@ void TestRunnerForSpecificView::SetDomainRelaxationForbiddenForURLScheme(
 
 v8::Local<v8::Value>
 TestRunnerForSpecificView::EvaluateScriptInIsolatedWorldAndReturnValue(
-    int world_id,
+    int32_t world_id,
     const std::string& script) {
   blink::WebScriptSource source(blink::WebString::FromUTF8(script));
   // This relies on the iframe focusing itself when it loads. This is a bit
@@ -617,14 +618,14 @@ TestRunnerForSpecificView::EvaluateScriptInIsolatedWorldAndReturnValue(
 }
 
 void TestRunnerForSpecificView::EvaluateScriptInIsolatedWorld(
-    int world_id,
+    int32_t world_id,
     const std::string& script) {
   blink::WebScriptSource source(blink::WebString::FromUTF8(script));
   web_view()->FocusedFrame()->ExecuteScriptInIsolatedWorld(world_id, source);
 }
 
 void TestRunnerForSpecificView::SetIsolatedWorldInfo(
-    int world_id,
+    int32_t world_id,
     v8::Local<v8::Value> security_origin,
     v8::Local<v8::Value> content_security_policy) {
   if (world_id <= content::ISOLATED_WORLD_ID_GLOBAL ||

@@ -58,7 +58,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
         }, description);
     }
 
-    private void setUp() throws Exception {
+    private void setUp() {
         TestThreadUtils.runOnUiThreadBlocking(() -> { initialize(); });
     }
 
@@ -67,7 +67,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
                                                    .getTargetContext()
                                                    .getApplicationContext());
 
-        mSelector = new TabModelSelectorBase() {
+        mSelector = new TabModelSelectorBase(null, false) {
             @Override
             public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
                     boolean incognito) {
@@ -75,7 +75,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
             }
         };
 
-        TabModelOrderController orderController = new TabModelOrderController(mSelector);
+        TabModelOrderController orderController = new TabModelOrderControllerImpl(mSelector);
         TabContentManager tabContentManager =
                 new TabContentManager(InstrumentationRegistry.getTargetContext(), null, false);
         TabPersistencePolicy persistencePolicy = new TabbedModeTabPersistencePolicy(0, false);
@@ -127,7 +127,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
         mIncognitoTabModel = new TabModelSelectorTestTabModel(
                 true, orderController, tabContentManager, tabPersistentStore, delegate);
 
-        mSelector.initialize(false, mNormalTabModel, mIncognitoTabModel);
+        mSelector.initialize(mNormalTabModel, mIncognitoTabModel);
     }
 
     /**

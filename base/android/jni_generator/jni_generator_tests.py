@@ -25,6 +25,7 @@ from jni_generator import CalledByNative
 from jni_generator import IsMainDexJavaClass
 from jni_generator import NativeMethod
 from jni_generator import Param
+from jni_generator import ProxyHelpers
 
 _SCRIPT_NAME = 'base/android/jni_generator/jni_generator.py'
 _INCLUDES = ('base/android/jni_generator/jni_generator_helper.h')
@@ -228,16 +229,13 @@ class TestGenerator(BaseTest):
             static=False,
             name='Init',
             params=[],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='void',
             static=False,
             name='Destroy',
             params=[Param(datatype='int', name='nativeChromeBrowserProvider')],
-            java_class_name=None,
-            type='method',
-            p0_type='ChromeBrowserProvider'),
+            java_class_name=None),
         NativeMethod(
             return_type='long',
             static=False,
@@ -249,16 +247,13 @@ class TestGenerator(BaseTest):
                 Param(datatype='boolean', name='isFolder'),
                 Param(datatype='long', name='parentId')
             ],
-            java_class_name=None,
-            type='method',
-            p0_type='ChromeBrowserProvider'),
+            java_class_name=None),
         NativeMethod(
             return_type='String',
             static=True,
             name='GetDomainAndRegistry',
             params=[Param(datatype='String', name='url')],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='void',
             static=True,
@@ -267,22 +262,19 @@ class TestGenerator(BaseTest):
                 Param(datatype='byte[]', name='state'),
                 Param(datatype='int', name='tab_index')
             ],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='byte[]',
             static=False,
             name='GetStateAsByteArray',
             params=[Param(datatype='View', name='view')],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='String[]',
             static=True,
             name='GetAutofillProfileGUIDs',
             params=[],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='void',
             static=False,
@@ -291,8 +283,7 @@ class TestGenerator(BaseTest):
                 Param(datatype='int', name='sessionId'),
                 Param(datatype='String[]', name='results')
             ],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='long',
             static=False,
@@ -307,23 +298,19 @@ class TestGenerator(BaseTest):
                 Param(datatype='String', name='title'),
                 Param(datatype='Integer', name='visits')
             ],
-            java_class_name=None,
-            type='method',
-            p0_type='ChromeBrowserProvider'),
+            java_class_name=None),
         NativeMethod(
             return_type='int',
             static=False,
             name='FindAll',
             params=[Param(datatype='String', name='find')],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='OnFrameAvailableListener',
             static=True,
             name='GetInnerClass',
             params=[],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='Bitmap',
             static=False,
@@ -335,9 +322,7 @@ class TestGenerator(BaseTest):
                 Param(datatype='String[]', name='selectionArgs'),
                 Param(datatype='String', name='sortOrder'),
             ],
-            java_class_name=None,
-            type='method',
-            p0_type='ChromeBrowserProvider'),
+            java_class_name=None),
         NativeMethod(
             return_type='void',
             static=False,
@@ -348,16 +333,13 @@ class TestGenerator(BaseTest):
                 Param(datatype='double', name='beta'),
                 Param(datatype='double', name='gamma'),
             ],
-            java_class_name=None,
-            type='method',
-            p0_type='content::DataFetcherImplAndroid'),
+            java_class_name=None),
         NativeMethod(
             return_type='Throwable',
             static=True,
             name='MessWithJavaException',
             params=[Param(datatype='Throwable', name='e')],
-            java_class_name=None,
-            type='function')
+            java_class_name=None)
     ]
     self.AssertListEquals(golden_natives, natives)
     h1 = jni_generator.InlHeaderFileGenerator('', 'org/chromium/TestJni',
@@ -391,8 +373,7 @@ class TestGenerator(BaseTest):
             static=False,
             name='Init',
             params=[],
-            java_class_name='MyInnerClass',
-            type='function')
+            java_class_name='MyInnerClass')
     ]
     self.AssertListEquals(golden_natives, natives)
     jni_params = jni_generator.JniParams('')
@@ -419,15 +400,13 @@ class TestGenerator(BaseTest):
             static=False,
             name='Init',
             params=[],
-            java_class_name='MyInnerClass',
-            type='function'),
+            java_class_name='MyInnerClass'),
         NativeMethod(
             return_type='int',
             static=False,
             name='Init',
             params=[],
-            java_class_name='MyOtherInnerClass',
-            type='function')
+            java_class_name='MyOtherInnerClass')
     ]
     self.AssertListEquals(golden_natives, natives)
     jni_params = jni_generator.JniParams('')
@@ -453,15 +432,13 @@ class TestGenerator(BaseTest):
             static=False,
             name='Init',
             params=[],
-            java_class_name=None,
-            type='function'),
+            java_class_name=None),
         NativeMethod(
             return_type='int',
             static=False,
             name='Init',
             params=[],
-            java_class_name='MyOtherInnerClass',
-            type='function')
+            java_class_name='MyOtherInnerClass')
     ]
     self.AssertListEquals(golden_natives, natives)
     jni_params = jni_generator.JniParams('')
@@ -1098,8 +1075,6 @@ class Foo {
             name='Destroy',
             params=[Param(datatype='long', name='nativeChromeBrowserProvider')],
             java_class_name=None,
-            type='method',
-            p0_type='ChromeBrowserProvider',
             ptr_type=test_options.ptr_type),
     ]
     self.AssertListEquals(golden_natives, natives)
@@ -1274,13 +1249,13 @@ class Foo {
     package org.chromium.foo;
 
     class Bar {
-      static native void nativeShouldBindCaller(@JCaller Object caller);
-      static native void nativeShouldBindCaller(@JCaller Object caller, int a);
-      static native void nativeFoo(@JCaller Bar caller,
-                          long nativeNativeObject);
-      static native void nativeFoo(@JCaller Bar caller,
-                          long nativeNativeObject, int a);
+      static native void nativeShouldBindCaller(Object caller);
+      static native void nativeShouldBindCaller(Object caller, int a);
+      static native void nativeFoo(long nativeNativeObject, Bar caller);
+      static native void nativeFoo(long nativeNativeObject, Bar caller, int a);
       native void nativeCallNativeMethod(long nativePtr);
+      @NativeClassQualifiedName("Foo::Bar")
+      native void nativeCallWithQualifiedObject(long nativePtr);
     }
     """
 
@@ -1314,7 +1289,7 @@ class ProxyTestGenerator(BaseTest):
        void foo();
        String bar(String s, int y, char x, short z);
        String[] foobar(String[] a);
-       void baz(@JCaller BazClass caller, long nativePtr);
+       void baz(long nativePtr, BazClass caller);
        void fooBar(long nativePtr);
     }
 
@@ -1354,8 +1329,7 @@ class ProxyTestGenerator(BaseTest):
             params=[],
             java_class_name=None,
             is_proxy=True,
-            proxy_name='org_chromium_example_SampleProxyJni_foo_1bar',
-            type='function'),
+            proxy_name='org_chromium_example_SampleProxyJni_foo_1bar'),
         NativeMethod(
             return_type='void',
             static=True,
@@ -1363,8 +1337,7 @@ class ProxyTestGenerator(BaseTest):
             params=[],
             java_class_name=None,
             is_proxy=True,
-            proxy_name='org_chromium_example_SampleProxyJni_foo_1_1bar',
-            type='function'),
+            proxy_name='org_chromium_example_SampleProxyJni_foo_1_1bar'),
     ]
 
     self.AssertListEquals(natives, golden_natives)
@@ -1406,8 +1379,7 @@ class ProxyTestGenerator(BaseTest):
             params=[],
             java_class_name=None,
             is_proxy=True,
-            proxy_name='test_foo_Foo_thisismaindex',
-            type='function'),
+            proxy_name='test_foo_Foo_thisismaindex'),
     ]
 
     self.AssertListEquals(natives, golden_natives)
@@ -1449,9 +1421,12 @@ class ProxyTestGenerator(BaseTest):
     test_data = """
     class SampleProxyJni {
       private void do_not_match();
+      @VisibleForTesting
       @NativeMethods
+      @Generated("Test")
       interface Natives {
-        void foo();
+        @NativeClassQualifiedName("FooAndroid::BarDelegate")
+        void foo(long nativePtr);
         int bar(int x, int y);
         String foobar(String x, String y);
       }
@@ -1467,7 +1442,8 @@ class ProxyTestGenerator(BaseTest):
       Natives
 
 
-      { void     foo();
+      { @NativeClassQualifiedName("FooAndroid::BarDelegate") void
+    foo(long nativePtr);
       int              bar(int
       x,  int y); String
         foobar(String x, String y);
@@ -1487,11 +1463,12 @@ class ProxyTestGenerator(BaseTest):
             return_type='void',
             static=True,
             name='foo',
-            params=[],
+            native_class_name='FooAndroid::BarDelegate',
+            params=[Param(datatype='long', name='nativePtr')],
             java_class_name=None,
             is_proxy=True,
             proxy_name='org_chromium_example_SampleProxyJni_foo',
-            type='function'),
+            ptr_type='long'),
         NativeMethod(
             return_type='int',
             static=True,
@@ -1502,8 +1479,7 @@ class ProxyTestGenerator(BaseTest):
             ],
             java_class_name=None,
             is_proxy=True,
-            proxy_name='org_chromium_example_SampleProxyJni_bar',
-            type='function'),
+            proxy_name='org_chromium_example_SampleProxyJni_bar'),
         NativeMethod(
             return_type='String',
             static=True,
@@ -1514,8 +1490,7 @@ class ProxyTestGenerator(BaseTest):
             ],
             java_class_name=None,
             is_proxy=True,
-            proxy_name='org_chromium_example_SampleProxyJni_foobar',
-            type='function'),
+            proxy_name='org_chromium_example_SampleProxyJni_foobar'),
     ]
     self.AssertListEquals(golden_natives, natives)
     self.AssertListEquals(golden_natives, bad_spacing_natives)
@@ -1583,6 +1558,70 @@ class ProxyTestGenerator(BaseTest):
     content = jni_registration_generator.CreateProxyJavaFromDict(
         reg_dict, proxy_options)
     self.AssertGoldenTextEquals(content, 'MocksRequired')
+
+  def testProxyTypeInfoPreserved(self):
+    test_data = """
+    package org.chromium.foo;
+
+    class Foo {
+
+    @NativeMethods
+    interface Natives {
+      char[][] fooProxy(byte[][] b);
+      SomeJavaType[][] barProxy(String[][] s, short z);
+      String[] foobarProxy(String[] a, int[][] b);
+      byte[][] bazProxy(long nativePtr, BazClass caller,
+          SomeJavaType[][] someObjects);
+    }
+    """
+    natives = ProxyHelpers.ExtractStaticProxyNatives('org/chromium/foo/FooJni',
+                                                     test_data, 'long')
+    golden_natives = [
+        NativeMethod(
+            static=True,
+            java_class_name=None,
+            return_type='char[][]',
+            name='fooProxy',
+            params=[Param(datatype='byte[][]', name='b')],
+            is_proxy=True,
+            proxy_name='org_chromium_foo_FooJni_fooProxy'),
+        NativeMethod(
+            static=True,
+            java_class_name=None,
+            return_type='Object[][]',
+            name='barProxy',
+            params=[
+                Param(datatype='String[][]', name='s'),
+                Param(datatype='short', name='z')
+            ],
+            is_proxy=True,
+            proxy_name='org_chromium_foo_FooJni_barProxy'),
+        NativeMethod(
+            static=True,
+            java_class_name=None,
+            return_type='String[]',
+            name='foobarProxy',
+            params=[
+                Param(datatype='String[]', name='a'),
+                Param(datatype='int[][]', name='b')
+            ],
+            is_proxy=True,
+            proxy_name='org_chromium_foo_FooJni_foobarProxy'),
+        NativeMethod(
+            static=True,
+            java_class_name=None,
+            return_type='byte[][]',
+            name='bazProxy',
+            params=[
+                Param(datatype='long', name='nativePtr'),
+                Param(datatype='Object', name='caller'),
+                Param(datatype='Object[][]', name='someObjects')
+            ],
+            is_proxy=True,
+            proxy_name='org_chromium_foo_FooJni_bazProxy',
+            ptr_type='long')
+    ]
+    self.AssertListEquals(golden_natives, natives)
 
 
 def TouchStamp(stamp_path):

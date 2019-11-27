@@ -17,7 +17,6 @@
 #include "components/autofill_assistant/browser/client_settings.h"
 #include "components/autofill_assistant/browser/element_area.h"
 #include "components/autofill_assistant/browser/metrics.h"
-#include "components/autofill_assistant/browser/payment_request.h"
 #include "components/autofill_assistant/browser/script.h"
 #include "components/autofill_assistant/browser/script_executor_delegate.h"
 #include "components/autofill_assistant/browser/script_tracker.h"
@@ -26,7 +25,8 @@
 #include "components/autofill_assistant/browser/trigger_context.h"
 #include "components/autofill_assistant/browser/ui_delegate.h"
 #include "components/autofill_assistant/browser/user_action.h"
-#include "components/autofill_assistant/browser/web_controller.h"
+#include "components/autofill_assistant/browser/user_data.h"
+#include "components/autofill_assistant/browser/web/web_controller.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 
@@ -72,6 +72,10 @@ class Controller : public ScriptExecutorDelegate,
   void Track(std::unique_ptr<TriggerContext> trigger_context,
              base::OnceCallback<void()> on_first_check_done);
 
+  // Returns true if we are in tracking mode and the first round of script
+  // checks has been completed.
+  bool HasRunFirstCheck() const;
+
   // Called when autofill assistant should start.
   //
   // This shows a UI, containing a progress bar, and executes the first
@@ -81,23 +85,26 @@ class Controller : public ScriptExecutorDelegate,
   // running.
   //
   // Start() will overwrite any context previously set by Track().
-  void Start(const GURL& deeplink_url,
+  bool Start(const GURL& deeplink_url,
              std::unique_ptr<TriggerContext> trigger_context);
 
   // Returns true if the controller is in a state where UI is necessary.
-  bool NeedsUI() const;
+  bool NeedsUI() const { return needs_ui_; }
 
   // Overrides ScriptExecutorDelegate:
   const ClientSettings& GetSettings() override;
   const GURL& GetCurrentURL() override;
   const GURL& GetDeeplinkURL() override;
   Service* GetService() override;
-  UiController* GetUiController() override;
   WebController* GetWebController() override;
   ClientMemory* GetClientMemory() override;
   const TriggerContext* GetTriggerContext() override;
   autofill::PersonalDataManager* GetPersonalDataManager() override;
+  WebsiteLoginFetcher* GetWebsiteLoginFetcher() override;
   content::WebContents* GetWebContents() override;
+  std::string GetAccountEmailAddress() override;
+  std::string GetLocale() override;
+
   void SetTouchableElementArea(const ElementAreaProto& area) override;
   void SetStatusMessage(const std::string& message) override;
   std::string GetStatusMessage() const override;
@@ -110,19 +117,29 @@ class Controller : public ScriptExecutorDelegate,
   void SetProgressVisible(bool visible) override;
   void SetUserActions(
       std::unique_ptr<std::vector<UserAction>> user_actions) override;
-  void SetResizeViewport(bool resize_viewport) override;
+  void SetViewportMode(ViewportMode mode) override;
   void SetPeekMode(ConfigureBottomSheetProto::PeekMode peek_mode) override;
-  bool SetForm(std::unique_ptr<FormProto> form,
-               base::RepeatingCallback<void(const FormProto::Result*)> callback)
-      override;
+  bool SetForm(
+      std::unique_ptr<FormProto> form,
+      base::RepeatingCallback<void(const FormProto::Result*)> changed_callback,
+      base::OnceCallback<void(const ClientStatus&)> cancel_callback) override;
   bool IsNavigatingToNewDocument() override;
   bool HasNavigationError() override;
+
+  // Show the UI if it's not already shown. This is only meaningful while in
+  // states where showing the UI is optional, such as RUNNING, in tracking mode.
+  void RequireUI() override;
+
   void AddListener(ScriptExecutorDelegate::Listener* listener) override;
   void RemoveListener(ScriptExecutorDelegate::Listener* listener) override;
 
   void EnterState(AutofillAssistantState state) override;
-  void SetPaymentRequestOptions(
-      std::unique_ptr<PaymentRequestOptions> options) override;
+  void SetCollectUserDataOptions(
+      std::unique_ptr<CollectUserDataOptions> options,
+      std::unique_ptr<UserData> information) override;
+  void WriteUserData(base::OnceCallback<void(const CollectUserDataOptions*,
+                                             UserData*,
+                                             UserData::FieldChange*)>) override;
   void OnScriptError(const std::string& error_message,
                      Metrics::DropOutReason reason);
 
@@ -139,18 +156,34 @@ class Controller : public ScriptExecutorDelegate,
       int index,
       std::unique_ptr<TriggerContext> context) override;
   std::string GetDebugContext() override;
-  const PaymentRequestOptions* GetPaymentRequestOptions() const override;
-  const PaymentInformation* GetPaymentRequestInformation() const override;
+  const CollectUserDataOptions* GetCollectUserDataOptions() const override;
+  const UserData* GetUserData() const override;
   void SetShippingAddress(
       std::unique_ptr<autofill::AutofillProfile> address) override;
-  void SetBillingAddress(
-      std::unique_ptr<autofill::AutofillProfile> address) override;
-  void SetContactInfo(std::string name,
-                      std::string phone,
-                      std::string email) override;
-  void SetCreditCard(std::unique_ptr<autofill::CreditCard> card) override;
+  void SetContactInfo(
+      std::unique_ptr<autofill::AutofillProfile> profile) override;
+  void SetCreditCard(
+      std::unique_ptr<autofill::CreditCard> card,
+      std::unique_ptr<autofill::AutofillProfile> billing_profile) override;
   void SetTermsAndConditions(
       TermsAndConditionsState terms_and_conditions) override;
+  void SetLoginOption(std::string identifier) override;
+  void OnTermsAndConditionsLinkClicked(int link) override;
+  void OnFormActionLinkClicked(int link) override;
+  void SetDateTimeRangeStart(int year,
+                             int month,
+                             int day,
+                             int hour,
+                             int minute,
+                             int second) override;
+  void SetDateTimeRangeEnd(int year,
+                           int month,
+                           int day,
+                           int hour,
+                           int minute,
+                           int second) override;
+  void SetAdditionalValue(const std::string& client_memory_key,
+                          const std::string& value) override;
   void GetTouchableArea(std::vector<RectF>* area) const override;
   void GetRestrictedArea(std::vector<RectF>* area) const override;
   void GetVisualViewport(RectF* visual_viewport) const override;
@@ -158,14 +191,17 @@ class Controller : public ScriptExecutorDelegate,
                     Metrics::DropOutReason reason) override;
   void PerformDelayedShutdownIfNecessary();
   void MaybeReportFirstCheckDone();
-  bool GetResizeViewport() override;
+  ViewportMode GetViewportMode() override;
   ConfigureBottomSheetProto::PeekMode GetPeekMode() override;
   void GetOverlayColors(OverlayColors* colors) const override;
+  const ClientSettings& GetClientSettings() const override;
   const FormProto* GetForm() const override;
   void SetCounterValue(int input_index, int counter_index, int value) override;
   void SetChoiceSelected(int input_index,
                          int choice_index,
                          bool selected) override;
+  void AddObserver(ControllerObserver* observer) override;
+  void RemoveObserver(const ControllerObserver* observer) override;
 
  private:
   friend ControllerTest;
@@ -188,6 +224,8 @@ class Controller : public ScriptExecutorDelegate,
   // Execute |script_path| and, if execution succeeds, enter |end_state| and
   // call |on_success|.
   void ExecuteScript(const std::string& script_path,
+                     const std::string& start_message,
+                     bool needs_ui,
                      std::unique_ptr<TriggerContext> context,
                      AutofillAssistantState end_state);
   void OnScriptExecuted(const std::string& script_path,
@@ -212,11 +250,12 @@ class Controller : public ScriptExecutorDelegate,
   void InitFromParameters();
 
   // Called when a script is selected.
-  void OnScriptSelected(const std::string& script_path,
+  void OnScriptSelected(const ScriptHandle& handle,
                         std::unique_ptr<TriggerContext> context);
 
-  void UpdatePaymentRequestActions();
-  void OnPaymentRequestContinueButtonClicked();
+  void UpdateCollectUserDataActions();
+  void OnCollectUserDataContinueButtonClicked();
+  void OnCollectUserDataAdditionalActionTriggered(int index);
 
   // Overrides ScriptTracker::Listener:
   void OnNoRunnableScriptsForPage() override;
@@ -253,8 +292,6 @@ class Controller : public ScriptExecutorDelegate,
   ClientSettings settings_;
   Client* const client_;
   const base::TickClock* const tick_clock_;
-
-  std::unique_ptr<UiController> noop_ui_controller_;
 
   // Lazily instantiate in GetWebController().
   std::unique_ptr<WebController> web_controller_;
@@ -320,8 +357,8 @@ class Controller : public ScriptExecutorDelegate,
   // Current set of user actions. May be null, but never empty.
   std::unique_ptr<std::vector<UserAction>> user_actions_;
 
-  // Whether the viewport should be resized.
-  bool resize_viewport_ = false;
+  // Current viewport mode.
+  ViewportMode viewport_mode_ = ViewportMode::NO_RESIZE;
 
   // Current peek mode.
   ConfigureBottomSheetProto::PeekMode peek_mode_ =
@@ -329,12 +366,14 @@ class Controller : public ScriptExecutorDelegate,
 
   std::unique_ptr<OverlayColors> overlay_colors_;
 
-  std::unique_ptr<PaymentRequestOptions> payment_request_options_;
-  std::unique_ptr<PaymentInformation> payment_request_info_;
+  std::unique_ptr<CollectUserDataOptions> collect_user_data_options_;
+  std::unique_ptr<UserData> user_data_;
 
   std::unique_ptr<FormProto> form_;
   std::unique_ptr<FormProto::Result> form_result_;
-  base::RepeatingCallback<void(const FormProto::Result*)> form_callback_ =
+  base::RepeatingCallback<void(const FormProto::Result*)>
+      form_changed_callback_ = base::DoNothing();
+  base::OnceCallback<void(const ClientStatus&)> form_cancel_callback_ =
       base::DoNothing();
 
   // Value for ScriptExecutorDelegate::IsNavigatingToNewDocument()
@@ -350,6 +389,8 @@ class Controller : public ScriptExecutorDelegate,
   // Lazily instantiate in script_tracker().
   std::unique_ptr<ScriptTracker> script_tracker_;
 
+  base::ObserverList<ControllerObserver> observers_;
+
   // If true, the controller is supposed to stay up and running in the
   // background even without UI, keeping track of scripts.
   //
@@ -361,6 +402,9 @@ class Controller : public ScriptExecutorDelegate,
   //
   // This is set by Track().
   bool tracking_ = false;
+
+  // Whether the controller is in a state in which a UI should be shown.
+  bool needs_ui_ = false;
 
   // True once the controller has run the first set of scripts and have either
   // declared it invalid - and entered stopped state - or have processed its
@@ -375,7 +419,7 @@ class Controller : public ScriptExecutorDelegate,
   // taken.
   base::Optional<Metrics::DropOutReason> delayed_shutdown_reason_;
 
-  base::WeakPtrFactory<Controller> weak_ptr_factory_;
+  base::WeakPtrFactory<Controller> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(Controller);
 };

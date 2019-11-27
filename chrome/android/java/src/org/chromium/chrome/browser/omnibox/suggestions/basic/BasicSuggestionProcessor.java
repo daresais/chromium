@@ -14,8 +14,9 @@ import android.util.Pair;
 import android.util.TypedValue;
 import android.view.View;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -41,7 +42,6 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
     private final SuggestionHost mSuggestionHost;
     private final UrlBarEditingTextStateProvider mUrlBarEditingTextProvider;
     private LargeIconBridge mLargeIconBridge;
-    private boolean mEnableNewAnswerLayout;
     private boolean mEnableSuggestionFavicons;
     private final int mDesiredFaviconWidthPx;
 
@@ -105,8 +105,6 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
     @Override
     public void onNativeInitialized() {
         // Experiment: controls presence of certain answer icon types.
-        mEnableNewAnswerLayout =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.OMNIBOX_NEW_ANSWER_LAYOUT);
         mEnableSuggestionFavicons =
                 ChromeFeatureList.isEnabled(ChromeFeatureList.OMNIBOX_SHOW_SUGGESTION_FAVICONS);
     }
@@ -131,10 +129,11 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
     @VisibleForTesting
     public @SuggestionIcon int getSuggestionIconType(OmniboxSuggestion suggestion) {
         if (suggestion.isUrlSuggestion()) {
-            if (suggestion.isStarred()) {
+            if (suggestion.getType() == OmniboxSuggestionType.CLIPBOARD_TEXT
+                    || suggestion.getType() == OmniboxSuggestionType.CLIPBOARD_IMAGE) {
+                return SuggestionIcon.MAGNIFIER;
+            } else if (suggestion.isStarred()) {
                 return SuggestionIcon.BOOKMARK;
-            } else if (suggestion.getType() == OmniboxSuggestionType.HISTORY_URL) {
-                return mEnableSuggestionFavicons ? SuggestionIcon.GLOBE : SuggestionIcon.HISTORY;
             } else {
                 return SuggestionIcon.GLOBE;
             }
@@ -145,12 +144,7 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
 
                 case OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED:
                 case OmniboxSuggestionType.SEARCH_HISTORY:
-                    return mEnableSuggestionFavicons ? SuggestionIcon.MAGNIFIER
-                                                     : SuggestionIcon.HISTORY;
-
-                case OmniboxSuggestionType.CALCULATOR:
-                    return mEnableNewAnswerLayout ? SuggestionIcon.CALCULATOR
-                                                  : SuggestionIcon.MAGNIFIER;
+                    return SuggestionIcon.HISTORY;
 
                 default:
                     return SuggestionIcon.MAGNIFIER;
@@ -177,7 +171,12 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
                         model.get(SuggestionCommonProperties.USE_DARK_COLORS)
                                 ? R.color.suggestion_url_dark_modern
                                 : R.color.suggestion_url_light_modern);
-                textLine2Direction = View.TEXT_DIRECTION_LTR;
+
+                if (suggestionType == OmniboxSuggestionType.CLIPBOARD_TEXT) {
+                    textLine2Direction = View.TEXT_DIRECTION_INHERIT;
+                } else {
+                    textLine2Direction = View.TEXT_DIRECTION_LTR;
+                }
             } else {
                 textLine2 = null;
             }
@@ -192,14 +191,6 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
                                 ? R.color.default_text_color_dark
                                 : R.color.default_text_color_light);
                 textLine2Direction = View.TEXT_DIRECTION_INHERIT;
-            } else if (mEnableNewAnswerLayout
-                    && suggestionType == OmniboxSuggestionType.CALCULATOR) {
-                textLine2 = SpannableString.valueOf(
-                        mUrlBarEditingTextProvider.getTextWithAutocomplete());
-
-                textLine2Color = ApiCompatibilityUtils.getColor(
-                        mContext.getResources(), R.color.answers_answer_text);
-                textLine2Direction = View.TEXT_DIRECTION_INHERIT;
             } else {
                 textLine2 = null;
             }
@@ -207,10 +198,6 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
 
         model.set(SuggestionViewProperties.SUGGESTION_ICON_TYPE, getSuggestionIconType(suggestion));
         model.set(SuggestionViewProperties.SUGGESTION_ICON_BITMAP, null);
-
-        model.set(SuggestionViewProperties.IS_ANSWER, false);
-        model.set(SuggestionViewProperties.HAS_ANSWER_IMAGE, false);
-        model.set(SuggestionViewProperties.ANSWER_IMAGE, null);
 
         model.set(
                 SuggestionViewProperties.TEXT_LINE_1_TEXT, new SuggestionTextContainer(textLine1));
@@ -233,25 +220,27 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
         model.set(SuggestionViewProperties.TEXT_LINE_2_MAX_LINES, 1);
 
         // Include site favicon if we are presenting URL and have favicon available.
-        if (mLargeIconBridge != null && suggestion.getUrl() != null) {
+        // TODO(gangwu): Create a saparate processor for clipboard suggestions.
+        if (mLargeIconBridge != null && suggestion.getUrl() != null
+                && suggestion.getType() != OmniboxSuggestionType.CLIPBOARD_TEXT) {
             mLargeIconBridge.getLargeIconForUrl(suggestion.getUrl(), mDesiredFaviconWidthPx,
                     (Bitmap icon, int fallbackColor, boolean isFallbackColorDefault,
                             int iconType) -> {
-                        if (!mSuggestionHost.isActiveModel(model)) return;
                         if (icon != null) {
                             model.set(SuggestionViewProperties.SUGGESTION_ICON_BITMAP, icon);
                             model.set(SuggestionViewProperties.SUGGESTION_ICON_TYPE,
                                     SuggestionIcon.FAVICON);
-                            mSuggestionHost.notifyPropertyModelsChanged();
                         }
                     });
         }
 
-        boolean sameAsTyped =
-                mUrlBarEditingTextProvider.getTextWithoutAutocomplete().trim().equalsIgnoreCase(
-                        suggestion.getDisplayText());
-        model.set(SuggestionViewProperties.REFINABLE, !sameAsTyped);
-
+        boolean isRefinable =
+                !(mUrlBarEditingTextProvider.getTextWithoutAutocomplete().trim().equalsIgnoreCase(
+                          suggestion.getDisplayText())
+                        || suggestionType == OmniboxSuggestionType.CLIPBOARD_TEXT
+                        || suggestionType == OmniboxSuggestionType.CLIPBOARD_URL
+                        || suggestionType == OmniboxSuggestionType.CLIPBOARD_IMAGE);
+        model.set(SuggestionViewProperties.REFINABLE, isRefinable);
     }
 
     /**
@@ -285,34 +274,18 @@ public class BasicSuggestionProcessor implements SuggestionProcessor {
 
         if (suggestion.getType() == OmniboxSuggestionType.SEARCH_SUGGEST_TAIL) {
             String fillIntoEdit = suggestion.getFillIntoEdit();
-            // Data sanity checks.
-            if (fillIntoEdit.startsWith(userQuery) && fillIntoEdit.endsWith(suggestedQuery)
-                    && fillIntoEdit.length() < userQuery.length() + suggestedQuery.length()) {
-                final String ellipsisPrefix = "\u2026 ";
-                suggestedQuery = ellipsisPrefix + suggestedQuery;
-
-                // Offset the match classifications by the length of the ellipsis prefix to ensure
-                // the highlighting remains correct.
-                for (int i = 0; i < classifications.size(); i++) {
-                    classifications.set(i,
-                            new OmniboxSuggestion.MatchClassification(
-                                    classifications.get(i).offset + ellipsisPrefix.length(),
-                                    classifications.get(i).style));
-                }
-                classifications.add(0,
+            final String ellipsisPrefix = "\u2026 ";
+            suggestedQuery = ellipsisPrefix + suggestedQuery;
+            // Offset the match classifications by the length of the ellipsis prefix to ensure
+            // the highlighting remains correct.
+            for (int i = 0; i < classifications.size(); i++) {
+                classifications.set(i,
                         new OmniboxSuggestion.MatchClassification(
-                                0, MatchClassificationStyle.NONE));
+                                classifications.get(i).offset + ellipsisPrefix.length(),
+                                classifications.get(i).style));
             }
-        } else if (mEnableNewAnswerLayout
-                && suggestion.getType() == OmniboxSuggestionType.CALCULATOR) {
-            // Trim preceding equal sign since we're going to present an icon instead.
-            // This is probably best placed in search_suggestion_parser.cc file, but at this point
-            // this would affect other devices that still want to present the sign (eg. iOS) so
-            // until these devices adopt the new entities we need to manage this here.
-            if (suggestedQuery.subSequence(0, 2).equals("= ")) {
-                suggestedQuery = suggestedQuery.substring(2);
-            }
-            shouldHighlight = false;
+            classifications.add(
+                    0, new OmniboxSuggestion.MatchClassification(0, MatchClassificationStyle.NONE));
         }
 
         Spannable str = SpannableString.valueOf(suggestedQuery);

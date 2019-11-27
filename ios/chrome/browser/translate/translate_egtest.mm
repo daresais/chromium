@@ -15,7 +15,6 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "base/test/scoped_feature_list.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
@@ -30,7 +29,7 @@
 #import "ios/chrome/browser/chrome_url_util.h"
 #include "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
-#import "ios/chrome/browser/ui/translate/translate_infobar_coordinator.h"
+#import "ios/chrome/browser/ui/translate/legacy_translate_infobar_coordinator.h"
 #import "ios/chrome/browser/ui/translate/translate_infobar_view.h"
 #import "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -62,6 +61,7 @@ using chrome_test_util::ButtonWithAccessibilityLabel;
 using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::CloseButton;
 using chrome_test_util::ToolsMenuView;
+using chrome_test_util::WebStateScrollViewMatcher;
 
 namespace {
 
@@ -430,7 +430,6 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   std::unique_ptr<net::NetworkChangeNotifier::DisableForTest>
       network_change_notifier_disabler_;
   std::unique_ptr<FakeNetworkChangeNotifier> network_change_notifier_;
-  base::test::ScopedFeatureList feature_list_;
 }
 @end
 
@@ -757,9 +756,7 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   [self assertTranslateInfobarIsVisible];
 
   // Scroll down to enter the fullscreen mode.
-  [[EarlGrey
-      selectElementWithMatcher:web::WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       performAction:grey_swipeFastInDirection(kGREYDirectionUp)];
 
   // Expect the translate infobar to be hidden.
@@ -767,9 +764,7 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
       assertWithMatcher:grey_notVisible()];
 
   // Scroll up to exit the fullscreen mode.
-  [[EarlGrey
-      selectElementWithMatcher:web::WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
 
   [self assertTranslateInfobarIsVisible];
@@ -1041,12 +1036,12 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 
   [self assertTranslateInfobarIsVisible];
 
-  // Make sure that French to English translation is not whitelisted.
+  // Make sure that French to English translation is not automatic.
   std::unique_ptr<translate::TranslatePrefs> translatePrefs(
       ChromeIOSTranslateClient::CreateTranslatePrefs(
           chrome_test_util::GetOriginalBrowserState()->GetPrefs()));
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 
   // Open the translate options menu.
   [[EarlGrey selectElementWithMatcher:OptionsButton()]
@@ -1063,9 +1058,9 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   // Make sure the page is not translated yet.
   [ChromeEarlGrey waitForWebStateNotContainingText:"Translated"];
 
-  // Make sure that French to English translation is not whitelisted yet.
+  // Make sure that French to English translation is not automatic yet.
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 
   // Tap the notification snackbar to dismiss it.
   NSString* snackbarTitle =
@@ -1078,10 +1073,10 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   // Make sure the page is translated after the snackbar is dismissed.
   [ChromeEarlGrey waitForWebStateContainingText:"Translated"];
 
-  // Make sure that French to English translation is whitelisted after the
+  // Make sure that French to English translation is automatic after the
   // snackbar is dismissed.
   GREYAssert(translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is not whitelisted");
+             @"French to English translation is not automatic");
 
   // Reload the page.
   [ChromeEarlGrey reload];
@@ -1106,9 +1101,9 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   [[[EarlGrey selectElementWithMatcher:AlwaysTranslate(@"French")]
       assertWithMatcher:ElementIsSelected(YES)] performAction:grey_tap()];
 
-  // Make sure that French to English translation is no longer whitelisted.
+  // Make sure that French to English translation is no longer automatic.
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 
   // Open the translate options menu.
   [[EarlGrey selectElementWithMatcher:OptionsButton()]
@@ -1129,9 +1124,9 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   [[EarlGrey selectElementWithMatcher:AlwaysTranslate(@"French")]
       assertWithMatcher:ElementIsSelected(NO)];
 
-  // Make sure that French to English translation is not whitelisted.
+  // Make sure that French to English translation is not automatic.
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 }
 
 // Tests that "Always Translate" is automatically triggered after a minimum
@@ -1148,12 +1143,12 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 
   [self assertTranslateInfobarIsVisible];
 
-  // Make sure that French to English translation is not whitelisted.
+  // Make sure that French to English translation is not automatic.
   std::unique_ptr<translate::TranslatePrefs> translatePrefs(
       ChromeIOSTranslateClient::CreateTranslatePrefs(
           chrome_test_util::GetOriginalBrowserState()->GetPrefs()));
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 
   // Translate the page by tapping the target language tab until
   // "Always Translate" is automatically triggered.
@@ -1165,9 +1160,9 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
         performAction:grey_tap()];
   }
 
-  // Make sure that French to English translation is not whitelisted yet.
+  // Make sure that French to English translation is not automatic yet.
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 
   // Tap the notification snackbar to dismiss it.
   NSString* snackbarTitle =
@@ -1177,10 +1172,10 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(snackbarTitle)]
       performAction:grey_tap()];
 
-  // Make sure that French to English translation is whitelisted after the
+  // Make sure that French to English translation is automatic after the
   // snackbar is dismissed.
   GREYAssert(translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is not whitelisted");
+             @"French to English translation is not automatic");
 }
 
 // Tests that "Always Translate" is automatically triggered only for a maximum
@@ -1197,12 +1192,12 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 
   [self assertTranslateInfobarIsVisible];
 
-  // Make sure that French to English translation is not whitelisted.
+  // Make sure that French to English translation is not automatic.
   std::unique_ptr<translate::TranslatePrefs> translatePrefs(
       ChromeIOSTranslateClient::CreateTranslatePrefs(
           chrome_test_util::GetOriginalBrowserState()->GetPrefs()));
   GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("fr", "en"),
-             @"French to English translation is whitelisted");
+             @"French to English translation is automatic");
 
   // Trigger and refuse the auto "Always Translate".
   for (int i = 0;
@@ -1526,8 +1521,6 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 // the page when tapped. If the page is already translated the infobar should
 // appear in "after translate" state.
 - (void)testTranslateManualTrigger {
-  feature_list_.InitAndEnableFeature(translate::kTranslateMobileManualTrigger);
-
   // Start the HTTP server.
   std::unique_ptr<web::DataResponseProvider> provider(new TestResponseProvider);
   web::test::SetUpHttpServer(std::move(provider));
@@ -1609,8 +1602,6 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 // Translate infobar even if user has previously selected not to translate the
 // the source language.
 - (void)testTranslateManualTriggerNeverTranslate {
-  feature_list_.InitAndEnableFeature(translate::kTranslateMobileManualTrigger);
-
   // Start the HTTP server.
   std::unique_ptr<web::DataResponseProvider> provider(new TestResponseProvider);
   web::test::SetUpHttpServer(std::move(provider));
@@ -1662,8 +1653,6 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 // Translate infobar even if user has previously selected not to translate the
 // the site.
 - (void)testTranslateManualTriggerNeverTranslateSite {
-  feature_list_.InitAndEnableFeature(translate::kTranslateMobileManualTrigger);
-
   // Start the HTTP server.
   std::unique_ptr<web::DataResponseProvider> provider(new TestResponseProvider);
   web::test::SetUpHttpServer(std::move(provider));
@@ -1713,8 +1702,6 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
 // Tests that the "Translate..." button in the tools menu is disabled if
 // translate is not available.
 - (void)testTranslateManualTriggerNotEnabled {
-  feature_list_.InitAndEnableFeature(translate::kTranslateMobileManualTrigger);
-
   // Start the HTTP server.
   std::unique_ptr<web::DataResponseProvider> provider(new TestResponseProvider);
   web::test::SetUpHttpServer(std::move(provider));
@@ -1772,29 +1759,6 @@ class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
                             UIAccessibilityTraitNotEnabled)];
   // Close the tools menu.
   [ChromeTestCase removeAnyOpenMenusAndInfoBars];
-}
-
-// Tests that the "Translate..." button in the tools menu should not be visible
-// if the feature is disabled.
-- (void)testTranslateManualTriggerFeatureDisabled {
-  feature_list_.InitAndDisableFeature(translate::kTranslateMobileManualTrigger);
-
-  // Start the HTTP server.
-  std::unique_ptr<web::DataResponseProvider> provider(new TestResponseProvider);
-  web::test::SetUpHttpServer(std::move(provider));
-
-  // Load a page with French text.
-  GURL URL = web::test::HttpServer::MakeUrl(
-      base::StringPrintf("http://%s", kFrenchPagePath));
-  [ChromeEarlGrey loadURL:URL];
-
-  [self assertTranslateInfobarIsVisible];
-
-  // Make sure the Translate manual trigger button is not visible.
-  [ChromeEarlGreyUI openToolsMenu];
-  [[[EarlGrey selectElementWithMatcher:toolsMenuTranslateButton()]
-         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 200)
-      onElementWithMatcher:ToolsMenuView()] assertWithMatcher:grey_nil()];
 }
 
 #pragma mark - Utility methods

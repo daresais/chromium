@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/script/js_module_script.h"
+#include "third_party/blink/renderer/core/script/value_wrapper_synthetic_module_script.h"
 #include "third_party/blink/renderer/core/testing/dummy_modulator.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata.h"
@@ -31,7 +32,8 @@ class ModuleScriptTestModulator final : public DummyModulator {
       : script_state_(script_state) {}
   ~ModuleScriptTestModulator() override = default;
 
-  Vector<ModuleRequest> ModuleRequestsFromModuleRecord(ModuleRecord) override {
+  Vector<ModuleRequest> ModuleRequestsFromModuleRecord(
+      v8::Local<v8::Module>) override {
     return Vector<ModuleRequest>();
   }
 
@@ -80,6 +82,14 @@ class ModuleScriptTest : public ::testing::Test {
         ScriptSourceLocationType::kExternalFile, modulator,
         KURL("https://fox.url/script.js"), KURL("https://fox.url/"),
         ScriptFetchOptions());
+  }
+
+  static ValueWrapperSyntheticModuleScript*
+  CreateValueWrapperSyntheticModuleScript(Modulator* modulator,
+                                          v8::Local<v8::Value> local_value) {
+    return ValueWrapperSyntheticModuleScript::CreateWithDefaultExport(
+        local_value, modulator, KURL("https://fox.url/script.js"),
+        KURL("https://fox.url/"), ScriptFetchOptions());
   }
 
   // Tests |window.foo| is set correctly, and reset |window.foo| for the next
@@ -132,10 +142,14 @@ TEST_F(ModuleScriptTest, V8CodeCache) {
     ASSERT_TRUE(module_script);
 
     // Check that the module script is instantiated/evaluated correctly.
-    ASSERT_TRUE(
-        module_script->Record().Instantiate(scope.GetScriptState()).IsEmpty());
-    ASSERT_TRUE(
-        module_script->Record().Evaluate(scope.GetScriptState()).IsEmpty());
+    ASSERT_TRUE(ModuleRecord::Instantiate(scope.GetScriptState(),
+                                          module_script->V8Module(),
+                                          module_script->SourceURL())
+                    .IsEmpty());
+    ASSERT_TRUE(ModuleRecord::Evaluate(scope.GetScriptState(),
+                                       module_script->V8Module(),
+                                       module_script->SourceURL())
+                    .IsEmpty());
     TestFoo(scope);
 
     Checkpoint checkpoint;
@@ -237,6 +251,16 @@ TEST_F(ModuleScriptTest, V8CodeCache) {
       V8CodeCache::TagForTimeStamp(cache_handler)));
   EXPECT_FALSE(cache_handler->GetCachedMetadata(
       V8CodeCache::TagForCodeCache(cache_handler)));
+}
+
+TEST_F(ModuleScriptTest, ValueWrapperSyntheticModuleScript) {
+  V8TestingScope scope;
+  v8::Local<v8::Value> local_value(v8::Number::New(scope.GetIsolate(), 1234));
+  Modulator* modulator =
+      MakeGarbageCollected<ModuleScriptTestModulator>(scope.GetScriptState());
+  ValueWrapperSyntheticModuleScript* module_script =
+      CreateValueWrapperSyntheticModuleScript(modulator, local_value);
+  ASSERT_FALSE(module_script->V8Module().IsEmpty());
 }
 
 }  // namespace blink

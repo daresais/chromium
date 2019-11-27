@@ -75,8 +75,8 @@ bool IOSChromeUpdatePasswordInfoBarDelegate::ShowMultipleAccounts() const {
 
 NSArray* IOSChromeUpdatePasswordInfoBarDelegate::GetAccounts() const {
   NSMutableArray* usernames = [NSMutableArray array];
-  for (const auto& match : form_to_save()->GetBestMatches()) {
-    [usernames addObject:base::SysUTF16ToNSString(match.first)];
+  for (const auto* match : form_to_save()->GetBestMatches()) {
+    [usernames addObject:base::SysUTF16ToNSString(match->username_value)];
   }
   return usernames;
 }
@@ -115,10 +115,9 @@ bool IOSChromeUpdatePasswordInfoBarDelegate::Accept() {
   return true;
 }
 
-bool IOSChromeUpdatePasswordInfoBarDelegate::Cancel() {
+void IOSChromeUpdatePasswordInfoBarDelegate::InfoBarDismissed() {
   DCHECK(form_to_save());
   set_infobar_response(password_manager::metrics_util::CLICKED_CANCEL);
-  return true;
 }
 
 base::string16 IOSChromeUpdatePasswordInfoBarDelegate::GetLinkText() const {

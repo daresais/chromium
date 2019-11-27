@@ -138,7 +138,7 @@ void InitLogging(const base::CommandLine& command_line) {
 
   logging::LoggingSettings settings;
   settings.logging_dest = logging::LOG_TO_ALL;
-  settings.log_file = log_filename.value().c_str();
+  settings.log_file_path = log_filename.value().c_str();
   settings.delete_old = logging::DELETE_OLD_LOG_FILE;
   logging::InitLogging(settings);
   logging::SetLogItems(true /* Process ID */, true /* Thread ID */,
@@ -264,7 +264,6 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
                                    "MAP *.test. 127.0.0.1,"
                                    "MAP *.test 127.0.0.1");
 
-    command_line.AppendSwitch(switches::kEnablePartialRaster);
     command_line.AppendSwitch(switches::kEnableWebAuthTestingAPI);
 
     if (!command_line.HasSwitch(switches::kForceGpuRasterization) &&
@@ -289,7 +288,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     command_line.AppendSwitch(switches::kUseFakeDeviceForMediaStream);
 
     // Always disable the unsandbox GPU process for DX12 and Vulkan Info
-    // collection to avoid interference. This GPU process is launched 15
+    // collection to avoid interference. This GPU process is launched 120
     // seconds after chrome starts.
     command_line.AppendSwitch(
         switches::kDisableGpuProcessForDX12VulkanInfoCollection);

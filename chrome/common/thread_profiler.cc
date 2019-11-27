@@ -12,6 +12,7 @@
 #include "base/message_loop/work_id_provider.h"
 #include "base/no_destructor.h"
 #include "base/profiler/sample_metadata.h"
+#include "base/profiler/sampling_profiler_thread_token.h"
 #include "base/rand_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/sequence_local_storage_slot.h"
@@ -146,8 +147,9 @@ std::unique_ptr<ThreadProfiler> ThreadProfiler::CreateAndStartOnMainThread() {
   // If running in single process mode, there may be multiple "main thread"
   // profilers created. In this case, we assume the first created one is the
   // browser one.
-  bool is_single_process = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kSingleProcess);
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  bool is_single_process = command_line->HasSwitch(switches::kSingleProcess) ||
+                           command_line->HasSwitch(switches::kInProcessGPU);
   DCHECK(!g_main_thread_instance || is_single_process);
   auto instance = std::unique_ptr<ThreadProfiler>(
       new ThreadProfiler(CallStackProfileParams::MAIN_THREAD));
@@ -159,12 +161,8 @@ std::unique_ptr<ThreadProfiler> ThreadProfiler::CreateAndStartOnMainThread() {
 // static
 void ThreadProfiler::SetMainThreadTaskRunner(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-#if !defined(OS_ANDROID)
-  // TODO(asvitkine): The code path where we create the profiler instance in
-  // chrome_main.cc does not run on Android.
   DCHECK(g_main_thread_instance);
   g_main_thread_instance->SetMainThreadTaskRunnerImpl(task_runner);
-#endif
 }
 
 void ThreadProfiler::SetAuxUnwinderFactory(
@@ -208,7 +206,7 @@ void ThreadProfiler::SetCollectorForChildProcess(
 
   DCHECK_NE(CallStackProfileParams::BROWSER_PROCESS, GetProcess());
   CallStackProfileBuilder::SetParentProfileCollectorForChildProcess(
-      metrics::mojom::CallStackProfileCollectorPtr(std::move(collector)));
+      std::move(collector));
 }
 
 // ThreadProfiler implementation synopsis:
@@ -240,7 +238,7 @@ ThreadProfiler::ThreadProfiler(
     return;
 
   startup_profiler_ = std::make_unique<StackSamplingProfiler>(
-      base::PlatformThread::CurrentId(), kSamplingParams,
+      base::GetSamplingProfilerCurrentThreadToken(), kSamplingParams,
       std::make_unique<CallStackProfileBuilder>(
           CallStackProfileParams(GetProcess(), thread,
                                  CallStackProfileParams::PROCESS_STARTUP),
@@ -300,7 +298,7 @@ void ThreadProfiler::StartPeriodicSamplingCollection() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // NB: Destroys the previous profiler as side effect.
   periodic_profiler_ = std::make_unique<StackSamplingProfiler>(
-      base::PlatformThread::CurrentId(), kSamplingParams,
+      base::GetSamplingProfilerCurrentThreadToken(), kSamplingParams,
       std::make_unique<CallStackProfileBuilder>(
           CallStackProfileParams(GetProcess(), thread_,
                                  CallStackProfileParams::PERIODIC_COLLECTION),

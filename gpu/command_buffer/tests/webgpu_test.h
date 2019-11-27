@@ -5,7 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_TESTS_WEBGPU_TEST_H_
 #define GPU_COMMAND_BUFFER_TESTS_WEBGPU_TEST_H_
 
-#include <dawn/dawncpp.h>
+#include <dawn/webgpu_cpp.h>
 
 #include <memory>
 
@@ -51,11 +51,12 @@ class WebGPUTest : public testing::Test {
   SharedImageInterface* GetSharedImageInterface() const;
 
   void RunPendingTasks();
-  void WaitForCompletion(dawn::Device device);
+  void WaitForCompletion(wgpu::Device device);
 
  private:
   std::unique_ptr<viz::TestGpuServiceHolder> gpu_service_holder_;
   std::unique_ptr<WebGPUInProcessContext> context_;
+  bool is_initialized_ = false;
 };
 
 }  // namespace gpu

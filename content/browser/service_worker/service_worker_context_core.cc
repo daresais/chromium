@@ -23,6 +23,7 @@
 #include "content/browser/log_console_message.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_consts.h"
+#include "content/browser/service_worker/service_worker_container_host.h"
 #include "content/browser/service_worker/service_worker_context_core_observer.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_info.h"
@@ -31,14 +32,15 @@
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/browser/service_worker/service_worker_register_job.h"
 #include "content/browser/service_worker/service_worker_registration.h"
-#include "content/browser/service_worker/service_worker_storage.h"
 #include "content/browser/service_worker/service_worker_version.h"
+#include "content/browser/storage_partition_impl.h"
 #include "content/browser/url_loader_factory_getter.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/console_message.h"
 #include "content/public/common/child_process_host.h"
+#include "content/public/common/navigation_policy.h"
 #include "content/public/common/url_utils.h"
 #include "ipc/ipc_message.h"
 #include "net/http/http_response_headers.h"
@@ -123,15 +125,36 @@ void SuccessReportingCallback(
 bool IsSameOriginClientProviderHost(const GURL& origin,
                                     bool allow_reserved_client,
                                     ServiceWorkerProviderHost* host) {
-  return host->IsProviderForClient() && host->url().GetOrigin() == origin &&
-         (allow_reserved_client || host->is_execution_ready());
+  // If |host| is in BackForwardCache, it should be skipped in iteration,
+  // because (1) hosts in BackForwardCache should never be exposed to web as
+  // clients and (2) hosts could be in an unknown state after eviction and
+  // before deletion.
+  if (IsBackForwardCacheEnabled() &&
+      ServiceWorkerContext::IsServiceWorkerOnUIEnabled()) {
+    if (host->container_host()->IsInBackForwardCache())
+      return false;
+  }
+  return host->container_host()->IsContainerForClient() &&
+         host->container_host()->url().GetOrigin() == origin &&
+         (allow_reserved_client ||
+          host->container_host()->is_execution_ready());
 }
 
 bool IsSameOriginWindowProviderHost(const GURL& origin,
                                     ServiceWorkerProviderHost* host) {
-  return host->provider_type() ==
+  // If |host| is in BackForwardCache, it should be skipped in iteration,
+  // because (1) hosts in BackForwardCache should never be exposed to web as
+  // clients and (2) hosts could be in an unknown state after eviction and
+  // before deletion.
+  if (IsBackForwardCacheEnabled() &&
+      ServiceWorkerContext::IsServiceWorkerOnUIEnabled()) {
+    if (host->container_host()->IsInBackForwardCache())
+      return false;
+  }
+  return host->container_host()->type() ==
              blink::mojom::ServiceWorkerProviderType::kForWindow &&
-         host->url().GetOrigin() == origin && host->is_execution_ready();
+         host->container_host()->url().GetOrigin() == origin &&
+         host->container_host()->is_execution_ready();
 }
 
 // Returns true if any of the frames specified by |frames| is a top-level frame.
@@ -156,11 +179,11 @@ class ClearAllServiceWorkersHelper
  public:
   explicit ClearAllServiceWorkersHelper(base::OnceClosure callback)
       : callback_(std::move(callback)) {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   }
 
   void OnResult(blink::ServiceWorkerStatusCode) {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
     // We do nothing in this method. We use this class to wait for all callbacks
     // to be called using the refcount.
   }
@@ -192,9 +215,8 @@ class ClearAllServiceWorkersHelper
  private:
   friend class base::RefCounted<ClearAllServiceWorkersHelper>;
   ~ClearAllServiceWorkersHelper() {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             std::move(callback_));
+    DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+    base::PostTask(FROM_HERE, {BrowserThread::UI}, std::move(callback_));
   }
 
   base::OnceClosure callback_;
@@ -258,6 +280,12 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
     : wrapper_(wrapper),
       providers_(std::make_unique<ProviderByIdMap>()),
       provider_by_uuid_(std::make_unique<ProviderByClientUUIDMap>()),
+      storage_(ServiceWorkerStorage::Create(user_data_directory,
+                                            this,
+                                            std::move(database_task_runner),
+                                            quota_manager_proxy,
+                                            special_storage_policy)),
+      job_coordinator_(std::make_unique<ServiceWorkerJobCoordinator>(this)),
       loader_factory_getter_(url_loader_factory_getter),
       force_update_on_page_load_(false),
       was_service_worker_registered_(false),
@@ -268,12 +296,6 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
         base::MakeRefCounted<blink::URLLoaderFactoryBundle>(
             std::move(non_network_loader_factory_bundle_info_for_update_check));
   }
-  // These get a WeakPtr from |weak_factory_|, so must be set after
-  // |weak_factory_| is initialized.
-  storage_ = ServiceWorkerStorage::Create(
-      user_data_directory, AsWeakPtr(), std::move(database_task_runner),
-      quota_manager_proxy, special_storage_policy);
-  job_coordinator_ = std::make_unique<ServiceWorkerJobCoordinator>(AsWeakPtr());
 }
 
 ServiceWorkerContextCore::ServiceWorkerContextCore(
@@ -282,38 +304,34 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
     : wrapper_(wrapper),
       providers_(old_context->providers_.release()),
       provider_by_uuid_(old_context->provider_by_uuid_.release()),
+      storage_(ServiceWorkerStorage::Create(this, old_context->storage())),
+      job_coordinator_(std::make_unique<ServiceWorkerJobCoordinator>(this)),
       loader_factory_getter_(old_context->loader_factory_getter()),
       loader_factory_bundle_for_update_check_(
           std::move(old_context->loader_factory_bundle_for_update_check_)),
       was_service_worker_registered_(
           old_context->was_service_worker_registered_),
       observer_list_(old_context->observer_list_),
-      next_embedded_worker_id_(old_context->next_embedded_worker_id_) {
-  DCHECK(observer_list_);
-
-  // These get a WeakPtr from |weak_factory_|, so must be set after
-  // |weak_factory_| is initialized.
-  storage_ = ServiceWorkerStorage::Create(AsWeakPtr(), old_context->storage());
-  job_coordinator_ = std::make_unique<ServiceWorkerJobCoordinator>(AsWeakPtr());
-}
+      next_embedded_worker_id_(old_context->next_embedded_worker_id_) {}
 
 ServiceWorkerContextCore::~ServiceWorkerContextCore() {
   DCHECK(storage_);
   for (const auto& it : live_versions_)
     it.second->RemoveObserver(this);
-  weak_factory_.InvalidateWeakPtrs();
+
+  job_coordinator_->ClearForShutdown();
 }
 
 void ServiceWorkerContextCore::AddProviderHost(
     std::unique_ptr<ServiceWorkerProviderHost> host) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   int provider_id = host->provider_id();
   providers_->emplace(provider_id, std::move(host));
 }
 
 ServiceWorkerProviderHost* ServiceWorkerContextCore::GetProviderHost(
     int provider_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   auto found = providers_->find(provider_id);
   if (found == providers_->end())
     return nullptr;
@@ -321,7 +339,7 @@ ServiceWorkerProviderHost* ServiceWorkerContextCore::GetProviderHost(
 }
 
 void ServiceWorkerContextCore::RemoveProviderHost(int provider_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   providers_->erase(provider_id);
 }
 
@@ -329,7 +347,7 @@ std::unique_ptr<ServiceWorkerContextCore::ProviderHostIterator>
 ServiceWorkerContextCore::GetClientProviderHostIterator(
     const GURL& origin,
     bool include_reserved_clients) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   return base::WrapUnique(new ProviderHostIterator(
       providers_.get(), base::BindRepeating(IsSameOriginClientProviderHost,
                                             origin, include_reserved_clients)));
@@ -338,7 +356,7 @@ ServiceWorkerContextCore::GetClientProviderHostIterator(
 void ServiceWorkerContextCore::HasMainFrameProviderHost(
     const GURL& origin,
     BoolCallback callback) const {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   ProviderHostIterator provider_host_iterator(
       providers_.get(),
       base::BindRepeating(IsSameOriginWindowProviderHost, origin));
@@ -356,14 +374,22 @@ void ServiceWorkerContextCore::HasMainFrameProviderHost(
     ServiceWorkerProviderHost* provider_host =
         provider_host_iterator.GetProviderHost();
     render_frames->push_back(
-        std::make_pair(provider_host->process_id(), provider_host->frame_id()));
+        std::make_pair(provider_host->container_host()->process_id(),
+                       provider_host->container_host()->frame_id()));
     provider_host_iterator.Advance();
   }
 
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&FrameListContainsMainFrameOnUI, std::move(render_frames)),
-      std::move(callback));
+  if (ServiceWorkerContext::IsServiceWorkerOnUIEnabled()) {
+    bool result = FrameListContainsMainFrameOnUI(std::move(render_frames));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), result));
+  } else {
+    base::PostTaskAndReplyWithResult(
+        FROM_HERE, {BrowserThread::UI},
+        base::BindOnce(&FrameListContainsMainFrameOnUI,
+                       std::move(render_frames)),
+        std::move(callback));
+  }
 }
 
 void ServiceWorkerContextCore::RegisterProviderHostByClientID(
@@ -390,8 +416,10 @@ ServiceWorkerProviderHost* ServiceWorkerContextCore::GetProviderHostByClientID(
 void ServiceWorkerContextCore::RegisterServiceWorker(
     const GURL& script_url,
     const blink::mojom::ServiceWorkerRegistrationOptions& options,
+    blink::mojom::FetchClientSettingsObjectPtr
+        outside_fetch_client_settings_object,
     RegistrationCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   std::string error_message;
   if (!IsValidRegisterRequest(script_url, options.scope, &error_message)) {
     std::move(callback).Run(
@@ -401,7 +429,7 @@ void ServiceWorkerContextCore::RegisterServiceWorker(
   }
   was_service_worker_registered_ = true;
   job_coordinator_->Register(
-      script_url, options,
+      script_url, options, std::move(outside_fetch_client_settings_object),
       base::BindOnce(&ServiceWorkerContextCore::RegistrationComplete,
                      AsWeakPtr(), options.scope, std::move(callback)));
 }
@@ -409,7 +437,7 @@ void ServiceWorkerContextCore::RegisterServiceWorker(
 void ServiceWorkerContextCore::UpdateServiceWorker(
     ServiceWorkerRegistration* registration,
     bool force_bypass_cache) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   job_coordinator_->Update(registration, force_bypass_cache);
 }
 
@@ -417,10 +445,13 @@ void ServiceWorkerContextCore::UpdateServiceWorker(
     ServiceWorkerRegistration* registration,
     bool force_bypass_cache,
     bool skip_script_comparison,
+    blink::mojom::FetchClientSettingsObjectPtr
+        outside_fetch_client_settings_object,
     UpdateCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   job_coordinator_->Update(
       registration, force_bypass_cache, skip_script_comparison,
+      std::move(outside_fetch_client_settings_object),
       base::BindOnce(&ServiceWorkerContextCore::UpdateComplete, AsWeakPtr(),
                      std::move(callback)));
 }
@@ -428,7 +459,7 @@ void ServiceWorkerContextCore::UpdateServiceWorker(
 void ServiceWorkerContextCore::UnregisterServiceWorker(
     const GURL& scope,
     UnregistrationCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   job_coordinator_->Unregister(
       scope, base::BindOnce(&ServiceWorkerContextCore::UnregistrationComplete,
                             AsWeakPtr(), scope, std::move(callback)));
@@ -436,7 +467,7 @@ void ServiceWorkerContextCore::UnregisterServiceWorker(
 
 void ServiceWorkerContextCore::DeleteForOrigin(const GURL& origin,
                                                StatusCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   storage()->GetRegistrationsForOrigin(
       origin,
       base::BindOnce(
@@ -446,7 +477,7 @@ void ServiceWorkerContextCore::DeleteForOrigin(const GURL& origin,
 
 void ServiceWorkerContextCore::PerformStorageCleanup(
     base::OnceClosure callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   storage()->PerformStorageCleanup(std::move(callback));
 }
 
@@ -493,26 +524,6 @@ void ServiceWorkerContextCore::DidGetRegistrationsForDeleteForOrigin(
 
 int ServiceWorkerContextCore::GetNextEmbeddedWorkerId() {
   return next_embedded_worker_id_++;
-}
-
-scoped_refptr<blink::URLLoaderFactoryBundle>
-ServiceWorkerContextCore::GetLoaderFactoryBundleForUpdateCheck() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(blink::ServiceWorkerUtils::IsImportedScriptUpdateCheckEnabled());
-
-  // Update the default factory in the bundle with a newly cloned network
-  // factory before update check because the old default factory may be invalid
-  // due to crash of network service.
-  network::mojom::URLLoaderFactoryPtr network_factory_ptr;
-  loader_factory_getter_->CloneNetworkFactory(
-      mojo::MakeRequest(&network_factory_ptr));
-  auto pending_factory_bundle =
-      std::make_unique<blink::URLLoaderFactoryBundleInfo>();
-  pending_factory_bundle->pending_default_factory() =
-      network_factory_ptr.PassInterface();
-  loader_factory_bundle_for_update_check_->Update(
-      std::move(pending_factory_bundle));
-  return loader_factory_bundle_for_update_check_;
 }
 
 void ServiceWorkerContextCore::RegistrationComplete(
@@ -623,15 +634,18 @@ void ServiceWorkerContextCore::AddLiveVersion(ServiceWorkerVersion* version) {
 }
 
 void ServiceWorkerContextCore::RemoveLiveVersion(int64_t id) {
-  if (live_versions_[id]->running_status() != EmbeddedWorkerStatus::STOPPED) {
+  auto it = live_versions_.find(id);
+  DCHECK(it != live_versions_.end());
+  ServiceWorkerVersion* version = it->second;
+
+  if (version->running_status() != EmbeddedWorkerStatus::STOPPED) {
     // Notify all observers that this live version is stopped, as it will
     // be removed from |live_versions_|.
-    observer_list_->Notify(
-        FROM_HERE, &ServiceWorkerContextCoreObserver::OnRunningStateChanged, id,
-        EmbeddedWorkerStatus::STOPPED);
+    observer_list_->Notify(FROM_HERE,
+                           &ServiceWorkerContextCoreObserver::OnStopped, id);
   }
 
-  live_versions_.erase(id);
+  live_versions_.erase(it);
 }
 
 std::vector<ServiceWorkerRegistrationInfo>
@@ -678,12 +692,16 @@ void ServiceWorkerContextCore::ScheduleDeleteAndStartOver() const {
 
 void ServiceWorkerContextCore::DeleteAndStartOver(StatusCallback callback) {
   job_coordinator_->AbortAll();
+
+  observer_list_->Notify(
+      FROM_HERE, &ServiceWorkerContextCoreObserver::OnDeleteAndStartOver);
+
   storage_->DeleteAndStartOver(std::move(callback));
 }
 
 void ServiceWorkerContextCore::ClearAllServiceWorkersForTest(
     base::OnceClosure callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   // |callback| will be called in the destructor of |helper| on the UI thread.
   auto helper =
       base::MakeRefCounted<ClearAllServiceWorkersHelper>(std::move(callback));
@@ -698,7 +716,7 @@ void ServiceWorkerContextCore::ClearAllServiceWorkersForTest(
 void ServiceWorkerContextCore::CheckHasServiceWorker(
     const GURL& url,
     ServiceWorkerContext::CheckHasServiceWorkerCallback callback) {
-  storage()->FindRegistrationForDocument(
+  storage()->FindRegistrationForClientUrl(
       url, base::BindOnce(&ServiceWorkerContextCore::
                               DidFindRegistrationForCheckHasServiceWorker,
                           AsWeakPtr(), std::move(callback)));
@@ -747,7 +765,7 @@ int ServiceWorkerContextCore::GetVersionFailureCount(int64_t version_id) {
 
 void ServiceWorkerContextCore::NotifyRegistrationStored(int64_t registration_id,
                                                         const GURL& scope) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   observer_list_->Notify(
       FROM_HERE, &ServiceWorkerContextCoreObserver::OnRegistrationStored,
       registration_id, scope);
@@ -760,9 +778,32 @@ void ServiceWorkerContextCore::OnStorageWiped() {
 
 void ServiceWorkerContextCore::OnRunningStateChanged(
     ServiceWorkerVersion* version) {
-  observer_list_->Notify(
-      FROM_HERE, &ServiceWorkerContextCoreObserver::OnRunningStateChanged,
-      version->version_id(), version->running_status());
+  if (!version->context())
+    return;
+
+  switch (version->running_status()) {
+    case EmbeddedWorkerStatus::STOPPED:
+      observer_list_->Notify(FROM_HERE,
+                             &ServiceWorkerContextCoreObserver::OnStopped,
+                             version->version_id());
+      break;
+    case EmbeddedWorkerStatus::STARTING:
+      observer_list_->Notify(FROM_HERE,
+                             &ServiceWorkerContextCoreObserver::OnStarting,
+                             version->version_id());
+      break;
+    case EmbeddedWorkerStatus::RUNNING:
+      observer_list_->Notify(
+          FROM_HERE, &ServiceWorkerContextCoreObserver::OnStarted,
+          version->version_id(), version->scope(),
+          version->embedded_worker()->process_id(), version->script_url());
+      break;
+    case EmbeddedWorkerStatus::STOPPING:
+      observer_list_->Notify(FROM_HERE,
+                             &ServiceWorkerContextCoreObserver::OnStopping,
+                             version->version_id());
+      break;
+  }
 }
 
 void ServiceWorkerContextCore::OnVersionStateChanged(
@@ -816,7 +857,7 @@ void ServiceWorkerContextCore::OnReportConsoleMessage(
     const base::string16& message,
     int line_number,
     const GURL& source_url) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   // NOTE: This differs slightly from
   // RenderFrameHostImpl::DidAddMessageToConsole, which also asks the
   // content embedder whether to classify the message as a builtin component.

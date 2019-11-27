@@ -45,6 +45,7 @@
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/settings/cros_settings_names.h"
 #include "components/account_id/account_id.h"
 #include "components/arc/arc_util.h"
 #include "components/prefs/pref_service.h"
@@ -274,7 +275,7 @@ void GetMultiProfilePolicy(const user_manager::User* user,
 class UserSelectionScreen::DircryptoMigrationChecker {
  public:
   explicit DircryptoMigrationChecker(UserSelectionScreen* owner)
-      : owner_(owner), weak_ptr_factory_(this) {}
+      : owner_(owner) {}
   ~DircryptoMigrationChecker() = default;
 
   // Start to check whether the given user needs dircrypto migration.
@@ -360,15 +361,13 @@ class UserSelectionScreen::DircryptoMigrationChecker {
   // and false means dircrypto migration is done.
   std::map<AccountId, bool> needs_dircrypto_migration_cache_;
 
-  base::WeakPtrFactory<DircryptoMigrationChecker> weak_ptr_factory_;
+  base::WeakPtrFactory<DircryptoMigrationChecker> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DircryptoMigrationChecker);
 };
 
 UserSelectionScreen::UserSelectionScreen(const std::string& display_type)
-    : BaseScreen(UserBoardView::kScreenId),
-      display_type_(display_type),
-      weak_factory_(this) {}
+    : BaseScreen(UserBoardView::kScreenId), display_type_(display_type) {}
 
 UserSelectionScreen::~UserSelectionScreen() {
   proximity_auth::ScreenlockBridge::Get()->SetLockHandler(nullptr);
@@ -619,8 +618,8 @@ void UserSelectionScreen::HandleGetUsers() {
 }
 
 void UserSelectionScreen::CheckUserStatus(const AccountId& account_id) {
-  // No checks on lock screen.
-  if (ScreenLocker::default_screen_locker())
+  // No checks on the multi-profiles signin or locker screen.
+  if (user_manager::UserManager::Get()->IsUserLoggedIn())
     return;
 
   if (!token_handle_util_.get()) {
@@ -841,6 +840,10 @@ UserSelectionScreen::UpdateAndReturnUserListForAsh() {
     user_info.is_device_owner = is_owner;
     user_info.can_remove = CanRemoveUser(user);
     user_info.fingerprint_state = GetInitialFingerprintState(user);
+    user_info.show_pin_pad_for_password = false;
+    chromeos::CrosSettings::Get()->GetBoolean(
+        chromeos::kDeviceShowNumericKeyboardForPassword,
+        &user_info.show_pin_pad_for_password);
 
     // Fill multi-profile data.
     if (!is_signin_to_add) {
@@ -856,6 +859,8 @@ UserSelectionScreen::UpdateAndReturnUserListForAsh() {
       user_info.public_account_info.emplace();
       if (GetEnterpriseDomain(&domain))
         user_info.public_account_info->enterprise_domain = domain;
+
+      user_info.public_account_info->using_saml = user->using_saml();
 
       const std::vector<std::string>* public_session_recommended_locales =
           public_session_recommended_locales_.find(account_id) ==

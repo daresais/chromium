@@ -1,8 +1,5 @@
 {
   "sandbox": {
-    "features": [
-      "deprecated-ambient-replace-as-executable"
-    ],
     "services": [
       "chromium.cast.ApplicationConfigManager",
       "fuchsia.deprecatedtimezone.Timezone",
@@ -10,10 +7,10 @@
       "fuchsia.fonts.Provider",
       "fuchsia.logger.LogSink",
       "fuchsia.media.Audio",
-      "fuchsia.media.drm.WidevineContentDecryptionModule",
+      "fuchsia.media.drm.PlayReady",
+      "fuchsia.media.drm.Widevine",
       "fuchsia.mediacodec.CodecFactory",
       "fuchsia.net.NameLookup",
-      "fuchsia.net.SocketProvider",
       "fuchsia.netstack.Netstack",
       "fuchsia.posix.socket.Provider",
       "fuchsia.process.Launcher",
@@ -21,6 +18,7 @@
       "fuchsia.ui.input.ImeService",
       "fuchsia.ui.input.ImeVisibilityService",
       "fuchsia.ui.scenic.Scenic",
+      "fuchsia.vulkan.loader.Loader",
       "fuchsia.web.ContextProvider"
     ]
   }

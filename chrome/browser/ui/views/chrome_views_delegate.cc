@@ -22,7 +22,9 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/public/cpp/app_types.h"
 #include "chrome/browser/ui/views/touch_selection_menu_runner_chromeos.h"
+#include "ui/aura/client/aura_constants.h"
 #endif
 
 // Helpers --------------------------------------------------------------------
@@ -157,8 +159,18 @@ void ChromeViewsDelegate::ReleaseRef() {
 void ChromeViewsDelegate::OnBeforeWidgetInit(
     views::Widget::InitParams* params,
     views::internal::NativeWidgetDelegate* delegate) {
+#if defined(OS_CHROMEOS)
+  // Only for dialog widgets, if this is not going to be a transient child,
+  // then we mark it as an OS system app, otherwise its transient root's app
+  // type should be used.
+  if (delegate->IsDialogBox() && !params->parent) {
+    params->init_properties_container.SetProperty(
+        aura::client::kAppType, static_cast<int>(ash::AppType::SYSTEM_APP));
+  }
+#endif  // defined(OS_CHROMEOS)
+
   // We need to determine opacity if it's not already specified.
-  if (params->opacity == views::Widget::InitParams::INFER_OPACITY)
+  if (params->opacity == views::Widget::InitParams::WindowOpacity::kInferred)
     params->opacity = GetOpacityForInitParams(*params);
 
   // If we already have a native_widget, we don't have to try to come
@@ -191,6 +203,6 @@ std::string ChromeViewsDelegate::GetApplicationName() {
 views::Widget::InitParams::WindowOpacity
 ChromeViewsDelegate::GetOpacityForInitParams(
     const views::Widget::InitParams& params) {
-  return views::Widget::InitParams::OPAQUE_WINDOW;
+  return views::Widget::InitParams::WindowOpacity::kOpaque;
 }
 #endif

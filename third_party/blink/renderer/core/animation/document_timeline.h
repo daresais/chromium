@@ -59,10 +59,10 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  class PlatformTiming : public GarbageCollectedFinalized<PlatformTiming> {
+  class PlatformTiming : public GarbageCollected<PlatformTiming> {
    public:
     // Calls DocumentTimeline's wake() method after duration seconds.
-    virtual void WakeAfter(double duration) = 0;
+    virtual void WakeAfter(base::TimeDelta duration) = 0;
     virtual void ServiceOnNextFrame() = 0;
     virtual ~PlatformTiming() = default;
     virtual void Trace(blink::Visitor* visitor) {}
@@ -94,6 +94,7 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
   void AnimationDetached(Animation*) override {}
 
   bool IsActive() const override;
+  base::Optional<base::TimeDelta> InitialStartTimeForAnimations() override;
   bool HasPendingUpdates() const {
     return !animations_needing_update_.IsEmpty();
   }
@@ -103,8 +104,7 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
   base::TimeTicks ZeroTime();
   double currentTime(bool& is_null) override;
   double currentTime();
-  double CurrentTimeInternal(bool& is_null);
-  double CurrentTimeInternal();
+  base::Optional<base::TimeDelta> CurrentTimeInternal();
   double EffectiveTime();
   void PauseAnimationsForTesting(double);
 
@@ -152,7 +152,7 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
   static const double kMinimumDelay;
 
   Member<PlatformTiming> timing_;
-  double last_current_time_internal_;
+  base::Optional<base::TimeDelta> last_current_time_internal_;
 
   std::unique_ptr<CompositorAnimationTimeline> compositor_timeline_;
 
@@ -167,7 +167,7 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
       DCHECK(timeline_);
     }
 
-    void WakeAfter(double duration) override;
+    void WakeAfter(base::TimeDelta duration) override;
     void ServiceOnNextFrame() override;
 
     void TimerFired(TimerBase*) { timeline_->Wake(); }

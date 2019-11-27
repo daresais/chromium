@@ -45,7 +45,6 @@
 #include "chrome/browser/download/download_query.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/download/drag_download_item.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/icon_loader.h"
 #include "chrome/browser/icon_manager.h"
@@ -71,7 +70,6 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/warning_service.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -150,6 +148,11 @@ const char kDangerUnwanted[] = "unwanted";
 const char kDangerWhitelistedByPolicy[] = "whitelistedByPolicy";
 const char kDangerAsyncScanning[] = "asyncScanning";
 const char kDangerPasswordProtected[] = "passwordProtected";
+const char kDangerTooLarge[] = "blockedTooLarge";
+const char kDangerSensitiveContentWarning[] = "sensitiveContentWarning";
+const char kDangerSensitiveContentBlock[] = "sensitiveContentBlock";
+const char kDangerDeepScannedSafe[] = "deepScannedSafe";
+const char kDangerDeepScannedOpenedDangerous[] = "deepScannedOpenedDangerous";
 const char kDangerUrl[] = "url";
 const char kEndTimeKey[] = "endTime";
 const char kEndedAfterKey[] = "endedAfter";
@@ -183,13 +186,23 @@ const char kFinalUrlRegexKey[] = "finalUrlRegex";
 
 // Note: Any change to the danger type strings, should be accompanied by a
 // corresponding change to downloads.json.
-const char* const kDangerStrings[] = {
-    kDangerSafe,          kDangerFile,
-    kDangerUrl,           kDangerContent,
-    kDangerSafe,          kDangerUncommon,
-    kDangerAccepted,      kDangerHost,
-    kDangerUnwanted,      kDangerWhitelistedByPolicy,
-    kDangerAsyncScanning, kDangerPasswordProtected};
+const char* const kDangerStrings[] = {kDangerSafe,
+                                      kDangerFile,
+                                      kDangerUrl,
+                                      kDangerContent,
+                                      kDangerSafe,
+                                      kDangerUncommon,
+                                      kDangerAccepted,
+                                      kDangerHost,
+                                      kDangerUnwanted,
+                                      kDangerWhitelistedByPolicy,
+                                      kDangerAsyncScanning,
+                                      kDangerPasswordProtected,
+                                      kDangerTooLarge,
+                                      kDangerSensitiveContentWarning,
+                                      kDangerSensitiveContentBlock,
+                                      kDangerDeepScannedSafe,
+                                      kDangerDeepScannedOpenedDangerous};
 static_assert(base::size(kDangerStrings) == download::DOWNLOAD_DANGER_TYPE_MAX,
               "kDangerStrings should have DOWNLOAD_DANGER_TYPE_MAX elements");
 
@@ -397,7 +410,7 @@ void InitFilterTypeMap(FilterTypeMap* filter_types_ptr) {
   AppendFilter(kFinalUrlKey, DownloadQuery::FILTER_URL, &v);
   AppendFilter(kFinalUrlRegexKey, DownloadQuery::FILTER_URL_REGEX, &v);
 
-  *filter_types_ptr = FilterTypeMap(std::move(v), base::KEEP_FIRST_OF_DUPES);
+  *filter_types_ptr = FilterTypeMap(std::move(v));
 }
 
 using SortTypeMap = base::flat_map<std::string, DownloadQuery::SortType>;
@@ -424,7 +437,7 @@ void InitSortTypeMap(SortTypeMap* sorter_types_ptr) {
   AppendFilter(kUrlKey, DownloadQuery::SORT_ORIGINAL_URL, &v);
   AppendFilter(kFinalUrlKey, DownloadQuery::SORT_URL, &v);
 
-  *sorter_types_ptr = SortTypeMap(std::move(v), base::KEEP_FIRST_OF_DUPES);
+  *sorter_types_ptr = SortTypeMap(std::move(v));
 }
 
 bool IsNotTemporaryDownloadFilter(const DownloadItem& download_item) {
@@ -930,13 +943,14 @@ const char ExtensionDownloadsEventRouterData::kKey[] =
 bool OnDeterminingFilenameWillDispatchCallback(
     bool* any_determiners,
     ExtensionDownloadsEventRouterData* data,
-    content::BrowserContext* context,
+    content::BrowserContext* browser_context,
+    Feature::Context target_context,
     const Extension* extension,
     Event* event,
     const base::DictionaryValue* listener_filter) {
   *any_determiners = true;
   base::Time installed =
-      ExtensionPrefs::Get(context)->GetInstallTime(extension->id());
+      ExtensionPrefs::Get(browser_context)->GetInstallTime(extension->id());
   data->AddPendingDeterminer(extension->id(), installed);
   return true;
 }
@@ -1495,36 +1509,6 @@ void DownloadsOpenFunction::OpenPromptDone(int download_id, bool accept) {
   Respond(NoArguments());
 }
 
-DownloadsDragFunction::DownloadsDragFunction() {}
-
-DownloadsDragFunction::~DownloadsDragFunction() {}
-
-ExtensionFunction::ResponseAction DownloadsDragFunction::Run() {
-  std::unique_ptr<downloads::Drag::Params> params(
-      downloads::Drag::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-  DownloadItem* download_item = GetDownload(
-      browser_context(), include_incognito_information(), params->download_id);
-  content::WebContents* web_contents =
-      dispatcher()->GetVisibleWebContents();
-  std::string error;
-  if (InvalidId(download_item, &error) ||
-      Fault(!web_contents, download_extension_errors::kInvisibleContext,
-            &error)) {
-    return RespondNow(Error(error));
-  }
-  RecordApiFunctions(DOWNLOADS_FUNCTION_DRAG);
-  gfx::Image* icon = g_browser_process->icon_manager()->LookupIconFromFilepath(
-      download_item->GetTargetFilePath(), IconLoader::NORMAL);
-  gfx::NativeView view = web_contents->GetNativeView();
-  {
-    // Enable nested tasks during DnD, while |DragDownload()| blocks.
-    base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
-    DragDownloadItem(download_item, icon, view);
-  }
-  return RespondNow(NoArguments());
-}
-
 DownloadsSetShelfEnabledFunction::DownloadsSetShelfEnabledFunction() {}
 
 DownloadsSetShelfEnabledFunction::~DownloadsSetShelfEnabledFunction() {}
@@ -1641,9 +1625,7 @@ void DownloadsGetFileIconFunction::OnIconURLExtracted(const std::string& url) {
 ExtensionDownloadsEventRouter::ExtensionDownloadsEventRouter(
     Profile* profile,
     DownloadManager* manager)
-    : profile_(profile),
-      notifier_(manager, this),
-      extension_registry_observer_(this) {
+    : profile_(profile), notifier_(manager, this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(profile_);
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));

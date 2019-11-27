@@ -7,9 +7,10 @@ package org.chromium.chrome.browser.dom_distiller;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.support.annotation.NonNull;
-import android.support.customtabs.CustomTabsIntent;
 import android.text.TextUtils;
+
+import androidx.annotation.NonNull;
+import androidx.browser.customtabs.CustomTabsIntent;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.SysUtils;

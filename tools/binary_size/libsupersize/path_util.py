@@ -112,7 +112,7 @@ class ToolPrefixFinder(_PathFinder):
           err_lines = ['tool-prefix not found: %s' % ret]
           if ret.endswith('llvm-'):
             err_lines.append('Probably need to run: '
-                             'tools/clang/scripts/download_objdump.py')
+                             'tools/clang/scripts/update.py --package=objdump')
           raise Exception('\n'.join(err_lines))
     from_path = distutils.spawn.find_executable(_SAMPLE_TOOL_SUFFIX)
     if from_path:
@@ -180,10 +180,6 @@ def GetObjDumpPath(tool_prefix):
 
 
 def GetReadElfPath(tool_prefix):
-  # Work-around for llvm-readobj bug where 'File: ...' info is not printed:
-  # https://bugs.llvm.org/show_bug.cgi?id=35351
-  if tool_prefix[-5:] == 'llvm-':
-    return 'readelf'
   return tool_prefix + 'readelf'
 
 

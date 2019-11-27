@@ -42,7 +42,6 @@
 #include "net/base/proxy_server.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
-#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if defined(OS_ANDROID)
@@ -179,21 +178,16 @@ std::string DoGetCurrentNetworkID(
 namespace data_reduction_proxy {
 
 DataReductionProxyConfig::DataReductionProxyConfig(
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     network::NetworkConnectionTracker* network_connection_tracker,
     std::unique_ptr<DataReductionProxyConfigValues> config_values,
     DataReductionProxyConfigurator* configurator)
     : unreachable_(false),
       enabled_by_user_(false),
       config_values_(std::move(config_values)),
-      io_task_runner_(io_task_runner),
-      ui_task_runner_(ui_task_runner),
       network_connection_tracker_(network_connection_tracker),
       configurator_(configurator),
       connection_type_(network::mojom::ConnectionType::CONNECTION_UNKNOWN),
       network_properties_manager_(nullptr) {
-  DCHECK(io_task_runner_);
   DCHECK(network_connection_tracker_);
   DCHECK(configurator);
 
@@ -205,7 +199,7 @@ DataReductionProxyConfig::~DataReductionProxyConfig() {
   network_connection_tracker_->RemoveNetworkConnectionObserver(this);
 }
 
-void DataReductionProxyConfig::InitializeOnIOThread(
+void DataReductionProxyConfig::Initialize(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     WarmupURLFetcher::CreateCustomProxyConfigCallback
         create_custom_proxy_config_callback,
@@ -215,15 +209,18 @@ void DataReductionProxyConfig::InitializeOnIOThread(
   network_properties_manager_ = manager;
   network_properties_manager_->ResetWarmupURLFetchMetrics();
 
-  secure_proxy_checker_.reset(new SecureProxyChecker(url_loader_factory));
-  warmup_url_fetcher_.reset(new WarmupURLFetcher(
-      create_custom_proxy_config_callback,
-      base::BindRepeating(
-          &DataReductionProxyConfig::HandleWarmupFetcherResponse,
-          base::Unretained(this)),
-      base::BindRepeating(&DataReductionProxyConfig::GetHttpRttEstimate,
-                          base::Unretained(this)),
-      ui_task_runner_, user_agent));
+  if (!params::IsIncludedInHoldbackFieldTrial()) {
+    secure_proxy_checker_ =
+        std::make_unique<SecureProxyChecker>(url_loader_factory);
+    warmup_url_fetcher_ = std::make_unique<WarmupURLFetcher>(
+        create_custom_proxy_config_callback,
+        base::BindRepeating(
+            &DataReductionProxyConfig::HandleWarmupFetcherResponse,
+            base::Unretained(this)),
+        base::BindRepeating(&DataReductionProxyConfig::GetHttpRttEstimate,
+                            base::Unretained(this)),
+        user_agent);
+  }
 
   AddDefaultProxyBypassRules();
 
@@ -520,9 +517,7 @@ void DataReductionProxyConfig::HandleWarmupFetcherResponse(
   // been reached yet. This method may have been called by warmup URL fetcher.
   // FetchWarmupProbeURL() may itself call warmup URL fetcher. Posting the call
   // here avoids recursive calls to the warmup URL fetcher.
-  io_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&DataReductionProxyConfig::FetchWarmupProbeURL,
-                                weak_factory_.GetWeakPtr()));
+  FetchWarmupProbeURL();
 }
 
 void DataReductionProxyConfig::HandleSecureProxyCheckResponse(
@@ -647,11 +642,17 @@ void DataReductionProxyConfig::AddDefaultProxyBypassRules() {
 
 void DataReductionProxyConfig::SecureProxyCheck(
     SecureProxyCheckerCallback fetcher_callback) {
+  if (params::IsIncludedInHoldbackFieldTrial())
+    return;
+
   secure_proxy_checker_->CheckIfSecureProxyIsAllowed(fetcher_callback);
 }
 
 void DataReductionProxyConfig::FetchWarmupProbeURL() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (params::IsIncludedInHoldbackFieldTrial())
+    return;
 
   if (!enabled_by_user_) {
     RecordWarmupURLFetchAttemptEvent(
@@ -753,6 +754,9 @@ DataReductionProxyConfig::GetNetworkPropertiesManager() const {
 
 bool DataReductionProxyConfig::IsFetchInFlight() const {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (!warmup_url_fetcher_)
+    return false;
   return warmup_url_fetcher_->IsFetchInFlight();
 }
 

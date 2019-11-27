@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "components/download/public/common/download_danger_type.h"
 #include "net/http/http_response_headers.h"
 
 namespace content {
@@ -266,6 +267,11 @@ void FakeDownloadItem::Rename(const base::FilePath& name,
   NOTREACHED();
 }
 
+void FakeDownloadItem::OnAsyncScanningCompleted(
+    download::DownloadDangerType danger_type) {
+  NOTREACHED();
+}
+
 bool FakeDownloadItem::IsPaused() const {
   return false;
 }
@@ -354,6 +360,10 @@ ui::PageTransition FakeDownloadItem::GetTransitionType() const {
 bool FakeDownloadItem::IsSavePackageDownload() const {
   NOTREACHED();
   return false;
+}
+
+download::DownloadSource FakeDownloadItem::GetDownloadSource() const {
+  return download::DownloadSource::UNKNOWN;
 }
 
 const base::FilePath& FakeDownloadItem::GetFullPath() const {

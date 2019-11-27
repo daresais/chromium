@@ -15,6 +15,7 @@
 #include "cc/base/math_util.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
+#include "components/viz/common/frame_timing_details.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/hit_test/hit_test_region_list.h"
 #include "components/viz/common/quads/compositor_frame.h"
@@ -230,10 +231,10 @@ class FastInkView::LayerTreeFrameSinkHolder
       view_->DidReceiveCompositorFrameAck();
   }
   void DidPresentCompositorFrame(
-      uint32_t presentation_token,
-      const gfx::PresentationFeedback& feedback) override {
+      uint32_t frame_token,
+      const viz::FrameTimingDetails& details) override {
     if (view_)
-      view_->DidPresentCompositorFrame(feedback);
+      view_->DidPresentCompositorFrame(details.presentation_feedback);
   }
   void DidLoseLayerTreeFrameSink() override {
     exported_resources_.clear();
@@ -283,7 +284,7 @@ class FastInkView::LayerTreeFrameSinkHolder
 
 FastInkView::FastInkView(aura::Window* container,
                          const PresentationCallback& presentation_callback)
-    : presentation_callback_(presentation_callback), weak_ptr_factory_(this) {
+    : presentation_callback_(presentation_callback) {
   widget_.reset(new views::Widget);
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
@@ -291,12 +292,12 @@ FastInkView::FastInkView(aura::Window* container,
   params.accept_events = false;
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.parent = container;
   params.layer_type = ui::LAYER_SOLID_COLOR;
 
   gfx::Rect screen_bounds = container->GetRootWindow()->GetBoundsInScreen();
-  widget_->Init(params);
+  widget_->Init(std::move(params));
   widget_->Show();
   widget_->SetContentsView(this);
   widget_->SetBounds(screen_bounds);

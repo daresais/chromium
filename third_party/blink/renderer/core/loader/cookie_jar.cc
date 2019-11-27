@@ -6,7 +6,7 @@
 
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
@@ -22,7 +22,8 @@ void CookieJar::SetCookie(const String& value) {
 
   RequestRestrictedCookieManagerIfNeeded();
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.CookieJar.SyncCookiesSetTime");
-  backend_->SetCookieFromString(cookie_url, document_->SiteForCookies(), value);
+  backend_->SetCookieFromString(cookie_url, document_->SiteForCookies(),
+                                document_->TopFrameOrigin(), value);
 }
 
 String CookieJar::Cookies() {
@@ -33,7 +34,8 @@ String CookieJar::Cookies() {
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.CookieJar.SyncCookiesTime");
   RequestRestrictedCookieManagerIfNeeded();
   String value;
-  backend_->GetCookiesString(cookie_url, document_->SiteForCookies(), &value);
+  backend_->GetCookiesString(cookie_url, document_->SiteForCookies(),
+                             document_->TopFrameOrigin(), &value);
   return value;
 }
 
@@ -45,14 +47,15 @@ bool CookieJar::CookiesEnabled() {
   RequestRestrictedCookieManagerIfNeeded();
   bool cookies_enabled = false;
   backend_->CookiesEnabledFor(cookie_url, document_->SiteForCookies(),
-                              &cookies_enabled);
+                              document_->TopFrameOrigin(), &cookies_enabled);
   return cookies_enabled;
 }
 
 void CookieJar::RequestRestrictedCookieManagerIfNeeded() {
-  if (!backend_.is_bound() || backend_.encountered_error()) {
+  if (!backend_.is_bound() || !backend_.is_connected()) {
+    backend_.reset();
     document_->GetInterfaceProvider()->GetInterface(
-        mojo::MakeRequest(&backend_));
+        backend_.BindNewPipeAndPassReceiver());
   }
 }
 

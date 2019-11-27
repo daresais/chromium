@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,12 @@
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/optional.h"
+#include "base/path_service.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
+#include "components/policy/core/common/cloud/cloud_policy_util.h"
 #include "components/policy/core/common/cloud/dm_auth.h"
+#include "components/version_info/version_info.h"
 #include "google_apis/google_api_keys.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
@@ -15,9 +19,30 @@ namespace em = enterprise_management;
 
 namespace policy {
 
-const char RealtimeReportingJobConfiguration::kDmTokenKey[] = "dmToken";
-const char RealtimeReportingJobConfiguration::kClientIdKey[] = "clientId";
+const char RealtimeReportingJobConfiguration::kContextKey[] = "context";
+const char RealtimeReportingJobConfiguration::kEventListKey[] = "eventList";
+
+const char RealtimeReportingJobConfiguration::kBrowserIdKey[] =
+    "browser.browserId";
+const char RealtimeReportingJobConfiguration::kChromeVersionKey[] =
+    "browser.chromeVersion";
+const char RealtimeReportingJobConfiguration::kClientIdKey[] =
+    "device.clientId";
+const char RealtimeReportingJobConfiguration::kDmTokenKey[] = "device.dmToken";
 const char RealtimeReportingJobConfiguration::kEventsKey[] = "events";
+const char RealtimeReportingJobConfiguration::kMachineUserKey[] =
+    "browser.machineUser";
+const char RealtimeReportingJobConfiguration::kOsVersionKey[] =
+    "device.osVersion";
+
+base::Value RealtimeReportingJobConfiguration::BuildReport(
+    base::Value events,
+    base::Value context) {
+  base::Value value_report(base::Value::Type::DICTIONARY);
+  value_report.SetKey(kEventListKey, std::move(events));
+  value_report.SetKey(kContextKey, std::move(context));
+  return value_report;
+}
 
 RealtimeReportingJobConfiguration::RealtimeReportingJobConfiguration(
     CloudPolicyClient* client,
@@ -33,17 +58,44 @@ RealtimeReportingJobConfiguration::RealtimeReportingJobConfiguration(
   DCHECK(GetAuth().has_dm_token());
 
   AddParameter("key", google_apis::GetAPIKey());
-
-  payload_.SetStringKey(kDmTokenKey, GetAuth().dm_token());
-  payload_.SetStringKey(kClientIdKey, client->client_id());
-  payload_.SetKey(kEventsKey, base::Value(base::Value::Type::LIST));
+  InitializePayload(client);
 }
 
 RealtimeReportingJobConfiguration::~RealtimeReportingJobConfiguration() {}
 
-void RealtimeReportingJobConfiguration::AddEvent(base::Value event) {
-  base::Value::ListStorage& list = payload_.FindListKey(kEventsKey)->GetList();
-  list.push_back(std::move(event));
+bool RealtimeReportingJobConfiguration::AddReport(base::Value report) {
+  if (!report.is_dict())
+    return false;
+
+  base::Optional<base::Value> context = report.ExtractKey(kContextKey);
+  base::Optional<base::Value> event_list = report.ExtractKey(kEventListKey);
+  if (!context || !event_list || !event_list->is_list())
+    return false;
+
+  // Move context keys to the payload.  It is possible to add multiple reports
+  // to the payload in which case the context values are the same.
+  payload_.MergeDictionary(&*context);
+
+  // Append event_list to the payload.
+  base::Value::ListStorage& to = payload_.FindListKey(kEventsKey)->GetList();
+  base::Value::ListStorage& from = event_list->GetList();
+  to.insert(to.end(), std::make_move_iterator(from.begin()),
+            std::make_move_iterator(from.end()));
+  return true;
+}
+
+void RealtimeReportingJobConfiguration::InitializePayload(
+    CloudPolicyClient* client) {
+  base::FilePath browser_id;
+  if (base::PathService::Get(base::DIR_EXE, &browser_id))
+    payload_.SetStringPath(kBrowserIdKey, browser_id.value());
+
+  payload_.SetStringPath(kDmTokenKey, GetAuth().dm_token());
+  payload_.SetStringPath(kClientIdKey, client->client_id());
+  payload_.SetStringPath(kMachineUserKey, GetOSUsername());
+  payload_.SetStringPath(kChromeVersionKey, version_info::GetVersionNumber());
+  payload_.SetStringPath(kOsVersionKey, GetOSVersion());
+  payload_.SetPath(kEventsKey, base::Value(base::Value::Type::LIST));
 }
 
 std::string RealtimeReportingJobConfiguration::GetPayload() {

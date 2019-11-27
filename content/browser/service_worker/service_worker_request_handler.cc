@@ -4,17 +4,11 @@
 
 #include "content/browser/service_worker/service_worker_request_handler.h"
 
-#include <string>
 #include <utility>
 
-#include "base/command_line.h"
 #include "base/macros.h"
 #include "content/browser/frame_host/navigation_request_info.h"
-#include "content/browser/service_worker/service_worker_context_core.h"
-#include "content/browser/service_worker/service_worker_context_wrapper.h"
-#include "content/browser/service_worker/service_worker_controllee_request_handler.h"
 #include "content/browser/service_worker/service_worker_navigation_handle.h"
-#include "content/browser/service_worker/service_worker_navigation_handle_core.h"
 #include "content/browser/service_worker/service_worker_navigation_loader_interceptor.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/public/common/origin_util.h"
@@ -39,9 +33,9 @@ bool SchemeMaySupportRedirectingToHTTPS(const GURL& url) {
 
 // static
 std::unique_ptr<NavigationLoaderInterceptor>
-ServiceWorkerRequestHandler::CreateForNavigationUI(
+ServiceWorkerRequestHandler::CreateForNavigation(
     const GURL& url,
-    ServiceWorkerNavigationHandle* navigation_handle,
+    base::WeakPtr<ServiceWorkerNavigationHandle> navigation_handle,
     const NavigationRequestInfo& request_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -52,60 +46,30 @@ ServiceWorkerRequestHandler::CreateForNavigationUI(
     return nullptr;
   }
 
+  ServiceWorkerNavigationLoaderInterceptorParams params;
+  params.resource_type = request_info.is_main_frame ? ResourceType::kMainFrame
+                                                    : ResourceType::kSubFrame;
+  params.skip_service_worker = request_info.begin_params->skip_service_worker;
+  params.is_main_frame = request_info.is_main_frame;
+  params.are_ancestors_secure = request_info.are_ancestors_secure;
+  params.frame_tree_node_id = request_info.frame_tree_node_id;
+
   return std::make_unique<ServiceWorkerNavigationLoaderInterceptor>(
-      request_info, navigation_handle);
-}
-
-// static
-std::unique_ptr<NavigationLoaderInterceptor>
-ServiceWorkerRequestHandler::CreateForNavigationIO(
-    const GURL& url,
-    ServiceWorkerNavigationHandleCore* navigation_handle_core,
-    const NavigationRequestInfo& request_info,
-    base::WeakPtr<ServiceWorkerProviderHost>* out_provider_host) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(navigation_handle_core);
-
-  // Create the handler even for insecure HTTP since it's used in the
-  // case of redirect to HTTPS.
-  if (!url.SchemeIsHTTPOrHTTPS() && !OriginCanAccessServiceWorkers(url) &&
-      !SchemeMaySupportRedirectingToHTTPS(url)) {
-    return nullptr;
-  }
-
-  if (!navigation_handle_core->context_wrapper())
-    return nullptr;
-  ServiceWorkerContextCore* context =
-      navigation_handle_core->context_wrapper()->context();
-  if (!context)
-    return nullptr;
-
-  auto provider_info = blink::mojom::ServiceWorkerProviderInfoForWindow::New();
-  // Initialize the SWProviderHost.
-  *out_provider_host = ServiceWorkerProviderHost::PreCreateNavigationHost(
-      context->AsWeakPtr(), request_info.are_ancestors_secure,
-      request_info.frame_tree_node_id, &provider_info);
-  navigation_handle_core->OnCreatedProviderHost(*out_provider_host,
-                                                std::move(provider_info));
-
-  const ResourceType resource_type = request_info.is_main_frame
-                                         ? ResourceType::kMainFrame
-                                         : ResourceType::kSubFrame;
-  return std::make_unique<ServiceWorkerControlleeRequestHandler>(
-      context->AsWeakPtr(), *out_provider_host, resource_type,
-      request_info.begin_params->skip_service_worker);
+      params, std::move(navigation_handle));
 }
 
 // static
 std::unique_ptr<NavigationLoaderInterceptor>
 ServiceWorkerRequestHandler::CreateForWorker(
     const network::ResourceRequest& resource_request,
-    ServiceWorkerProviderHost* host) {
-  DCHECK(host);
-  DCHECK(resource_request.resource_type ==
-             static_cast<int>(ResourceType::kWorker) ||
-         resource_request.resource_type ==
-             static_cast<int>(ResourceType::kSharedWorker))
+    int process_id,
+    base::WeakPtr<ServiceWorkerNavigationHandle> navigation_handle) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  auto resource_type =
+      static_cast<ResourceType>(resource_request.resource_type);
+  DCHECK(resource_type == ResourceType::kWorker ||
+         resource_type == ResourceType::kSharedWorker)
       << resource_request.resource_type;
 
   // Create the handler even for insecure HTTP since it's used in the
@@ -115,10 +79,13 @@ ServiceWorkerRequestHandler::CreateForWorker(
     return nullptr;
   }
 
-  return std::make_unique<ServiceWorkerControlleeRequestHandler>(
-      host->context(), host->AsWeakPtr(),
-      static_cast<ResourceType>(resource_request.resource_type),
-      resource_request.skip_service_worker);
+  ServiceWorkerNavigationLoaderInterceptorParams params;
+  params.resource_type = resource_type;
+  params.skip_service_worker = resource_request.skip_service_worker;
+  params.process_id = process_id;
+
+  return std::make_unique<ServiceWorkerNavigationLoaderInterceptor>(
+      params, std::move(navigation_handle));
 }
 
 }  // namespace content

@@ -136,14 +136,38 @@ void GetColorModelForMode(int color_mode,
 }
 #endif  // defined(USE_CUPS)
 
-bool IsColorModelSelected(int color_mode) {
-  return (color_mode != GRAY && color_mode != BLACK &&
-          color_mode != PRINTOUTMODE_NORMAL_GRAY &&
-          color_mode != COLORMODE_MONOCHROME &&
-          color_mode != PROCESSCOLORMODEL_GREYSCALE &&
-          color_mode != BROTHER_CUPS_MONO &&
-          color_mode != BROTHER_BRSCRIPT3_BLACK &&
-          color_mode != HP_COLOR_BLACK);
+base::Optional<bool> IsColorModelSelected(int color_mode) {
+  switch (color_mode) {
+    case COLOR:
+    case CMYK:
+    case CMY:
+    case KCMY:
+    case CMY_K:
+    case RGB:
+    case RGB16:
+    case RGBA:
+    case COLORMODE_COLOR:
+    case HP_COLOR_COLOR:
+    case PRINTOUTMODE_NORMAL:
+    case PROCESSCOLORMODEL_CMYK:
+    case PROCESSCOLORMODEL_RGB:
+    case BROTHER_CUPS_COLOR:
+    case BROTHER_BRSCRIPT3_COLOR:
+      return true;
+    case GRAY:
+    case BLACK:
+    case GRAYSCALE:
+    case COLORMODE_MONOCHROME:
+    case HP_COLOR_BLACK:
+    case PRINTOUTMODE_NORMAL_GRAY:
+    case PROCESSCOLORMODEL_GREYSCALE:
+    case BROTHER_CUPS_MONO:
+    case BROTHER_BRSCRIPT3_BLACK:
+      return false;
+    default:
+      NOTREACHED();
+      return base::nullopt;
+  }
 }
 
 // Global SequenceNumber used for generating unique cookie values.
@@ -152,8 +176,6 @@ static base::AtomicSequenceNumber cookie_seq;
 PrintSettings::PrintSettings() {
   Clear();
 }
-
-PrintSettings::PrintSettings(const PrintSettings& other) = default;
 
 PrintSettings::~PrintSettings() = default;
 
@@ -186,8 +208,8 @@ void PrintSettings::Clear() {
 #if defined(OS_CHROMEOS)
   send_user_info_ = false;
   username_.clear();
-  job_title_.clear();
   pin_value_.clear();
+  advanced_settings_.clear();
 #endif  // defined(OS_CHROMEOS)
 }
 

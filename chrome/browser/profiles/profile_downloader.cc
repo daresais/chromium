@@ -50,10 +50,10 @@ ProfileDownloader::ProfileDownloader(ProfileDownloaderDelegate* delegate)
 }
 
 void ProfileDownloader::Start() {
-  StartForAccount(std::string());
+  StartForAccount(CoreAccountId());
 }
 
-void ProfileDownloader::StartForAccount(const std::string& account_id) {
+void ProfileDownloader::StartForAccount(const CoreAccountId& account_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   VLOG(1) << "Starting profile downloader...";
 
@@ -65,10 +65,9 @@ void ProfileDownloader::StartForAccount(const std::string& account_id) {
     return;
   }
 
-  // TODO(triploblastic@): Remove explicit conversion once ProfileDownloader
-  // has been fixed to use CoreAccountId.
-  account_id_ = account_id.empty() ? identity_manager_->GetPrimaryAccountId().id
-                                   : account_id;
+  account_id_ = account_id.empty()
+                    ? identity_manager_->GetUnconsentedPrimaryAccountId()
+                    : account_id;
   StartFetchingOAuth2AccessToken();
 }
 
@@ -110,8 +109,9 @@ std::string ProfileDownloader::GetProfilePictureURL() const {
 void ProfileDownloader::StartFetchingImage() {
   VLOG(1) << "Fetching user entry with token: " << auth_token_;
   auto maybe_account_info =
-      identity_manager_->FindAccountInfoForAccountWithRefreshTokenByAccountId(
-          account_id_);
+      identity_manager_
+          ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
+              account_id_);
   if (maybe_account_info.has_value())
     account_info_ = maybe_account_info.value();
 
@@ -141,7 +141,7 @@ void ProfileDownloader::StartFetchingOAuth2AccessToken() {
           account_id_, "profile_downloader", scopes,
           base::BindOnce(&ProfileDownloader::OnAccessTokenFetchComplete,
                          base::Unretained(this)),
-          identity::AccessTokenFetcher::Mode::kWaitUntilRefreshTokenAvailable);
+          signin::AccessTokenFetcher::Mode::kWaitUntilRefreshTokenAvailable);
 }
 
 ProfileDownloader::~ProfileDownloader() {
@@ -213,8 +213,7 @@ void ProfileDownloader::FetchImageData() {
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = image_url_to_fetch;
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   if (!auth_token_.empty()) {
     resource_request->headers.SetHeader(
         net::HttpRequestHeaders::kAuthorization,
@@ -282,7 +281,7 @@ void ProfileDownloader::OnDecodeImageFailed() {
 
 void ProfileDownloader::OnAccessTokenFetchComplete(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   oauth2_access_token_fetcher_.reset();
   if (error.state() != GoogleServiceAuthError::NONE) {
     LOG(WARNING)

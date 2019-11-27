@@ -431,6 +431,7 @@ component("bluetooth") {
           "chromeos/bluetooth_utils.cc",
           "chromeos/bluetooth_utils.h",
         ]
+        deps += [ "//services/data_decoder/public/mojom" ]
       }
       deps += [ "//dbus" ]
     } else {  # !use_dbus
@@ -510,6 +511,8 @@ if (is_android) {
     "android/java/src/org/chromium/device/bluetooth/ChromeBluetoothRemoteGattCharacteristic.java",
     "android/java/src/org/chromium/device/bluetooth/ChromeBluetoothRemoteGattDescriptor.java",
     "android/java/src/org/chromium/device/bluetooth/ChromeBluetoothRemoteGattService.java",
+    "android/java/src/org/chromium/device/bluetooth/ChromeBluetoothScanFilterBuilder.java",
+    "android/java/src/org/chromium/device/bluetooth/ChromeBluetoothScanFilterList.java",
     "android/java/src/org/chromium/device/bluetooth/Wrappers.java",
   ]
 
@@ -521,7 +524,9 @@ if (is_android) {
     java_files = java_sources_needing_jni
     deps = [
       "//base:base_java",
+      "//base:jni_java",
       "//components/location/android:location_java",
     ]
+    annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
   }
 }

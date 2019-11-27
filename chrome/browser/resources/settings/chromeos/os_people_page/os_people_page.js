@@ -11,9 +11,9 @@ Polymer({
 
   behaviors: [
     settings.RouteObserverBehavior,
+    CrPngBehavior,
     I18nBehavior,
     WebUIListenerBehavior,
-    CrPngBehavior,
     LockStateBehavior,
   ],
 
@@ -26,17 +26,10 @@ Polymer({
       notify: true,
     },
 
-    /**
-     * This flag is used to conditionally show a set of sync UIs to the
-     * profiles that have been migrated to have a unified consent flow.
-     * TODO(tangltom): In the future when all profiles are completely migrated,
-     * this should be removed, and UIs hidden behind it should become default.
-     * @private
-     */
-    unifiedConsentEnabled_: {
+    splitSettingsSyncEnabled_: {
       type: Boolean,
       value: function() {
-        return loadTimeData.getBoolean('unifiedConsentEnabled');
+        return loadTimeData.getBoolean('splitSettingsSyncEnabled');
       },
     },
 
@@ -48,7 +41,7 @@ Polymer({
 
     /**
      * Dictionary defining page visibility.
-     * @type {!PeoplePageVisibility}
+     * @type {!PageVisibility}
      */
     pageVisibility: Object,
 
@@ -103,18 +96,6 @@ Polymer({
       readOnly: true,
     },
 
-    /**
-     * True if Chrome OS Kerberos support is enabled.
-     * @private
-     */
-    isKerberosEnabled_: {
-      type: Boolean,
-      value: function() {
-        return loadTimeData.getBoolean('isKerberosEnabled');
-      },
-      readOnly: true,
-    },
-
     /** @private */
     showParentalControls_: {
       type: Boolean,
@@ -130,14 +111,7 @@ Polymer({
       value: function() {
         const map = new Map();
         if (settings.routes.SYNC) {
-          map.set(
-              settings.routes.SYNC.path,
-              loadTimeData.getBoolean('unifiedConsentEnabled') ?
-                  '#sync-setup' :
-                  '#sync-status .subpage-arrow');
-        }
-        if (settings.routes.CHANGE_PICTURE) {
-          map.set(settings.routes.CHANGE_PICTURE.path, '#profile-icon');
+          map.set(settings.routes.SYNC.path, '#sync-setup');
         }
         if (settings.routes.LOCK_SCREEN) {
           map.set(
@@ -166,27 +140,26 @@ Polymer({
   /** @private {?settings.SyncBrowserProxy} */
   syncBrowserProxy_: null,
 
-  /** @private {?settings.AccountManagerBrowserProxy} */
-  accountManagerBrowserProxy_: null,
-
   /** @override */
   attached: function() {
-    const profileInfoProxy = settings.ProfileInfoBrowserProxyImpl.getInstance();
-    profileInfoProxy.getProfileInfo().then(this.handleProfileInfo_.bind(this));
-    this.addWebUIListener(
-        'profile-info-changed', this.handleProfileInfo_.bind(this));
+    if (this.isAccountManagerEnabled_) {
+      // If we have the Google Account manager, use GAIA name and icon.
+      this.addWebUIListener(
+          'accounts-changed', this.updateAccounts_.bind(this));
+      this.updateAccounts_();
+    } else {
+      // Otherwise use the Profile name and icon.
+      settings.ProfileInfoBrowserProxyImpl.getInstance().getProfileInfo().then(
+          this.handleProfileInfo_.bind(this));
+      this.addWebUIListener(
+          'profile-info-changed', this.handleProfileInfo_.bind(this));
+    }
 
     this.syncBrowserProxy_ = settings.SyncBrowserProxyImpl.getInstance();
     this.syncBrowserProxy_.getSyncStatus().then(
         this.handleSyncStatus_.bind(this));
     this.addWebUIListener(
         'sync-status-changed', this.handleSyncStatus_.bind(this));
-
-    this.accountManagerBrowserProxy_ =
-        settings.AccountManagerBrowserProxyImpl.getInstance();
-    this.addWebUIListener(
-        'accounts-changed', this.updateProfileLabel_.bind(this));
-    this.updateProfileLabel_();
   },
 
   /** @protected */
@@ -215,38 +188,63 @@ Polymer({
   },
 
   /**
+   * @return {string}
+   * @private
+   */
+  getSyncRowLabel_: function() {
+    if (this.splitSettingsSyncEnabled_) {
+      return this.i18n('peopleOsSyncRowLabel');
+    } else {
+      return this.i18n('syncAndNonPersonalizedServices');
+    }
+  },
+
+  /**
+   * @return {string}
+   * @private
+   */
+  getSyncAndGoogleServicesSubtext_: function() {
+    if (this.syncStatus && this.syncStatus.hasError &&
+        this.syncStatus.statusText) {
+      return this.syncStatus.statusText;
+    }
+    return '';
+  },
+
+  /**
    * Handler for when the profile's icon and name is updated.
    * @private
    * @param {!settings.ProfileInfo} info
    */
   handleProfileInfo_: function(info) {
     this.profileName_ = info.name;
-    /**
-     * Extract first frame from image by creating a single frame PNG using
-     * url as input if base64 encoded and potentially animated.
-     */
+    // Extract first frame from image by creating a single frame PNG using
+    // url as input if base64 encoded and potentially animated.
     if (info.iconUrl.startsWith('data:image/png;base64')) {
       this.profileIconUrl_ =
           CrPngBehavior.convertImageSequenceToPng([info.iconUrl]);
       return;
     }
-
     this.profileIconUrl_ = info.iconUrl;
   },
 
   /**
-   * Updates the label underneath the primary profile name.
+   * Handler for when the account list is updated.
    * @private
    */
-  updateProfileLabel_: async function() {
-    const includeImages = false;
+  updateAccounts_: async function() {
     const /** @type {!Array<settings.Account>} */ accounts =
-        await this.accountManagerBrowserProxy_.getAccounts(includeImages);
-    // The user might not have any GAIA accounts.
+        await settings.AccountManagerBrowserProxyImpl.getInstance()
+            .getAccounts();
+    // The user might not have any GAIA accounts (e.g. guest mode, Kerberos,
+    // Active Directory). In these cases the profile row is hidden, so there's
+    // nothing to do.
     if (accounts.length == 0) {
-      this.profileLabel_ = '';
       return;
     }
+    this.profileName_ = accounts[0].fullName;
+    this.profileIconUrl_ = accounts[0].pic;
+
     const moreAccounts = accounts.length - 1;
     // Template: "$1, +$2 more accounts" with correct plural of "account".
     // Localization handles the case of 0 more accounts.
@@ -265,11 +263,13 @@ Polymer({
    */
   handleSyncStatus_: function(syncStatus) {
     this.syncStatus = syncStatus;
-  },
 
-  /** @private */
-  onProfileIconTap_: function() {
-    settings.navigateTo(settings.routes.CHANGE_PICTURE);
+    // When ChromeOSAccountManager is disabled, fall back to using the sync
+    // username ("alice@gmail.com") as the profile label.
+    if (!this.isAccountManagerEnabled_ && syncStatus && syncStatus.signedIn &&
+        syncStatus.signedInUsername) {
+      this.profileLabel_ = syncStatus.signedInUsername;
+    }
   },
 
   /** @private */
@@ -294,38 +294,13 @@ Polymer({
 
   /** @private */
   onSyncTap_: function() {
-    // When unified-consent is enabled, users can go to sync subpage regardless
-    // of sync status.
-    if (this.unifiedConsentEnabled_) {
-      settings.navigateTo(settings.routes.SYNC);
+    if (this.splitSettingsSyncEnabled_) {
+      settings.navigateTo(settings.routes.OS_SYNC);
       return;
     }
 
-    // TODO(crbug.com/862983): Remove this code once UnifiedConsent is rolled
-    // out to 100%.
-    assert(this.syncStatus.signedIn);
-    assert(this.syncStatus.syncSystemEnabled);
-
-    if (!this.isSyncStatusActionable_(this.syncStatus)) {
-      return;
-    }
-
-    switch (this.syncStatus.statusAction) {
-      case settings.StatusAction.REAUTHENTICATE:
-        this.syncBrowserProxy_.startSignIn();
-        break;
-      case settings.StatusAction.SIGNOUT_AND_SIGNIN:
-        this.syncBrowserProxy_.attemptUserExit();
-        break;
-      case settings.StatusAction.UPGRADE_CLIENT:
-        settings.navigateTo(settings.routes.ABOUT);
-        break;
-      case settings.StatusAction.ENTER_PASSPHRASE:
-      case settings.StatusAction.CONFIRM_SYNC_SETTINGS:
-      case settings.StatusAction.NO_ACTION:
-      default:
-        settings.navigateTo(settings.routes.SYNC);
-    }
+    // Users can go to sync subpage regardless of sync status.
+    settings.navigateTo(settings.routes.SYNC);
   },
 
   /**
@@ -345,7 +320,9 @@ Polymer({
    * @private
    */
   onAccountManagerTap_: function(e) {
-    settings.navigateTo(settings.routes.ACCOUNT_MANAGER);
+    if (this.isAccountManagerEnabled_) {
+      settings.navigateTo(settings.routes.ACCOUNT_MANAGER);
+    }
   },
 
   /**
@@ -359,90 +336,6 @@ Polymer({
   /** @private */
   onManageOtherPeople_: function() {
     settings.navigateTo(settings.routes.ACCOUNTS);
-  },
-
-  /**
-   * @private
-   * @param {?settings.SyncStatus} syncStatus
-   * @return {boolean}
-   */
-  isPreUnifiedConsentAdvancedSyncSettingsVisible_: function(syncStatus) {
-    return !!syncStatus && !!syncStatus.signedIn &&
-        !!syncStatus.syncSystemEnabled && !this.unifiedConsentEnabled_;
-  },
-
-  /**
-   * @private
-   * @param {?settings.SyncStatus} syncStatus
-   * @return {boolean}
-   */
-  isAdvancedSyncSettingsSearchable_: function(syncStatus) {
-    return this.isPreUnifiedConsentAdvancedSyncSettingsVisible_(syncStatus) ||
-        !!this.unifiedConsentEnabled_;
-  },
-
-  /**
-   * @private
-   * @return {Element|null}
-   */
-  getAdvancedSyncSettingsAssociatedControl_: function() {
-    return this.unifiedConsentEnabled_ ? this.$$('#sync-setup') :
-                                         this.$$('#sync-status');
-  },
-
-  /**
-   * @private
-   * @param {?settings.SyncStatus} syncStatus
-   * @return {boolean} Whether an action can be taken with the sync status. sync
-   *     status is actionable if sync is not managed and if there is a sync
-   *     error, there is an action associated with it.
-   */
-  isSyncStatusActionable_: function(syncStatus) {
-    return !!syncStatus && !syncStatus.managed &&
-        (!syncStatus.hasError ||
-         syncStatus.statusAction != settings.StatusAction.NO_ACTION);
-  },
-
-  /**
-   * @private
-   * @param {?settings.SyncStatus} syncStatus
-   * @return {string}
-   */
-  getSyncIcon_: function(syncStatus) {
-    if (!syncStatus) {
-      return '';
-    }
-
-    let syncIcon = 'cr:sync';
-
-    if (syncStatus.hasError) {
-      syncIcon = 'settings:sync-problem';
-    }
-
-    // Override the icon to the disabled icon if sync is managed.
-    if (syncStatus.managed ||
-        syncStatus.statusAction == settings.StatusAction.REAUTHENTICATE) {
-      syncIcon = 'settings:sync-disabled';
-    }
-
-    return syncIcon;
-  },
-
-  /**
-   * @private
-   * @param {?settings.SyncStatus} syncStatus
-   * @return {string} The class name for the sync status row.
-   */
-  getSyncStatusClass_: function(syncStatus) {
-    if (syncStatus && syncStatus.hasError) {
-      // Most of the time re-authenticate states are caused by intentional user
-      // action, so they will be displayed differently as other errors.
-      return syncStatus.statusAction == settings.StatusAction.REAUTHENTICATE ?
-          'auth-error' :
-          'sync-error';
-    }
-
-    return '';
   },
 
   /**

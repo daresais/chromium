@@ -8,8 +8,6 @@
 #include "ash/assistant/assistant_ui_controller.h"
 #include "ash/assistant/util/deep_link_util.h"
 #include "ash/assistant/util/i18n_util.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
-#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -27,7 +25,7 @@ namespace ash {
 
 AssistantSetupController::AssistantSetupController(
     AssistantController* assistant_controller)
-    : assistant_controller_(assistant_controller), weak_ptr_factory_(this) {
+    : assistant_controller_(assistant_controller) {
   assistant_controller_->AddObserver(this);
 }
 
@@ -46,20 +44,18 @@ void AssistantSetupController::OnAssistantControllerDestroying() {
 void AssistantSetupController::OnDeepLinkReceived(
     assistant::util::DeepLinkType type,
     const std::map<std::string, std::string>& params) {
-  using namespace assistant::util;
-
-  if (type != DeepLinkType::kOnboarding)
+  if (type != assistant::util::DeepLinkType::kOnboarding)
     return;
 
-  base::Optional<bool> relaunch =
-      GetDeepLinkParamAsBool(params, DeepLinkParam::kRelaunch);
+  base::Optional<bool> relaunch = assistant::util::GetDeepLinkParamAsBool(
+      params, assistant::util::DeepLinkParam::kRelaunch);
 
   StartOnboarding(relaunch.value_or(false));
 }
 
 void AssistantSetupController::OnOptInButtonPressed() {
-  if (assistant_controller_->prefs_controller()->prefs()->GetInteger(
-          chromeos::assistant::prefs::kAssistantConsentStatus) ==
+  if (AssistantState::Get()->consent_status().value_or(
+          chromeos::assistant::prefs::ConsentStatus::kUnknown) ==
       chromeos::assistant::prefs::ConsentStatus::kUnauthorized) {
     assistant_controller_->OpenUrl(assistant::util::CreateLocalizedGURL(
         kGSuiteAdministratorInstructionsUrl));

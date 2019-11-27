@@ -10,7 +10,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
 #include "ios/web/common/features.h"
-#import "ios/web/public/navigation_item.h"
+#import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/web_client.h"
 #include "net/base/escape.h"
 #include "net/base/url_util.h"
@@ -60,7 +60,7 @@ int GetSafeItemIterators(
     return last_committed_item_index;
   }
 
-  if (items.size() - last_committed_item_index < kMaxSessionSize / 2) {
+  if (items.size() - last_committed_item_index <= kMaxSessionSize / 2) {
     // Items which are the furthest to |last_committed_item_index| are located
     // on the left side of the vector. Trim those.
     *begin = items.end() - kMaxSessionSize;
@@ -136,8 +136,8 @@ void CreateRestoreSessionUrl(
   restored_titles.GetList().reserve(new_size);
   for (auto it = begin; it != end; ++it) {
     NavigationItem* item = (*it).get();
-    restored_urls.GetList().push_back(base::Value(item->GetURL().spec()));
-    restored_titles.GetList().push_back(base::Value(item->GetTitle()));
+    restored_urls.Append(base::Value(item->GetURL().spec()));
+    restored_titles.Append(base::Value(item->GetTitle()));
   }
   base::Value session(base::Value::Type::DICTIONARY);
   int offset = new_last_committed_item_index + 1 - new_size;

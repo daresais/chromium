@@ -11,7 +11,6 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/window_factory.h"
 #include "ash/wm/desks/desks_util.h"
-#include "ash/wm/root_window_finder.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "base/run_loop.h"
@@ -157,7 +156,7 @@ class ExtendedDesktopTest : public AshTestBase {
     params.bounds = bounds;
     views::Widget* widget = new views::Widget;
     params.context = CurrentContext();
-    widget->Init(params);
+    widget->Init(std::move(params));
     widget->Show();
     return widget;
   }
@@ -298,17 +297,18 @@ TEST_F(ExtendedDesktopTest, GetRootWindowAt) {
   SetSecondaryDisplayLayout(display::DisplayPlacement::LEFT);
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-400, 100)));
-  EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-1, 100)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(0, 300)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(700, 300)));
+  using window_util::GetRootWindowAt;
+  EXPECT_EQ(root_windows[1], GetRootWindowAt(gfx::Point(-400, 100)));
+  EXPECT_EQ(root_windows[1], GetRootWindowAt(gfx::Point(-1, 100)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(0, 300)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(700, 300)));
 
   // Zero origin.
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(0, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(0, 0)));
 
   // Out of range point should return the nearest root window
-  EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-600, 0)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(701, 100)));
+  EXPECT_EQ(root_windows[1], GetRootWindowAt(gfx::Point(-600, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(701, 100)));
 }
 
 TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
@@ -318,32 +318,29 @@ TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
   // Containing rect.
+  using window_util::GetRootWindowMatching;
   EXPECT_EQ(root_windows[1],
-            wm::GetRootWindowMatching(gfx::Rect(-300, 10, 50, 50)));
-  EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(100, 10, 50, 50)));
+            GetRootWindowMatching(gfx::Rect(-300, 10, 50, 50)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(100, 10, 50, 50)));
 
   // Intersecting rect.
   EXPECT_EQ(root_windows[1],
-            wm::GetRootWindowMatching(gfx::Rect(-200, 0, 300, 300)));
+            GetRootWindowMatching(gfx::Rect(-200, 0, 300, 300)));
   EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(-100, 0, 300, 300)));
+            GetRootWindowMatching(gfx::Rect(-100, 0, 300, 300)));
 
   // Zero origin.
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowMatching(gfx::Rect(0, 0, 0, 0)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowMatching(gfx::Rect(0, 0, 1, 1)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(0, 0, 0, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(0, 0, 1, 1)));
 
   // Empty rect.
-  EXPECT_EQ(root_windows[1],
-            wm::GetRootWindowMatching(gfx::Rect(-400, 100, 0, 0)));
-  EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(100, 100, 0, 0)));
+  EXPECT_EQ(root_windows[1], GetRootWindowMatching(gfx::Rect(-400, 100, 0, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(100, 100, 0, 0)));
 
   // Out of range rect should return the primary root window.
   EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(-600, -300, 50, 50)));
-  EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(0, 1000, 50, 50)));
+            GetRootWindowMatching(gfx::Rect(-600, -300, 50, 50)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(0, 1000, 50, 50)));
 }
 
 TEST_F(ExtendedDesktopTest, Capture) {
@@ -845,13 +842,13 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   event_generator->PressKey(ui::VKEY_A, 0);
   event_generator->ReleaseKey(ui::VKEY_A, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("a", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("a", base::UTF16ToASCII(textfield->GetText()));
 
   event_generator->set_current_target(root_windows[1]);
   event_generator->PressKey(ui::VKEY_B, 0);
   event_generator->ReleaseKey(ui::VKEY_B, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("ab", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("ab", base::UTF16ToASCII(textfield->GetText()));
 
   // Deleting 2nd display. The lock window still should get the events.
   UpdateDisplay("100x100");
@@ -859,7 +856,7 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   event_generator->PressKey(ui::VKEY_C, 0);
   event_generator->ReleaseKey(ui::VKEY_C, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("abc", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("abc", base::UTF16ToASCII(textfield->GetText()));
 
   // Creating 2nd display again, and lock window still should get events
   // on both root windows.
@@ -869,13 +866,13 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   event_generator->PressKey(ui::VKEY_D, 0);
   event_generator->ReleaseKey(ui::VKEY_D, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("abcd", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("abcd", base::UTF16ToASCII(textfield->GetText()));
 
   event_generator->set_current_target(root_windows[1]);
   event_generator->PressKey(ui::VKEY_E, 0);
   event_generator->ReleaseKey(ui::VKEY_E, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("abcde", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("abcde", base::UTF16ToASCII(textfield->GetText()));
 }
 
 // Verifies that clicking in the primary display and dragging to the secondary

@@ -17,6 +17,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -44,12 +45,12 @@ public class PortalsTest {
     private EmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -246,6 +247,7 @@ public class PortalsTest {
     @Test
     @MediumTest
     @Feature({"Portals"})
+    @DisabledTest // Disabled due to flakiness. See https://crbug.com/1024850
     public void testTouchTransferAfterTouchStartActivate() throws Exception {
         mActivityTestRule.startMainActivityWithURL(mTestServer.getURL(
                 "/chrome/test/data/android/portals/touch-transfer.html?event=touchstart"));
@@ -269,6 +271,50 @@ public class PortalsTest {
 
         // Wait for the first layout after tab contents are swapped. This is needed as touch events
         // sent before the first layout are dropped.
+        layoutWaiter.waitForCallback(currLayoutCount, 1);
+
+        // Continue and finish drag.
+        TouchCommon.dragTo(activity, dragStartX, dragEndX, dragStartY, dragEndY, 100, downTime);
+        TouchCommon.dragEnd(activity, dragEndX, dragEndY, downTime);
+
+        WebContents contents = mActivityTestRule.getWebContents();
+        Assert.assertTrue(Coordinates.createFor(contents).getScrollYPixInt() > 0);
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"Portals"})
+    public void testTouchTransferAfterReactivation() throws Exception {
+        mActivityTestRule.startMainActivityWithURL(mTestServer.getURL(
+                "/chrome/test/data/android/portals/touch-transfer-after-reactivation.html"));
+
+        ChromeActivity activity = mActivityTestRule.getActivity();
+        Tab tab = activity.getActivityTab();
+        View contentView = tab.getContentView();
+
+        TabContentsSwapObserver swapObserver = new TabContentsSwapObserver();
+        CallbackHelper swapWaiter = swapObserver.getCallbackHelper();
+        tab.addObserver(swapObserver);
+        int currSwapCount = swapWaiter.getCallCount();
+
+        int dragStartX = 30;
+        int dragStartY = contentView.getHeight() / 2;
+        int dragEndX = dragStartX;
+        int dragEndY = 30;
+        long downTime = System.currentTimeMillis();
+
+        // Initial touch to trigger activation.
+        TouchCommon.dragStart(activity, dragStartX, dragStartY, downTime);
+
+        // Wait for first activation.
+        swapWaiter.waitForCallback(currSwapCount, 1);
+
+        LayoutAfterTabContentsSwappedObserver layoutObserver =
+                new LayoutAfterTabContentsSwappedObserver(tab);
+        CallbackHelper layoutWaiter = layoutObserver.getCallbackHelper();
+        int currLayoutCount = layoutWaiter.getCallCount();
+
+        // Wait for the first layout after second activation (reactivation of predecessor).
         layoutWaiter.waitForCallback(currLayoutCount, 1);
 
         // Continue and finish drag.

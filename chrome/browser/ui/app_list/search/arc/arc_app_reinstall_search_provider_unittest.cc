@@ -21,7 +21,7 @@
 #include "chrome/browser/ui/app_list/test/test_app_list_controller_delegate.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/arc/common/app.mojom.h"
+#include "components/arc/mojom/app.mojom.h"
 #include "components/arc/test/fake_app_instance.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
@@ -153,8 +153,8 @@ class TestSearchResult : public ChromeSearchResult {
     // set_id is protected in chromesearchresult.
     ChromeSearchResult::set_id(str);
   }
-  app_list::SearchResultType GetSearchResultType() const override {
-    return app_list::SEARCH_RESULT_TYPE_BOUNDARY;
+  ash::SearchResultType GetSearchResultType() const override {
+    return ash::SEARCH_RESULT_TYPE_BOUNDARY;
   }
 };
 }  // namespace

@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
-#include "components/favicon/core/favicon_server_fetcher_params.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon/core/favicon_util.h"
 #include "components/favicon/core/large_icon_service.h"
@@ -35,12 +34,10 @@ constexpr int kDesiredFrameSize = 128;
 // arguments from the UI so that we desire for the right size on a given device.
 // See crbug.com/696563.
 constexpr int kDefaultTileIconMinSizePx = 1;
-constexpr int kDefaultTileIconDesiredSizePx = 96;
 
 const char kImageFetcherUmaClient[] = "IconCacher";
 
 constexpr char kTileIconMinSizePxFieldParam[] = "min_size";
-constexpr char kTileIconDesiredSizePxFieldParam[] = "desired_size";
 
 favicon_base::IconType IconType(const PopularSites::Site& site) {
   return site.large_icon_url.is_valid() ? favicon_base::IconType::kTouchIcon
@@ -64,12 +61,6 @@ int GetMinimumFetchingSizeForChromeSuggestionsFaviconsFromServer() {
   return base::GetFieldTrialParamByFeatureAsInt(
       kNtpMostLikelyFaviconsFromServerFeature, kTileIconMinSizePxFieldParam,
       kDefaultTileIconMinSizePx);
-}
-
-int GetDesiredFetchingSizeForChromeSuggestionsFaviconsFromServer() {
-  return base::GetFieldTrialParamByFeatureAsInt(
-      kNtpMostLikelyFaviconsFromServerFeature, kTileIconDesiredSizePxFieldParam,
-      kDefaultTileIconDesiredSizePx);
 }
 
 }  // namespace
@@ -152,7 +143,6 @@ void IconCacherImpl::OnPopularSitesFaviconDownloaded(
     const image_fetcher::RequestMetadata& metadata) {
   if (fetched_image.IsEmpty()) {
     FinishRequestAndNotifyIconAvailable(site.url, /*newly_available=*/false);
-    UMA_HISTOGRAM_BOOLEAN("NewTabPage.TileFaviconFetchSuccess.Popular", false);
     return;
   }
 
@@ -163,7 +153,6 @@ void IconCacherImpl::OnPopularSitesFaviconDownloaded(
   }
   SaveIconForSite(site, fetched_image);
   FinishRequestAndNotifyIconAvailable(site.url, /*newly_available=*/true);
-  UMA_HISTOGRAM_BOOLEAN("NewTabPage.TileFaviconFetchSuccess.Popular", true);
 }
 
 void IconCacherImpl::SaveAndNotifyDefaultIconForSite(
@@ -264,9 +253,7 @@ void IconCacherImpl::OnGetLargeIconOrFallbackStyleFinished(
         })");
   large_icon_service_
       ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-          favicon::FaviconServerFetcherParams::CreateForMobile(
-              page_url,
-              GetDesiredFetchingSizeForChromeSuggestionsFaviconsFromServer()),
+          page_url,
           /*may_page_url_be_private=*/true, /*should_trim_page_url_path=*/false,
           traffic_annotation,
           base::Bind(&IconCacherImpl::OnMostLikelyFaviconDownloaded,
@@ -276,9 +263,6 @@ void IconCacherImpl::OnGetLargeIconOrFallbackStyleFinished(
 void IconCacherImpl::OnMostLikelyFaviconDownloaded(
     const GURL& request_url,
     favicon_base::GoogleFaviconServerRequestStatus status) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "NewTabPage.TileFaviconFetchStatus.Server", status,
-      favicon_base::GoogleFaviconServerRequestStatus::COUNT);
   FinishRequestAndNotifyIconAvailable(
       request_url,
       status == favicon_base::GoogleFaviconServerRequestStatus::SUCCESS);

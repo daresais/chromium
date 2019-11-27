@@ -5,7 +5,11 @@
 #ifndef CC_TEST_FAKE_COMPOSITOR_FRAME_REPORTING_CONTROLLER_H_
 #define CC_TEST_FAKE_COMPOSITOR_FRAME_REPORTING_CONTROLLER_H_
 
-#include "cc/scheduler/compositor_frame_reporting_controller.h"
+#include "cc/metrics/compositor_frame_reporting_controller.h"
+
+namespace viz {
+struct FrameTimingDetails;
+}
 
 namespace cc {
 // This class is to be used for testing, during cases where the DCHECKs won't
@@ -30,8 +34,9 @@ class FakeCompositorFrameReportingController
   void WillActivate() override;
   void DidActivate() override;
   void DidSubmitCompositorFrame(uint32_t frame_token) override;
-  void DidPresentCompositorFrame(uint32_t frame_token,
-                                 base::TimeTicks presentation_time) override;
+  void DidPresentCompositorFrame(
+      uint32_t frame_token,
+      const viz::FrameTimingDetails& details) override;
 };
 }  // namespace cc
 

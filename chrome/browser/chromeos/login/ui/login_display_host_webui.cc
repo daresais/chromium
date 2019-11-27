@@ -26,8 +26,10 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/chromeos/app_mode/web_app/web_kiosk_app_manager.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/chromeos/first_run/drive_first_run_controller.h"
@@ -353,20 +355,6 @@ bool CanPlayStartupSound() {
          device.type != chromeos::AudioDeviceType::AUDIO_TYPE_OTHER;
 }
 
-bool ShouldInitializeWebUIHidden() {
-  // Always postpone WebUI initialization on first boot, otherwise we miss
-  // initial animation.
-  if (!StartupUtils::IsOobeCompleted())
-    return false;
-
-  // Tests and kiosk app autolaunch don't support hidden.
-  if (WizardController::IsZeroDelayEnabled())
-    return false;
-
-  // Default.
-  return true;
-}
-
 }  // namespace
 
 // static
@@ -400,9 +388,7 @@ class LoginDisplayHostWebUI::KeyboardDrivenOobeKeyHandler
 // LoginDisplayHostWebUI, public
 
 LoginDisplayHostWebUI::LoginDisplayHostWebUI()
-    : initialize_webui_hidden_(ShouldInitializeWebUIHidden()),
-      oobe_startup_sound_played_(StartupUtils::IsOobeCompleted()),
-      weak_factory_(this) {
+    : oobe_startup_sound_played_(StartupUtils::IsOobeCompleted()) {
   SessionManagerClient::Get()->AddObserver(this);
   CrasAudioHandler::Get()->AddAudioObserver(this);
 
@@ -410,26 +396,12 @@ LoginDisplayHostWebUI::LoginDisplayHostWebUI()
 
   ui::DeviceDataManager::GetInstance()->AddObserver(this);
 
-  bool zero_delay_enabled = WizardController::IsZeroDelayEnabled();
-  waiting_for_wallpaper_load_ = !zero_delay_enabled;
-
-  if (waiting_for_wallpaper_load_) {
-    registrar_.Add(this, chrome::NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
-                   content::NotificationService::AllSources());
-  }
-
   // When we wait for WebUI to be initialized we wait for one of
   // these notifications.
-  if (waiting_for_wallpaper_load_ && initialize_webui_hidden_) {
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-                   content::NotificationService::AllSources());
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
-                   content::NotificationService::AllSources());
-  }
-  VLOG(1) << "Login WebUI >> "
-          << "zero_delay: " << zero_delay_enabled
-          << " wait_for_wp_load_: " << waiting_for_wallpaper_load_
-          << " init_webui_hidden_: " << initialize_webui_hidden_;
+  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
+                 content::NotificationService::AllSources());
 
   audio::SoundsManager* manager = audio::SoundsManager::Get();
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
@@ -520,10 +492,9 @@ void LoginDisplayHostWebUI::OnFinalize() {
 }
 
 void LoginDisplayHostWebUI::SetStatusAreaVisible(bool visible) {
-  if (initialize_webui_hidden_)
-    status_area_saved_visibility_ = visible;
-  else if (login_view_)
-    login_view_->SetStatusAreaVisible(visible);
+  status_area_saved_visibility_ = visible;
+  if (login_view_)
+    login_view_->SetStatusAreaVisible(status_area_saved_visibility_);
 }
 
 void LoginDisplayHostWebUI::OnOobeConfigurationChanged() {
@@ -555,10 +526,6 @@ void LoginDisplayHostWebUI::StartWizard(OobeScreenId first_screen) {
   first_screen_ = first_screen;
   is_showing_login_ = false;
 
-  if (waiting_for_wallpaper_load_ && !initialize_webui_hidden_) {
-    VLOG(1) << "Login WebUI >> wizard postponed";
-    return;
-  }
   VLOG(1) << "Login WebUI >> wizard";
 
   if (!login_window_)
@@ -635,10 +602,6 @@ void LoginDisplayHostWebUI::OnStartSignInScreen(
   is_showing_login_ = true;
   finalize_animation_type_ = ANIMATION_WORKSPACE;
 
-  if (waiting_for_wallpaper_load_ && !initialize_webui_hidden_) {
-    VLOG(1) << "Login WebUI >> sign in postponed";
-    return;
-  }
   VLOG(1) << "Login WebUI >> sign in";
 
   // TODO(crbug.com/784495): Make sure this is ported to views.
@@ -693,8 +656,16 @@ void LoginDisplayHostWebUI::OnStartAppLaunch() {
 void LoginDisplayHostWebUI::OnStartArcKiosk() {
   finalize_animation_type_ = ANIMATION_FADE_OUT;
   if (!login_window_) {
-    LoadURL(GURL(kAppLaunchSplashURL));
     LoadURL(GURL(kArcKioskSplashURL));
+  }
+
+  login_view_->set_should_emit_login_prompt_visible(false);
+}
+
+void LoginDisplayHostWebUI::OnStartWebKiosk() {
+  finalize_animation_type_ = ANIMATION_FADE_OUT;
+  if (!login_window_) {
+    LoadURL(GURL(kAppLaunchSplashURL));
   }
 
   login_view_->set_should_emit_login_prompt_visible(false);
@@ -731,34 +702,10 @@ void LoginDisplayHostWebUI::Observe(
   if (chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE == type ||
       chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN == type) {
     VLOG(1) << "Login WebUI >> WEBUI_VISIBLE";
-    if (waiting_for_wallpaper_load_ && initialize_webui_hidden_) {
-      // Reduce time till login UI is shown - show it as soon as possible.
-      waiting_for_wallpaper_load_ = false;
-      ShowWebUI();
-    }
+    ShowWebUI();
     registrar_.Remove(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                       content::NotificationService::AllSources());
     registrar_.Remove(this, chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
-                      content::NotificationService::AllSources());
-  } else if (chrome::NOTIFICATION_WALLPAPER_ANIMATION_FINISHED == type) {
-    VLOG(1) << "Login WebUI >> wp animation done";
-    is_wallpaper_loaded_ = true;
-    if (waiting_for_wallpaper_load_) {
-      // StartWizard / StartSignInScreen could be called multiple times through
-      // the lifetime of host.
-      // Make sure that subsequent calls are not postponed.
-      waiting_for_wallpaper_load_ = false;
-      if (initialize_webui_hidden_) {
-        // If we're in the process of switching locale, the wallpaper might
-        // have finished loading before the locale switch was completed.
-        // Only show the UI if it already exists.
-        if (login_window_ && login_view_)
-          ShowWebUI();
-      } else {
-        StartPostponedWebUI();
-      }
-    }
-    registrar_.Remove(this, chrome::NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
                       content::NotificationService::AllSources());
   }
 }
@@ -768,7 +715,7 @@ void LoginDisplayHostWebUI::Observe(
 
 void LoginDisplayHostWebUI::RenderProcessGone(base::TerminationStatus status) {
   // Do not try to restore on shutdown
-  if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
+  if (browser_shutdown::HasShutdownStarted())
     return;
 
   crash_count_++;
@@ -901,49 +848,14 @@ void LoginDisplayHostWebUI::LoadURL(const GURL& url) {
 }
 
 void LoginDisplayHostWebUI::ShowWebUI() {
-  if (!login_window_ || !login_view_) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(login_window_);
+  DCHECK(login_view_);
+
   VLOG(1) << "Login WebUI >> Show already initialized UI";
   login_window_->Show();
   login_view_->GetWebContents()->Focus();
   login_view_->SetStatusAreaVisible(status_area_saved_visibility_);
   login_view_->OnPostponedShow();
-
-  // We should reset this flag to allow changing of status area visibility.
-  initialize_webui_hidden_ = false;
-}
-
-void LoginDisplayHostWebUI::StartPostponedWebUI() {
-  if (!is_wallpaper_loaded_) {
-    NOTREACHED();
-    return;
-  }
-  VLOG(1) << "Login WebUI >> Init postponed WebUI";
-
-  // Wallpaper has finished loading before StartWizard/StartSignInScreen has
-  // been called. In general this should not happen.
-  // Let go through normal code path when one of those will be called.
-  if (restore_path_ == RESTORE_UNKNOWN) {
-    NOTREACHED();
-    return;
-  }
-
-  switch (restore_path_) {
-    case RESTORE_WIZARD:
-      StartWizard(first_screen_);
-      break;
-    case RESTORE_SIGN_IN:
-      StartSignInScreen(LoginScreenContext());
-      break;
-    case RESTORE_ADD_USER_INTO_SESSION:
-      StartUserAdding(base::OnceClosure());
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
 }
 
 void LoginDisplayHostWebUI::InitLoginWindowAndView() {
@@ -962,12 +874,12 @@ void LoginDisplayHostWebUI::InitLoginWindowAndView() {
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.bounds = CalculateScreenBounds(gfx::Size());
   params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
 
   ash_util::SetupWidgetInitParamsForContainer(
       &params, ash::kShellWindowId_LockScreenContainer);
   login_window_ = new views::Widget;
-  login_window_->Init(params);
+  login_window_->Init(std::move(params));
 
   login_view_ = new WebUILoginView(WebUILoginView::WebViewSettings());
   login_view_->Init();
@@ -984,18 +896,11 @@ void LoginDisplayHostWebUI::InitLoginWindowAndView() {
   login_window_->AddObserver(this);
   login_window_->AddRemovalsObserver(this);
   login_window_->SetContentsView(login_view_);
-
-  // If WebUI is initialized in hidden state, show it only if we're no
-  // longer waiting for wallpaper animation/user images loading. Otherwise,
-  // always show it.
-  if (!initialize_webui_hidden_ || !waiting_for_wallpaper_load_) {
-    VLOG(1) << "Login WebUI >> show login wnd on create";
-    login_window_->Show();
-  } else {
-    VLOG(1) << "Login WebUI >> login wnd is hidden on create";
-    login_view_->set_is_hidden(true);
-  }
   login_window_->GetNativeView()->SetName("WebUILoginView");
+
+  // Delay showing the window until the login webui is ready.
+  VLOG(1) << "Login WebUI >> login window is hidden on create";
+  login_view_->set_is_hidden(true);
 }
 
 void LoginDisplayHostWebUI::ResetLoginWindowAndView() {
@@ -1068,10 +973,6 @@ void LoginDisplayHostWebUI::HideOobeDialog() {
   NOTREACHED();
 }
 
-void LoginDisplayHostWebUI::UpdateOobeDialogSize(int width, int height) {
-  NOTREACHED();
-}
-
 void LoginDisplayHostWebUI::UpdateOobeDialogState(ash::OobeDialogState state) {
   NOTREACHED();
 }
@@ -1095,6 +996,10 @@ void LoginDisplayHostWebUI::HandleDisplayCaptivePortal() {
 void LoginDisplayHostWebUI::OnCancelPasswordChangedFlow() {}
 
 void LoginDisplayHostWebUI::UpdateAddUserButtonStatus() {
+  NOTREACHED();
+}
+
+void LoginDisplayHostWebUI::RequestSystemInfoUpdate() {
   NOTREACHED();
 }
 
@@ -1171,8 +1076,13 @@ void ShowLoginWizard(OobeScreenId first_screen) {
     const bool auto_launch = true;
     // Manages its own lifetime. See ShutdownDisplayHost().
     auto* display_host = new LoginDisplayHostWebUI();
-    display_host->StartAppLaunch(auto_launch_app_id, diagnostic_mode,
-                                 auto_launch);
+    if (!auto_launch_app_id.empty()) {
+      display_host->StartAppLaunch(auto_launch_app_id, diagnostic_mode,
+                                   auto_launch);
+    } else {
+      display_host->StartWebKiosk(
+          WebKioskAppManager::Get()->GetAutoLaunchAccountId());
+    }
     return;
   }
 

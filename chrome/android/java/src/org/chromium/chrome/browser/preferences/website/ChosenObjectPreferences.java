@@ -23,8 +23,8 @@ import android.view.inputmethod.EditorInfo;
 import org.chromium.base.annotations.RemovableInRelease;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
-import org.chromium.chrome.browser.preferences.ChromeImageViewPreferenceCompat;
-import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegateCompat;
+import org.chromium.chrome.browser.preferences.ChromeImageViewPreference;
+import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 
@@ -130,9 +130,8 @@ public class ChosenObjectPreferences extends PreferenceFragmentCompat {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == R.id.menu_id_targeted_help) {
-            HelpAndFeedback.getInstance(getActivity())
-                    .show(getActivity(), getString(R.string.help_context_settings),
-                            Profile.getLastUsedProfile(), null);
+            HelpAndFeedback.getInstance().show(getActivity(),
+                    getString(R.string.help_context_settings), Profile.getLastUsedProfile(), null);
             return true;
         }
         return false;
@@ -157,10 +156,11 @@ public class ChosenObjectPreferences extends PreferenceFragmentCompat {
     public void revokeObjectPermissions() {
         boolean hasManagedObject = false;
         for (ChosenObjectInfo info : mObjectInfos) {
-            if (info.isManaged())
+            if (info.isManaged()) {
                 hasManagedObject = true;
-            else
+            } else {
                 info.revoke();
+            }
         }
 
         // Managed objects cannot be revoked, so finish the activity only if the list did not
@@ -229,8 +229,7 @@ public class ChosenObjectPreferences extends PreferenceFragmentCompat {
      */
     private void createHeader() {
         PreferenceScreen preferenceScreen = getPreferenceScreen();
-        ChromeImageViewPreferenceCompat header =
-                new ChromeImageViewPreferenceCompat(getStyledContext());
+        ChromeImageViewPreference header = new ChromeImageViewPreference(getStyledContext());
         String titleText = mObjectInfos.get(0).getName();
         String dialogMsg =
                 String.format(getView().getContext().getString(
@@ -254,7 +253,7 @@ public class ChosenObjectPreferences extends PreferenceFragmentCompat {
         preferenceScreen.addPreference(header);
 
         // TODO(chouinard): Handle this header and divider in a cleaner way. May need to migrate
-        // WebsitePreference to extend ChromeBasePreferenceCompat to more easily set dividers
+        // WebsitePreference to extend ChromeBasePreference to more easily set dividers
         // programmatically.
         Preference divider = new Preference(getStyledContext());
         divider.setLayoutResource(R.layout.divider_preference);
@@ -286,7 +285,7 @@ public class ChosenObjectPreferences extends PreferenceFragmentCompat {
                         getInfo();
                     });
 
-            preference.setManagedPreferenceDelegate(new ManagedPreferenceDelegateCompat() {
+            preference.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
                 @Override
                 public boolean isPreferenceControlledByPolicy(Preference preference) {
                     return info.isManaged();

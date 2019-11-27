@@ -11,9 +11,9 @@
 #import "base/mac/scoped_nsobject.h"
 #import "base/mac/sdk_forward_declarations.h"
 #include "base/strings/sys_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/vector_icons/vector_icons.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +22,8 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_observer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #import "chrome/browser/ui/cocoa/touchbar/browser_window_touch_bar_controller.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
@@ -33,7 +35,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "components/vector_icons/vector_icons.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #import "skia/ext/skia_utils_mac.h"
@@ -118,7 +119,7 @@ ui::TouchBarAction TouchBarActionFromCommand(int command) {
       return ui::TouchBarAction::HOME;
     case IDC_FOCUS_LOCATION:
       return ui::TouchBarAction::SEARCH;
-    case IDC_BOOKMARK_PAGE:
+    case IDC_BOOKMARK_THIS_TAB:
       return ui::TouchBarAction::STAR;
     case IDC_NEW_TAB:
       return ui::TouchBarAction::NEW_TAB;
@@ -132,9 +133,9 @@ ui::TouchBarAction TouchBarActionFromCommand(int command) {
 // the profile preferences and the back/forward commands.
 class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     : public CommandObserver,
+      public BrowserListObserver,
       public BookmarkTabHelperObserver,
       public TabStripModelObserver,
-      public content::NotificationObserver,
       public content::WebContentsObserver {
  public:
   TouchBarNotificationBridge(BrowserWindowDefaultTouchBar* owner,
@@ -149,7 +150,7 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     command_controller->AddCommandObserver(IDC_BACK, this);
     owner.canGoBack = command_controller->IsCommandEnabled(IDC_BACK);
     command_controller->AddCommandObserver(IDC_FORWARD, this);
-    owner.canGoBack = command_controller->IsCommandEnabled(IDC_FORWARD);
+    owner.canGoForward = command_controller->IsCommandEnabled(IDC_FORWARD);
 
     auto* profile = browser->profile();
     auto* prefs = profile->GetPrefs();
@@ -164,13 +165,13 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
         base::BindRepeating(&TouchBarNotificationBridge::UpdateTouchBar,
                             base::Unretained(this)));
 
-    notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                                content::Source<Profile>(profile));
+    BrowserList::AddObserver(this);
   }
 
   bool show_home_button() { return show_home_button_.GetValue(); }
 
   ~TouchBarNotificationBridge() override {
+    BrowserList::RemoveObserver(this);
     browser_->tab_strip_model()->RemoveObserver(this);
     UpdateWebContents(nullptr);
   }
@@ -186,8 +187,8 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     contents_ = new_contents;
 
     // Stop observing the old WebContents and start observing the new one (if
-    // nonnull). Qualified to disambiguate from NotificationObserver::Observe().
-    WebContentsObserver::Observe(contents_);
+    // nonnull).
+    Observe(contents_);
 
     BookmarkTabHelper* bookmark_helper =
         contents_ ? BookmarkTabHelper::FromWebContents(contents_) : nullptr;
@@ -224,11 +225,9 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     UpdateWebContents(selection.new_contents);
   }
 
-  // NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    owner_.browser = nullptr;
+  void OnBrowserRemoved(Browser* browser) override {
+    if (browser == owner_.browser)
+      owner_.browser = nullptr;
   }
 
   // WebContentsObserver:
@@ -256,8 +255,6 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
 
   // Used to monitor the optional home button pref.
   BooleanPrefMember show_home_button_;
-
-  content::NotificationRegistrar notification_registrar_;
 
   PrefChangeRegistrar profile_pref_registrar_;
 
@@ -470,8 +467,8 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
       isStarred_ ? kTouchBarStarActiveColor : kTouchBarDefaultIconColor;
   int tooltipId = isStarred_ ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR;
   if (!starredButton_) {
-    starredButton_.reset([CreateTouchBarButton(icon, self, IDC_BOOKMARK_PAGE,
-                                               tooltipId, iconColor) retain]);
+    starredButton_.reset([CreateTouchBarButton(
+        icon, self, IDC_BOOKMARK_THIS_TAB, tooltipId, iconColor) retain]);
     return;
   }
 
@@ -484,17 +481,22 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
       TemplateURLServiceFactory::GetForProfile(browser_->profile());
   const TemplateURL* defaultProvider =
       templateUrlService->GetDefaultSearchProvider();
-  BOOL isGoogle =
-      defaultProvider->GetEngineType(templateUrlService->search_terms_data()) ==
-      SEARCH_ENGINE_GOOGLE;
+  BOOL isGoogle = NO;
+  base::string16 title;
+  if (defaultProvider) {
+    isGoogle =
+        defaultProvider->GetEngineType(
+            templateUrlService->search_terms_data()) == SEARCH_ENGINE_GOOGLE;
 
-  base::string16 title =
-      isGoogle ? l10n_util::GetStringUTF16(IDS_TOUCH_BAR_GOOGLE_SEARCH)
-               : l10n_util::GetStringFUTF16(IDS_TOUCH_BAR_SEARCH,
-                                            defaultProvider->short_name());
+    title = isGoogle ? l10n_util::GetStringUTF16(IDS_TOUCH_BAR_GOOGLE_SEARCH)
+                     : l10n_util::GetStringFUTF16(
+                           IDS_TOUCH_BAR_SEARCH, defaultProvider->short_name());
+  } else {
+    title = l10n_util::GetStringUTF16(IDS_TOUCH_BAR_NO_DEFAULT_SEARCH);
+  }
 
   NSImage* image = nil;
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (isGoogle) {
     image = NSImageFromImageSkiaWithColorSpace(
         gfx::CreateVectorIcon(kGoogleGLogoIcon, kTouchBarIconSize,

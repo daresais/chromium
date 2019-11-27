@@ -4,6 +4,7 @@
 
 #include "ash/assistant/assistant_ui_controller.h"
 
+#include "ash/ambient/ambient_controller.h"
 #include "ash/assistant/assistant_controller.h"
 #include "ash/assistant/assistant_interaction_controller.h"
 #include "ash/assistant/assistant_screen_context_controller.h"
@@ -15,14 +16,16 @@
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/multi_user/multi_user_window_manager_impl.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/assistant/assistant_setup.h"
 #include "ash/public/cpp/toast_data.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/toast/toast_manager_impl.h"
 #include "base/bind.h"
 #include "base/optional.h"
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/services/assistant/public/features.h"
 #include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -54,7 +57,7 @@ void ShowToast(const std::string& id, int message_id) {
 
 AssistantUiController::AssistantUiController(
     AssistantController* assistant_controller)
-    : assistant_controller_(assistant_controller), weak_factory_(this) {
+    : assistant_controller_(assistant_controller) {
   AddModelObserver(this);
   assistant_controller_->AddObserver(this);
   Shell::Get()->highlighter_controller()->AddObserver(this);
@@ -129,7 +132,7 @@ void AssistantUiController::OnInteractionStateChanged(
   // already so that the interaction is visible to the user. Note that we
   // indicate that this UI mode change is occurring due to an interaction so
   // that we won't inadvertently stop the interaction due to the UI mode change.
-  UpdateUiMode(app_list_features::IsEmbeddedAssistantUIEnabled()
+  UpdateUiMode(app_list_features::IsAssistantLauncherUIEnabled()
                    ? AssistantUiMode::kLauncherEmbeddedUi
                    : AssistantUiMode::kMainUi,
                /*due_to_interaction=*/true);
@@ -161,7 +164,7 @@ void AssistantUiController::OnScreenContextRequestStateChanged(
 bool AssistantUiController::OnCaptionButtonPressed(AssistantButtonId id) {
   switch (id) {
     case AssistantButtonId::kBack:
-      UpdateUiMode(app_list_features::IsEmbeddedAssistantUIEnabled()
+      UpdateUiMode(app_list_features::IsAssistantLauncherUIEnabled()
                        ? AssistantUiMode::kLauncherEmbeddedUi
                        : AssistantUiMode::kMainUi);
       return true;
@@ -202,7 +205,7 @@ void AssistantUiController::OnMiniViewPressed() {
 
 void AssistantUiController::OnHighlighterEnabledChanged(
     HighlighterEnabledState state) {
-  if (app_list_features::IsEmbeddedAssistantUIEnabled()) {
+  if (app_list_features::IsAssistantLauncherUIEnabled()) {
     if (state == HighlighterEnabledState::kEnabled) {
       ShowToast(kStylusPromptToastId, IDS_ASH_ASSISTANT_PROMPT_STYLUS);
       CloseUi(AssistantExitPoint::kStylus);
@@ -244,14 +247,24 @@ void AssistantUiController::OnAssistantControllerDestroying() {
   }
 }
 
+// TODO(dmblack): Remove after deprecating standalone UI.
 void AssistantUiController::OnDeepLinkReceived(
     assistant::util::DeepLinkType type,
     const std::map<std::string, std::string>& params) {
+  // This method only handles web deep links, which will be handled separately
+  // in |AssistantWebUiController| when Assistant web container is
+  // enabled.
+  if (chromeos::assistant::features::IsAssistantWebContainerEnabled())
+    return;
+
   if (!assistant::util::IsWebDeepLinkType(type, params))
     return;
 
   ShowUi(AssistantEntryPoint::kDeepLink);
   UpdateUiMode(AssistantUiMode::kWebUi);
+
+  // Open the url associated w/ the deep link in Assistant UI.
+  container_view_->OpenUrl(assistant::util::GetWebUrl(type, params).value());
 }
 
 void AssistantUiController::OnOpeningUrl(const GURL& url,
@@ -269,13 +282,13 @@ void AssistantUiController::OnOpeningUrl(const GURL& url,
   // navigation was initiated by a server response. Otherwise the navigation
   // was user initiated so we only hide the UI to retain session state. That way
   // the user can choose to resume their session if they are so inclined.
-  // However, we close the UI if the feature |IsEmbeddedAssistantUIEnabled| is
+  // However, we close the UI if the feature |IsAssistantLauncherUIEnabled| is
   // enabled, where we only maintain |kVisible| and |kClosed| two states.
-  if (in_background && !app_list_features::IsEmbeddedAssistantUIEnabled())
+  if (in_background && !app_list_features::IsAssistantLauncherUIEnabled())
     UpdateUiMode(AssistantUiMode::kMiniUi);
   else if (from_server)
     CloseUi(AssistantExitPoint::kNewBrowserTabFromServer);
-  else if (app_list_features::IsEmbeddedAssistantUIEnabled())
+  else if (app_list_features::IsAssistantLauncherUIEnabled())
     CloseUi(AssistantExitPoint::kNewBrowserTabFromUser);
   else
     HideUi(AssistantExitPoint::kNewBrowserTabFromUser);
@@ -286,11 +299,6 @@ void AssistantUiController::OnUiVisibilityChanged(
     AssistantVisibility old_visibility,
     base::Optional<AssistantEntryPoint> entry_point,
     base::Optional<AssistantExitPoint> exit_point) {
-  VoiceInteractionController::Get()->NotifyStatusChanged(
-      new_visibility == AssistantVisibility::kVisible
-          ? mojom::VoiceInteractionState::RUNNING
-          : mojom::VoiceInteractionState::STOPPED);
-
   switch (new_visibility) {
     case AssistantVisibility::kClosed:
       // When the UI is closed, we stop the auto close timer as it may be
@@ -319,7 +327,8 @@ void AssistantUiController::OnUiVisibilityChanged(
       assistant::util::RecordAssistantEntryPoint(entry_point.value());
 
       if (!container_view_) {
-        DCHECK_EQ(AssistantUiMode::kLauncherEmbeddedUi, model_.ui_mode());
+        DCHECK(model_.ui_mode() == AssistantUiMode::kAmbientUi ||
+               model_.ui_mode() == AssistantUiMode::kLauncherEmbeddedUi);
         event_monitor_.reset();
         break;
       }
@@ -362,17 +371,20 @@ void AssistantUiController::OnUiVisibilityChanged(
 }
 
 void AssistantUiController::ShowUi(AssistantEntryPoint entry_point) {
-  auto* voice_interaction_controller = VoiceInteractionController::Get();
+  // Skip if the opt-in window is active.
+  auto* assistant_setup = AssistantSetup::GetInstance();
+  if (assistant_setup && assistant_setup->BounceOptInWindowIfActive())
+    return;
 
-  if (!voice_interaction_controller->settings_enabled().value_or(false) ||
-      voice_interaction_controller->locked_full_screen_enabled().value_or(
-          false)) {
+  auto* assistant_state = AssistantState::Get();
+
+  if (!assistant_state->settings_enabled().value_or(false) ||
+      assistant_state->locked_full_screen_enabled().value_or(false)) {
     return;
   }
 
   // TODO(dmblack): Show a more helpful message to the user.
-  if (VoiceInteractionController::Get()->voice_interaction_state() ==
-      mojom::VoiceInteractionState::NOT_READY) {
+  if (assistant_state->assistant_state() == mojom::AssistantState::NOT_READY) {
     ShowToast(kUnboundServiceToastId, IDS_ASH_ASSISTANT_ERROR_GENERIC);
     return;
   }
@@ -382,13 +394,21 @@ void AssistantUiController::ShowUi(AssistantEntryPoint entry_point) {
     return;
   }
 
-  if (app_list_features::IsEmbeddedAssistantUIEnabled()) {
+  if (chromeos::features::IsAmbientModeEnabled() &&
+      Shell::Get()->ambient_controller()->is_showing()) {
+    model_.SetUiMode(AssistantUiMode::kAmbientUi);
+    model_.SetVisible(entry_point);
+    return;
+  }
+
+  if (app_list_features::IsAssistantLauncherUIEnabled()) {
     model_.SetUiMode(AssistantUiMode::kLauncherEmbeddedUi);
     model_.SetVisible(entry_point);
     return;
   }
 
   DCHECK_NE(AssistantUiMode::kLauncherEmbeddedUi, model_.ui_mode());
+  DCHECK_NE(AssistantUiMode::kAmbientUi, model_.ui_mode());
 
   if (model_.visibility() == AssistantVisibility::kVisible) {
     // If Assistant window is already visible, we just try to retake focus.
@@ -463,7 +483,7 @@ void AssistantUiController::UpdateUiMode(
     return;
   }
 
-  if (app_list_features::IsEmbeddedAssistantUIEnabled()) {
+  if (app_list_features::IsAssistantLauncherUIEnabled()) {
     model_.SetUiMode(AssistantUiMode::kLauncherEmbeddedUi, due_to_interaction);
     return;
   }
@@ -491,8 +511,10 @@ void AssistantUiController::OnKeyboardOccludedBoundsChanged(
   // the virtual keyboard controller.
   aura::Window* root_window =
       container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
+
   display::Display keyboard_display =
       display::Screen::GetScreen()->GetDisplayMatching(new_bounds_in_screen);
+
   if (!new_bounds_in_screen.IsEmpty() &&
       root_window !=
           Shell::Get()->GetRootWindowForDisplayId(keyboard_display.id())) {
@@ -519,13 +541,14 @@ void AssistantUiController::OnDisplayMetricsChanged(
   // changing the work area (accessibility keyboard will change the display work
   // area but virtual keyboard won't). Display metrics change with keyboard
   // showing is instead handled by OnKeyboardOccludedBoundsChanged.
-  if (keyboard_workspace_occluded_bounds_.IsEmpty()) {
-    aura::Window* root_window =
-        container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
-    if (root_window == Shell::Get()->GetRootWindowForDisplayId(display.id())) {
-      UpdateUsableWorkArea(root_window);
-    }
-  }
+  if (!keyboard_workspace_occluded_bounds_.IsEmpty())
+    return;
+
+  aura::Window* root_window =
+      container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
+
+  if (root_window == Shell::Get()->GetRootWindowForDisplayId(display.id()))
+    UpdateUsableWorkArea(root_window);
 }
 
 void AssistantUiController::OnEvent(const ui::Event& event) {
@@ -546,8 +569,10 @@ void AssistantUiController::OnEvent(const ui::Event& event) {
 
   const gfx::Rect screen_bounds =
       container_view_->GetWidget()->GetWindowBoundsInScreen();
-  const gfx::Rect keyboard_bounds = keyboard::KeyboardUIController::Get()
-                                        ->GetWorkspaceOccludedBoundsInScreen();
+  const gfx::Rect keyboard_bounds =
+      keyboard::KeyboardUIController::Get()->IsKeyboardVisible()
+          ? keyboard::KeyboardUIController::Get()->GetVisualBoundsInScreen()
+          : gfx::Rect();
 
   // Pressed events outside our widget bounds should result in hiding of the
   // Assistant UI. The exception to this rule is if the user is interacting
@@ -590,13 +615,39 @@ AssistantContainerView* AssistantUiController::GetViewForTest() {
 
 void AssistantUiController::CreateContainerView() {
   DCHECK(!container_view_);
-  DCHECK(!app_list_features::IsEmbeddedAssistantUIEnabled());
+  DCHECK(!app_list_features::IsAssistantLauncherUIEnabled());
 
   container_view_ =
       new AssistantContainerView(assistant_controller_->view_delegate());
   container_view_->GetWidget()->AddObserver(this);
 
-  // To save resources, only watch these events while Assistant UI exists.
+  UpdateUsableWorkAreaObservers();
+}
+
+void AssistantUiController::ResetContainerView() {
+  DCHECK(container_view_);
+
+  container_view_->GetWidget()->RemoveObserver(this);
+  container_view_ = nullptr;
+
+  UpdateUsableWorkAreaObservers();
+}
+
+void AssistantUiController::UpdateUsableWorkAreaObservers() {
+  // To save resources, we only observe the usable work area when Assistant UI
+  // exists as we otherwise don't need to respond to events in realtime.
+  const bool should_observe_usable_work_area = !!container_view_;
+  if (should_observe_usable_work_area == is_observing_usable_work_area_)
+    return;
+
+  is_observing_usable_work_area_ = should_observe_usable_work_area;
+
+  if (!is_observing_usable_work_area_) {
+    keyboard::KeyboardUIController::Get()->RemoveObserver(this);
+    display::Screen::GetScreen()->RemoveObserver(this);
+    return;
+  }
+
   display::Screen::GetScreen()->AddObserver(this);
   keyboard::KeyboardUIController::Get()->AddObserver(this);
 
@@ -605,19 +656,9 @@ void AssistantUiController::CreateContainerView() {
       keyboard::KeyboardUIController::Get()
           ->GetWorkspaceOccludedBoundsInScreen();
 
-  // Set the initial usable work area for Assistant views.
-  aura::Window* root_window =
-      container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
-  UpdateUsableWorkArea(root_window);
-}
-
-void AssistantUiController::ResetContainerView() {
-  // Remove observers when the Assistant UI is closed.
-  keyboard::KeyboardUIController::Get()->RemoveObserver(this);
-  display::Screen::GetScreen()->RemoveObserver(this);
-
-  container_view_->GetWidget()->RemoveObserver(this);
-  container_view_ = nullptr;
+  // Set the initial usable work area.
+  UpdateUsableWorkArea(
+      container_view_->GetWidget()->GetNativeWindow()->GetRootWindow());
 }
 
 }  // namespace ash

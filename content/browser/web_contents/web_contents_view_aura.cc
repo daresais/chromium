@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
 #include "base/feature_list.h"
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop_current.h"
@@ -52,7 +53,6 @@
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/drop_data.h"
 #include "net/base/filename_util.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "ui/aura/client/aura_constants.h"
@@ -215,17 +215,13 @@ void PrepareDragForDownload(
 
   // Provide the data as file (CF_HDROP). A temporary download file with the
   // Zone.Identifier ADS (Alternate Data Stream) attached will be created.
-  scoped_refptr<DragDownloadFile> download_file =
-      new DragDownloadFile(
-          download_path,
-          base::File(),
-          download_url,
-          Referrer(page_url, drop_data.referrer_policy),
-          page_encoding,
-          web_contents);
+  auto download_file = std::make_unique<DragDownloadFile>(
+      download_path, base::File(), download_url,
+      Referrer(page_url, drop_data.referrer_policy), page_encoding,
+      web_contents);
   ui::OSExchangeData::DownloadFileInfo file_download(base::FilePath(),
-                                                     download_file.get());
-  provider->SetDownloadFileInfo(file_download);
+                                                     std::move(download_file));
+  provider->SetDownloadFileInfo(&file_download);
 }
 #endif  // defined(OS_WIN)
 
@@ -399,6 +395,25 @@ aura::Window* GetHostWindow(aura::Window* window) {
 
 }  // namespace
 
+WebContentsViewAura::OnPerformDropContext::OnPerformDropContext(
+    RenderWidgetHostImpl* target_rwh,
+    const ui::DropTargetEvent& event,
+    std::unique_ptr<ui::OSExchangeData> data,
+    base::ScopedClosureRunner end_drag_runner,
+    base::Optional<gfx::PointF> transformed_pt,
+    gfx::PointF screen_pt)
+    : target_rwh(target_rwh->GetWeakPtr()),
+      event(event),
+      data(std::move(data)),
+      end_drag_runner(std::move(end_drag_runner)),
+      transformed_pt(std::move(transformed_pt)),
+      screen_pt(screen_pt) {}
+
+WebContentsViewAura::OnPerformDropContext::OnPerformDropContext(
+    OnPerformDropContext&&) = default;
+
+WebContentsViewAura::OnPerformDropContext::~OnPerformDropContext() = default;
+
 #if defined(OS_WIN)
 // A web contents observer that watches for navigations while an async drop
 // operation is in progress during virtual file data retrieval and temp file
@@ -412,6 +427,7 @@ class WebContentsViewAura::AsyncDropNavigationObserver
  public:
   AsyncDropNavigationObserver(WebContents* watched_contents,
                               std::unique_ptr<DropData> drop_data,
+                              base::ScopedClosureRunner end_drag_runner,
                               RenderWidgetHostImpl* target_rwh,
                               const gfx::PointF& client_pt,
                               const gfx::PointF& screen_pt,
@@ -436,6 +452,7 @@ class WebContentsViewAura::AsyncDropNavigationObserver
   // Data cached at the start of the drop operation and needed to complete the
   // drop.
   std::unique_ptr<DropData> drop_data_;
+  base::ScopedClosureRunner end_drag_runner_;
   base::WeakPtr<RenderWidgetHostImpl> target_rwh_;
   const gfx::PointF client_pt_;
   const gfx::PointF screen_pt_;
@@ -447,6 +464,7 @@ class WebContentsViewAura::AsyncDropNavigationObserver
 WebContentsViewAura::AsyncDropNavigationObserver::AsyncDropNavigationObserver(
     WebContents* watched_contents,
     std::unique_ptr<DropData> drop_data,
+    base::ScopedClosureRunner end_drag_runner,
     RenderWidgetHostImpl* target_rwh,
     const gfx::PointF& client_pt,
     const gfx::PointF& screen_pt,
@@ -454,6 +472,7 @@ WebContentsViewAura::AsyncDropNavigationObserver::AsyncDropNavigationObserver(
     : WebContentsObserver(watched_contents),
       drop_allowed_(true),
       drop_data_(std::move(drop_data)),
+      end_drag_runner_(std::move(end_drag_runner)),
       target_rwh_(target_rwh->GetWeakPtr()),
       client_pt_(client_pt),
       screen_pt_(screen_pt),
@@ -505,11 +524,12 @@ void WebContentsViewAura::AsyncDropTempFileDeleter::DeleteAllFilesAsync()
 
 void WebContentsViewAura::AsyncDropTempFileDeleter::DeleteFileAsync(
     const base::FilePath& path) const {
-  base::PostTaskWithTraits(FROM_HERE,
-                           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-                            base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
-                           base::BindOnce(base::IgnoreResult(&base::DeleteFile),
-                                          std::move(path), false));
+  base::PostTask(
+      FROM_HERE,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+      base::BindOnce(base::IgnoreResult(&base::DeleteFile), std::move(path),
+                     false));
 }
 #endif
 
@@ -931,12 +951,7 @@ Visibility WebContentsViewAura::GetVisibility() const {
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsViewAura, WebContentsView implementation:
 
-void WebContentsViewAura::CreateView(const gfx::Size& initial_size,
-                                     gfx::NativeView context) {
-  // NOTE: we ignore |initial_size| since in some cases it's wrong (such as
-  // if the bookmark bar is not shown and you create a new tab). The right
-  // value is set shortly after this, so its safe to ignore.
-
+void WebContentsViewAura::CreateView(gfx::NativeView context) {
   CreateAuraWindow(context);
 
   // delegate_->GetDragDestDelegate() creates a new delegate on every call.
@@ -1097,7 +1112,15 @@ void WebContentsViewAura::StartDragging(
     return;
   }
 
-  EndDrag(source_rwh_weak_ptr.get(), ConvertToWeb(result_op));
+  // If drag is still in progress that means we haven't received drop targeting
+  // callback yet. So we have to make sure to delay calling EndDrag until drop
+  // is done.
+  if (!drag_in_progress_)
+    EndDrag(source_rwh_weak_ptr.get(), ConvertToWeb(result_op));
+  else
+    end_drag_runner_ = base::ScopedClosureRunner(base::BindOnce(
+        &WebContentsViewAura::EndDrag, weak_ptr_factory_.GetWeakPtr(),
+        source_rwh_weak_ptr.get(), ConvertToWeb(result_op)));
 }
 
 void WebContentsViewAura::UpdateDragCursor(blink::WebDragOperation operation) {
@@ -1260,9 +1283,6 @@ void WebContentsViewAura::DragEnteredCallback(
     return;
   }
 
-  if (drag_dest_delegate_)
-    drag_dest_delegate_->DragInitialize(web_contents_);
-
   DCHECK(transformed_pt.has_value());
   gfx::PointF screen_pt(display::Screen::GetScreen()->GetCursorScreenPoint());
   current_rwh_for_drag_->DragTargetDragEnter(
@@ -1284,6 +1304,7 @@ void WebContentsViewAura::OnDragEntered(const ui::DropTargetEvent& event) {
   PrepareDropData(drop_data.get(), event.data());
 
   if (drag_dest_delegate_) {
+    drag_dest_delegate_->DragInitialize(web_contents_);
     drag_dest_delegate_->OnReceiveDragData(event.data());
   }
 
@@ -1393,6 +1414,8 @@ void WebContentsViewAura::PerformDropCallback(
     base::WeakPtr<RenderWidgetHostViewBase> target,
     base::Optional<gfx::PointF> transformed_pt) {
   drag_in_progress_ = false;
+  base::ScopedClosureRunner end_drag_runner(std::move(end_drag_runner_));
+
   if (!target)
     return;
   RenderWidgetHostImpl* target_rwh =
@@ -1413,14 +1436,47 @@ void WebContentsViewAura::PerformDropCallback(
     DragEnteredCallback(event, std::move(drop_data), target, transformed_pt);
   }
 
-  if (!current_drop_data_) {
+  if (!current_drop_data_)
+    return;
+
+  OnPerformDropContext context(target_rwh, event, std::move(data),
+                               std::move(end_drag_runner), transformed_pt,
+                               screen_pt);
+  // |delegate_| may be null in unit tests.
+  if (delegate_) {
+    delegate_->OnPerformDrop(
+        *current_drop_data_,
+        base::BindOnce(&WebContentsViewAura::FinishOnPerformDropCallback,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(context)));
+  } else {
+    FinishOnPerformDropCallback(
+        std::move(context),
+        WebContentsViewDelegate::DropCompletionResult::kContinue);
+  }
+}
+
+void WebContentsViewAura::FinishOnPerformDropCallback(
+    OnPerformDropContext context,
+    WebContentsViewDelegate::DropCompletionResult result) {
+  const int key_modifiers =
+      ui::EventFlagsToWebEventModifiers(context.event.flags());
+  // This is possibly an async callback.  Make sure the RWH is still valid.
+  if (!context.target_rwh || !IsValidDragTarget(context.target_rwh.get()))
+    return;
+
+  if (result != WebContentsViewDelegate::DropCompletionResult::kContinue) {
+    if (!drop_callback_for_testing_.is_null()) {
+      std::move(drop_callback_for_testing_)
+          .Run(context.target_rwh.get(), *current_drop_data_,
+               context.transformed_pt.value(), context.screen_pt, key_modifiers,
+               /*drop_allowed=*/false);
+    }
     return;
   }
 
-  const int key_modifiers = ui::EventFlagsToWebEventModifiers(event.flags());
 #if defined(OS_WIN)
   if (ShouldIncludeVirtualFiles(*current_drop_data_) &&
-      data->HasVirtualFilenames()) {
+      context.data->HasVirtualFilenames()) {
     // Asynchronously retrieve the actual content of any virtual files now (this
     // step is not needed for "real" files already on the file system, e.g.
     // those dropped on Chromium from the desktop). When all content has been
@@ -1434,21 +1490,23 @@ void WebContentsViewAura::PerformDropCallback(
     // GetVirtualFilesAsTempFiles will immediately return false if there are no
     // virtual files to retrieve (all items are folders e.g.) and no callback
     // will be received.
-    if (data->GetVirtualFilesAsTempFiles(std::move(callback))) {
+    if (context.data->GetVirtualFilesAsTempFiles(std::move(callback))) {
       // Cache the parameters as they were at the time of the drop. This is
       // needed for checking that the drop target is still valid when the async
       // operation completes.
       async_drop_navigation_observer_ =
           std::make_unique<AsyncDropNavigationObserver>(
-              web_contents_, std::move(current_drop_data_), target_rwh,
-              transformed_pt.value(), screen_pt, key_modifiers);
+              web_contents_, std::move(current_drop_data_),
+              std::move(context.end_drag_runner), context.target_rwh.get(),
+              context.transformed_pt.value(), context.screen_pt, key_modifiers);
       return;
     }
   }
 
 #endif
-  CompleteDrop(target_rwh, *current_drop_data_, transformed_pt.value(),
-               screen_pt, key_modifiers);
+  CompleteDrop(context.target_rwh.get(), *current_drop_data_,
+               context.transformed_pt.value(), context.screen_pt,
+               key_modifiers);
   current_drop_data_.reset();
 }
 
@@ -1477,7 +1535,7 @@ void WebContentsViewAura::CompleteDrop(RenderWidgetHostImpl* target_rwh,
   if (!drop_callback_for_testing_.is_null()) {
     std::move(drop_callback_for_testing_)
         .Run(target_rwh, drop_data, client_pt, screen_pt, key_modifiers,
-             /*drop_allowed*/ true);
+             /*drop_allowed=*/true);
   }
 }
 

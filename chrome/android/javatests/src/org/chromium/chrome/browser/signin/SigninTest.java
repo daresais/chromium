@@ -4,16 +4,16 @@
 
 package org.chromium.chrome.browser.signin;
 
-import android.app.Activity;
-import android.app.DialogFragment;
-import android.app.Fragment;
 import android.app.Instrumentation.ActivityMonitor;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.preference.Preference;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
+import android.support.v4.app.DialogFragment;
+import android.support.v4.app.Fragment;
 import android.support.v7.app.AlertDialog;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.preference.Preference;
 import android.widget.Button;
 
 import org.junit.After;
@@ -28,14 +28,17 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.SyncFirstSetupCompleteSource;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.preferences.MainPreferences;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.sync.AccountManagementFragment;
 import org.chromium.chrome.browser.preferences.sync.SignInPreference;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ActivityUtils;
@@ -43,6 +46,7 @@ import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.signin.ChromeSigninController;
+import org.chromium.components.signin.metrics.SignoutReason;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.TestTouchUtils;
 
@@ -234,7 +238,8 @@ public class SigninTest {
 
             // Get these handles in the UI thread.
             mPrefService = PrefServiceBridge.getInstance();
-            Profile profile = mActivityTestRule.getActivity().getActivityTab().getProfile();
+            Profile profile =
+                    ((TabImpl) mActivityTestRule.getActivity().getActivityTab()).getProfile();
             mBookmarks = new BookmarkBridge(profile);
 
             // Add a test bookmark, to verify later if sign out cleared the bookmarks.
@@ -259,7 +264,7 @@ public class SigninTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mBookmarks.removeObserver(mTestBookmarkModelObserver);
 
@@ -286,8 +291,8 @@ public class SigninTest {
             Assert.assertNull(mSigninManager.getManagementDomain());
 
             // Verify that the password manager is enabled by default.
-            Assert.assertTrue(mPrefService.isRememberPasswordsEnabled());
-            Assert.assertFalse(mPrefService.isRememberPasswordsManaged());
+            Assert.assertTrue(mPrefService.getBoolean(Pref.REMEMBER_PASSWORDS_ENABLED));
+            Assert.assertFalse(mPrefService.isManagedPreference(Pref.REMEMBER_PASSWORDS_ENABLED));
         });
 
         // Verify that its preference UI is enabled.
@@ -343,7 +348,9 @@ public class SigninTest {
         // in the resume of the Main activity, but we forcefully do this here.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         TestThreadUtils.runOnUiThreadBlocking(
-                () -> ProfileSyncService.get().setFirstSetupComplete());
+                ()
+                        -> ProfileSyncService.get().setFirstSetupComplete(
+                                SyncFirstSetupCompleteSource.BASIC_FLOW));
         prefActivity.finish();
 
         // Verify that signin succeeded.
@@ -406,7 +413,7 @@ public class SigninTest {
         signOutPref.getOnPreferenceClickListener().onPreferenceClick(signOutPref);
     }
 
-    private void acceptAlertDialogWithTag(Activity activity, String tag) {
+    private void acceptAlertDialogWithTag(AppCompatActivity activity, String tag) {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         DialogFragment fragment = ActivityUtils.waitForFragment(activity, tag);
         AlertDialog dialog = (AlertDialog) fragment.getDialog();

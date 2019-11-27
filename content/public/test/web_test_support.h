@@ -40,11 +40,15 @@ class StoragePartition;
 // Turn the browser process into web test mode.
 void EnableBrowserWebTestMode();
 
+// Replaces the SharedWorkerService implementation with a test-specific one that
+// tracks running shared workers.
+void InjectTestSharedWorkerService(StoragePartition* storage_partition);
+
 // Terminates all workers and notifies when complete. This is used for
 // testing when it is important to make sure that all shared worker activity
-// has stopped.
-void TerminateAllSharedWorkersForTesting(StoragePartition* storage_partition,
-                                         base::OnceClosure callback);
+// has stopped. Can only be used if InjectTestSharedWorkerService() was called.
+void TerminateAllSharedWorkers(StoragePartition* storage_partition,
+                               base::OnceClosure callback);
 
 ///////////////////////////////////////////////////////////////////////////////
 // The following methods are meant to be used from a renderer.
@@ -81,9 +85,6 @@ void ForceResizeRenderView(RenderView* render_view,
 
 // Set the device scale factor and force the compositor to resize.
 void SetDeviceScaleFactor(RenderView* render_view, float factor);
-
-// Get the window to viewport scale.
-float GetWindowToViewportScale(RenderView* render_view);
 
 // Converts |event| from screen coordinates to coordinates used by the widget
 // associated with the |web_widget_test_proxy|.  Returns nullptr if no

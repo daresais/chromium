@@ -30,7 +30,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/local_window_proxy.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/initialize_v8_extras_binding.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/bindings/core/v8/isolated_world_csp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
@@ -41,6 +41,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_initializer.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_page_popup_controller_binding.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -62,6 +63,7 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_violation_reporting_policy.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_operators.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -77,8 +79,29 @@ void LocalWindowProxy::Trace(blink::Visitor* visitor) {
   WindowProxy::Trace(visitor);
 }
 
-void LocalWindowProxy::DisposeContext(Lifecycle next_status,
-                                      FrameReuseStatus frame_reuse_status) {
+bool LocalWindowProxy::IsSetDetachedWindowReasonEnabled(
+    v8::Context::DetachedWindowReason reason) {
+  switch (reason) {
+    case v8::Context::DetachedWindowReason::kWindowNotDetached:
+      // This shouldn't happen, but if it does, it's always safe to clear the
+      // reason.
+      return true;
+    case v8::Context::DetachedWindowReason::kDetachedWindowByNavigation:
+      return base::FeatureList::IsEnabled(
+          features::kSetDetachedWindowReasonByNavigation);
+    case v8::Context::DetachedWindowReason::kDetachedWindowByClosing:
+      return base::FeatureList::IsEnabled(
+          features::kSetDetachedWindowReasonByClosing);
+    case v8::Context::DetachedWindowReason::kDetachedWindowByOtherReason:
+      return base::FeatureList::IsEnabled(
+          features::kSetDetachedWindowReasonByOtherReason);
+  }
+}
+
+void LocalWindowProxy::DisposeContext(
+    Lifecycle next_status,
+    FrameReuseStatus frame_reuse_status,
+    v8::Context::DetachedWindowReason reason) {
   DCHECK(next_status == Lifecycle::kV8MemoryIsForciblyPurged ||
          next_status == Lifecycle::kGlobalObjectIsDetached ||
          next_status == Lifecycle::kFrameIsDetached ||
@@ -123,6 +146,10 @@ void LocalWindowProxy::DisposeContext(Lifecycle next_status,
 #if DCHECK_IS_ON()
     DidDetachGlobalObject();
 #endif
+  }
+
+  if (IsSetDetachedWindowReasonEnabled(reason)) {
+    context->SetDetachedWindowReason(reason);
   }
 
   script_state_->DisposePerContextData();
@@ -180,9 +207,15 @@ void LocalWindowProxy::Initialize() {
   if (evaluate_csp_for_eval) {
     ContentSecurityPolicy* csp =
         GetFrame()->GetDocument()->GetContentSecurityPolicyForWorld();
-    context->AllowCodeGenerationFromStrings(csp->AllowEval(
-        nullptr, SecurityViolationReportingPolicy::kSuppressReporting,
-        ContentSecurityPolicy::kWillNotThrowException, g_empty_string));
+    // CSP has two mechanisms for controlling eval, script-src and Trusted
+    // Types, and we need to check both.
+    // TODO(vogelheim): Provide a simple(e) API for this use case.
+    bool allow_code_generation =
+        csp->AllowEval(SecurityViolationReportingPolicy::kSuppressReporting,
+                       ContentSecurityPolicy::kWillNotThrowException,
+                       g_empty_string) &&
+        !csp->IsRequireTrustedTypes();
+    context->AllowCodeGenerationFromStrings(allow_code_generation);
     context->SetErrorMessageForCodeGenerationFromStrings(
         V8String(GetIsolate(), csp->EvalDisabledErrorMessage()));
   }
@@ -207,9 +240,6 @@ void LocalWindowProxy::Initialize() {
   }
 
   InstallConditionalFeatures();
-
-  // This needs to go after everything else since it accesses the window object.
-  InitializeV8ExtrasBinding(script_state_);
 
   if (World().IsMainWorld()) {
     GetFrame()->Loader().DispatchDidClearWindowObjectInMainWorld();
@@ -485,7 +515,7 @@ static v8::Local<v8::Value> GetNamedProperty(
   if (items->HasExactlyOneItem()) {
     HTMLElement* element = items->Item(0);
     DCHECK(element);
-    if (auto* iframe = ToHTMLIFrameElementOrNull(*element)) {
+    if (auto* iframe = DynamicTo<HTMLIFrameElement>(*element)) {
       if (Frame* frame = iframe->ContentFrame())
         return ToV8(frame->DomWindow(), creation_context, isolate);
     }

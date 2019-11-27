@@ -11,6 +11,7 @@
 
 #include "base/debug/crash_logging.h"
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
 #include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "content/browser/accessibility/browser_accessibility.h"
@@ -185,6 +186,7 @@ BrowserAccessibilityManager::BrowserAccessibilityManager(
 }
 
 BrowserAccessibilityManager::~BrowserAccessibilityManager() {
+  delegate_ = nullptr;  // Guard against reentrancy by screen reader.
   if (last_focused_node_tree_id_ &&
       ax_tree_id_ == *last_focused_node_tree_id_) {
     SetLastFocusedNode(nullptr);
@@ -421,7 +423,15 @@ bool BrowserAccessibilityManager::OnAccessibilityEvents(
   // Screen readers might not do the right thing if they're not aware of what
   // has focus, so always try that first. Nothing will be fired if the window
   // itself isn't focused or if focus hasn't changed.
-  FireFocusEventsIfNeeded();
+  //
+  // We need to fire focus events specifically from the root manager, since we
+  // need the top document's delegate to check if its view has focus.
+  //
+  // If this manager is disconnected from the top document, then root_manager
+  // will be a null pointer and FireFocusEventsIfNeeded won't be able to
+  // retrieve the global focus (not firing an event anyway).
+  if (root_manager)
+    root_manager->FireFocusEventsIfNeeded();
 
   bool received_load_complete_event = false;
   // Fire any events related to changes to the tree.
@@ -626,9 +636,14 @@ void BrowserAccessibilityManager::SetFocus(const BrowserAccessibility& node) {
   if (!delegate_)
     return;
 
+  base::RecordAction(
+      base::UserMetricsAction("Accessibility.NativeApi.SetFocus"));
+
   ui::AXActionData action_data;
   action_data.action = ax::mojom::Action::kFocus;
   action_data.target_node_id = node.GetId();
+  if (!delegate_->AccessibilityViewHasFocus())
+    delegate_->AccessibilityViewSetFocus();
   delegate_->AccessibilityPerformAction(action_data);
 }
 
@@ -682,6 +697,9 @@ void BrowserAccessibilityManager::DoDefaultAction(
   if (!delegate_)
     return;
 
+  base::RecordAction(
+      base::UserMetricsAction("Accessibility.NativeApi.DoDefault"));
+
   ui::AXActionData action_data;
   action_data.action = ax::mojom::Action::kDoDefault;
   action_data.target_node_id = node.GetId();
@@ -734,9 +752,13 @@ void BrowserAccessibilityManager::ScrollToMakeVisible(
     const BrowserAccessibility& node,
     gfx::Rect subfocus,
     ax::mojom::ScrollAlignment horizontal_scroll_alignment,
-    ax::mojom::ScrollAlignment vertical_scroll_alignment) {
+    ax::mojom::ScrollAlignment vertical_scroll_alignment,
+    ax::mojom::ScrollBehavior scroll_behavior) {
   if (!delegate_)
     return;
+
+  base::RecordAction(
+      base::UserMetricsAction("Accessibility.NativeApi.ScrollToMakeVisible"));
 
   ui::AXActionData action_data;
   action_data.target_node_id = node.GetId();
@@ -744,6 +766,7 @@ void BrowserAccessibilityManager::ScrollToMakeVisible(
   action_data.target_rect = subfocus;
   action_data.horizontal_scroll_alignment = horizontal_scroll_alignment;
   action_data.vertical_scroll_alignment = vertical_scroll_alignment;
+  action_data.scroll_behavior = scroll_behavior;
   delegate_->AccessibilityPerformAction(action_data);
 }
 
@@ -843,6 +866,9 @@ void BrowserAccessibilityManager::HitTest(const gfx::Point& point) {
   if (!delegate_)
     return;
 
+  base::RecordAction(
+      base::UserMetricsAction("Accessibility.NativeApi.HitTest"));
+
   ui::AXActionData action_data;
   action_data.action = ax::mojom::Action::kHitTest;
   action_data.target_point = point;
@@ -888,8 +914,7 @@ BrowserAccessibility* BrowserAccessibilityManager::PreviousInTreeOrder(
 
   // For android, this needs to be handled carefully. If not, there is a chance
   // of getting into infinite loop.
-  if (can_wrap_to_last_element &&
-      object->GetRole() == ax::mojom::Role::kRootWebArea &&
+  if (can_wrap_to_last_element && object->manager()->GetRoot() == object &&
       object->PlatformChildCount() != 0) {
     return object->PlatformDeepestLastChild();
   }
@@ -1199,17 +1224,11 @@ void BrowserAccessibilityManager::OnNodeWillBeDeleted(ui::AXTree* tree,
   if (BrowserAccessibility* wrapper = GetFromAXNode(node)) {
     if (wrapper == GetLastFocusedNode())
       SetLastFocusedNode(nullptr);
-    id_wrapper_map_.erase(node->id());
-    wrapper->Destroy();
   }
 }
 
 void BrowserAccessibilityManager::OnSubtreeWillBeDeleted(ui::AXTree* tree,
-                                                         ui::AXNode* node) {
-  DCHECK(node);
-  if (BrowserAccessibility* wrapper = GetFromAXNode(node))
-    wrapper->OnSubtreeWillBeDeleted();
-}
+                                                         ui::AXNode* node) {}
 
 void BrowserAccessibilityManager::OnNodeCreated(ui::AXTree* tree,
                                                 ui::AXNode* node) {
@@ -1217,6 +1236,15 @@ void BrowserAccessibilityManager::OnNodeCreated(ui::AXTree* tree,
   BrowserAccessibility* wrapper = factory_->Create();
   id_wrapper_map_[node->id()] = wrapper;
   wrapper->Init(this, node);
+}
+
+void BrowserAccessibilityManager::OnNodeDeleted(ui::AXTree* tree,
+                                                int32_t node_id) {
+  DCHECK_NE(node_id, ui::AXNode::kInvalidAXID);
+  if (BrowserAccessibility* wrapper = GetFromID(node_id)) {
+    id_wrapper_map_.erase(node_id);
+    wrapper->Destroy();
+  }
 }
 
 void BrowserAccessibilityManager::OnNodeReparented(ui::AXTree* tree,
@@ -1228,13 +1256,6 @@ void BrowserAccessibilityManager::OnNodeReparented(ui::AXTree* tree,
     id_wrapper_map_[node->id()] = wrapper;
   }
   wrapper->Init(this, node);
-}
-
-void BrowserAccessibilityManager::OnNodeChanged(ui::AXTree* tree,
-                                                ui::AXNode* node) {
-  DCHECK(node);
-  if (BrowserAccessibility* wrapper = GetFromAXNode(node))
-    wrapper->OnDataChanged();
 }
 
 void BrowserAccessibilityManager::OnAtomicUpdateFinished(
@@ -1261,22 +1282,12 @@ void BrowserAccessibilityManager::OnAtomicUpdateFinished(
     ui::AXTreeManagerMap::GetInstance().AddTreeManager(ax_tree_id_, this);
   }
 
-  // Calls OnDataChanged on newly created or reparented nodes.
+  // Calls OnDataChanged on newly created, reparented or changed nodes.
   for (const auto change : changes) {
     ui::AXNode* node = change.node;
     BrowserAccessibility* wrapper = GetFromAXNode(node);
     if (wrapper) {
-      switch (change.type) {
-        case NODE_CREATED:
-        case NODE_REPARENTED:
-          wrapper->OnDataChanged();
-          break;
-          // Unhandled.
-        case NODE_CHANGED:
-        case SUBTREE_CREATED:
-        case SUBTREE_REPARENTED:
-          break;
-      }
+      wrapper->OnDataChanged();
     }
   }
 }
@@ -1291,20 +1302,6 @@ ui::AXNode* BrowserAccessibilityManager::GetNodeFromTree(
   BrowserAccessibility* wrapper = manager->GetFromID(node_id);
   if (wrapper)
     return wrapper->node();
-
-  return nullptr;
-}
-
-ui::AXPlatformNodeDelegate* BrowserAccessibilityManager::GetDelegate(
-    const ui::AXTreeID tree_id,
-    const int32_t node_id) const {
-  auto* manager = BrowserAccessibilityManager::FromID(tree_id);
-  if (!manager)
-    return nullptr;
-
-  BrowserAccessibility* wrapper = manager->GetFromID(node_id);
-  if (wrapper)
-    return wrapper;
 
   return nullptr;
 }
@@ -1357,15 +1354,6 @@ ui::AXNode* BrowserAccessibilityManager::GetParentNodeFromParentTreeAsAXNode()
   }
 
   return nullptr;
-}
-
-ui::AXPlatformNodeDelegate* BrowserAccessibilityManager::GetRootDelegate(
-    const ui::AXTreeID tree_id) const {
-  auto* manager = BrowserAccessibilityManager::FromID(tree_id);
-  if (!manager)
-    return nullptr;
-
-  return manager->GetRoot();
 }
 
 BrowserAccessibilityManager* BrowserAccessibilityManager::GetRootManager()

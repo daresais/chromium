@@ -19,6 +19,7 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_navigation_widget.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shutdown_controller_impl.h"
@@ -57,9 +58,9 @@ class LoginShelfViewTest : public LoginTestBase {
   ~LoginShelfViewTest() override = default;
 
   void SetUp() override {
-    action_background_controller_factory_ =
-        base::Bind(&LoginShelfViewTest::CreateActionBackgroundController,
-                   base::Unretained(this));
+    action_background_controller_factory_ = base::BindRepeating(
+        &LoginShelfViewTest::CreateActionBackgroundController,
+        base::Unretained(this));
     LockScreenActionBackgroundController::SetFactoryCallbackForTesting(
         &action_background_controller_factory_);
 
@@ -68,7 +69,7 @@ class LoginShelfViewTest : public LoginTestBase {
     LoginTestBase::SetUp();
     login_shelf_view_ = GetPrimaryShelf()->shelf_widget()->login_shelf_view();
     Shell::Get()->tray_action()->SetClient(
-        tray_action_client_.CreateInterfacePtrAndBind(),
+        tray_action_client_.CreateRemoteAndBind(),
         mojom::TrayActionState::kNotAvailable);
     // Set initial states.
     NotifySessionStateChanged(SessionState::OOBE);
@@ -520,6 +521,15 @@ TEST_F(LoginShelfViewTest, ShouldUpdateUiAfterShutdownButtonStatusChange) {
                                  LoginShelfView::kBrowseAsGuest,
                                  LoginShelfView::kAddUser}));
   EXPECT_TRUE(IsButtonEnabled(LoginShelfView::kShutdown));
+}
+
+TEST_F(LoginShelfViewTest, ShouldNotShowNavigationAndHotseat) {
+  gfx::NativeWindow window = login_shelf_view_->GetWidget()->GetNativeWindow();
+  ShelfWidget* shelf_widget = Shelf::ForWindow(window)->shelf_widget();
+  EXPECT_FALSE(shelf_widget->navigation_widget()->IsVisible())
+      << "The navigation widget should not appear in the login shelf.";
+  EXPECT_FALSE(shelf_widget->hotseat_widget()->IsVisible())
+      << "The hotseat widget should not appear in the login shelf.";
 }
 
 TEST_F(LoginShelfViewTest, ParentAccessButtonVisibility) {

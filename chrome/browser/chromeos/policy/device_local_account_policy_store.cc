@@ -35,8 +35,7 @@ DeviceLocalAccountPolicyStore::DeviceLocalAccountPolicyStore(
                                PolicySource::POLICY_SOURCE_CLOUD),
       account_id_(account_id),
       session_manager_client_(session_manager_client),
-      device_settings_service_(device_settings_service),
-      weak_factory_(this) {}
+      device_settings_service_(device_settings_service) {}
 
 DeviceLocalAccountPolicyStore::~DeviceLocalAccountPolicyStore() {}
 
@@ -237,7 +236,7 @@ void DeviceLocalAccountPolicyStore::Validate(
 
   if (validate_in_background) {
     UserCloudPolicyValidator::StartValidation(
-        std::move(validator), base::Bind(callback, key->as_string()));
+        std::move(validator), base::BindOnce(callback, key->as_string()));
   } else {
     validator->RunValidation();
 

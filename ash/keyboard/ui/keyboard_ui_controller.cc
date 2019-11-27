@@ -33,7 +33,6 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -163,10 +162,7 @@ class CallbackAnimationObserver : public ui::ImplicitAnimationObserver {
 
 KeyboardUIController::KeyboardUIController()
     : input_method_keyboard_controller_(
-          std::make_unique<InputMethodKeyboardController>(this)),
-      ime_observer_(this),
-      weak_factory_report_lingering_state_(this),
-      weak_factory_will_hide_(this) {
+          std::make_unique<InputMethodKeyboardController>(this)) {
   DCHECK_EQ(g_keyboard_controller, nullptr);
   g_keyboard_controller = this;
 }
@@ -993,6 +989,21 @@ void KeyboardUIController::SetHitTestBounds(
 
   GetKeyboardWindow()->SetEventTargeter(
       std::make_unique<ShapedWindowTargeter>(bounds_in_window));
+}
+
+bool KeyboardUIController::SetAreaToRemainOnScreen(
+    const gfx::Rect& bounds_in_window) {
+  gfx::Rect window_bounds_in_screen = GetKeyboardWindow()->GetBoundsInScreen();
+  gfx::Rect bounds_in_screen =
+      gfx::Rect(window_bounds_in_screen.x() + bounds_in_window.x(),
+                window_bounds_in_screen.y() + bounds_in_window.y(),
+                bounds_in_window.width(), bounds_in_window.height());
+
+  if (!window_bounds_in_screen.Contains(bounds_in_screen))
+    return false;
+
+  container_behavior_->SetAreaToRemainOnScreen(bounds_in_window);
+  return true;
 }
 
 gfx::Rect KeyboardUIController::AdjustSetBoundsRequest(

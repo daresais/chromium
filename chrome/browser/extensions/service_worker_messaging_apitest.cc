@@ -3,42 +3,27 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/messaging/native_messaging_test_util.h"
+#include "chrome/browser/extensions/browsertest_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/version_info/version_info.h"
+#include "extensions/common/scoped_worker_based_extensions_channel.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 
 namespace extensions {
 
-namespace {
-
-// Returns the newly added WebContents.
-content::WebContents* AddTab(Browser* browser, const GURL& url) {
-  int starting_tab_count = browser->tab_strip_model()->count();
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser, url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  EXPECT_EQ(starting_tab_count + 1, browser->tab_strip_model()->count());
-  return browser->tab_strip_model()->GetActiveWebContents();
-}
-
-}  // namespace
-
 class ServiceWorkerMessagingTest : public ExtensionApiTest {
  public:
-  ServiceWorkerMessagingTest()
-      : current_channel_(
-            // Extensions APIs from SW are only enabled on trunk.
-            // It is important to set the channel early so that this change is
-            // visible in renderers running with service workers (and no
-            // extension).
-            version_info::Channel::UNKNOWN) {}
+  ServiceWorkerMessagingTest() = default;
   ~ServiceWorkerMessagingTest() override = default;
 
+ protected:
+  extensions::ScopedTestNativeMessagingHost test_host_;
+
  private:
-  ScopedCurrentChannel current_channel_;
+  ScopedWorkerBasedExtensionsChannel current_channel_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerMessagingTest);
 };
@@ -59,7 +44,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest, TabToWorkerOneWay) {
     ASSERT_TRUE(StartEmbeddedTestServer());
     const GURL url =
         embedded_test_server()->GetURL("/extensions/test_file.html");
-    content::WebContents* new_web_contents = AddTab(browser(), url);
+    content::WebContents* new_web_contents =
+        browsertest_util::AddTab(browser(), url);
     EXPECT_TRUE(new_web_contents);
   }
 
@@ -82,7 +68,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest, TabToWorker) {
     ASSERT_TRUE(StartEmbeddedTestServer());
     const GURL url =
         embedded_test_server()->GetURL("/extensions/test_file.html");
-    content::WebContents* new_web_contents = AddTab(browser(), url);
+    content::WebContents* new_web_contents =
+        browsertest_util::AddTab(browser(), url);
     EXPECT_TRUE(new_web_contents);
   }
 
@@ -92,8 +79,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest, TabToWorker) {
 // Tests chrome.runtime.sendNativeMessage from SW extension to a native
 // messaging host.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest, NativeMessagingBasic) {
-  extensions::ScopedTestNativeMessagingHost test_host;
-  ASSERT_NO_FATAL_FAILURE(test_host.RegisterTestHost(false));
+  ASSERT_NO_FATAL_FAILURE(test_host_.RegisterTestHost(false));
   ASSERT_TRUE(RunExtensionTest("service_worker/messaging/send_native_message"))
       << message_;
 }
@@ -101,8 +87,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest, NativeMessagingBasic) {
 // Tests chrome.runtime.connectNative from SW extension to a native messaging
 // host.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest, ConnectNative) {
-  extensions::ScopedTestNativeMessagingHost test_host;
-  ASSERT_NO_FATAL_FAILURE(test_host.RegisterTestHost(false));
+  ASSERT_NO_FATAL_FAILURE(test_host_.RegisterTestHost(false));
   ASSERT_TRUE(RunExtensionTest("service_worker/messaging/connect_native"))
       << message_;
 }
@@ -129,9 +114,9 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest,
   ResultCatcher catcher;
   {
     ASSERT_TRUE(StartEmbeddedTestServer());
-    content::WebContents* new_web_contents =
-        AddTab(browser(),
-               embedded_test_server()->GetURL("/extensions/test_file.html"));
+    content::WebContents* new_web_contents = browsertest_util::AddTab(
+        browser(),
+        embedded_test_server()->GetURL("/extensions/test_file.html"));
     EXPECT_TRUE(new_web_contents);
   }
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -152,9 +137,9 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerMessagingTest,
   ResultCatcher catcher;
   {
     ASSERT_TRUE(StartEmbeddedTestServer());
-    content::WebContents* new_web_contents =
-        AddTab(browser(),
-               embedded_test_server()->GetURL("/extensions/test_file.html"));
+    content::WebContents* new_web_contents = browsertest_util::AddTab(
+        browser(),
+        embedded_test_server()->GetURL("/extensions/test_file.html"));
     EXPECT_TRUE(new_web_contents);
   }
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();

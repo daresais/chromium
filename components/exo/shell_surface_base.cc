@@ -30,12 +30,14 @@
 #include "components/exo/surface.h"
 #include "components/exo/wm_helper.h"
 #include "third_party/skia/include/core/SkPath.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
+#include "ui/aura/window_occlusion_tracker.h"
 #include "ui/aura/window_targeter.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -232,7 +234,7 @@ class CustomWindowTargeter : public aura::WindowTargeter {
     // Use ash's resize handle detection logic if
     // a) ClientControlledShellSurface
     // b) xdg shell is using the server side decoration.
-    if (!ash::wm::GetWindowState(widget_->GetNativeWindow())
+    if (!ash::WindowState::Get(widget_->GetNativeWindow())
              ->allow_set_bounds_direct() &&
         !widget_->non_client_view()->frame_view()->GetVisible()) {
       return false;
@@ -272,13 +274,13 @@ class CustomWindowTargeter : public aura::WindowTargeter {
 // A place holder to disable default implementation created by
 // ash::NonClientFrameViewAsh, which triggers immersive fullscreen etc, which
 // we don't need.
-class CustomWindowStateDelegate : public ash::wm::WindowStateDelegate {
+class CustomWindowStateDelegate : public ash::WindowStateDelegate {
  public:
   CustomWindowStateDelegate() {}
   ~CustomWindowStateDelegate() override {}
 
-  // Overridden from ash::wm::WindowStateDelegate:
-  bool ToggleFullscreen(ash::wm::WindowState* window_state) override {
+  // Overridden from ash::WindowStateDelegate:
+  bool ToggleFullscreen(ash::WindowState* window_state) override {
     return false;
   }
 
@@ -314,6 +316,7 @@ ShellSurfaceBase::~ShellSurfaceBase() {
   WMHelper::GetInstance()->RemoveActivationObserver(this);
   if (widget_) {
     widget_->GetNativeWindow()->RemoveObserver(this);
+    widget_->RemoveObserver(this);
     // Remove transient children so they are not automatically destroyed.
     for (auto* child : wm::GetTransientChildren(widget_->GetNativeWindow()))
       wm::RemoveTransientChild(widget_->GetNativeWindow(), child);
@@ -423,11 +426,6 @@ void ShellSurfaceBase::SetChildAxTreeId(ui::AXTreeID child_ax_tree_id) {
   this->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged, false);
 }
 
-void ShellSurfaceBase::Close() {
-  if (!close_callback_.is_null())
-    close_callback_.Run();
-}
-
 void ShellSurfaceBase::SetGeometry(const gfx::Rect& geometry) {
   TRACE_EVENT1("exo", "ShellSurfaceBase::SetGeometry", "geometry",
                geometry.ToString());
@@ -526,6 +524,9 @@ ShellSurfaceBase::AsTracedValue() const {
 // SurfaceDelegate overrides:
 
 void ShellSurfaceBase::OnSurfaceCommit() {
+  // Pause occlusion tracking since we will update a bunch of window properties.
+  aura::WindowOcclusionTracker::ScopedPause pause_occlusion;
+
   // SetShadowBounds requires synchronizing shadow bounds with the next frame,
   // so submit the next frame to a new surface and let the host window use the
   // new surface.
@@ -556,6 +557,7 @@ void ShellSurfaceBase::OnSetFrame(SurfaceFrameType frame_type) {
   }
 
   bool frame_was_disabled = !frame_enabled();
+  // TODO(b/141151475): Make frame_type a committable property.
   frame_type_ = frame_type;
   switch (frame_type) {
     case SurfaceFrameType::NONE:
@@ -564,9 +566,11 @@ void ShellSurfaceBase::OnSetFrame(SurfaceFrameType frame_type) {
     case SurfaceFrameType::NORMAL:
     case SurfaceFrameType::AUTOHIDE:
     case SurfaceFrameType::OVERLAY:
-      // Initialize the shadow if it didn't exist.  Do not reset if
-      // the frame type just switched from another enabled type.
-      if (!shadow_bounds_ || frame_was_disabled)
+      // Initialize the shadow if it didn't exist. Do not reset if
+      // the frame type just switched from another enabled type or
+      // there is a pending shadow_bounds_ change to avoid overriding
+      // a shadow bounds which have been changed and not yet committed.
+      if (!shadow_bounds_ || (frame_was_disabled && !shadow_bounds_changed_))
         shadow_bounds_ = gfx::Rect();
       break;
     case SurfaceFrameType::SHADOW:
@@ -589,7 +593,6 @@ void ShellSurfaceBase::OnSetFrame(SurfaceFrameType frame_type) {
   frame_view->SetEnabled(frame_enabled());
   frame_view->SetVisible(frame_enabled());
   frame_view->SetShouldPaintHeader(frame_enabled());
-  frame_view->SetHeaderHeight(base::nullopt);
   widget_->GetRootView()->Layout();
   // TODO(oshima): We probably should wait applying these if the
   // window is animating.
@@ -684,11 +687,14 @@ gfx::ImageSkia ShellSurfaceBase::GetWindowIcon() {
 
 bool ShellSurfaceBase::OnCloseRequested(
     views::Widget::ClosedReason close_reason) {
+  if (!pre_close_callback_.is_null())
+    pre_close_callback_.Run();
   // Closing the shell surface is a potentially asynchronous operation, so we
   // will defer actually closing the Widget right now, and come back and call
   // CloseNow() when the callback completes and the shell surface is destroyed
   // (see ~ShellSurfaceBase()).
-  Close();
+  if (!close_callback_.is_null())
+    close_callback_.Run();
   return false;
 }
 
@@ -751,6 +757,26 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
     }
     widget_->Close();
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// views::WidgetObserver overrides:
+
+void ShellSurfaceBase::OnWidgetClosing(views::Widget* widget) {
+  DCHECK(widget_ == widget);
+  // To force the widget to close we first disconnect this shell surface from
+  // its underlying surface, by asserting to it that the surface destroyed
+  // itself. After that, it is safe to call CloseNow() on the widget.
+  //
+  // TODO(crbug.com/1010326): This only closes the aura/exo pieces, but we
+  // should go one level deeper and destroy the wayland stuff. Some options:
+  //  - Invoke xkill under-the-hood, which will only work for x11 and won't
+  //    work if the container itself is stuck.
+  //  - Close the wl connection to the client (i.e. wlkill) this is
+  //    problematic with X11 as all of xwayland shares the same client.
+  //  - Transitively kill all the wl_resources rooted at this window's
+  //    wl_surface, which is not really supported in wayland.
+  OnSurfaceDestroying(root_surface());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -823,8 +849,7 @@ void ShellSurfaceBase::OnWindowActivated(ActivationReason reason,
 bool ShellSurfaceBase::AcceleratorPressed(const ui::Accelerator& accelerator) {
   for (const auto& entry : kCloseWindowAccelerators) {
     if (ui::Accelerator(entry.keycode, entry.modifiers) == accelerator) {
-      if (!close_callback_.is_null())
-        close_callback_.Run();
+      OnCloseRequested(views::Widget::ClosedReason::kUnspecified);
       return true;
     }
   }
@@ -862,8 +887,8 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
                                  : views::Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
   params.delegate = this;
-  params.shadow_type = views::Widget::InitParams::SHADOW_TYPE_NONE;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.show_state = show_state;
   // Make shell surface a transient child if |parent_| has been set and
   // container_ isn't specified.
@@ -889,7 +914,8 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
                                    : views::Widget::InitParams::ACTIVATABLE_NO;
   // Note: NativeWidget owns this widget.
   widget_ = new ShellSurfaceWidget;
-  widget_->Init(params);
+  widget_->Init(std::move(params));
+  widget_->AddObserver(this);
 
   aura::Window* window = widget_->GetNativeWindow();
   window->SetName("ExoShellSurface");
@@ -904,7 +930,7 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
 
   // Start tracking changes to window bounds and window state.
   window->AddObserver(this);
-  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window);
+  ash::WindowState* window_state = ash::WindowState::Get(window);
   InitializeWindowState(window_state);
 
   // AutoHide shelf in fullscreen state.
@@ -931,8 +957,8 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
 }
 
 bool ShellSurfaceBase::IsResizing() const {
-  ash::wm::WindowState* window_state =
-      ash::wm::GetWindowState(widget_->GetNativeWindow());
+  ash::WindowState* window_state =
+      ash::WindowState::Get(widget_->GetNativeWindow());
   if (!window_state->is_dragged())
     return false;
   return window_state->drag_details() &&
@@ -944,7 +970,7 @@ void ShellSurfaceBase::UpdateWidgetBounds() {
   DCHECK(widget_);
 
   aura::Window* window = widget_->GetNativeWindow();
-  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window);
+  ash::WindowState* window_state = ash::WindowState::Get(window);
   // Return early if the shell is currently managing the bounds of the widget.
   if (!window_state->allow_set_bounds_direct()) {
     // 1) When a window is either maximized/fullscreen/pinned.
@@ -1048,7 +1074,7 @@ views::NonClientFrameView* ShellSurfaceBase::CreateNonClientFrameViewInternal(
   aura::Window* window = widget_->GetNativeWindow();
   // ShellSurfaces always use immersive mode.
   window->SetProperty(ash::kImmersiveIsActive, true);
-  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window);
+  ash::WindowState* window_state = ash::WindowState::Get(window);
   if (!frame_enabled() && !window_state->HasDelegate()) {
     window_state->SetDelegate(std::make_unique<CustomWindowStateDelegate>());
   }

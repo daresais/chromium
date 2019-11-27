@@ -5,11 +5,12 @@
 package org.chromium.chrome.browser.toolbar;
 
 import android.content.res.ColorStateList;
-import android.support.annotation.ColorRes;
-import android.support.annotation.DrawableRes;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.annotation.StringRes;
+
+import androidx.annotation.ColorRes;
+import androidx.annotation.DrawableRes;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.NewTabPage;
@@ -21,7 +22,9 @@ import org.chromium.components.security_state.ConnectionSecurityLevel;
 /**
  * Defines the data that is exposed to properly render the Toolbar.
  */
-public interface ToolbarDataProvider {
+// TODO(crbug.com/865801): Refine split between common/generally toolbar properties and
+//                         sub-component properties.
+public interface ToolbarDataProvider extends ToolbarCommonPropertiesModel {
     /**
      * @return The tab that contains the information currently displayed in the toolbar.
      */
@@ -37,16 +40,19 @@ public interface ToolbarDataProvider {
      * @return The current url for the current tab. Returns empty string when there is no tab.
      */
     @NonNull
+    @Override
     String getCurrentUrl();
 
     /**
      * @return The NewTabPage shown for the current Tab or null if one is not being shown.
      */
+    @Override
     NewTabPage getNewTabPageForCurrentTab();
 
     /**
      * @return Whether the toolbar is currently being displayed for incognito.
      */
+    @Override
     boolean isIncognito();
 
     /**
@@ -122,7 +128,7 @@ public interface ToolbarDataProvider {
     default int getSecurityIconContentDescription() {
         switch (getSecurityLevel()) {
             case ConnectionSecurityLevel.NONE:
-            case ConnectionSecurityLevel.HTTP_SHOW_WARNING:
+            case ConnectionSecurityLevel.WARNING:
                 return R.string.accessibility_security_btn_warn;
             case ConnectionSecurityLevel.DANGEROUS:
                 return R.string.accessibility_security_btn_dangerous;
@@ -150,12 +156,8 @@ public interface ToolbarDataProvider {
      *         instead of the URL.
      */
     @Nullable
-    default public String getDisplaySearchTerms() {
+    @Override
+    public default String getDisplaySearchTerms() {
         return null;
     }
-
-    /**
-     * Turn on/off the google logo in the omnibox
-     */
-    void setShouldShowGoogleLogo(boolean shouldShowGoogleLogo);
 }

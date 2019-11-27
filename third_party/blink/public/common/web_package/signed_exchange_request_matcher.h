@@ -12,7 +12,7 @@
 #include "base/gtest_prod_util.h"
 #include "net/http/http_request_headers.h"
 #include "third_party/blink/public/common/common_export.h"
-#include "third_party/blink/public/common/web_package/http_structured_header.h"
+#include "third_party/blink/public/common/http/structured_header.h"
 
 namespace blink {
 
@@ -47,7 +47,8 @@ class BLINK_COMMON_EXPORT SignedExchangeRequestMatcher {
   static bool MatchRequest(const net::HttpRequestHeaders& request_headers,
                            const HeaderMap& response_headers);
   static std::vector<std::vector<std::string>> CacheBehavior(
-      const http_structured_header::ListOfLists& variants,
+      const std::vector<std::pair<std::string, std::vector<std::string>>>&
+          variants,
       const net::HttpRequestHeaders& request_headers);
 
   static std::vector<std::string>::const_iterator FindBestMatchingVariantKey(

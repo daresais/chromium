@@ -107,6 +107,10 @@ void OverlayPresenterImpl::RemoveObserver(OverlayPresenterObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
+bool OverlayPresenterImpl::IsShowingOverlayUI() const {
+  return presenting_;
+}
+
 #pragma mark - Private
 
 #pragma mark Accessors
@@ -183,13 +187,14 @@ void OverlayPresenterImpl::PresentOverlayForActiveRequest() {
   // Overlays cannot be presented if one is already presented.
   DCHECK(!presenting_);
 
-  // Overlays cannot be shown without an active presentation context.
-  if (!presentation_context_ || !presentation_context_->IsActive())
+  // Overlays cannot be shown without a presentation context.
+  if (!presentation_context_)
     return;
 
-  // No presentation is necessary if there is no active reqeust.
+  // No presentation is necessary if there is no active reqeust or the context
+  // is unable to show it.
   OverlayRequest* request = GetActiveRequest();
-  if (!request)
+  if (!request || !presentation_context_->CanShowUIForRequest(request))
     return;
 
   presenting_ = true;
@@ -200,11 +205,25 @@ void OverlayPresenterImpl::PresentOverlayForActiveRequest() {
   }
 
   // Present the overlay UI via the UI delegate.
+  OverlayPresentationCallback presentation_callback = base::BindOnce(
+      &OverlayPresenterImpl::OverlayWasPresented, weak_factory_.GetWeakPtr(),
+      presentation_context_, request);
   OverlayDismissalCallback dismissal_callback = base::BindOnce(
       &OverlayPresenterImpl::OverlayWasDismissed, weak_factory_.GetWeakPtr(),
       presentation_context_, request, GetActiveQueue()->GetWeakPtr());
   presentation_context_->ShowOverlayUI(this, request,
+                                       std::move(presentation_callback),
                                        std::move(dismissal_callback));
+}
+
+void OverlayPresenterImpl::OverlayWasPresented(
+    OverlayPresentationContext* presentation_context,
+    OverlayRequest* request) {
+  DCHECK_EQ(presentation_context_, presentation_context);
+  DCHECK_EQ(GetActiveRequest(), request);
+  for (auto& observer : observers_) {
+    observer.DidShowOverlay(this, request);
+  }
 }
 
 void OverlayPresenterImpl::OverlayWasDismissed(
@@ -279,10 +298,12 @@ void OverlayPresenterImpl::BrowserDestroyed(Browser* browser) {
 
 void OverlayPresenterImpl::RequestAddedToQueue(OverlayRequestQueueImpl* queue,
                                                OverlayRequest* request) {
-  // If |queue| is active and the added request is the front request, trigger
-  // the UI presentation for that request.
-  if (queue == GetActiveQueue() && request == queue->front_request())
+  // If |queue| is active, the added request is frontmost, and an overlay is not
+  // currently being presented, trigger the UI presentation for that request.
+  if (queue == GetActiveQueue() && request == queue->front_request() &&
+      !presenting_) {
     PresentOverlayForActiveRequest();
+  }
 }
 
 void OverlayPresenterImpl::QueuedRequestCancelled(
@@ -293,21 +314,25 @@ void OverlayPresenterImpl::QueuedRequestCancelled(
 
 #pragma mark - OverlayPresentationContextObserver
 
-void OverlayPresenterImpl::OverlayPresentationContextWillChangeActivationState(
-    OverlayPresentationContext* presentation_context,
-    bool activating) {
+void OverlayPresenterImpl::
+    OverlayPresentationContextWillChangePresentationCapabilities(
+        OverlayPresentationContext* presentation_context,
+        OverlayPresentationContext::UIPresentationCapabilities capabilities) {
   DCHECK_EQ(presentation_context_, presentation_context);
-  // Hide the presented overlay UI if the presentation context is deactivating.
-  if (!activating && presenting_)
+  // Hide the presented overlay UI if the presentation context is transitioning
+  // to a state where that UI is not supported.
+  OverlayRequest* request = GetActiveRequest();
+  if (presenting_ &&
+      !presentation_context->CanShowUIForRequest(request, capabilities)) {
     presentation_context_->HideOverlayUI(this, GetActiveRequest());
+  }
 }
 
-void OverlayPresenterImpl::OverlayPresentationContextDidChangeActivationState(
-    OverlayPresentationContext* presentation_context) {
+void OverlayPresenterImpl::
+    OverlayPresentationContextDidChangePresentationCapabilities(
+        OverlayPresentationContext* presentation_context) {
   DCHECK_EQ(presentation_context_, presentation_context);
-  // Attempt to present the active request's overlay UI if the context is being
-  // activated.
-  if (presentation_context_->IsActive())
+  if (!presenting_)
     PresentOverlayForActiveRequest();
 }
 

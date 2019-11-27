@@ -52,11 +52,6 @@ namespace {
 
 const char kEpsonGenericPPD[] = "epson generic escpr printer";
 
-struct UsbVendorPair {
-  int vendor_id;
-  const char* vendor_name;
-};
-
 // Holds a metadata_v2 reverse-index response
 struct ReverseIndexJSON {
   // Canonical name of printer
@@ -414,12 +409,11 @@ class PpdProviderImpl : public PpdProvider {
       : browser_locale_(browser_locale),
         loader_factory_(loader_factory),
         ppd_cache_(ppd_cache),
-        disk_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-            {base::TaskPriority::USER_VISIBLE, base::MayBlock(),
-             base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
+        disk_task_runner_(base::CreateSequencedTaskRunner(
+            {base::ThreadPool(), base::TaskPriority::USER_VISIBLE,
+             base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
         version_(current_version),
-        options_(options),
-        weak_factory_(this) {}
+        options_(options) {}
 
   // Resolving manufacturers requires a couple of steps, because of
   // localization.  First we have to figure out what locale to use, which
@@ -775,7 +769,8 @@ class PpdProviderImpl : public PpdProvider {
       resource_request->url = url;
       resource_request->load_flags =
           net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
-      resource_request->allow_credentials = false;
+      resource_request->credentials_mode =
+          network::mojom::CredentialsMode::kOmit;
 
       // TODO(luum): confirm correct traffic annotation
       fetcher_ = network::SimpleURLLoader::Create(std::move(resource_request),
@@ -867,10 +862,9 @@ class PpdProviderImpl : public PpdProvider {
       FailQueuedMetadataResolutions(PpdProvider::SERVER_ERROR);
       return;
     }
-    auto top_list =
-        base::ListValue::From(base::JSONReader::ReadDeprecated(contents));
 
-    if (top_list.get() == nullptr) {
+    base::Optional<base::Value> top_list = base::JSONReader::Read(contents);
+    if (!top_list.has_value() || !top_list.value().is_list()) {
       // We got something malformed back.
       FailQueuedMetadataResolutions(PpdProvider::INTERNAL_ERROR);
       return;
@@ -879,7 +873,7 @@ class PpdProviderImpl : public PpdProvider {
     // This should just be a simple list of locale strings.
     std::vector<std::string> available_locales;
     bool found_en = false;
-    for (const base::Value& entry : *top_list) {
+    for (const base::Value& entry : top_list.value().GetList()) {
       std::string tmp;
       // Locales should have at *least* a two-character country code.  100 is an
       // arbitrary upper bound for length to protect against extreme bogosity.
@@ -1081,17 +1075,15 @@ class PpdProviderImpl : public PpdProvider {
       //  [0x5926, "some othercanonical name"]
       // ]
       // So we scan through the response looking for our desired device id.
-      auto top_list =
-          base::ListValue::From(base::JSONReader::ReadDeprecated(buffer));
-
-      if (top_list.get() == nullptr) {
+      base::Optional<base::Value> top_list = base::JSONReader::Read(buffer);
+      if (!top_list.has_value() || !top_list.value().is_list()) {
         // We got something malformed back.
         LOG(ERROR) << "Malformed top list";
         result = PpdProvider::INTERNAL_ERROR;
       } else {
         // We'll set result to SUCCESS if we do find the device.
         result = PpdProvider::NOT_FOUND;
-        for (const auto& entry : *top_list) {
+        for (const auto& entry : top_list.value().GetList()) {
           int device_id;
           const base::ListValue* sub_list;
 
@@ -1285,41 +1277,74 @@ class PpdProviderImpl : public PpdProvider {
       return fetch_result;
     }
 
-    auto ret_list =
-        base::ListValue::From(base::JSONReader::ReadDeprecated(buffer));
-    if (ret_list == nullptr) {
+    base::Optional<base::Value> ret_list = base::JSONReader::Read(buffer);
+    if (!ret_list.has_value()) {
+      LOG(ERROR) << "Failed to read contents of retrieved JSON";
       return PpdProvider::INTERNAL_ERROR;
     }
-    *top_list = std::move(ret_list->GetList());
 
+    if (!ret_list.value().is_list()) {
+      LOG(ERROR) << "JSON object is not a list";
+      return PpdProvider::INTERNAL_ERROR;
+    }
+
+    *top_list = std::move(ret_list.value().GetList());
     for (const auto& entry : *top_list) {
       if (!entry.is_list()) {
+        LOG(ERROR) << "Found unexpected non-list entry in JSON object";
         return PpdProvider::INTERNAL_ERROR;
       }
 
       // entry must start with |num_strings| strings
-      const base::Value::ListStorage& list = entry.GetList();
+      base::span<const base::Value> list = entry.GetList();
       if (list.size() < num_strings) {
+        LOG(ERROR) << "List is smaller than expected";
         return PpdProvider::INTERNAL_ERROR;
       }
       for (size_t i = 0; i < num_strings; ++i) {
         if (!list[i].is_string()) {
+          LOG(ERROR) << "Found unexpected non-string value in list";
           return PpdProvider::INTERNAL_ERROR;
         }
       }
 
-      // entry may optionally have a last arg that must be a dict
-      if (list.size() > num_strings && !list[num_strings].is_dict()) {
+      // entry may not have more than |num_strings| strings and one dict
+      if (list.size() > num_strings + 1) {
+        LOG(ERROR) << "List is larger than expected";
         return PpdProvider::INTERNAL_ERROR;
       }
 
-      // entry may not have more than |num_strings| strings and one dict
-      if (list.size() > num_strings + 1) {
+      // entry may optionally have a last arg that must be a dict
+      if (list.size() == num_strings + 1 && !list[num_strings].is_dict()) {
+        LOG(ERROR) << "List size exceeds " << num_strings
+                   << " and final element is not a dictionary";
         return PpdProvider::INTERNAL_ERROR;
       }
     }
 
     return PpdProvider::SUCCESS;
+  }
+
+  // Convenience function which logs the error message associated with the value
+  // of |result|. The given |type| is used to indicate which type of JSON
+  // metadata file the validation error occurred on.
+  void LogJSONValidationError(const std::string& type,
+                              PpdProvider::CallbackResultCode result) {
+    DCHECK(result != PpdProvider::SUCCESS);
+    switch (result) {
+      case PpdProvider::NOT_FOUND:
+        LOG(ERROR) << "Could not find the " << type << " metadata file";
+        break;
+      case PpdProvider::SERVER_ERROR:
+        LOG(ERROR) << "Failed to retrieve the " << type
+                   << " metadata from the server";
+        break;
+      case PpdProvider::INTERNAL_ERROR:
+        LOG(ERROR) << "Failed to parse the " << type << " metadata";
+        break;
+      default:
+        break;
+    }
   }
 
   // Attempts to parse a ReverseIndexJSON reply to |fetcher| into the passed
@@ -1333,14 +1358,14 @@ class PpdProviderImpl : public PpdProvider {
     base::Value::ListStorage top_list;
     auto ret = ParseAndValidateJSONFormat(&top_list, 3);
     if (ret != PpdProvider::SUCCESS) {
-      LOG(ERROR) << "Failed to parse ReverseIndex metadata";
+      LogJSONValidationError("ReverseIndex", ret);
       return ret;
     }
 
     // Fetched data should be in the form {[effective_make_and_model],
     // [manufacturer], [model], [dictionary of metadata]}
     for (const auto& entry : top_list) {
-      const base::Value::ListStorage& list = entry.GetList();
+      base::span<const base::Value> list = entry.GetList();
 
       ReverseIndexJSON rij_entry;
       rij_entry.effective_make_and_model = list[0].GetString();
@@ -1368,14 +1393,14 @@ class PpdProviderImpl : public PpdProvider {
     base::Value::ListStorage top_list;
     auto ret = ParseAndValidateJSONFormat(&top_list, 2);
     if (ret != PpdProvider::SUCCESS) {
-      LOG(ERROR) << "Failed to process Manufacturers metadata";
+      LogJSONValidationError("Manufacturers", ret);
       return ret;
     }
 
     // Fetched data should be in form [[name], [canonical name],
     // {restrictions}]
     for (const auto& entry : top_list) {
-      const base::Value::ListStorage& list = entry.GetList();
+      base::span<const base::Value> list = entry.GetList();
       ManufacturersJSON mj_entry;
       mj_entry.name = list[0].GetString();
       mj_entry.reference = list[1].GetString();
@@ -1402,14 +1427,14 @@ class PpdProviderImpl : public PpdProvider {
     base::Value::ListStorage top_list;
     auto ret = ParseAndValidateJSONFormat(&top_list, 2);
     if (ret != PpdProvider::SUCCESS) {
-      LOG(ERROR) << "Failed to parse Printers metadata";
+      LogJSONValidationError("Printers", ret);
       return ret;
     }
 
     // Fetched data should be in form [[name], [canonical name],
     // {restrictions}]
     for (const auto& entry : top_list) {
-      const base::Value::ListStorage& list = entry.GetList();
+      base::span<const base::Value> list = entry.GetList();
       PrintersJSON pj_entry;
       pj_entry.name = list[0].GetString();
       pj_entry.effective_make_and_model = list[1].GetString();
@@ -1436,14 +1461,14 @@ class PpdProviderImpl : public PpdProvider {
     base::Value::ListStorage top_list;
     auto ret = ParseAndValidateJSONFormat(&top_list, 2);
     if (ret != PpdProvider::SUCCESS) {
-      LOG(ERROR) << "Failed to parse PpdIndex metadata";
+      LogJSONValidationError("PpdIndex", ret);
       return ret;
     }
 
     // Fetched data should be in the form {[effective_make_and_model],
     // [manufacturer], [model], [dictionary of metadata]}
     for (const auto& entry : top_list) {
-      const base::Value::ListStorage& list = entry.GetList();
+      base::span<const base::Value> list = entry.GetList();
 
       PpdIndexJSON pij_entry;
       pij_entry.effective_make_and_model = list[0].GetString();
@@ -1619,7 +1644,7 @@ class PpdProviderImpl : public PpdProvider {
   // Construction-time options, immutable.
   const PpdProvider::Options options_;
 
-  base::WeakPtrFactory<PpdProviderImpl> weak_factory_;
+  base::WeakPtrFactory<PpdProviderImpl> weak_factory_{this};
 
  protected:
   ~PpdProviderImpl() override = default;

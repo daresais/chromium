@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "chromecast/chromecast_buildflags.h"
 #include "chromecast/common/mojom/constants.mojom.h"
@@ -22,6 +22,7 @@
 #include "media/audio/fake_audio_log_factory.h"
 #include "media/audio/mock_audio_source_callback.h"
 #include "media/audio/test_audio_thread.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -51,8 +52,8 @@ const ::media::AudioParameters kAudioParamsInvalidLayout(
     256);
 
 std::unique_ptr<service_manager::Connector> CreateConnector() {
-  service_manager::mojom::ConnectorRequest request;
-  return service_manager::Connector::Create(&request);
+  mojo::PendingReceiver<service_manager::mojom::Connector> receiver;
+  return service_manager::Connector::Create(&receiver);
 }
 
 int OnMoreData(base::TimeDelta delay,
@@ -129,7 +130,7 @@ class CastAudioManagerTest : public testing::Test {
         base::BindRepeating(&CastAudioManagerTest::GetCmaBackendFactory,
                             base::Unretained(this)),
         base::BindRepeating(&DummyGetSessionId),
-        scoped_task_environment_.GetMainThreadTaskRunner(),
+        task_environment_.GetMainThreadTaskRunner(),
         audio_thread_.task_runner(), connector_.get(), use_mixer,
         true /* force_use_cma_backend_for_output*/
         ));
@@ -163,7 +164,7 @@ class CastAudioManagerTest : public testing::Test {
   }
 
   void RunThreadsUntilIdle() {
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     audio_thread_.FlushForTesting();
   }
 
@@ -172,7 +173,7 @@ class CastAudioManagerTest : public testing::Test {
   }
 
   base::Thread audio_thread_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ::media::FakeAudioLogFactory fake_audio_log_factory_;
   std::unique_ptr<MockCmaBackendFactory> mock_backend_factory_;
   ::media::MockAudioSourceCallback mock_source_callback_;
@@ -200,7 +201,7 @@ TEST_F(CastAudioManagerTest, CanMakeStream) {
 
   EXPECT_CALL(mock_source_callback_, OnMoreData(_, _, _, _))
       .WillRepeatedly(Invoke(OnMoreData));
-  EXPECT_CALL(mock_source_callback_, OnError()).Times(0);
+  EXPECT_CALL(mock_source_callback_, OnError(_)).Times(0);
   stream->Start(&mock_source_callback_);
   RunThreadsUntilIdle();
 
@@ -224,7 +225,7 @@ TEST_F(CastAudioManagerTest, CanMakeAC3Stream) {
   if (stream->Open()) {
     EXPECT_CALL(mock_source_callback_, OnMoreData(_, _, _, _))
         .WillRepeatedly(Invoke(OnMoreData));
-    EXPECT_CALL(mock_source_callback_, OnError()).Times(0);
+    EXPECT_CALL(mock_source_callback_, OnError(_)).Times(0);
     stream->Start(&mock_source_callback_);
     RunThreadsUntilIdle();
 
@@ -243,7 +244,7 @@ TEST_F(CastAudioManagerTest, DISABLED_CanMakeStreamProxy) {
   RunThreadsUntilIdle();
   EXPECT_CALL(mock_source_callback_, OnMoreData(_, _, _, _))
       .WillRepeatedly(Invoke(OnMoreData));
-  EXPECT_CALL(mock_source_callback_, OnError()).Times(0);
+  EXPECT_CALL(mock_source_callback_, OnError(_)).Times(0);
   stream->Start(&mock_source_callback_);
   RunThreadsUntilIdle();
 
@@ -264,7 +265,7 @@ TEST_F(CastAudioManagerTest, CanMakeMixerStream) {
 
   EXPECT_CALL(mock_source_callback_, OnMoreData(_, _, _, _))
       .WillRepeatedly(Invoke(OnMoreData));
-  EXPECT_CALL(mock_source_callback_, OnError()).Times(0);
+  EXPECT_CALL(mock_source_callback_, OnError(_)).Times(0);
   stream->Start(&mock_source_callback_);
   RunThreadsUntilIdle();
 
@@ -286,11 +287,11 @@ TEST_F(CastAudioManagerTest, CanMakeCommunicationsStream) {
 
   EXPECT_CALL(mock_source_callback_, OnMoreData(_, _, _, _))
       .WillRepeatedly(Invoke(OnMoreData));
-  EXPECT_CALL(mock_source_callback_, OnError()).Times(0);
-  scoped_task_environment_.RunUntilIdle();
+  EXPECT_CALL(mock_source_callback_, OnError(_)).Times(0);
+  task_environment_.RunUntilIdle();
 
   stream->Stop();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   stream->Close();
 }

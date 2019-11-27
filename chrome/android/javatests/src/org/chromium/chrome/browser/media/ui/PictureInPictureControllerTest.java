@@ -57,7 +57,7 @@ public class PictureInPictureControllerTest {
     private ChromeTabbedActivity mActivity;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mTestServer = EmbeddedTestServer.createAndStartServer(
                 InstrumentationRegistry.getInstrumentation().getContext());
         mActivityTestRule.startMainActivityWithURL(mTestServer.getURL(TEST_PATH));
@@ -214,7 +214,8 @@ public class PictureInPictureControllerTest {
         DOMUtils.waitForMediaPlay(getWebContents(), VIDEO_ID);
 
         // Trigger requestFullscreen() via a click on a button.
-        Assert.assertTrue(DOMUtils.clickNode(getWebContents(), "fullscreen"));
+        Assert.assertTrue(DOMUtils.clickNode(getWebContents(), "fullscreen",
+                true /* goThroughRootAndroidView */, false /* shouldScrollIntoView */));
 
         // We use the web contents fullscreen heuristic.
         CriteriaHelper.pollUiThread(

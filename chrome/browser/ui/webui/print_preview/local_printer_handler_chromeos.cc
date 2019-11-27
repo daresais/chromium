@@ -19,15 +19,13 @@
 #include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager_factory.h"
-#include "chrome/browser/chromeos/printing/ppd_provider_factory.h"
 #include "chrome/browser/chromeos/printing/printer_configurer.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon_client.h"
-#include "chromeos/printing/ppd_provider.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "components/prefs/pref_service.h"
 #include "components/printing/browser/printer_capabilities.h"
@@ -66,6 +64,15 @@ void AddPrintersToList(const std::vector<chromeos::Printer>& printers,
   }
 }
 
+base::Value FetchCapabilitiesAsync(const std::string& device_name,
+                                   const PrinterBasicInfo& basic_info,
+                                   bool has_secure_protocol) {
+  auto print_backend = PrintBackend::CreateInstance(nullptr);
+  return GetSettingsOnBlockingTaskRunner(
+      device_name, basic_info, PrinterSemanticCapsAndDefaults::Papers(),
+      has_secure_protocol, print_backend);
+}
+
 void CapabilitiesFetched(base::Value policies,
                          LocalPrinterHandlerChromeos::GetCapabilityCallback cb,
                          base::Value printer_info) {
@@ -83,11 +90,11 @@ void FetchCapabilities(const chromeos::Printer& printer,
                              printer.GetProtocol() == chromeos::Printer::kIpps;
 
   // USER_VISIBLE because the result is displayed in the print preview dialog.
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-      base::BindOnce(&GetSettingsOnBlockingPool, printer.id(), basic_info,
-                     PrinterSemanticCapsAndDefaults::Papers(),
-                     has_secure_protocol, nullptr),
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::BindOnce(&FetchCapabilitiesAsync, printer.id(), basic_info,
+                     has_secure_protocol),
       base::BindOnce(&CapabilitiesFetched, std::move(policies), std::move(cb)));
 }
 
@@ -101,8 +108,7 @@ LocalPrinterHandlerChromeos::LocalPrinterHandlerChromeos(
     : profile_(profile),
       preview_web_contents_(preview_web_contents),
       printers_manager_(printers_manager),
-      printer_configurer_(std::move(printer_configurer)),
-      weak_factory_(this) {
+      printer_configurer_(std::move(printer_configurer)) {
   // Construct the CupsPrintJobManager to listen for printing events.
   chromeos::CupsPrintJobManagerFactory::GetForBrowserContext(profile);
 }
@@ -147,8 +153,8 @@ void LocalPrinterHandlerChromeos::GetDefaultPrinter(DefaultPrinterCallback cb) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   // TODO(crbug.com/660898): Add default printers to ChromeOS.
 
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(std::move(cb), ""));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(std::move(cb), ""));
 }
 
 void LocalPrinterHandlerChromeos::StartGetPrinters(
@@ -158,11 +164,8 @@ void LocalPrinterHandlerChromeos::StartGetPrinters(
   // thread.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  // TODO(crbug.com/971823): Re-enable printing from OOBE.
-  if (chromeos::ProfileHelper::IsSigninProfile(profile_)) {
-    std::move(done_callback).Run();
-    return;
-  }
+  // Printing is not allowed during OOBE.
+  CHECK(!chromeos::ProfileHelper::IsSigninProfile(profile_));
 
   PrinterList printer_list;
   AddPrintersToList(printers_manager_->GetPrinters(PrinterClass::kSaved),
@@ -185,8 +188,8 @@ void LocalPrinterHandlerChromeos::StartGetCapability(
       printers_manager_->GetPrinter(printer_name);
   if (!printer) {
     // If the printer was removed, the lookup will fail.
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             base::BindOnce(std::move(cb), base::Value()));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(std::move(cb), base::Value()));
     return;
   }
 
@@ -215,7 +218,9 @@ void LocalPrinterHandlerChromeos::OnPrinterInstalled(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (result == chromeos::PrinterSetupResult::kSuccess) {
-    printers_manager_->PrinterInstalled(printer, true /*is_automatic*/);
+    printers_manager_->PrinterInstalled(
+        printer, /*is_automatic=*/true,
+        chromeos::PrinterSetupSource::kPrintPreview);
   }
 
   HandlePrinterSetup(printer, std::move(cb), printer.IsUsbProtocol(), result);
@@ -306,6 +311,9 @@ base::Value LocalPrinterHandlerChromeos::GetNativePrinterPolicies() const {
   policies.SetKey(
       kAllowedPinModes,
       base::Value(prefs->GetInteger(prefs::kPrintingAllowedPinModes)));
+  policies.SetKey(kAllowedBackgroundGraphicsModes,
+                  base::Value(prefs->GetInteger(
+                      prefs::kPrintingAllowedBackgroundGraphicsModes)));
   policies.SetKey(kDefaultColorMode,
                   base::Value(prefs->GetInteger(prefs::kPrintingColorDefault)));
   policies.SetKey(
@@ -313,6 +321,9 @@ base::Value LocalPrinterHandlerChromeos::GetNativePrinterPolicies() const {
       base::Value(prefs->GetInteger(prefs::kPrintingDuplexDefault)));
   policies.SetKey(kDefaultPinMode,
                   base::Value(prefs->GetInteger(prefs::kPrintingPinDefault)));
+  policies.SetKey(kDefaultBackgroundGraphicsMode,
+                  base::Value(prefs->GetInteger(
+                      prefs::kPrintingBackgroundGraphicsDefault)));
   return policies;
 }
 

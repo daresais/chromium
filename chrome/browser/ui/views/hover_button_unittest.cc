@@ -10,6 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/views/chrome_views_test_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/text_utils.h"
@@ -75,7 +76,7 @@ class HoverButtonTest : public ChromeViewsTestBase {
         CreateParams(views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     params.bounds = gfx::Rect(100, 100, 200, 200);
-    widget_->Init(params);
+    widget_->Init(std::move(params));
   }
 
  private:

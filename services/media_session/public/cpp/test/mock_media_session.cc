@@ -12,6 +12,27 @@
 namespace media_session {
 namespace test {
 
+namespace {
+
+bool IsPositionEqual(const MediaPosition& p1, const MediaPosition& p2) {
+  if (p1.duration() != p2.duration() ||
+      p1.playback_rate() != p2.playback_rate()) {
+    return false;
+  }
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  if (p1.GetPositionAtTime(now) == p2.GetPositionAtTime(now))
+    return true;
+
+  // To make testing easier we allow position at creation time to be equal
+  // to one another. If we did not do this then the position may advance
+  // if the playback rate is not zero.
+  return p1.GetPositionAtTime(p1.last_updated_time()) ==
+         p2.GetPositionAtTime(p2.last_updated_time());
+}
+
+}  // namespace
+
 MockMediaSessionMojoObserver::MockMediaSessionMojoObserver(
     mojom::MediaSession& media_session) {
   media_session.AddObserver(receiver_.BindNewPipeAndPassRemote());
@@ -72,6 +93,20 @@ void MockMediaSessionMojoObserver::MediaSessionImagesChanged(
       run_loop_->Quit();
       expected_images_of_type_.reset();
     }
+  }
+}
+
+void MockMediaSessionMojoObserver::MediaSessionPositionChanged(
+    const base::Optional<media_session::MediaPosition>& position) {
+  session_position_ = position;
+
+  if (position.has_value() && expected_position_.has_value() &&
+      IsPositionEqual(*position, *expected_position_)) {
+    run_loop_->Quit();
+    expected_position_.reset();
+  } else if (waiting_for_empty_position_ && !position.has_value()) {
+    run_loop_->Quit();
+    waiting_for_empty_position_ = false;
   }
 }
 
@@ -141,6 +176,27 @@ void MockMediaSessionMojoObserver::WaitForExpectedImagesOfType(
   }
 
   expected_images_of_type_ = std::make_pair(type, images);
+  StartWaiting();
+}
+
+void MockMediaSessionMojoObserver::WaitForEmptyPosition() {
+  // |session_position_| is doubly wrapped in base::Optional so we must check
+  // both values.
+  if (session_position_.has_value() && !session_position_->has_value())
+    return;
+
+  waiting_for_empty_position_ = true;
+  StartWaiting();
+}
+
+void MockMediaSessionMojoObserver::WaitForExpectedPosition(
+    const MediaPosition& position) {
+  if (session_position_.has_value() && session_position_->has_value()) {
+    if (IsPositionEqual(*session_position_.value(), position))
+      return;
+  }
+
+  expected_position_ = position;
   StartWaiting();
 }
 
@@ -261,7 +317,7 @@ void MockMediaSession::AbandonAudioFocusFromClient() {
 }
 
 base::UnguessableToken MockMediaSession::RequestAudioFocusFromService(
-    mojom::AudioFocusManagerPtr& service,
+    mojo::Remote<mojom::AudioFocusManager>& service,
     mojom::AudioFocusType audio_focus_type) {
   if (afr_client_.is_bound()) {
     RequestAudioFocusFromClient(audio_focus_type);
@@ -269,11 +325,11 @@ base::UnguessableToken MockMediaSession::RequestAudioFocusFromService(
     DCHECK(request_id_.is_empty());
 
     // Build a new audio focus request.
-    mojom::MediaSessionPtr media_session;
-    bindings_.AddBinding(this, mojo::MakeRequest(&media_session));
+    mojo::PendingRemote<mojom::MediaSession> media_session;
+    receivers_.Add(this, media_session.InitWithNewPipeAndPassReceiver());
 
     service->RequestAudioFocus(
-        mojo::MakeRequest(&afr_client_), std::move(media_session),
+        afr_client_.BindNewPipeAndPassReceiver(), std::move(media_session),
         GetMediaSessionInfoSync(), audio_focus_type,
         base::BindOnce(
             [](base::UnguessableToken* id,
@@ -292,37 +348,42 @@ base::UnguessableToken MockMediaSession::RequestAudioFocusFromService(
   return request_id_;
 }
 
-base::UnguessableToken MockMediaSession::RequestGroupedAudioFocusFromService(
-    mojom::AudioFocusManagerPtr& service,
+bool MockMediaSession::RequestGroupedAudioFocusFromService(
+    const base::UnguessableToken& request_id,
+    mojo::Remote<mojom::AudioFocusManager>& service,
     mojom::AudioFocusType audio_focus_type,
     const base::UnguessableToken& group_id) {
   if (afr_client_.is_bound()) {
     RequestAudioFocusFromClient(audio_focus_type);
-  } else {
-    DCHECK(request_id_.is_empty());
-
-    // Build a new audio focus request.
-    mojom::MediaSessionPtr media_session;
-    bindings_.AddBinding(this, mojo::MakeRequest(&media_session));
-
-    service->RequestGroupedAudioFocus(
-        mojo::MakeRequest(&afr_client_), std::move(media_session),
-        GetMediaSessionInfoSync(), audio_focus_type, group_id,
-        base::BindOnce(
-            [](base::UnguessableToken* id,
-               const base::UnguessableToken& received_id) {
-              *id = received_id;
-            },
-            &request_id_));
-
-    service.FlushForTesting();
-    afr_client_.FlushForTesting();
+    SetState(mojom::MediaSessionInfo::SessionState::kActive);
+    return true;
   }
 
-  DCHECK(!request_id_.is_empty());
-  SetState(mojom::MediaSessionInfo::SessionState::kActive);
+  DCHECK(request_id_.is_empty());
 
-  return request_id_;
+  // Build a new audio focus request.
+  mojo::PendingRemote<mojom::MediaSession> media_session;
+  receivers_.Add(this, media_session.InitWithNewPipeAndPassReceiver());
+  bool success;
+
+  service->RequestGroupedAudioFocus(
+      request_id, afr_client_.BindNewPipeAndPassReceiver(),
+      std::move(media_session), GetMediaSessionInfoSync(), audio_focus_type,
+      group_id,
+      base::BindOnce([](bool* success, bool result) { *success = result; },
+                     &success));
+
+  service.FlushForTesting();
+  afr_client_.FlushForTesting();
+
+  if (success) {
+    request_id_ = request_id;
+    SetState(mojom::MediaSessionInfo::SessionState::kActive);
+  } else {
+    afr_client_.reset();
+  }
+
+  return success;
 }
 
 mojom::MediaSessionInfo::SessionState MockMediaSession::GetState() const {
@@ -337,6 +398,13 @@ void MockMediaSession::SimulateMetadataChanged(
     const base::Optional<MediaMetadata>& metadata) {
   for (auto& observer : observers_) {
     observer->MediaSessionMetadataChanged(metadata);
+  }
+}
+
+void MockMediaSession::SimulatePositionChanged(
+    const base::Optional<MediaPosition>& position) {
+  for (auto& observer : observers_) {
+    observer->MediaSessionPositionChanged(position);
   }
 }
 

@@ -5,6 +5,7 @@
 #include "ash/shelf/shelf_bubble.h"
 
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/aura/window.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 
@@ -31,11 +32,11 @@ ShelfBubble::ShelfBubble(views::View* anchor,
                          ShelfAlignment alignment,
                          SkColor background_color)
     : views::BubbleDialogDelegateView(anchor, GetArrow(alignment)),
-      background_animator_(SHELF_BACKGROUND_DEFAULT,
-                           // Don't pass the Shelf so the translucent color is
-                           // always used.
-                           nullptr,
-                           Shell::Get()->wallpaper_controller()) {
+      background_animator_(
+          /* Don't pass the Shelf so the translucent color is always used. */
+          nullptr,
+          Shell::Get()->wallpaper_controller()) {
+  background_animator_.Init(SHELF_BACKGROUND_DEFAULT);
   background_animator_.AddObserver(this);
 
   // Place the bubble in the same display as the anchor.

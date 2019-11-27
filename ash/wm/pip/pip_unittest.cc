@@ -12,6 +12,7 @@
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_navigation_widget.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/system/status_area_widget.h"
@@ -36,7 +37,7 @@ std::unique_ptr<views::Widget> CreateWidget(aura::Window* context) {
   params.delegate = new views::WidgetDelegateView();
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.context = context;
-  widget->Init(params);
+  widget->Init(std::move(params));
   return widget;
 }
 
@@ -61,8 +62,8 @@ class PipTest : public AshTestBase {
 
 TEST_F(PipTest, ShowInactive) {
   auto widget = CreateWidget(Shell::GetPrimaryRootWindow());
-  const wm::WMEvent pip_event(wm::WM_EVENT_PIP);
-  auto* window_state = wm::GetWindowState(widget->GetNativeWindow());
+  const WMEvent pip_event(WM_EVENT_PIP);
+  auto* window_state = WindowState::Get(widget->GetNativeWindow());
   window_state->OnWMEvent(&pip_event);
   ASSERT_TRUE(window_state->IsPip());
   ASSERT_FALSE(widget->IsVisible());
@@ -73,7 +74,7 @@ TEST_F(PipTest, ShowInactive) {
   widget->Activate();
   EXPECT_FALSE(widget->IsActive());
 
-  const wm::WMEvent normal_event(wm::WM_EVENT_NORMAL);
+  const WMEvent normal_event(WM_EVENT_NORMAL);
   window_state->OnWMEvent(&normal_event);
   EXPECT_FALSE(window_state->IsPip());
   EXPECT_FALSE(widget->IsActive());
@@ -90,8 +91,8 @@ TEST_F(PipTest, ShortcutNavigation) {
   auto pip_widget = CreateWidget(Shell::GetPrimaryRootWindow());
   widget->Show();
   pip_widget->Show();
-  const wm::WMEvent pip_event(wm::WM_EVENT_PIP);
-  auto* pip_window_state = wm::GetWindowState(pip_widget->GetNativeWindow());
+  const WMEvent pip_event(WM_EVENT_PIP);
+  auto* pip_window_state = WindowState::Get(pip_widget->GetNativeWindow());
   pip_window_state->OnWMEvent(&pip_event);
   EXPECT_TRUE(pip_window_state->IsPip());
   EXPECT_FALSE(pip_widget->IsActive());
@@ -102,16 +103,22 @@ TEST_F(PipTest, ShortcutNavigation) {
   EXPECT_TRUE(pip_widget->IsActive());
   EXPECT_FALSE(widget->IsActive());
 
-  auto* shelf = AshTestBase::GetPrimaryShelf()->shelf_widget();
+  auto* navigation_widget =
+      AshTestBase::GetPrimaryShelf()->shelf_widget()->navigation_widget();
+  auto* hotseat_widget =
+      AshTestBase::GetPrimaryShelf()->shelf_widget()->hotseat_widget();
   auto* status_area =
       Shell::GetPrimaryRootWindowController()->GetStatusAreaWidget();
 
   // Cycle Backward.
   generator->PressKey(ui::VKEY_BROWSER_BACK, ui::EF_CONTROL_DOWN);
-  EXPECT_TRUE(shelf->IsActive());
+  EXPECT_TRUE(hotseat_widget->IsActive());
 
   generator->PressKey(ui::VKEY_BROWSER_BACK, ui::EF_CONTROL_DOWN);
   EXPECT_TRUE(status_area->IsActive());
+
+  generator->PressKey(ui::VKEY_BROWSER_BACK, ui::EF_CONTROL_DOWN);
+  EXPECT_TRUE(navigation_widget->IsActive());
 
   generator->PressKey(ui::VKEY_BROWSER_BACK, ui::EF_CONTROL_DOWN);
   EXPECT_TRUE(widget->IsActive());
@@ -124,21 +131,27 @@ TEST_F(PipTest, ShortcutNavigation) {
   EXPECT_TRUE(widget->IsActive());
 
   generator->PressKey(ui::VKEY_BROWSER_FORWARD, ui::EF_CONTROL_DOWN);
+  EXPECT_TRUE(navigation_widget->IsActive());
+
+  generator->PressKey(ui::VKEY_BROWSER_FORWARD, ui::EF_CONTROL_DOWN);
   EXPECT_TRUE(status_area->IsActive());
 
   generator->PressKey(ui::VKEY_BROWSER_FORWARD, ui::EF_CONTROL_DOWN);
-  EXPECT_TRUE(shelf->IsActive());
+  EXPECT_TRUE(hotseat_widget->IsActive());
 
   generator->PressKey(ui::VKEY_BROWSER_FORWARD, ui::EF_CONTROL_DOWN);
   EXPECT_TRUE(pip_widget->IsActive());
+
+  generator->PressKey(ui::VKEY_BROWSER_FORWARD, ui::EF_CONTROL_DOWN);
+  EXPECT_TRUE(widget->IsActive());
 }
 
 TEST_F(PipTest, PipInitialPositionAvoidsObstacles) {
   UpdateDisplay("400x400");
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(100, 300, 100, 100)));
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
-  const wm::WMEvent enter_pip(wm::WM_EVENT_PIP);
+  WindowState* window_state = WindowState::Get(window.get());
+  const WMEvent enter_pip(WM_EVENT_PIP);
   window_state->OnWMEvent(&enter_pip);
   window->Show();
 
@@ -166,8 +179,8 @@ TEST_F(PipTest, TargetBoundsAffectedByWorkAreaChange) {
 
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(100, 300, 100, 100)));
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
-  const wm::WMEvent enter_pip(wm::WM_EVENT_PIP);
+  WindowState* window_state = WindowState::Get(window.get());
+  const WMEvent enter_pip(WM_EVENT_PIP);
   window_state->OnWMEvent(&enter_pip);
   window->Show();
 
@@ -182,8 +195,8 @@ TEST_F(PipTest, PipRestoresToPreviousBoundsOnMovementAreaChangeIfTheyExist) {
   UpdateDisplay("400x400");
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(200, 200, 100, 100)));
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
-  const wm::WMEvent enter_pip(wm::WM_EVENT_PIP);
+  WindowState* window_state = WindowState::Get(window.get());
+  const WMEvent enter_pip(WM_EVENT_PIP);
   window_state->OnWMEvent(&enter_pip);
   window->Show();
 
@@ -221,8 +234,8 @@ TEST_F(
   // to an edge and therefore in a resting position for the whole test.
   auto widget = CreateWidget(root_window);
   auto* window = widget->GetNativeWindow();
-  wm::WindowState* window_state = wm::GetWindowState(window);
-  const wm::WMEvent enter_pip(wm::WM_EVENT_PIP);
+  WindowState* window_state = WindowState::Get(window);
+  const WMEvent enter_pip(WM_EVENT_PIP);
   window_state->OnWMEvent(&enter_pip);
   window->Show();
   window->SetBounds(gfx::Rect(8, 292, 100, 100));
@@ -251,8 +264,8 @@ TEST_F(PipTest, PipRestoreOnWorkAreaChangeDoesNotChangeWindowSize) {
   UpdateDisplay("400x400");
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(200, 200, 100, 100)));
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
-  const wm::WMEvent enter_pip(wm::WM_EVENT_PIP);
+  WindowState* window_state = WindowState::Get(window.get());
+  const WMEvent enter_pip(WM_EVENT_PIP);
   window_state->OnWMEvent(&enter_pip);
   window->Show();
 

@@ -6,7 +6,6 @@
 
 #include "base/optional.h"
 #include "third_party/blink/renderer/core/content_capture/content_capture_manager.h"
-#include "third_party/blink/renderer/core/content_capture/content_holder.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/markers/composition_marker.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
@@ -25,6 +24,7 @@
 #include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/selection_painting_utils.h"
 #include "third_party/blink/renderer/core/paint/text_painter.h"
+#include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
@@ -49,7 +49,8 @@ std::pair<unsigned, unsigned> GetTextMatchMarkerPaintOffsets(
   const unsigned text_box_start =
       text_box.Start() + text_box.GetLineLayoutItem().TextStartOffset();
 
-  DCHECK_EQ(DocumentMarker::kTextMatch, marker.GetType());
+  DCHECK(marker.GetType() == DocumentMarker::kTextMatch ||
+         marker.GetType() == DocumentMarker::kTextFragment);
   const unsigned start_offset = marker.StartOffset() > text_box_start
                                     ? marker.StartOffset() - text_box_start
                                     : 0U;
@@ -58,12 +59,12 @@ std::pair<unsigned, unsigned> GetTextMatchMarkerPaintOffsets(
   return std::make_pair(start_offset, end_offset);
 }
 
-NodeHolder GetNodeHolder(Node* node) {
+DOMNodeId GetNodeHolder(Node* node) {
   if (node && node->GetLayoutObject()) {
     DCHECK(node->GetLayoutObject()->IsText());
-    return (ToLayoutText(node->GetLayoutObject()))->EnsureNodeHolder();
+    return (ToLayoutText(node->GetLayoutObject()))->EnsureNodeId();
   }
-  return NodeHolder::EmptyNodeHolder();
+  return kInvalidDOMNodeId;
 }
 
 }  // anonymous namespace
@@ -88,7 +89,8 @@ static LineLayoutItem EnclosingUnderlineObject(
       return current;
 
     if (Node* node = current.GetNode()) {
-      if (IsHTMLAnchorElement(node) || node->HasTagName(html_names::kFontTag))
+      if (IsA<HTMLAnchorElement>(node) ||
+          node->HasTagName(html_names::kFontTag))
         return current;
     }
   }
@@ -341,7 +343,7 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
   if (inline_text_box_.Truncation() != kCNoTruncation && ltr != flow_is_ltr)
     text_painter.SetEllipsisOffset(inline_text_box_.Truncation());
 
-  NodeHolder node_holder = GetNodeHolder(
+  DOMNodeId node_id = GetNodeHolder(
       LineLayoutAPIShim::LayoutObjectFrom(inline_text_box_.GetLineLayoutItem())
           ->GetNode());
 
@@ -385,8 +387,7 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
       start_offset = selection_end;
       end_offset = selection_start;
     }
-    text_painter.Paint(start_offset, end_offset, length, text_style,
-                       node_holder);
+    text_painter.Paint(start_offset, end_offset, length, text_style, node_id);
 
     // Paint line-through decoration if needed.
     if (has_line_through_decoration) {
@@ -411,7 +412,7 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
       GraphicsContextStateSaver state_saver(context);
       context.ClipOut(FloatRect(selection_rect));
       text_painter.Paint(selection_start, selection_end, length, text_style,
-                         node_holder);
+                         node_id);
     }
     // the second time, we draw the glyphs inside the selection area, with
     // the selection style.
@@ -419,7 +420,7 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
       GraphicsContextStateSaver state_saver(context);
       context.Clip(FloatRect(selection_rect));
       text_painter.Paint(selection_start, selection_end, length,
-                         selection_style, node_holder);
+                         selection_style, node_id);
     }
   }
 
@@ -478,7 +479,8 @@ InlineTextBoxPainter::PaintOffsets InlineTextBoxPainter::MarkerPaintStartAndEnd(
   // Text match markers are painted differently (in an inline text box truncated
   // by an ellipsis, they paint over the ellipsis) and so should not use this
   // function.
-  DCHECK_NE(DocumentMarker::kTextMatch, marker.GetType());
+  DCHECK(marker.GetType() != DocumentMarker::kTextMatch &&
+         marker.GetType() != DocumentMarker::kTextFragment);
   DCHECK(inline_text_box_.Truncation() != kCFullTruncation);
   DCHECK(inline_text_box_.Len());
 
@@ -594,13 +596,14 @@ void InlineTextBoxPainter::PaintDocumentMarkers(
         inline_text_box_.PaintDocumentMarker(paint_info.context, box_origin,
                                              marker, style, font, true);
         break;
+      case DocumentMarker::kTextFragment:
       case DocumentMarker::kTextMatch:
         if (marker_paint_phase == DocumentMarkerPaintPhase::kBackground) {
-          inline_text_box_.PaintTextMatchMarkerBackground(
-              paint_info, box_origin, To<TextMatchMarker>(marker), style, font);
+          inline_text_box_.PaintTextMarkerBackground(
+              paint_info, box_origin, To<TextMarkerBase>(marker), style, font);
         } else {
-          inline_text_box_.PaintTextMatchMarkerForeground(
-              paint_info, box_origin, To<TextMatchMarker>(marker), style, font);
+          inline_text_box_.PaintTextMarkerForeground(
+              paint_info, box_origin, To<TextMarkerBase>(marker), style, font);
         }
         break;
       case DocumentMarker::kComposition:
@@ -825,13 +828,14 @@ void InlineTextBoxPainter::PaintStyleableMarkerUnderline(
       inline_text_box_.LogicalHeight());
 }
 
-void InlineTextBoxPainter::PaintTextMatchMarkerForeground(
+void InlineTextBoxPainter::PaintTextMarkerForeground(
     const PaintInfo& paint_info,
     const LayoutPoint& box_origin,
-    const TextMatchMarker& marker,
+    const TextMarkerBase& marker,
     const ComputedStyle& style,
     const Font& font) {
-  if (!InlineLayoutObject()
+  if (marker.GetType() == DocumentMarker::kTextMatch &&
+      !InlineLayoutObject()
            .GetFrame()
            ->GetEditor()
            .MarkedTextMatchesAreHighlighted())
@@ -847,7 +851,11 @@ void InlineTextBoxPainter::PaintTextMatchMarkerForeground(
     return;
 
   const TextPaintStyle text_style =
-      DocumentMarkerPainter::ComputeTextPaintStyleFrom(style, marker);
+      DocumentMarkerPainter::ComputeTextPaintStyleFrom(
+          style, marker,
+          inline_text_box_.GetLineLayoutItem()
+              .GetDocument()
+              .InForcedColorsMode());
   if (text_style.current_color == Color::kTransparent)
     return;
 
@@ -859,17 +867,17 @@ void InlineTextBoxPainter::PaintTextMatchMarkerForeground(
                            inline_text_box_.IsHorizontal());
 
   text_painter.Paint(paint_offsets.first, paint_offsets.second,
-                     inline_text_box_.Len(), text_style,
-                     NodeHolder::EmptyNodeHolder());
+                     inline_text_box_.Len(), text_style, kInvalidDOMNodeId);
 }
 
-void InlineTextBoxPainter::PaintTextMatchMarkerBackground(
+void InlineTextBoxPainter::PaintTextMarkerBackground(
     const PaintInfo& paint_info,
     const LayoutPoint& box_origin,
-    const TextMatchMarker& marker,
+    const TextMarkerBase& marker,
     const ComputedStyle& style,
     const Font& font) {
-  if (!LineLayoutAPIShim::LayoutObjectFrom(inline_text_box_.GetLineLayoutItem())
+  if (marker.GetType() == DocumentMarker::kTextMatch &&
+      !LineLayoutAPIShim::LayoutObjectFrom(inline_text_box_.GetLineLayoutItem())
            ->GetFrame()
            ->GetEditor()
            .MarkedTextMatchesAreHighlighted())
@@ -880,7 +888,9 @@ void InlineTextBoxPainter::PaintTextMatchMarkerBackground(
   TextRun run = inline_text_box_.ConstructTextRun(style);
 
   Color color = LayoutTheme::GetTheme().PlatformTextSearchHighlightColor(
-      marker.IsActiveMatch());
+      marker.IsActiveMatch(),
+      inline_text_box_.GetLineLayoutItem().GetDocument().InForcedColorsMode(),
+      style.UsedColorScheme());
   GraphicsContext& context = paint_info.context;
   GraphicsContextStateSaver state_saver(context);
 

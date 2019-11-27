@@ -13,9 +13,9 @@
 #include "ios/chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #include "ios/web/public/favicon/favicon_status.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/web_state/navigation_context.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -77,7 +77,7 @@ SearchEngineTabHelper::~SearchEngineTabHelper() {}
 SearchEngineTabHelper::SearchEngineTabHelper(web::WebState* web_state)
     : web_state_(web_state) {
   web_state->AddObserver(this);
-  web_state->AddScriptCommandCallback(
+  subscription_ = web_state->AddScriptCommandCallback(
       base::BindRepeating(&SearchEngineTabHelper::OnJsMessage,
                           base::Unretained(this)),
       kCommandPrefix);
@@ -87,7 +87,6 @@ SearchEngineTabHelper::SearchEngineTabHelper(web::WebState* web_state)
 }
 
 void SearchEngineTabHelper::WebStateDestroyed(web::WebState* web_state) {
-  web_state->RemoveScriptCommandCallback(kCommandPrefix);
   web_state->RemoveObserver(this);
   web_state_ = nullptr;
   favicon_driver_observer_.RemoveAll();

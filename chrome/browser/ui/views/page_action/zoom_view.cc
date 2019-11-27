@@ -23,10 +23,8 @@ ZoomView::ZoomView(PageActionIconView::Delegate* delegate)
 
 ZoomView::~ZoomView() {}
 
-bool ZoomView::Update() {
-  bool was_visible = GetVisible();
+void ZoomView::UpdateImpl() {
   ZoomChangedForActiveTab(false);
-  return GetVisible() != was_visible;
 }
 
 bool ZoomView::ShouldBeVisible(bool can_show_bubble) const {
@@ -80,8 +78,7 @@ void ZoomView::ZoomChangedForActiveTab(bool can_show_bubble) {
     SetVisible(true);
 
     if (can_show_bubble) {
-      ZoomBubbleView::ShowBubble(web_contents, gfx::Point(),
-                                 ZoomBubbleView::AUTOMATIC);
+      ZoomBubbleView::ShowBubble(web_contents, ZoomBubbleView::AUTOMATIC);
     } else {
       ZoomBubbleView::RefreshBubbleIfShowing(web_contents);
     }
@@ -95,8 +92,7 @@ void ZoomView::ZoomChangedForActiveTab(bool can_show_bubble) {
 }
 
 void ZoomView::OnExecuting(PageActionIconView::ExecuteSource source) {
-  ZoomBubbleView::ShowBubble(GetWebContents(), gfx::Point(),
-                             ZoomBubbleView::USER_GESTURE);
+  ZoomBubbleView::ShowBubble(GetWebContents(), ZoomBubbleView::USER_GESTURE);
 }
 
 views::BubbleDialogDelegateView* ZoomView::GetBubble() const {

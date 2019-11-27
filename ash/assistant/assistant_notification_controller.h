@@ -13,10 +13,11 @@
 #include "ash/assistant/model/assistant_notification_model.h"
 #include "ash/assistant/model/assistant_notification_model_observer.h"
 #include "ash/assistant/model/assistant_ui_model_observer.h"
-#include "ash/public/interfaces/assistant_controller.mojom.h"
+#include "ash/public/mojom/assistant_controller.mojom.h"
 #include "base/macros.h"
 #include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/public/cpp/notifier_id.h"
 
@@ -43,7 +44,8 @@ class ASH_EXPORT AssistantNotificationController
       AssistantController* assistant_controller);
   ~AssistantNotificationController() override;
 
-  void BindRequest(mojom::AssistantNotificationControllerRequest request);
+  void BindReceiver(
+      mojo::PendingReceiver<mojom::AssistantNotificationController> receiver);
 
   // Returns the underlying model.
   const AssistantNotificationModel* model() const { return &model_; }
@@ -95,7 +97,7 @@ class ASH_EXPORT AssistantNotificationController
  private:
   AssistantController* const assistant_controller_;  // Owned by Shell.
 
-  mojo::Binding<mojom::AssistantNotificationController> binding_;
+  mojo::Receiver<mojom::AssistantNotificationController> receiver_{this};
 
   AssistantNotificationModel model_;
   AssistantNotificationExpiryMonitor expiry_monitor_;

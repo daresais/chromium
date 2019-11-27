@@ -66,9 +66,6 @@ Polymer({
     pageVisibility_: {type: Object, value: settings.pageVisibility},
 
     /** @private */
-    showApps_: Boolean,
-
-    /** @private */
     showAndroidApps_: Boolean,
 
     /** @private */
@@ -134,41 +131,14 @@ Polymer({
           loadTimeData.getString('controlledSettingNoOwner'),
       controlledSettingParent:
           loadTimeData.getString('controlledSettingParent'),
+      controlledSettingChildRestriction:
+          loadTimeData.getString('controlledSettingChildRestriction'),
       // </if>
     };
-
-    // <if expr="chromeos">
-    CrOncStrings = {
-      OncTypeCellular: loadTimeData.getString('OncTypeCellular'),
-      OncTypeEthernet: loadTimeData.getString('OncTypeEthernet'),
-      OncTypeMobile: loadTimeData.getString('OncTypeMobile'),
-      OncTypeTether: loadTimeData.getString('OncTypeTether'),
-      OncTypeVPN: loadTimeData.getString('OncTypeVPN'),
-      OncTypeWiFi: loadTimeData.getString('OncTypeWiFi'),
-      OncTypeWiMAX: loadTimeData.getString('OncTypeWiMAX'),
-      networkListItemConnected:
-          loadTimeData.getString('networkListItemConnected'),
-      networkListItemConnecting:
-          loadTimeData.getString('networkListItemConnecting'),
-      networkListItemConnectingTo:
-          loadTimeData.getString('networkListItemConnectingTo'),
-      networkListItemInitializing:
-          loadTimeData.getString('networkListItemInitializing'),
-      networkListItemScanning:
-          loadTimeData.getString('networkListItemScanning'),
-      networkListItemNotConnected:
-          loadTimeData.getString('networkListItemNotConnected'),
-      networkListItemNoNetwork:
-          loadTimeData.getString('networkListItemNoNetwork'),
-      vpnNameTemplate: loadTimeData.getString('vpnNameTemplate'),
-    };
-    // </if>
 
     // The SplitSettings feature hides OS settings in the browser settings page.
     // https://crbug.com/950007
     const showOSSettings = loadTimeData.getBoolean('showOSSettings');
-    this.showApps_ = showOSSettings && loadTimeData.valueExists('showApps') &&
-        loadTimeData.getBoolean('showApps');
     this.showAndroidApps_ = showOSSettings &&
         loadTimeData.valueExists('androidAppsVisible') &&
         loadTimeData.getBoolean('androidAppsVisible');

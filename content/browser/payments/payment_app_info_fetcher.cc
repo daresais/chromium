@@ -33,13 +33,13 @@ void PaymentAppInfoFetcher::Start(
     const GURL& context_url,
     scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
     PaymentAppInfoFetchCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
 
   std::unique_ptr<std::vector<GlobalFrameRoutingId>> provider_hosts =
       service_worker_context->GetProviderHostIds(context_url.GetOrigin());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  RunOrPostTaskOnThread(
+      FROM_HERE, BrowserThread::UI,
       base::BindOnce(&PaymentAppInfoFetcher::StartOnUI, context_url,
                      std::move(provider_hosts), std::move(callback)));
 }
@@ -149,7 +149,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
     top_level_web_content->GetManifest(
         base::BindOnce(&PaymentAppInfoFetcher::SelfDeleteFetcher::
                            FetchPaymentAppManifestCallback,
-                       base::Unretained(this)));
+                       weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
@@ -166,10 +166,9 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
 void PaymentAppInfoFetcher::SelfDeleteFetcher::RunCallbackAndDestroy() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(std::move(callback_),
-                     std::move(fetched_payment_app_info_)));
+  base::PostTask(FROM_HERE, {ServiceWorkerContext::GetCoreThreadId()},
+                 base::BindOnce(std::move(callback_),
+                                std::move(fetched_payment_app_info_)));
   delete this;
 }
 
@@ -284,7 +283,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
       payments::IconSizeCalculator::IdealIconHeight(native_view),
       payments::IconSizeCalculator::MinimumIconHeight(),
       base::BindOnce(&PaymentAppInfoFetcher::SelfDeleteFetcher::OnIconFetched,
-                     base::Unretained(this)),
+                     weak_ptr_factory_.GetWeakPtr()),
       false /* square_only */);
   // |can_download| is false only if web contents are  null or the icon URL is
   // not valid. Both of these conditions are manually checked above, so

@@ -17,7 +17,8 @@
 
 @implementation MockTabOpener
 
-- (void)dismissModalsAndOpenSelectedTabInMode:(ApplicationMode)targetMode
+- (void)dismissModalsAndOpenSelectedTabInMode:
+            (ApplicationModeForTabOpening)targetMode
                             withUrlLoadParams:
                                 (const UrlLoadParams&)urlLoadParams
                                dismissOmnibox:(BOOL)dismissOmnibox
@@ -51,6 +52,10 @@
 - (BOOL)shouldCompletePaymentRequestOnCurrentTab:
     (id<StartupInformation>)startupInformation {
   // Stub.
+  return NO;
+}
+
+- (BOOL)URLIsOpenedInRegularMode:(const GURL&)URL {
   return NO;
 }
 

@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/hosts_using_features.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
@@ -300,7 +301,7 @@ void Event::InitEventPath(Node& node) {
 
 ScriptValue Event::path(ScriptState* script_state) const {
   return ScriptValue(
-      script_state,
+      script_state->GetIsolate(),
       ToV8(PathInternal(script_state, kNonEmptyAfterDispatch), script_state));
 }
 
@@ -315,10 +316,6 @@ void Event::SetHandlingPassive(PassiveMode mode) {
 
 HeapVector<Member<EventTarget>> Event::PathInternal(ScriptState* script_state,
                                                     EventPathMode mode) const {
-  if (target_)
-    HostsUsingFeatures::CountHostOrIsolatedWorldHumanReadableName(
-        script_state, *target_, HostsUsingFeatures::Feature::kEventPath);
-
   if (!current_target_) {
     DCHECK_EQ(Event::kNone, event_phase_);
     if (!event_path_) {

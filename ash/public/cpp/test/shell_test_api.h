@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/public/cpp/overview_test_api.h"
 #include "base/callback_forward.h"
 #include "base/macros.h"
 
@@ -27,11 +28,6 @@ class ScreenPositionController;
 class Shell;
 class SystemGestureEventFilter;
 class WorkspaceController;
-
-enum class OverviewAnimationState : int32_t {
-  kEnterAnimationComplete,
-  kExitAnimationComplete,
-};
 
 // Accesses private data from a Shell for testing.
 class ASH_EXPORT ShellTestApi {
@@ -100,6 +96,8 @@ class ASH_EXPORT ShellTestApi {
   // Runs the callback when the launcher state becomes |state| after
   // state transition animation.
   void WaitForLauncherAnimationState(AppListViewState state);
+
+  void WaitForWindowFinishAnimating(aura::Window* window);
 
   // Returns the pagination model of the currently visible app-list view.
   // It returns nullptr when app-list is not shown.

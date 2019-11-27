@@ -121,8 +121,22 @@ class OmniboxEditModel {
   // case, will not be modified.
   //
   // |sel_min| gives the minimum of the selection, e.g. min(sel_start, sel_end).
-  // |text| is the currently selected text. If the copied text is interpreted
-  // as a URL, |write_url| is set to true and |url_from_text| set to the URL.
+  // |text| is the currently selected text, and may be modified by this method.
+  // |url_from_text| is the GURL interpretation of the selected text, and may
+  // be used for drag-and-drop models or writing hyperlink data types to
+  // system clipboards.
+  //
+  // If the copied text is interpreted as a URL:
+  //  - |write_url| is set to true.
+  //  - |url_from_text| is set to the URL.
+  //  - |text| is set to the URL's spec. The output will be pure ASCII and
+  //    %-escaped, since canonical URLs are always encoded to ASCII.
+  //
+  // If the copied text is *NOT* interpreted as a URL:
+  //  - |write_url| is set to false.
+  //  - |url_from_text| may be modified, but might not contain a valid GURL.
+  //  - |text| is full UTF-16 and not %-escaped. This is because we are not
+  //    interpreting |text| as a URL, so we leave the Unicode characters as-is.
   void AdjustTextForCopy(int sel_min,
                          base::string16* text,
                          GURL* url_from_text,
@@ -277,7 +291,15 @@ class OmniboxEditModel {
 
   // Called when the view is gaining focus.  |control_down| is whether the
   // control key is down (at the time we're gaining focus).
-  void OnSetFocus(bool control_down);
+  // |suppress_on_focus_suggestions| is set to true when on-focus suggestions
+  // should not appear for this focus event. For instance, for
+  // renderer-initiated focus events, it should be set to true.
+  void OnSetFocus(bool control_down, bool suppress_on_focus_suggestions);
+
+  // Shows On-Focus Suggestions (ZeroSuggest) if no query is currently running
+  // and the popup is closed. This can be called multiple times without harm,
+  // since it will early-exit if an earlier request is in progress (or done).
+  void ShowOnFocusSuggestionsIfAutocompleteIdle();
 
   // Sets the visibility of the caret in the omnibox, if it has focus. The
   // visibility of the caret is reset to visible if either
@@ -328,19 +350,19 @@ class OmniboxEditModel {
   // separate pieces of data into one call so we can update all the UI
   // efficiently:
   //   |text| is either the new temporary text from the user manually selecting
-  //     a different match, or the inline autocomplete text.  We distinguish by
-  //     checking if |destination_for_temporary_text_change| is NULL.
+  //     a different match, or the inline autocomplete text.
+  //   |is_temporary_text| is true if |text| contains the temporary text for
+  //     a match, and is false if |text| contains the inline autocomplete text.
   //   |destination_for_temporary_text_change| is NULL (if temporary text should
   //     not change) or the pre-change destination URL (if temporary text should
   //     change) so we can save it off to restore later.
   //   |keyword| is the keyword to show a hint for if |is_keyword_hint| is true,
   //     or the currently selected keyword if |is_keyword_hint| is false (see
   //     comments on keyword_ and is_keyword_hint_).
-  void OnPopupDataChanged(
-      const base::string16& text,
-      GURL* destination_for_temporary_text_change,
-      const base::string16& keyword,
-      bool is_keyword_hint);
+  void OnPopupDataChanged(const base::string16& text,
+                          bool is_temporary_text,
+                          const base::string16& keyword,
+                          bool is_keyword_hint);
 
   // Called by the OmniboxView after something changes, with details about what
   // state changes occured.  Updates internal state, updates the popup if
@@ -363,7 +385,8 @@ class OmniboxEditModel {
   // Name of the histogram tracking cut or copy omnibox commands.
   static const char kCutOrCopyAllTextHistogram[];
 
-  OmniboxView* view() { return view_; }
+  // Just forwards the call to the OmniboxView referred within.
+  void SetAccessibilityLabel(const AutocompleteMatch& match);
 
  private:
   friend class OmniboxControllerTest;
@@ -414,15 +437,15 @@ class OmniboxEditModel {
   base::string16 MaybeStripKeyword(const base::string16& text) const;
   base::string16 MaybePrependKeyword(const base::string16& text) const;
 
-  // If there's a selected match, copies it into |match|. Else, returns the
-  // default match for the current text, as well as the alternate nav URL, if
-  // |alternate_nav_url| is non-NULL and there is such a URL.
+  // Copies a match corresponding to the current text into |match|, and
+  // populates |alternate_nav_url| as well if it's not nullptr. If the popup
+  // is closed, the match is generated from the autocomplete classifier.
   void GetInfoForCurrentText(AutocompleteMatch* match,
                              GURL* alternate_nav_url) const;
 
   // Reverts the edit box from a temporary text back to the original user text.
-  // If |revert_popup| is true then the popup will be reverted as well.
-  void RevertTemporaryText(bool revert_popup);
+  // Also resets the popup to the initial state.
+  void RevertTemporaryTextAndPopup();
 
   // Accepts current keyword if the user just typed a space at the end of
   // |new_text|.  This handles both of the following cases:

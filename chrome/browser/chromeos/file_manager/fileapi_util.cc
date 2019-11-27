@@ -13,11 +13,9 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/drive/file_system_core_util.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -27,10 +25,10 @@
 #include "extensions/common/extension.h"
 #include "google_apis/drive/task_util.h"
 #include "net/base/escape.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/isolated_context.h"
-#include "storage/browser/fileapi/open_file_system_mode.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/isolated_context.h"
+#include "storage/browser/file_system/open_file_system_mode.h"
+#include "storage/common/file_system/file_system_util.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 #include "url/gurl.h"
 
@@ -328,7 +326,7 @@ class ConvertSelectedFileInfoListToFileChooserFileInfoListImpl {
     // If the list includes at least one non-native file (wihtout a snapshot
     // file), move to IO thread to obtian metadata for the non-native file.
     if (need_fill_metadata) {
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {BrowserThread::IO},
           base::BindOnce(
               &ConvertSelectedFileInfoListToFileChooserFileInfoListImpl::
@@ -358,7 +356,7 @@ class ConvertSelectedFileInfoListToFileChooserFileInfoListImpl {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
     if (it == chooser_info_list_.end()) {
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {BrowserThread::UI},
           base::BindOnce(
               &ConvertSelectedFileInfoListToFileChooserFileInfoListImpl::
@@ -391,7 +389,7 @@ class ConvertSelectedFileInfoListToFileChooserFileInfoListImpl {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
     if (result != base::File::FILE_OK) {
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {BrowserThread::UI},
           base::BindOnce(
               &ConvertSelectedFileInfoListToFileChooserFileInfoListImpl::
@@ -469,34 +467,6 @@ storage::FileSystemContext* GetFileSystemContextForRenderFrameHost(
   content::SiteInstance* site_instance = render_frame_host->GetSiteInstance();
   return content::BrowserContext::GetStoragePartition(profile, site_instance)->
       GetFileSystemContext();
-}
-
-base::FilePath ConvertDrivePathToRelativeFileSystemPath(
-    Profile* profile,
-    const std::string& extension_id,
-    const base::FilePath& drive_path) {
-  // "/special/drive-xxx"
-  base::FilePath path = drive::util::GetDriveMountPointPath(profile);
-  // appended with (|drive_path| - "drive").
-  drive::util::GetDriveGrandRootPath().AppendRelativePath(drive_path, &path);
-
-  base::FilePath relative_path;
-  ConvertAbsoluteFilePathToRelativeFileSystemPath(profile,
-                                                  extension_id,
-                                                  path,
-                                                  &relative_path);
-  return relative_path;
-}
-
-GURL ConvertDrivePathToFileSystemUrl(Profile* profile,
-                                     const base::FilePath& drive_path,
-                                     const std::string& extension_id) {
-  const base::FilePath relative_path =
-      ConvertDrivePathToRelativeFileSystemPath(profile, extension_id,
-                                               drive_path);
-  if (relative_path.empty())
-    return GURL();
-  return ConvertRelativeFilePathToFileSystemUrl(relative_path, extension_id);
 }
 
 bool ConvertAbsoluteFilePathToFileSystemUrl(Profile* profile,
@@ -607,7 +577,7 @@ void CheckIfDirectoryExists(
   const storage::FileSystemURL internal_url =
       backend->CreateInternalURL(file_system_context.get(), directory_path);
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&CheckIfDirectoryExistsOnIoThread, file_system_context,
                      internal_url,
@@ -627,7 +597,7 @@ void GetMetadataForPath(
   const storage::FileSystemURL internal_url =
       backend->CreateInternalURL(file_system_context.get(), entry_path);
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&GetMetadataForPathOnIoThread, file_system_context,
                      internal_url, fields,

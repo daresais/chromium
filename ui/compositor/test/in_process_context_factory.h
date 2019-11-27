@@ -18,7 +18,8 @@
 #include "components/viz/test/test_image_factory.h"
 #include "components/viz/test/test_shared_bitmap_manager.h"
 #include "gpu/ipc/common/surface_handle.h"
-#include "services/viz/privileged/interfaces/compositing/vsync_parameter_observer.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/viz/privileged/mojom/compositing/vsync_parameter_observer.mojom.h"
 #include "ui/compositor/compositor.h"
 
 namespace viz {
@@ -32,11 +33,15 @@ class InProcessContextFactory : public ContextFactory,
                                 public ContextFactoryPrivate {
  public:
   // Both |host_frame_sink_manager| and |frame_sink_manager| must outlive the
-  // ContextFactory.
+  // ContextFactory. The constructor without |use_skia_renderer| will use
+  // SkiaRenderer if the feature is enabled.
   // TODO(crbug.com/657959): |frame_sink_manager| should go away and we should
   // use the LayerTreeFrameSink from the HostFrameSinkManager.
   InProcessContextFactory(viz::HostFrameSinkManager* host_frame_sink_manager,
                           viz::FrameSinkManagerImpl* frame_sink_manager);
+  InProcessContextFactory(viz::HostFrameSinkManager* host_frame_sink_manager,
+                          viz::FrameSinkManagerImpl* frame_sink_manager,
+                          bool use_skia_renderer);
   ~InProcessContextFactory() override;
 
   viz::FrameSinkManagerImpl* GetFrameSinkManager() {
@@ -82,22 +87,32 @@ class InProcessContextFactory : public ContextFactory,
                              const SkMatrix44& matrix) override;
   void SetDisplayColorSpace(ui::Compositor* compositor,
                             const gfx::ColorSpace& output_color_space,
-                            float sdr_white_level) override {}
+                            float sdr_white_level) override;
   void SetDisplayVSyncParameters(ui::Compositor* compositor,
                                  base::TimeTicks timebase,
-                                 base::TimeDelta interval) override {}
-  void IssueExternalBeginFrame(ui::Compositor* compositor,
-                               const viz::BeginFrameArgs& args) override {}
+                                 base::TimeDelta interval) override;
+  void IssueExternalBeginFrame(
+      ui::Compositor* compositor,
+      const viz::BeginFrameArgs& args,
+      bool force,
+      base::OnceCallback<void(const viz::BeginFrameAck&)> callback) override {}
   void SetOutputIsSecure(ui::Compositor* compositor, bool secure) override {}
   void AddVSyncParameterObserver(
       ui::Compositor* compositor,
-      viz::mojom::VSyncParameterObserverPtr observer) override {}
+      mojo::PendingRemote<viz::mojom::VSyncParameterObserver> observer)
+      override {}
+  void SetDisplayTransformHint(Compositor* compositor,
+                               gfx::OverlayTransform transform) override {}
   void AddObserver(ContextFactoryObserver* observer) override;
   void RemoveObserver(ContextFactoryObserver* observer) override;
   bool SyncTokensRequiredForDisplayCompositor() override;
 
   SkMatrix44 GetOutputColorMatrix(Compositor* compositor) const;
-  void ResetOutputColorMatrixToIdentity(ui::Compositor* compositor);
+  gfx::ColorSpace GetDisplayColorSpace(ui::Compositor* compositor) const;
+  float GetSDRWhiteLevel(ui::Compositor* compositor) const;
+  base::TimeTicks GetDisplayVSyncTimeBase(ui::Compositor* compositor) const;
+  base::TimeDelta GetDisplayVSyncTimeInterval(ui::Compositor* compositor) const;
+  void ResetDisplayOutputParameters(ui::Compositor* compositor);
 
  private:
   struct PerCompositorData;

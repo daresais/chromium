@@ -11,7 +11,9 @@
 #include <string>
 #include <unordered_set>
 
+#include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace base {
 class FilePath;
@@ -22,9 +24,19 @@ namespace gfx {
 class Image;
 }
 
+class ProfileAttributesEntry;
 class SkBitmap;
 
 namespace profiles {
+
+#if defined(OS_WIN)
+// The avatar badge size needs to be half of the shortcut icon size because
+// the Windows taskbar icon is 32x32 and the avatar icon overlay is 16x16. So to
+// get the shortcut avatar badge and the avatar icon overlay to match up, we
+// need to preserve those ratios when creating the shortcut icon.
+const int kShortcutIconSizeWin = 48;
+const int kProfileAvatarBadgeSizeWin = kShortcutIconSizeWin / 2;
+#endif  // OS_WIN
 
 // Avatar access.
 extern const char kGAIAPictureFileName[];
@@ -43,6 +55,9 @@ enum AvatarShape {
   SHAPE_CIRCLE,  // Only available for desktop platforms
   SHAPE_SQUARE,
 };
+
+// Returns the default guest avatar.
+gfx::ImageSkia GetGuestAvatar(int size = 256);
 
 // Returns a version of |image| of a specific size. Note that no checks are
 // done on the width/height so make sure they're reasonable values; in the
@@ -68,6 +83,12 @@ gfx::Image GetAvatarIconForTitleBar(const gfx::Image& image,
                                     bool is_rectangle,
                                     int dst_width,
                                     int dst_height);
+
+#if defined(OS_MACOSX)
+// Returns the image for the profile at |profile_path| that is suitable for use
+// in the macOS menu bar.
+gfx::Image GetAvatarIconForNSMenu(const base::FilePath& profile_path);
+#endif
 
 // Returns a bitmap with a couple of columns shaved off so it is more square,
 // so that when resized to a square aspect ratio it looks pretty.
@@ -128,6 +149,19 @@ std::unique_ptr<base::ListValue> GetDefaultProfileAvatarIconsAndLabels(
 // |used_icon_indices|. If there is no such index, a random index is returned.
 size_t GetRandomAvatarIconIndex(
     const std::unordered_set<size_t>& used_icon_indices);
+
+#if defined(OS_WIN)
+// Get the 1x and 2x avatar images for a ProfileAttributesEntry.
+void GetWinAvatarImages(ProfileAttributesEntry* entry,
+                        SkBitmap* avatar_image_1x,
+                        SkBitmap* avatar_image_2x);
+
+// Badges |app_icon_bitmap| with |avatar_bitmap| at the bottom right corner and
+// returns the resulting SkBitmap.
+SkBitmap GetBadgedWinIconBitmapForAvatar(const SkBitmap& app_icon_bitmap,
+                                         const SkBitmap& avatar_bitmap,
+                                         int scale_factor);
+#endif  // OS_WIN
 
 }  // namespace profiles
 

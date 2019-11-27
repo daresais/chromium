@@ -471,6 +471,12 @@ constexpr const base::FilePath::CharType* kDangerousFileTypes[] = {
     FILE_PATH_LITERAL(".weba"),             // 385
     FILE_PATH_LITERAL(".webm"),             // 386
     FILE_PATH_LITERAL(".xbm"),              // 387
+    FILE_PATH_LITERAL(".accdb"),            // 388
+    FILE_PATH_LITERAL(".accde"),            // 389
+    FILE_PATH_LITERAL(".accdr"),            // 390
+    FILE_PATH_LITERAL(".accda"),            // 391
+    FILE_PATH_LITERAL(".cer"),              // 392
+    FILE_PATH_LITERAL(".der"),              // 393
     // NOTE! When you add a type here, please add the UMA value as a comment.
     // These must all match DownloadItem.DangerousFileType in
     // enums.xml. From 263 onward, they should also match
@@ -613,17 +619,11 @@ void RecordDownloadInterrupted(DownloadInterruptReason reason,
                                int64_t total,
                                bool is_parallelizable,
                                bool is_parallel_download_enabled,
-                               DownloadSource download_source,
-                               bool post_content_length_mismatch) {
+                               DownloadSource download_source) {
   RecordDownloadCountWithSource(INTERRUPTED_COUNT, download_source);
   if (is_parallelizable) {
     RecordParallelizableDownloadCount(INTERRUPTED_COUNT,
                                       is_parallel_download_enabled);
-  }
-
-  if (post_content_length_mismatch) {
-    base::UmaHistogramSparse(
-        "Download.ResumptionAfterContentLengthMismatch.Reason", reason);
   }
 
   std::vector<base::HistogramBase::Sample> samples =
@@ -650,8 +650,6 @@ void RecordDownloadInterrupted(DownloadInterruptReason reason,
   bool unknown_size = total <= 0;
   int64_t received_kb = received / 1024;
   int64_t total_kb = total / 1024;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedReceivedSizeK", received_kb,
-                              1, kMaxKb, kBuckets);
   if (is_parallel_download_enabled) {
     UMA_HISTOGRAM_CUSTOM_COUNTS(
         "Download.InterruptedReceivedSizeK.ParallelDownload", received_kb, 1,
@@ -668,39 +666,12 @@ void RecordDownloadInterrupted(DownloadInterruptReason reason,
     }
     if (delta_bytes == 0) {
       RecordDownloadCountWithSource(INTERRUPTED_AT_END_COUNT, download_source);
-      UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.InterruptedAtEndReason",
-                                       reason, samples);
-
       if (is_parallelizable) {
         RecordParallelizableDownloadCount(INTERRUPTED_AT_END_COUNT,
                                           is_parallel_download_enabled);
-        UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-            "Download.InterruptedAtEndReason.ParallelDownload", reason,
-            samples);
-      }
-    } else if (delta_bytes > 0) {
-      UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedOverrunBytes",
-                                  delta_bytes, 1, kMaxKb, kBuckets);
-      if (is_parallel_download_enabled) {
-        UMA_HISTOGRAM_CUSTOM_COUNTS(
-            "Download.InterruptedOverrunBytes.ParallelDownload", delta_bytes, 1,
-            kMaxKb, kBuckets);
-      }
-    } else {
-      UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedUnderrunBytes",
-                                  -delta_bytes, 1, kMaxKb, kBuckets);
-      if (is_parallel_download_enabled) {
-        UMA_HISTOGRAM_CUSTOM_COUNTS(
-            "Download.InterruptedUnderrunBytes.ParallelDownload", -delta_bytes,
-            1, kMaxKb, kBuckets);
       }
     }
   }
-}
-
-void RecordMaliciousDownloadClassified(DownloadDangerType danger_type) {
-  UMA_HISTOGRAM_ENUMERATION("Download.MaliciousDownloadClassified", danger_type,
-                            DOWNLOAD_DANGER_TYPE_MAX);
 }
 
 void RecordDangerousDownloadAccept(DownloadDangerType danger_type,
@@ -711,31 +682,6 @@ void RecordDangerousDownloadAccept(DownloadDangerType danger_type,
     base::UmaHistogramSparse(
         "Download.DangerousFile.DangerousDownloadValidated",
         GetDangerousFileType(file_path));
-  }
-}
-
-void RecordDangerousDownloadDiscard(DownloadDiscardReason reason,
-                                    DownloadDangerType danger_type,
-                                    const base::FilePath& file_path) {
-  switch (reason) {
-    case DOWNLOAD_DISCARD_DUE_TO_USER_ACTION:
-      UMA_HISTOGRAM_ENUMERATION("Download.UserDiscard", danger_type,
-                                DOWNLOAD_DANGER_TYPE_MAX);
-      if (danger_type == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE) {
-        base::UmaHistogramSparse("Download.DangerousFile.UserDiscard",
-                                 GetDangerousFileType(file_path));
-      }
-      break;
-    case DOWNLOAD_DISCARD_DUE_TO_SHUTDOWN:
-      UMA_HISTOGRAM_ENUMERATION("Download.Discard", danger_type,
-                                DOWNLOAD_DANGER_TYPE_MAX);
-      if (danger_type == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE) {
-        base::UmaHistogramSparse("Download.DangerousFile.Discard",
-                                 GetDangerousFileType(file_path));
-      }
-      break;
-    default:
-      NOTREACHED();
   }
 }
 
@@ -1121,6 +1067,11 @@ void RecordParallelDownloadAddStreamSuccess(bool success,
   }
 }
 
+void RecordParallelRequestCreationFailure(DownloadInterruptReason reason) {
+  base::UmaHistogramSparse("Download.ParallelDownload.CreationFailureReason",
+                           reason);
+}
+
 void RecordParallelizableContentLength(int64_t content_length) {
   UMA_HISTOGRAM_CUSTOM_COUNTS("Download.ContentLength.Parallelizable",
                               content_length / 1024, 1, kMaxFileSizeKb, 50);
@@ -1259,14 +1210,6 @@ void RecordDownloadValidationMetrics(DownloadMetricsCallsite callsite,
       DownloadContent::MAX);
 }
 
-void RecordDownloadConnectionSecurity(const GURL& download_url,
-                                      const std::vector<GURL>& url_chain) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Download.TargetConnectionSecurity",
-      CheckDownloadConnectionSecurity(download_url, url_chain),
-      DOWNLOAD_CONNECTION_SECURITY_MAX);
-}
-
 void RecordDownloadContentTypeSecurity(
     const GURL& download_url,
     const std::vector<GURL>& url_chain,
@@ -1304,11 +1247,17 @@ void RecordDownloadSourcePageTransitionType(
       ui::PAGE_TRANSITION_LAST_CORE + 1);
 }
 
-void RecordDownloadHttpResponseCode(int response_code) {
-  UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-      "Download.HttpResponseCode",
-      net::HttpUtil::MapStatusCodeForHistogram(response_code),
-      net::HttpUtil::GetStatusCodesForHistogram());
+void RecordDownloadHttpResponseCode(int response_code,
+                                    bool is_background_mode) {
+  int status_code = net::HttpUtil::MapStatusCodeForHistogram(response_code);
+  std::vector<int> status_codes = net::HttpUtil::GetStatusCodesForHistogram();
+  UMA_HISTOGRAM_CUSTOM_ENUMERATION("Download.HttpResponseCode", status_code,
+                                   status_codes);
+  if (is_background_mode) {
+    UMA_HISTOGRAM_CUSTOM_ENUMERATION(
+        "Download.HttpResponseCode.BackgroundDownload", status_code,
+        status_codes);
+  }
 }
 
 void RecordInProgressDBCount(InProgressDBCountTypes type) {
@@ -1340,6 +1289,17 @@ void RecordDownloadConnectionInfo(
       net::HttpResponseInfo::ConnectionInfo::NUM_OF_CONNECTION_INFOS);
 }
 
+void RecordDownloadManagerCreationTimeSinceStartup(
+    base::TimeDelta elapsed_time) {
+  base::UmaHistogramLongTimes("Download.DownloadManager.CreationDelay",
+                              elapsed_time);
+}
+
+void RecordDownloadManagerMemoryUsage(size_t bytes_used) {
+  base::UmaHistogramMemoryKB("Download.DownloadManager.MemoryUsage",
+                             bytes_used / 1000);
+}
+
 #if defined(OS_ANDROID)
 void RecordFirstBackgroundDownloadInterruptReason(
     DownloadInterruptReason reason,
@@ -1349,6 +1309,12 @@ void RecordFirstBackgroundDownloadInterruptReason(
                              reason);
   else
     base::UmaHistogramSparse("MobileDownload.FirstBackground.Reason", reason);
+}
+
+void RecordBackgroundTargetDeterminationResult(
+    BackgroudTargetDeterminationResultTypes type) {
+  base::UmaHistogramEnumeration(
+      "MobileDownload.Background.TargetDeterminationResult", type);
 }
 #endif  // defined(OS_ANDROID)
 

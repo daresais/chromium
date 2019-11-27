@@ -5,7 +5,9 @@
 #include "ash/public/cpp/login_screen_test_api.h"
 #include "base/bind.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_check_screen.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
@@ -248,8 +250,9 @@ IN_PROC_BROWSER_TEST_F(EnrollmentLocalPolicyServerBase,
 
 // Simple manual enrollment with license selection.
 // Enrollment selection UI should be displayed during enrollment.
+// Disable due to flaky crash/timeout on ChromeOS. https://crbug.com/1028650
 IN_PROC_BROWSER_TEST_F(EnrollmentLocalPolicyServerBase,
-                       ManualEnrollmentWithMultipleLicenses) {
+                       DISABLED_ManualEnrollmentWithMultipleLicenses) {
   policy_server_.ExpectAvailableLicenseCount(5 /* perpetual */, 5 /* annual */,
                                              5 /* kiosk */);
 
@@ -361,8 +364,10 @@ IN_PROC_BROWSER_TEST_F(EnrollmentLocalPolicyServerBase,
 }
 
 // Error during enrollment : 417 - Consumer account with packaged license.
-IN_PROC_BROWSER_TEST_F(EnrollmentLocalPolicyServerBase,
-                       EnrollmentErrorConsumerAccountWithPackagedLicense) {
+// Disable due to flaky crash/timeout on ChromeOS. https://crbug.com/1028650
+IN_PROC_BROWSER_TEST_F(
+    EnrollmentLocalPolicyServerBase,
+    DISABLED_EnrollmentErrorConsumerAccountWithPackagedLicense) {
   policy_server_.SetExpectedDeviceEnrollmentError(417);
 
   TriggerEnrollmentAndSignInSuccessfully();
@@ -552,14 +557,14 @@ IN_PROC_BROWSER_TEST_F(AutoEnrollmentNoStateKeys, FREExplicitlyRequired) {
 
 // FRE not explicitly required and the state keys are missing. Should proceed to
 // normal signin.
-IN_PROC_BROWSER_TEST_F(AutoEnrollmentNoStateKeys, FRENotRequired) {
+IN_PROC_BROWSER_TEST_F(AutoEnrollmentNoStateKeys, NotRequired) {
   host()->StartWizard(AutoEnrollmentCheckScreenView::kScreenId);
   OobeScreenWaiter(GaiaView::kScreenId).Wait();
 }
 
 // FRE explicitly not required in VPD, so it should not even contact the policy
 // server.
-IN_PROC_BROWSER_TEST_F(AutoEnrollmentWithStatistics, FREExplicitlyNotRequired) {
+IN_PROC_BROWSER_TEST_F(AutoEnrollmentWithStatistics, ExplicitlyNotRequired) {
   SetFRERequiredKey("0");
 
   // Should be ignored.
@@ -635,7 +640,13 @@ class EnrollmentRecoveryTest : public EnrollmentLocalPolicyServerBase {
   DISALLOW_COPY_AND_ASSIGN(EnrollmentRecoveryTest);
 };
 
-IN_PROC_BROWSER_TEST_F(EnrollmentRecoveryTest, Success) {
+// TODO(https://crbug.com/995784): Slow on MSAN and debug builds.
+#if defined(MEMORY_SANITIZER) || !defined(NDEBUG)
+#define MAYBE_Success DISABLED_Success
+#else
+#define MAYBE_Success Success
+#endif
+IN_PROC_BROWSER_TEST_F(EnrollmentRecoveryTest, MAYBE_Success) {
   test::SkipToEnrollmentOnRecovery();
 
   ASSERT_TRUE(StartupUtils::IsDeviceRegistered());
@@ -660,7 +671,13 @@ IN_PROC_BROWSER_TEST_F(EnrollmentRecoveryTest, Success) {
           .empty());
 }
 
-IN_PROC_BROWSER_TEST_F(EnrollmentRecoveryTest, DifferentDomain) {
+// TODO(https://crbug.com/995784): Slow on MSAN and debug builds.
+#if defined(MEMORY_SANITIZER) || !defined(NDEBUG)
+#define MAYBE_DifferentDomain DISABLED_DifferentDomain
+#else
+#define MAYBE_DifferentDomain DifferentDomain
+#endif
+IN_PROC_BROWSER_TEST_F(EnrollmentRecoveryTest, MAYBE_DifferentDomain) {
   test::SkipToEnrollmentOnRecovery();
 
   ASSERT_TRUE(StartupUtils::IsDeviceRegistered());

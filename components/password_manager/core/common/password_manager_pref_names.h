@@ -29,9 +29,6 @@ extern const char kCredentialsEnableAutosignin[];
 extern const char kCredentialsEnableService[];
 
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
-// The local profile id for this profile.
-extern const char kLocalProfileId[];
-
 // The current state of the migration to LoginDB from Keyring/Kwallet on Linux.
 extern const char kMigrationToLoginDBStep[];
 #endif
@@ -66,6 +63,10 @@ extern const char kWasSignInPasswordPromoClicked[];
 // Number of times the Chrome Sign in promo popped up.
 extern const char kNumberSignInPasswordPromoShown[];
 
+// True if the counters for the sign in promo were reset for M79.
+// Safe to remove for M82.
+extern const char kSignInPasswordPromoRevive[];
+
 // String that represents the sync password hash.
 extern const char kSyncPasswordHash[];
 
@@ -80,6 +81,19 @@ extern const char kLastTimeObsoleteHttpCredentialsRemoved[];
 
 // List that contains captured password hashes.
 extern const char kPasswordHashDataList[];
+
+// Integer indicating the state of the password manager onboarding experience.
+extern const char kPasswordManagerOnboardingState[];
+
+// Boolean indicating whether Chrome should check whether the credentials
+// submitted by the user were part of a leak.
+extern const char kPasswordLeakDetectionEnabled[];
+
+// Boolean indicating whether this profile was ever eligible for password
+// manager onboarding. If the profile was eligible, then the feature flag
+// will be checked and this will be set to true. This is then used for
+// subsequent feature checks to ensure data completeness.
+extern const char kWasOnboardingFeatureCheckedBefore[];
 
 }  // namespace prefs
 }  // namespace password_manager

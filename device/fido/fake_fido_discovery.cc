@@ -80,6 +80,13 @@ FakeFidoDiscovery* FakeFidoDiscoveryFactory::ForgeNextCableDiscovery(
   return next_cable_discovery_.get();
 }
 
+FakeFidoDiscovery* FakeFidoDiscoveryFactory::ForgeNextPlatformDiscovery(
+    FakeFidoDiscovery::StartMode mode) {
+  next_platform_discovery_ = std::make_unique<FakeFidoDiscovery>(
+      FidoTransportProtocol::kInternal, mode);
+  return next_platform_discovery_.get();
+}
+
 std::unique_ptr<FidoDiscoveryBase> FakeFidoDiscoveryFactory::Create(
     FidoTransportProtocol transport,
     ::service_manager::Connector* connector) {
@@ -91,19 +98,12 @@ std::unique_ptr<FidoDiscoveryBase> FakeFidoDiscoveryFactory::Create(
     case FidoTransportProtocol::kBluetoothLowEnergy:
       return std::move(next_ble_discovery_);
     case FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy:
-      NOTREACHED() << "CaBLE should be handled by CreateCable().";
-      return nullptr;
+      return std::move(next_cable_discovery_);
     case FidoTransportProtocol::kInternal:
-      NOTREACHED() << "Internal authenticators should be handled separately.";
-      return nullptr;
+      return std::move(next_platform_discovery_);
   }
   NOTREACHED();
   return nullptr;
-}
-
-std::unique_ptr<FidoDiscoveryBase> FakeFidoDiscoveryFactory::CreateCable(
-    std::vector<CableDiscoveryData> cable_data) {
-  return std::move(next_cable_discovery_);
 }
 
 }  // namespace test

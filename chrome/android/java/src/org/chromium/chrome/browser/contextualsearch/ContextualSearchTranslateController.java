@@ -5,8 +5,9 @@
 package org.chromium.chrome.browser.contextualsearch;
 
 import android.content.Context;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -40,7 +41,7 @@ public class ContextualSearchTranslateController implements ContextualSearchTran
      */
     static public ContextualSearchTranslation getContextualSearchTranslation(
             ContextualSearchPolicy policy, ContextualSearchTranslateInterface hostInterface) {
-        if (useChromeLanguageModel()) {
+        if (useChromeLanguageModel() && !policy.isTranslationDisabled()) {
             return new ContextualSearchTranslationImpl(policy);
         } else {
             return new ContextualSearchTranslateController(policy, hostInterface);

@@ -9,7 +9,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -43,7 +43,10 @@ class TestNavigableContentsClient : public mojom::NavigableContentsClient {
   void DidSuppressNavigation(const GURL& url,
                              WindowOpenDisposition disposition,
                              bool from_user_gesture) override {}
+  void UpdateCanGoBack(bool can_go_back) override {}
   void UpdateContentAXTree(const ui::AXTreeID& id) override {}
+  void FocusedNodeChanged(bool is_editable_node,
+                          const gfx::Rect& node_bounds_in_screen) override {}
 
   DISALLOW_COPY_AND_ASSIGN(TestNavigableContentsClient);
 };
@@ -129,7 +132,7 @@ class ContentServiceTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   service_manager::TestConnectorFactory connector_factory_;
   TestServiceDelegate delegate_;
   Service service_;

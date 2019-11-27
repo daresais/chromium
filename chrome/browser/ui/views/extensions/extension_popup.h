@@ -8,7 +8,6 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/extensions/extension_view_views.h"
@@ -75,9 +74,7 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
   // views::BubbleDialogDelegateView:
   gfx::Size CalculatePreferredSize() const override;
   void AddedToWidget() override;
-  int GetDialogButtons() const override;
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
-  bool ShouldHaveRoundCorners() const override;
 #if defined(USE_AURA)
   void OnWidgetDestroying(views::Widget* widget) override;
 
@@ -127,7 +124,6 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
   ShowAction show_action_;
 
   content::NotificationRegistrar registrar_;
-  ScopedObserver<TabStripModel, TabStripModelObserver> observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPopup);
 };

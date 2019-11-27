@@ -21,11 +21,13 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/strings/string_split.h"
 #include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
+#include "chromecast/base/bind_to_task_runner.h"
 #include "chromecast/base/cast_constants.h"
 #include "chromecast/base/cast_paths.h"
 #include "chromecast/base/chromecast_switches.h"
@@ -36,7 +38,8 @@
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/cast_content_browser_client.h"
 #include "chromecast/browser/cast_feature_list_creator.h"
-#include "chromecast/browser/cast_memory_pressure_monitor.h"
+#include "chromecast/browser/cast_system_memory_pressure_evaluator.h"
+#include "chromecast/browser/cast_system_memory_pressure_evaluator_adjuster.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
 #include "chromecast/browser/media/media_caps_impl.h"
 #include "chromecast/browser/metrics/cast_browser_metrics.h"
@@ -58,9 +61,9 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/system_connector.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -74,6 +77,7 @@
 #include <fontconfig/fontconfig.h>
 #include <signal.h>
 #include <sys/prctl.h>
+#include "ui/gfx/linux/fontconfig_util.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -99,6 +103,7 @@
 #include "chromecast/browser/cast_display_configurator.h"
 #include "chromecast/graphics/cast_screen.h"
 #include "chromecast/graphics/cast_window_manager_aura.h"
+#include "chromecast/media/service/cast_renderer.h"  // nogncheck
 #include "components/viz/service/display/overlay_strategy_underlay_cast.h"  // nogncheck
 #include "ui/display/screen.h"
 #include "ui/views/views_delegate.h"  // nogncheck
@@ -119,7 +124,6 @@
 
 #if BUILDFLAG(ENABLE_CAST_WAYLAND_SERVER)
 #include "chromecast/browser/exo/wayland_server_controller.h"
-#include "chromecast/browser/exo/wm_helper_cast_shell.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
@@ -256,6 +260,24 @@ class CastViewsDelegate : public views::ViewsDelegate {
 
 #endif  // defined(USE_AURA)
 
+#if defined(OS_LINUX)
+
+base::FilePath GetApplicationFontsDir() {
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  std::string fontconfig_sysroot;
+  if (env->GetVar("FONTCONFIG_SYSROOT", &fontconfig_sysroot)) {
+    // Running with hermetic fontconfig; using the full path will not work.
+    // Assume the root is base::DIR_MODULE as set by base::SetUpFontconfig().
+    return base::FilePath("/fonts");
+  } else {
+    base::FilePath dir_module;
+    base::PathService::Get(base::DIR_MODULE, &dir_module);
+    return dir_module.Append("fonts");
+  }
+}
+
+#endif  // defined(OS_LINUX)
+
 }  // namespace
 
 namespace chromecast {
@@ -275,6 +297,7 @@ const DefaultCommandLineSwitch kDefaultSwitches[] = {
 #endif
 #if BUILDFLAG(IS_CAST_AUDIO_ONLY)
     {switches::kDisableGpu, ""},
+    {switches::kDisableSoftwareRasterizer, ""},
 #if defined(OS_ANDROID)
     {switches::kDisableFrameRateLimit, ""},
     {switches::kDisableGLDrawingForTests, ""},
@@ -357,7 +380,8 @@ CastBrowserMainParts::CastBrowserMainParts(
       parameters_(parameters),
       cast_content_browser_client_(cast_content_browser_client),
       url_request_context_factory_(url_request_context_factory),
-      media_caps_(new media::MediaCapsImpl()) {
+      media_caps_(new media::MediaCapsImpl()),
+      cast_system_memory_pressure_evaluator_adjuster_(nullptr) {
   DCHECK(cast_content_browser_client);
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   AddDefaultCommandLineSwitches(command_line);
@@ -387,7 +411,8 @@ CastBrowserMainParts::media_pipeline_backend_manager() {
   if (!media_pipeline_backend_manager_) {
     media_pipeline_backend_manager_ =
         std::make_unique<media::MediaPipelineBackendManager>(
-            cast_content_browser_client_->GetMediaTaskRunner());
+            cast_content_browser_client_->GetMediaTaskRunner(),
+            cast_content_browser_client_->media_resource_tracker());
   }
   return media_pipeline_backend_manager_.get();
 }
@@ -433,25 +458,9 @@ void CastBrowserMainParts::ToolkitInitialized() {
 #endif  // defined(USE_AURA)
 
 #if defined(OS_LINUX)
-  // Without this call, the FontConfig library gets implicitly initialized
-  // on the first call to FontConfig. Since it's not safe to initialize it
-  // concurrently from multiple threads, we explicitly initialize it here
-  // to prevent races when there are multiple renderer's querying the library:
-  // http://crbug.com/404311
-  // Also, implicit initialization can cause a long delay on the first
-  // rendering if the font cache has to be regenerated for some reason. Doing it
-  // explicitly here helps in cases where the browser process is starting up in
-  // the background (resources have not yet been granted to cast) since it
-  // prevents the long delay the user would have seen on first rendering. Note
-  // that future calls to FcInit() are safe no-ops per the FontConfig interface.
-  base::FilePath dir_module;
-  base::PathService::Get(base::DIR_MODULE, &dir_module);
-  base::FilePath dir_font = dir_module.Append("fonts");
-
-  FcInit();
-
+  base::FilePath dir_font = GetApplicationFontsDir();
   const FcChar8 *dir_font_char8 = reinterpret_cast<const FcChar8*>(dir_font.value().data());
-  if (FcConfigAppFontAddDir(nullptr, dir_font_char8) == FcFalse) {
+  if (!FcConfigAppFontAddDir(gfx::GetGlobalFontConfig(), dir_font_char8)) {
     LOG(ERROR) << "Cannot load fonts from " << dir_font_char8;
   }
 #endif
@@ -484,7 +493,14 @@ int CastBrowserMainParts::PreCreateThreads() {
 
 void CastBrowserMainParts::PreMainMessageLoopRun() {
 #if !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
-  memory_pressure_monitor_.reset(new CastMemoryPressureMonitor());
+  memory_pressure_monitor_.reset(new util::MultiSourceMemoryPressureMonitor());
+  auto cast_system_memory_pressure_evaluator =
+      std::make_unique<CastSystemMemoryPressureEvaluator>(
+          memory_pressure_monitor_->CreateVoter());
+  cast_system_memory_pressure_evaluator_adjuster_ =
+      cast_system_memory_pressure_evaluator.get();
+  memory_pressure_monitor_->SetSystemEvaluator(
+      std::move(cast_system_memory_pressure_evaluator));
 
   // base::Unretained() is safe because the browser client will outlive any
   // component in the browser; this factory method will not be called after
@@ -495,8 +511,8 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
 #endif  // !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
 
 #if defined(OS_ANDROID)
-  crash_reporter_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+  crash_reporter_runner_ = base::CreateSequencedTaskRunner(
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   crash_reporter_runner_->PostTask(
       FROM_HERE,
@@ -506,13 +522,16 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
 
   url_request_context_factory_->InitializeOnUIThread(nullptr);
 
-  cast_browser_process_->SetConnectivityChecker(ConnectivityChecker::Create(
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::IO}),
-      url_request_context_factory_->GetSystemGetter()));
-
   cast_browser_process_->SetBrowserContext(
       std::make_unique<CastBrowserContext>());
+
+  cast_browser_process_->SetConnectivityChecker(ConnectivityChecker::Create(
+      base::CreateSingleThreadTaskRunner({content::BrowserThread::IO}),
+      content::BrowserContext::GetDefaultStoragePartition(
+          cast_browser_process_->browser_context())
+          ->GetURLLoaderFactoryForBrowserProcessIOThread(),
+      content::GetNetworkConnectionTracker()));
+
   cast_browser_process_->SetMetricsServiceClient(
       std::make_unique<metrics::CastMetricsServiceClient>(
           cast_browser_process_->browser_client(),
@@ -534,9 +553,14 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   video_plane_controller_.reset(new media::VideoPlaneController(
       Size(display_size.width(), display_size.height()),
       cast_content_browser_client_->GetMediaTaskRunner()));
+  // TODO(crbug.com/925450): Once compositor migrates to GPU process, We
+  // don't need to set the callback in viz::OverlayStrategyUnderlayCast.
   viz::OverlayStrategyUnderlayCast::SetOverlayCompositedCallback(
       base::BindRepeating(&media::VideoPlaneController::SetGeometry,
                           base::Unretained(video_plane_controller_.get())));
+  media::CastRenderer::SetOverlayCompositedCallback(BindToCurrentThread(
+      base::BindRepeating(&media::VideoPlaneController::SetGeometry,
+                          base::Unretained(video_plane_controller_.get()))));
 #endif
 
 #if defined(USE_AURA)
@@ -557,6 +581,7 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   cast_browser_process_->SetCastService(
       cast_browser_process_->browser_client()->CreateCastService(
           cast_browser_process_->browser_context(),
+          cast_system_memory_pressure_evaluator_adjuster_,
           cast_browser_process_->pref_service(),
           video_plane_controller_.get(), window_manager_.get()));
   cast_browser_process_->cast_service()->Initialize();
@@ -577,7 +602,8 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
 
   extensions_browser_client_ =
       std::make_unique<extensions::CastExtensionsBrowserClient>(
-          cast_browser_process_->browser_context(), user_pref_service_.get());
+          cast_browser_process_->browser_context(), user_pref_service_.get(),
+          cast_content_browser_client_->cast_network_contexts());
   extensions::ExtensionsBrowserClient::Set(extensions_browser_client_.get());
 
   extensions::EnsureBrowserContextKeyedServiceFactoriesBuilt();
@@ -621,7 +647,7 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   cast_browser_process_->cast_service()->Start();
 
   if (parameters_.ui_task) {
-    parameters_.ui_task->Run();
+    std::move(*parameters_.ui_task).Run();
     delete parameters_.ui_task;
     run_message_loop_ = false;
   }
@@ -638,9 +664,11 @@ void CastBrowserMainParts::StartPeriodicCrashReportUpload() {
 
 void CastBrowserMainParts::OnStartPeriodicCrashReportUpload() {
   base::FilePath crash_dir;
-  CrashHandler::GetCrashDumpLocation(&crash_dir);
+  if (!CrashHandler::GetCrashDumpLocation(&crash_dir))
+    return;
   base::FilePath reports_dir;
-  CrashHandler::GetCrashReportsLocation(&reports_dir);
+  if (!CrashHandler::GetCrashReportsLocation(&reports_dir))
+    return;
   CrashHandler::UploadDumps(crash_dir, reports_dir, "", "");
 }
 #endif  // defined(OS_ANDROID)
@@ -714,7 +742,7 @@ void CastBrowserMainParts::PostCreateThreads() {
       heap_profiling::Supervisor::GetInstance();
   supervisor->SetClientConnectionManagerConstructor(
       &CreateClientConnectionManager);
-  supervisor->Start(content::GetSystemConnector(), base::NullCallback());
+  supervisor->Start(base::NullCallback());
 #endif  // !defined(OS_FUCHSIA)
 }
 

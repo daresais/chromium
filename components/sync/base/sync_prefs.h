@@ -15,7 +15,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -123,6 +122,18 @@ class SyncPrefs : public CryptoSyncPrefs,
                         UserSelectableTypeSet registered_types,
                         UserSelectableTypeSet selected_types);
 
+#if defined(OS_CHROMEOS)
+  // Chrome OS provides a separate settings UI surface for sync of OS types,
+  // including a separate "Sync All" toggle for OS types.
+  bool IsSyncAllOsTypesEnabled() const;
+  UserSelectableOsTypeSet GetSelectedOsTypes() const;
+  void SetSelectedOsTypes(bool sync_all_os_types,
+                          UserSelectableOsTypeSet registered_types,
+                          UserSelectableOsTypeSet selected_types);
+  bool GetOsSyncFeatureEnabled() const;
+  void SetOsSyncFeatureEnabled(bool enabled);
+#endif
+
   // Whether Sync is forced off by enterprise policy. Note that this only covers
   // one out of two types of policy, "browser" policy. The second kind, "cloud"
   // policy, is handled directly in ProfileSyncService.
@@ -158,16 +169,6 @@ class SyncPrefs : public CryptoSyncPrefs,
   // For testing.
   void SetManagedForTest(bool is_managed);
 
-  // Get/Set number of memory warnings received.
-  int GetMemoryPressureWarningCount() const;
-  void SetMemoryPressureWarningCount(int value);
-
-  // Check if the previous shutdown was clean.
-  bool DidSyncShutdownCleanly() const;
-
-  // Set whether the last shutdown was clean.
-  void SetCleanShutdown(bool value);
-
   // Get/set for the last known sync invalidation versions.
   void GetInvalidationVersions(
       std::map<ModelType, int64_t>* invalidation_versions) const;
@@ -184,11 +185,11 @@ class SyncPrefs : public CryptoSyncPrefs,
   // Gets the local sync backend enabled state.
   bool IsLocalSyncEnabled() const;
 
-  // Gets user demographics. Returns an empty optional if not all demographics
-  // are available. Birth year and gender are mutually inclusive to avoid being
-  // able to infer demographic information that has low entropy (e.g., custom
-  // gender).
-  base::Optional<UserDemographics> GetUserDemographics();
+  // Gets the synced user’s birth year and gender from synced prefs and adds
+  // noise to the birth year, see doc of UserDemographicsStatus in
+  // components/sync/base/user_demographics.h for more details. You need to
+  // provide an accurate |now| time that represents the current time.
+  UserDemographicsResult GetUserNoisedBirthYearAndGender(base::Time now);
 
  private:
   static void RegisterTypeSelectedPref(user_prefs::PrefRegistrySyncable* prefs,
@@ -228,6 +229,7 @@ void ClearObsoleteSyncLongPollIntervalSeconds(PrefService* pref_service);
 void ClearObsoleteSyncSpareBootstrapToken(PrefService* pref_service);
 #endif  // defined(OS_CHROMEOS)
 void MigrateSyncSuppressedPref(PrefService* pref_service);
+void ClearObsoleteMemoryPressurePrefs(PrefService* pref_service);
 
 }  // namespace syncer
 

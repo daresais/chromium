@@ -19,6 +19,8 @@
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
@@ -38,7 +40,6 @@ class IndexedDBConnection;
 class IndexedDBCursor;
 class IndexedDBDatabase;
 struct IndexedDBDataLossInfo;
-struct IndexedDBReturnValue;
 struct IndexedDBValue;
 
 class CONTENT_EXPORT IndexedDBCallbacks
@@ -46,6 +47,10 @@ class CONTENT_EXPORT IndexedDBCallbacks
  public:
   // IndexedDBValueBlob stores information about a given IndexedDBValue's
   // blobs so they can be created on the IO thread.
+  //
+  // This class holds a const reference to its creating blob info, so
+  // should only be used as a temporary object to pass to a function,
+  // and not something that should be persisted or posttasked.
   class IndexedDBValueBlob {
    public:
     // IndexedDBValueBlob() takes a std::vector<IDBBlobInfoPtr>* which it
@@ -77,16 +82,19 @@ class CONTENT_EXPORT IndexedDBCallbacks
 
     const IndexedDBBlobInfo& blob_info_;
     std::string uuid_;
-    blink::mojom::BlobRequest request_;
+    mojo::PendingReceiver<blink::mojom::Blob> receiver_;
   };
 
-  static bool CreateAllBlobs(
-      scoped_refptr<ChromeBlobStorageContext> blob_context,
-      std::vector<IndexedDBValueBlob> value_blobs);
+  // Create blobs for all of the receivers in |value_blobs|.
+  // |dispatcher_host| must be non-null.
+  // TODO(enne): maybe this function should live in dispatcher host?
+  static void CreateAllBlobs(IndexedDBDispatcherHost* dispatcher_host,
+                             std::vector<IndexedDBValueBlob> value_blobs);
 
   IndexedDBCallbacks(base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host,
                      const url::Origin& origin,
-                     blink::mojom::IDBCallbacksAssociatedPtrInfo callbacks_info,
+                     mojo::PendingAssociatedRemote<blink::mojom::IDBCallbacks>
+                         pending_callbacks,
                      scoped_refptr<base::SequencedTaskRunner> idb_runner);
 
   virtual void OnError(const IndexedDBDatabaseError& error);
@@ -109,19 +117,6 @@ class CONTENT_EXPORT IndexedDBCallbacks
   virtual void OnSuccess(std::unique_ptr<IndexedDBConnection> connection,
                          const blink::IndexedDBDatabaseMetadata& metadata);
 
-  // IndexedDBDatabase::OpenCursor
-  virtual void OnSuccess(std::unique_ptr<IndexedDBCursor> cursor,
-                         const blink::IndexedDBKey& key,
-                         const blink::IndexedDBKey& primary_key,
-                         IndexedDBValue* value);
-
-  // IndexedDBDatabase::Get
-  // IndexedDBCursor::Advance
-  virtual void OnSuccess(IndexedDBReturnValue* value);
-
-  // IndexedDBDatabase::Put / IndexedDBCursor::Update
-  virtual void OnSuccess(const blink::IndexedDBKey& key);
-
   // IndexedDBDatabase::Count
   // IndexedDBFactory::DeleteDatabase
   // IndexedDBDatabase::DeleteRange
@@ -132,6 +127,8 @@ class CONTENT_EXPORT IndexedDBCallbacks
   virtual void OnSuccess();
 
   void OnConnectionError();
+
+  bool is_complete() const { return complete_; }
 
  protected:
   virtual ~IndexedDBCallbacks();
@@ -156,7 +153,7 @@ class CONTENT_EXPORT IndexedDBCallbacks
   base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host_;
   url::Origin origin_;
   scoped_refptr<base::SequencedTaskRunner> idb_runner_;
-  blink::mojom::IDBCallbacksAssociatedPtr callbacks_;
+  mojo::AssociatedRemote<blink::mojom::IDBCallbacks> callbacks_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

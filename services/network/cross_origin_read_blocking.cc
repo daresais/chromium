@@ -25,9 +25,11 @@
 #include "net/base/mime_sniffer.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/http/http_response_headers.h"
-#include "services/network/cross_origin_resource_policy.h"
+#include "services/network/public/cpp/cross_origin_resource_policy.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/initiator_lock_compatibility.h"
 #include "services/network/public/cpp/resource_response_info.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 using base::StringPiece;
 using MimeType = network::CrossOriginReadBlocking::MimeType;
@@ -235,7 +237,6 @@ base::flat_set<std::string>& GetNeverSniffedMimeTypes() {
       "application/gzip",
       "application/x-gzip",
       "application/x-protobuf",
-      "application/x-www-form-urlencoded",
       "application/zip",
       // Block multipart responses because a protected type (e.g. JSON) can
       // become multipart if returned in a range request with multiple parts.
@@ -344,7 +345,7 @@ SniffingResult CrossOriginReadBlocking::SniffForHTML(StringPiece data) {
   // TODO(dsjang): Once CrossOriginReadBlocking is moved into the browser
   // process, we should do single-thread checking here for the static
   // initializer.
-  static const StringPiece kHtmlSignatures[] = {
+  static constexpr StringPiece kHtmlSignatures[] = {
       StringPiece("<!doctype html"),  // HTML5 spec
       StringPiece("<script"),         // HTML5 spec, Mozilla
       StringPiece("<html"),           // HTML5 spec, Mozilla
@@ -384,7 +385,7 @@ SniffingResult CrossOriginReadBlocking::SniffForXML(base::StringPiece data) {
   // process, we should do single-thread checking here for the static
   // initializer.
   AdvancePastWhitespace(&data);
-  static const StringPiece kXmlSignatures[] = {StringPiece("<?xml")};
+  static constexpr StringPiece kXmlSignatures[] = {StringPiece("<?xml")};
   return MatchesSignature(&data, kXmlSignatures, base::size(kXmlSignatures),
                           base::CompareCase::SENSITIVE);
 }
@@ -466,7 +467,7 @@ SniffingResult CrossOriginReadBlocking::SniffForFetchOnlyResource(
   // infinite loop. In either case, the prefix must create a guarantee that no
   // matter what bytes follow it, the entire response would be worthless to
   // execute as a <script>.
-  static const StringPiece kScriptBreakingPrefixes[] = {
+  static constexpr StringPiece kScriptBreakingPrefixes[] = {
       // Parser breaker prefix.
       //
       // Built into angular.js (followed by a comma and a newline):
@@ -486,7 +487,8 @@ SniffingResult CrossOriginReadBlocking::SniffForFetchOnlyResource(
 
       // Infinite loops.
       StringPiece("for(;;);"),  // observed on facebook.com
-      StringPiece("while(1);"), StringPiece("for (;;);"),
+      StringPiece("while(1);"),
+      StringPiece("for (;;);"),
       StringPiece("while (1);"),
   };
   SniffingResult has_parser_breaker = MatchesSignature(
@@ -600,6 +602,7 @@ CrossOriginReadBlocking::ResponseAnalyzer::ResponseAnalyzer(
       seems_sensitive_from_cache_heuristic_(
           SeemsSensitiveFromCacheHeuristic(response)),
       supports_range_requests_(SupportsRangeRequests(response)),
+      has_nosniff_header_(HasNoSniff(response)),
       content_length_(response.content_length),
       http_response_code_(response.headers ? response.headers->response_code()
                                            : 0) {
@@ -678,18 +681,6 @@ CrossOriginReadBlocking::ResponseAnalyzer::ShouldBlockBasedOnHeaders(
   // that are inexpensive should be near the top.
   url::Origin target_origin = url::Origin::Create(request_url);
 
-  // Check if |target_origin| seems to match the factory lock in
-  // |request_initiator_site_lock|.  If so, then treat this request as
-  // same-origin (even if |request_initiator| might be cross-origin).  See
-  // also https://crbug.com/918660.
-  // TODO(lukasza): https://crbug.com/940068: Remove this code section
-  // once request_initiator is always set to the webpage (and never to the
-  // isolated world).
-  if (VerifyRequestInitiatorLock(request_initiator_site_lock, target_origin) ==
-      InitiatorLockCompatibility::kCompatibleLock) {
-    return kAllow;
-  }
-
   // Compute the |initiator| of the request, falling back to a unique origin if
   // there was no initiator or if it was incompatible with the lock. Using a
   // unique origin makes CORB treat the response as cross-origin and thus
@@ -711,6 +702,8 @@ CrossOriginReadBlocking::ResponseAnalyzer::ShouldBlockBasedOnHeaders(
   // valid CORS headers.
   switch (request_mode) {
     case mojom::RequestMode::kNavigate:
+    case mojom::RequestMode::kNavigateNestedFrame:
+    case mojom::RequestMode::kNavigateNestedObject:
     case mojom::RequestMode::kNoCors:
     case mojom::RequestMode::kSameOrigin:
       break;
@@ -746,18 +739,6 @@ CrossOriginReadBlocking::ResponseAnalyzer::ShouldBlockBasedOnHeaders(
     }
   }
 
-  // We intend to block the response at this point.  However, we will usually
-  // sniff the contents to confirm the MIME type, to avoid blocking incorrectly
-  // labeled JavaScript, JSONP, etc files.
-  //
-  // Note: if there is a nosniff header, it means we should honor the response
-  // mime type without trying to confirm it.
-  std::string nosniff_header;
-  response.headers->GetNormalizedHeader("x-content-type-options",
-                                        &nosniff_header);
-  bool has_nosniff_header =
-      base::LowerCaseEqualsASCII(nosniff_header, "nosniff");
-
   // Some types (e.g. ZIP) are protected without any confirmation sniffing.
   if (canonical_mime_type == MimeType::kNeverSniffed)
     return kBlock;
@@ -787,10 +768,12 @@ CrossOriginReadBlocking::ResponseAnalyzer::ShouldBlockBasedOnHeaders(
   // |request_initiator| (i.e. vetted against |request_initiator|site_lock|).
   constexpr mojom::RequestMode kOverreachingRequestMode =
       mojom::RequestMode::kNoCors;
+  // COEP is not supported when OOR-CORS is disabled.
   if (CrossOriginResourcePolicy::kBlock ==
-      CrossOriginResourcePolicy::Verify(request_url, request_initiator,
-                                        response, kOverreachingRequestMode,
-                                        request_initiator_site_lock)) {
+      CrossOriginResourcePolicy::Verify(
+          request_url, request_initiator, response, kOverreachingRequestMode,
+          request_initiator_site_lock,
+          mojom::CrossOriginEmbedderPolicy::kNone)) {
     // Ignore mime types and/or sniffing and have CORB block all responses with
     // COR*P* header.
     return kBlock;
@@ -817,13 +800,20 @@ CrossOriginReadBlocking::ResponseAnalyzer::ShouldBlockBasedOnHeaders(
     }
   }
 
+  // We intend to block the response at this point.  However, we will usually
+  // sniff the contents to confirm the MIME type, to avoid blocking incorrectly
+  // labeled JavaScript, JSONP, etc files.
+  //
+  // Note: if there is a nosniff header, it means we should honor the response
+  // mime type without trying to confirm it.
+  //
   // Decide whether to block based on the MIME type.
   switch (canonical_mime_type) {
     case MimeType::kHtml:
     case MimeType::kXml:
     case MimeType::kJson:
     case MimeType::kPlain:
-      if (has_nosniff_header)
+      if (HasNoSniff(response))
         return kBlock;
       else
         return kNeedToSniffMore;
@@ -845,6 +835,17 @@ CrossOriginReadBlocking::ResponseAnalyzer::ShouldBlockBasedOnHeaders(
   }
   NOTREACHED();
   return kBlock;
+}
+
+// static
+bool CrossOriginReadBlocking::ResponseAnalyzer::HasNoSniff(
+    const ResourceResponseInfo& response) {
+  if (!response.headers)
+    return false;
+  std::string nosniff_header;
+  response.headers->GetNormalizedHeader("x-content-type-options",
+                                        &nosniff_header);
+  return base::LowerCaseEqualsASCII(nosniff_header, "nosniff");
 }
 
 // static
@@ -1162,6 +1163,10 @@ void CrossOriginReadBlocking::ResponseAnalyzer::LogSensitiveResponseProtection(
               "SiteIsolation.CORBProtection.CORSHeuristic.ProtectedMimeType."
               "BlockedWithRangeSupport",
               supports_range_requests_);
+          UMA_HISTOGRAM_BOOLEAN(
+              "SiteIsolation.CORBProtection.CORSHeuristic.ProtectedMimeType."
+              "BlockedWithoutSniffing.HasNoSniff",
+              has_nosniff_header_);
         } else if (protection_decision ==
                    CrossOriginProtectionDecision::kBlockedAfterSniffing) {
           UMA_HISTOGRAM_BOOLEAN(
@@ -1192,6 +1197,10 @@ void CrossOriginReadBlocking::ResponseAnalyzer::LogSensitiveResponseProtection(
               "SiteIsolation.CORBProtection.CacheHeuristic.ProtectedMimeType."
               "BlockedWithRangeSupport",
               supports_range_requests_);
+          UMA_HISTOGRAM_BOOLEAN(
+              "SiteIsolation.CORBProtection.CacheHeuristic.ProtectedMimeType."
+              "BlockedWithoutSniffing.HasNoSniff",
+              has_nosniff_header_);
         } else if (protection_decision ==
                    CrossOriginProtectionDecision::kBlockedAfterSniffing) {
           UMA_HISTOGRAM_BOOLEAN(

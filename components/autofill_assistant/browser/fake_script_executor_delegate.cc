@@ -29,10 +29,6 @@ Service* FakeScriptExecutorDelegate::GetService() {
   return service_;
 }
 
-UiController* FakeScriptExecutorDelegate::GetUiController() {
-  return ui_controller_;
-}
-
 WebController* FakeScriptExecutorDelegate::GetWebController() {
   return web_controller_;
 }
@@ -50,8 +46,20 @@ FakeScriptExecutorDelegate::GetPersonalDataManager() {
   return nullptr;
 }
 
+WebsiteLoginFetcher* FakeScriptExecutorDelegate::GetWebsiteLoginFetcher() {
+  return nullptr;
+}
+
 content::WebContents* FakeScriptExecutorDelegate::GetWebContents() {
   return nullptr;
+}
+
+std::string FakeScriptExecutorDelegate::GetAccountEmailAddress() {
+  return std::string();
+}
+
+std::string FakeScriptExecutorDelegate::GetLocale() {
+  return "en-US";
 }
 
 void FakeScriptExecutorDelegate::EnterState(AutofillAssistantState state) {
@@ -98,17 +106,33 @@ void FakeScriptExecutorDelegate::SetUserActions(
   user_actions_ = std::move(user_actions);
 }
 
-void FakeScriptExecutorDelegate::SetPaymentRequestOptions(
-    std::unique_ptr<PaymentRequestOptions> options) {
+void FakeScriptExecutorDelegate::SetCollectUserDataOptions(
+    std::unique_ptr<CollectUserDataOptions> options,
+    std::unique_ptr<UserData> information) {
   payment_request_options_ = std::move(options);
+  payment_request_info_ = std::move(information);
 }
 
-void FakeScriptExecutorDelegate::SetResizeViewport(bool resize_viewport) {
-  resize_viewport_ = resize_viewport;
+void FakeScriptExecutorDelegate::WriteUserData(
+    base::OnceCallback<void(const CollectUserDataOptions*,
+                            UserData*,
+                            UserData::FieldChange*)> write_callback) {
+  if (payment_request_options_ == nullptr || payment_request_info_ == nullptr) {
+    return;
+  }
+
+  UserData::FieldChange field_change = UserData::FieldChange::NONE;
+  std::move(write_callback)
+      .Run(payment_request_options_.get(), payment_request_info_.get(),
+           &field_change);
 }
 
-bool FakeScriptExecutorDelegate::GetResizeViewport() {
-  return resize_viewport_;
+void FakeScriptExecutorDelegate::SetViewportMode(ViewportMode mode) {
+  viewport_mode_ = mode;
+}
+
+ViewportMode FakeScriptExecutorDelegate::GetViewportMode() {
+  return viewport_mode_;
 }
 
 void FakeScriptExecutorDelegate::SetPeekMode(
@@ -128,6 +152,10 @@ bool FakeScriptExecutorDelegate::IsNavigatingToNewDocument() {
   return navigating_to_new_document_;
 }
 
+void FakeScriptExecutorDelegate::RequireUI() {
+  require_ui_ = true;
+}
+
 void FakeScriptExecutorDelegate::AddListener(Listener* listener) {
   listeners_.insert(listener);
 }
@@ -138,7 +166,8 @@ void FakeScriptExecutorDelegate::RemoveListener(Listener* listener) {
 
 bool FakeScriptExecutorDelegate::SetForm(
     std::unique_ptr<FormProto> form,
-    base::RepeatingCallback<void(const FormProto::Result*)> callback) {
+    base::RepeatingCallback<void(const FormProto::Result*)> changed_callback,
+    base::OnceCallback<void(const ClientStatus&)> cancel_callback) {
   return true;
 }
 }  // namespace autofill_assistant

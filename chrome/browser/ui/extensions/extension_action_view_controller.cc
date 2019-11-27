@@ -30,7 +30,6 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/grit/generated_resources.h"
-#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
@@ -59,8 +58,7 @@ ExtensionActionViewController::ExtensionActionViewController(
       platform_delegate_(ExtensionActionPlatformDelegate::Create(this)),
       icon_factory_(browser->profile(), extension, extension_action, this),
       extension_registry_(
-          extensions::ExtensionRegistry::Get(browser_->profile())),
-      popup_host_observer_(this) {
+          extensions::ExtensionRegistry::Get(browser_->profile())) {
   DCHECK(extensions_container);
   DCHECK(extension_action);
   DCHECK(extension);
@@ -214,9 +212,9 @@ ui::MenuModel* ExtensionActionViewController::GetContextMenu() {
   }
 
   // Reconstruct the menu every time because the menu's contents are dynamic.
-  context_menu_model_.reset(new extensions::ExtensionContextMenuModel(
+  context_menu_model_ = std::make_unique<extensions::ExtensionContextMenuModel>(
       extension(), browser_, visibility, this,
-      view_delegate_->CanShowIconInToolbar()));
+      view_delegate_->CanShowIconInToolbar());
   return context_menu_model_.get();
 }
 
@@ -432,12 +430,11 @@ ExtensionActionViewController::GetIconImageSource(
   image_source->SetIcon(icon_factory_.GetIcon(tab_id));
 
   std::unique_ptr<IconWithBadgeImageSource::Badge> badge;
-  std::string badge_text = extension_action_->GetBadgeText(tab_id);
+  std::string badge_text = extension_action_->GetDisplayBadgeText(tab_id);
   if (!badge_text.empty()) {
-    badge.reset(new IconWithBadgeImageSource::Badge(
-            badge_text,
-            extension_action_->GetBadgeTextColor(tab_id),
-            extension_action_->GetBadgeBackgroundColor(tab_id)));
+    badge = std::make_unique<IconWithBadgeImageSource::Badge>(
+        badge_text, extension_action_->GetBadgeTextColor(tab_id),
+        extension_action_->GetBadgeBackgroundColor(tab_id));
   }
   image_source->SetBadge(std::move(badge));
 

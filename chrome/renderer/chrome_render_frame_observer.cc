@@ -28,6 +28,7 @@
 #include "chrome/renderer/web_apps.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/offline_pages/buildflags/buildflags.h"
+#include "components/safe_browsing/buildflags.h"
 #include "components/translate/content/renderer/translate_helper.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
 #include "content/public/common/bindings_policy.h"
@@ -40,7 +41,6 @@
 #include "skia/ext/image_operations.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
-#include "third_party/blink/public/platform/web_image.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -61,7 +61,7 @@
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #endif  // !defined(OS_ANDROID)
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #endif
 
@@ -91,7 +91,8 @@ static const char kTranslateCaptureText[] = "Translate.CaptureText";
 
 // For a page that auto-refreshes, we still show the bubble, if
 // the refresh delay is less than this value (in seconds).
-static const double kLocationChangeIntervalInSeconds = 10;
+static constexpr base::TimeDelta kLocationChangeInterval =
+    base::TimeDelta::FromSeconds(10);
 
 // For the context menu, we want to keep transparency as is instead of
 // replacing transparent pixels with black ones
@@ -151,7 +152,7 @@ ChromeRenderFrameObserver::ChromeRenderFrameObserver(
   if (!render_frame->IsMainFrame())
     return;
 
-#if defined(SAFE_BROWSING_CSD)
+#if BUILDFLAG(SAFE_BROWSING_CSD)
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
@@ -318,7 +319,7 @@ void ChromeRenderFrameObserver::GetWebApplicationInfo(
 
 void ChromeRenderFrameObserver::SetClientSidePhishingDetection(
     bool enable_phishing_detection) {
-#if defined(SAFE_BROWSING_CSD)
+#if BUILDFLAG(SAFE_BROWSING_CSD)
   phishing_classifier_ =
       enable_phishing_detection
           ? safe_browsing::PhishingClassifierDelegate::Create(render_frame(),
@@ -342,7 +343,7 @@ void ChromeRenderFrameObserver::DidFinishLoad() {
 
   GURL osdd_url = frame->GetDocument().OpenSearchDescriptionURL();
   if (!osdd_url.is_empty()) {
-    chrome::mojom::OpenSearchDescriptionDocumentHandlerAssociatedPtr
+    mojo::AssociatedRemote<chrome::mojom::OpenSearchDescriptionDocumentHandler>
         osdd_handler;
     render_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
         &osdd_handler);
@@ -367,7 +368,8 @@ void ChromeRenderFrameObserver::DidCreateNewDocument() {
 
   // Connect to Mojo service on browser to notify it of the page's archive
   // properties.
-  offline_pages::mojom::MhtmlPageNotifierAssociatedPtr mhtml_notifier;
+  mojo::AssociatedRemote<offline_pages::mojom::MhtmlPageNotifier>
+      mhtml_notifier;
   render_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
       &mhtml_notifier);
   DCHECK(mhtml_notifier);
@@ -431,7 +433,7 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
     return;
 
   // Don't capture pages that have pending redirect or location change.
-  if (frame->IsNavigationScheduledWithin(kLocationChangeIntervalInSeconds))
+  if (frame->IsNavigationScheduledWithin(kLocationChangeInterval))
     return;
 
   // Don't index/capture pages that are in view source mode.
@@ -469,7 +471,7 @@ void ChromeRenderFrameObserver::CapturePageText(TextCaptureType capture_type) {
 
   TRACE_EVENT0("renderer", "ChromeRenderFrameObserver::CapturePageText");
 
-#if defined(SAFE_BROWSING_CSD)
+#if BUILDFLAG(SAFE_BROWSING_CSD)
   // Will swap out the string.
   if (phishing_classifier_)
     phishing_classifier_->PageCaptured(&contents,
@@ -500,22 +502,13 @@ void ChromeRenderFrameObserver::OnDestruct() {
 }
 
 void ChromeRenderFrameObserver::OnRenderFrameObserverRequest(
-    chrome::mojom::ChromeRenderFrameAssociatedRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+    mojo::PendingAssociatedReceiver<chrome::mojom::ChromeRenderFrame>
+        receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void ChromeRenderFrameObserver::SetWindowFeatures(
     blink::mojom::WindowFeaturesPtr window_features) {
   render_frame()->GetRenderView()->GetWebView()->SetWindowFeatures(
       content::ConvertMojoWindowFeaturesToWebWindowFeatures(*window_features));
-}
-
-void ChromeRenderFrameObserver::UpdateBrowserControlsState(
-    content::BrowserControlsState constraints,
-    content::BrowserControlsState current,
-    bool animate) {
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-  render_frame()->GetRenderView()->UpdateBrowserControlsState(constraints,
-                                                              current, animate);
-#endif
 }

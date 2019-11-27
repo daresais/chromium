@@ -13,9 +13,11 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/auth.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_auth.h"
 #include "net/http/http_auth_challenge_tokenizer.h"
 #include "net/http/http_auth_multi_round_parse.h"
 #include "net/http/http_auth_preferences.h"
+#include "net/log/net_log_with_source.h"
 #include "net/net_jni_headers/HttpNegotiateAuthenticator_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -69,7 +71,7 @@ HttpAuthNegotiateAndroid::HttpAuthNegotiateAndroid(
 HttpAuthNegotiateAndroid::~HttpAuthNegotiateAndroid() {
 }
 
-bool HttpAuthNegotiateAndroid::Init() {
+bool HttpAuthNegotiateAndroid::Init(const NetLogWithSource& net_log) {
   return true;
 }
 
@@ -85,11 +87,22 @@ HttpAuth::AuthorizationResult HttpAuthNegotiateAndroid::ParseChallenge(
     net::HttpAuthChallengeTokenizer* tok) {
   if (first_challenge_) {
     first_challenge_ = false;
-    return net::ParseFirstRoundChallenge("negotiate", tok);
+    return net::ParseFirstRoundChallenge(HttpAuth::AUTH_SCHEME_NEGOTIATE, tok);
   }
   std::string decoded_auth_token;
-  return net::ParseLaterRoundChallenge("negotiate", tok, &server_auth_token_,
+  return net::ParseLaterRoundChallenge(HttpAuth::AUTH_SCHEME_NEGOTIATE, tok,
+                                       &server_auth_token_,
                                        &decoded_auth_token);
+}
+
+int HttpAuthNegotiateAndroid::GenerateAuthTokenAndroid(
+    const AuthCredentials* credentials,
+    const std::string& spn,
+    const std::string& channel_bindings,
+    std::string* auth_token,
+    net::CompletionOnceCallback callback) {
+  return GenerateAuthToken(credentials, spn, channel_bindings, auth_token,
+                           NetLogWithSource(), std::move(callback));
 }
 
 int HttpAuthNegotiateAndroid::GenerateAuthToken(
@@ -97,6 +110,7 @@ int HttpAuthNegotiateAndroid::GenerateAuthToken(
     const std::string& spn,
     const std::string& channel_bindings,
     std::string* auth_token,
+    const NetLogWithSource& net_log,
     net::CompletionOnceCallback callback) {
   if (GetAuthAndroidNegotiateAccountType().empty()) {
     // This can happen if there is a policy change, removing the account type,

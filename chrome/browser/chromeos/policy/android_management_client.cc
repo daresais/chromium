@@ -28,13 +28,12 @@ namespace policy {
 AndroidManagementClient::AndroidManagementClient(
     DeviceManagementService* device_management_service,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    const std::string& account_id,
-    identity::IdentityManager* identity_manager)
+    const CoreAccountId& account_id,
+    signin::IdentityManager* identity_manager)
     : device_management_service_(device_management_service),
       url_loader_factory_(url_loader_factory),
       account_id_(account_id),
-      identity_manager_(identity_manager),
-      weak_ptr_factory_(this) {}
+      identity_manager_(identity_manager) {}
 
 AndroidManagementClient::~AndroidManagementClient() {}
 
@@ -49,7 +48,7 @@ void AndroidManagementClient::StartCheckAndroidManagement(
 
 void AndroidManagementClient::OnAccessTokenFetchComplete(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   access_token_fetcher_.reset();
 
   if (error.state() != GoogleServiceAuthError::NONE) {
@@ -75,7 +74,7 @@ void AndroidManagementClient::RequestAccessToken() {
       account_id_, "android_management_client", scopes,
       base::BindOnce(&AndroidManagementClient::OnAccessTokenFetchComplete,
                      base::Unretained(this)),
-      identity::AccessTokenFetcher::Mode::kImmediate);
+      signin::AccessTokenFetcher::Mode::kImmediate);
 }
 
 void AndroidManagementClient::CheckAndroidManagement(

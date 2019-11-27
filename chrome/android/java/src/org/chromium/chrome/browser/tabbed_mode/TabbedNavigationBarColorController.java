@@ -9,10 +9,11 @@ import android.annotation.TargetApi;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.os.Build;
-import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
@@ -23,6 +24,7 @@ import org.chromium.chrome.browser.compositor.layouts.EmptyOverviewModeObserver;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior.OverviewModeObserver;
 import org.chromium.chrome.browser.device.DeviceClassManager;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -182,7 +184,8 @@ class TabbedNavigationBarColorController implements VrModeObserver {
         boolean useLightNavigation;
         if (ChromeFeatureList.isInitialized()
                 && (ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID)
-                        || DeviceClassManager.enableAccessibilityLayout())) {
+                        || DeviceClassManager.enableAccessibilityLayout()
+                        || FeatureUtilities.isGridTabSwitcherEnabled())) {
             useLightNavigation = !mTabModelSelector.isIncognitoSelected();
         } else {
             useLightNavigation = !mTabModelSelector.isIncognitoSelected() || overviewVisible;

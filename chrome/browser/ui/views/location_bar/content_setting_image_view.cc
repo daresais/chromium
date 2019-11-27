@@ -18,6 +18,7 @@
 #include "ui/events/event_utils.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/controls/image_view.h"
@@ -51,6 +52,7 @@ base::Optional<ViewID> GetViewID(
     case ImageType::FRAMEBUST:
     case ImageType::CLIPBOARD_READ:
     case ImageType::SENSORS:
+    case ImageType::NOTIFICATIONS_QUIET_PROMPT:
       return base::nullopt;
 
     case ImageType::NUM_IMAGE_TYPES:
@@ -101,6 +103,18 @@ void ContentSettingImageView::Update() {
   UpdateImage();
   SetVisible(true);
 
+  if (content_setting_image_model_->ShouldNotifyAccessibility(web_contents)) {
+    GetViewAccessibility().OverrideName(l10n_util::GetStringUTF16(
+        content_setting_image_model_->explanatory_string_id()));
+    NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
+    content_setting_image_model_->AccessibilityWasNotified(web_contents);
+  }
+
+  if (content_setting_image_model_->ShouldAutoOpenBubble(web_contents)) {
+    ShowBubbleImpl();
+    content_setting_image_model_->SetBubbleWasAutoOpened(web_contents);
+  }
+
   // If the content usage or blockage should be indicated to the user, start the
   // animation and record that the icon has been shown.
   if (!can_animate_ ||
@@ -145,7 +159,7 @@ bool ContentSettingImageView::OnMousePressed(const ui::MouseEvent& event) {
 bool ContentSettingImageView::OnKeyPressed(const ui::KeyEvent& event) {
   // Pause animation so that the icon does not shrink and deselect while the
   // user is attempting to press it using key commands.
-  if (GetKeyClickActionForEvent(event) == KeyClickAction::CLICK_ON_KEY_RELEASE)
+  if (GetKeyClickActionForEvent(event) == KeyClickAction::kOnKeyRelease)
     PauseAnimation();
   return Button::OnKeyPressed(event);
 }
@@ -165,6 +179,10 @@ bool ContentSettingImageView::ShouldShowSeparator() const {
 }
 
 bool ContentSettingImageView::ShowBubble(const ui::Event& event) {
+  return ShowBubbleImpl();
+}
+
+bool ContentSettingImageView::ShowBubbleImpl() {
   PauseAnimation();
   content::WebContents* web_contents =
       delegate_->GetContentSettingWebContents();

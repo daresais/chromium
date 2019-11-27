@@ -207,7 +207,9 @@ class CORE_EXPORT File final : public Blob {
 
   // Getter for the lastModifiedDate IDL attribute,
   // http://www.w3.org/TR/FileAPI/#dfn-lastModifiedDate
-  double lastModifiedDate() const;
+  ScriptValue lastModifiedDate(ScriptState* script_state) const;
+  // Returns milliseconds from the Unix epoch.
+  double LastModifiedDate() const;
 
   UserVisibility GetUserVisibility() const { return user_visibility_; }
 
@@ -217,8 +219,9 @@ class CORE_EXPORT File final : public Blob {
 
   // Note that this involves synchronous file operation. Think twice before
   // calling this function.
-  void CaptureSnapshot(uint64_t& snapshot_size,
-                       double& snapshot_modification_time_ms) const;
+  void CaptureSnapshot(
+      uint64_t& snapshot_size,
+      base::Optional<base::Time>& snapshot_modification_time) const;
 
   // Returns true if this has a valid snapshot metadata
   // (i.e. m_snapshotSize >= 0).

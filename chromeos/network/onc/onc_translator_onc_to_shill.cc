@@ -299,7 +299,6 @@ void LocalTranslator::TranslateWiFi() {
 }
 
 void LocalTranslator::TranslateEAP() {
-  // Note: EAP.Outer may be empty for WiMAX configurations.
   std::string outer;
   onc_object_->GetStringWithoutPathExpansion(::onc::eap::kOuter, &outer);
   if (!outer.empty())
@@ -352,7 +351,7 @@ void LocalTranslator::TranslateStaticIPConfig() {
         value_ref = base::Value(kDefaultIpAddr);
     }
     while (name_servers->GetList().size() < 4)
-      name_servers->GetList().push_back(base::Value(kDefaultIpAddr));
+      name_servers->Append(base::Value(kDefaultIpAddr));
   }
 }
 
@@ -360,6 +359,11 @@ void LocalTranslator::TranslateNetworkConfiguration() {
   std::string type;
   onc_object_->GetStringWithoutPathExpansion(::onc::network_config::kType,
                                              &type);
+
+  if (type == ::onc::network_type::kWimaxDeprecated) {
+    NET_LOG(ERROR) << "WiMAX ONC configuration is no longer supported.";
+    return;
+  }
 
   // Note; The Ethernet type might be overridden to EthernetEap in
   // TranslateEthernet if Ethernet specific properties are provided.
@@ -495,7 +499,10 @@ void TranslateONCHierarchy(const OncValueSignature& signature,
 
     const OncFieldSignature* field_signature =
         GetFieldSignature(signature, it.key());
-
+    if (!field_signature) {
+      NET_LOG(ERROR) << "Unexpected or deprecated ONC key: " << it.key();
+      continue;
+    }
     TranslateONCHierarchy(*field_signature->value_signature, *inner_object,
                           shill_dictionary);
   }

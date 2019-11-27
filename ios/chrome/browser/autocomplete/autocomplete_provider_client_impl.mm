@@ -30,7 +30,6 @@
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_model_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -161,10 +160,6 @@ AutocompleteProviderClientImpl::GetBuiltinsToProvideAsUserTypes() {
           base::ASCIIToUTF16(kChromeUIVersionURL)};
 }
 
-base::Time AutocompleteProviderClientImpl::GetCurrentVisitTimestamp() const {
-  return base::Time();
-}
-
 component_updater::ComponentUpdateService*
 AutocompleteProviderClientImpl::GetComponentUpdateService() {
   return GetApplicationContext()->GetComponentUpdateService();
@@ -184,7 +179,7 @@ bool AutocompleteProviderClientImpl::IsPersonalizedUrlDataCollectionActive()
 }
 
 bool AutocompleteProviderClientImpl::IsAuthenticated() const {
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(browser_state_);
   return identity_manager != nullptr && identity_manager->HasPrimaryAccount();
 }

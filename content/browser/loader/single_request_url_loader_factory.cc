@@ -24,9 +24,10 @@ class SingleRequestURLLoaderFactory::HandlerState
       : handler_(std::move(handler)),
         handler_task_runner_(base::SequencedTaskRunnerHandle::Get()) {}
 
-  void HandleRequest(const network::ResourceRequest& resource_request,
-                     network::mojom::URLLoaderRequest loader,
-                     network::mojom::URLLoaderClientPtr client) {
+  void HandleRequest(
+      const network::ResourceRequest& resource_request,
+      mojo::PendingReceiver<network::mojom::URLLoader> loader,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
     if (!handler_task_runner_->RunsTasksInCurrentSequence()) {
       handler_task_runner_->PostTask(
           FROM_HERE,
@@ -82,19 +83,21 @@ SingleRequestURLLoaderFactory::SingleRequestURLLoaderFactory(
     : state_(base::MakeRefCounted<HandlerState>(std::move(handler))) {}
 
 void SingleRequestURLLoaderFactory::CreateLoaderAndStart(
-    network::mojom::URLLoaderRequest loader,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader,
     int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& request,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   state_->HandleRequest(request, std::move(loader), std::move(client));
 }
 
 void SingleRequestURLLoaderFactory::Clone(
-    network::mojom::URLLoaderFactoryRequest request) {
-  NOTREACHED();
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
+  // Pass |this| as the recevier context to make sure this object stays alive
+  // while it still has receivers.
+  receivers_.Add(this, std::move(receiver), this);
 }
 
 std::unique_ptr<network::SharedURLLoaderFactoryInfo>

@@ -14,6 +14,7 @@
 // test (AboutFlagsTest.OnlyPermittedFlagsNeverExpire).
 [
   "allow-previews",
+  "arc-native-bridge-toggle",
   "ash-debug-shortcuts",
   "ash-enable-unified-desktop",
   "data-saver-server-previews",
@@ -33,6 +34,7 @@
   "enable-data-reduction-proxy-server-experiment",
   "enable-devtools-experiments",
   "enable-experimental-web-platform-features",
+  "enable-experimental-webassembly-features",
   "enable-future-v8-vm-features",
   "enable-gpu-rasterization",
   "enable-gpu-service-logging",
@@ -64,6 +66,7 @@
   "ignore-gpu-blacklist",
   "ignore-previews-blocklist",
   "in-product-help-demo-mode-choice",
+  "instant-tethering",
   "list-all-display-modes",
   "load-media-router-component-extension",
   "media-router-cast-allow-all-ips",
@@ -73,6 +76,7 @@
   "overlay-strategies",
   "set-market-url-for-testing",
   "show-autofill-type-predictions",
+  "show-bluetooth-debug-log-toggle",
   "show-taps",
   "show-touch-hud",
   "tint-gl-composited-content",
@@ -81,6 +85,7 @@
   "ui-slow-animations",
   "update-menu-item-custom-summary",
   "use-angle",
+  "use_messages_staging_url",
   "use-sync-sandbox",
   "wallet-service-use-sandbox"
 ]

@@ -42,7 +42,6 @@ import org.chromium.chrome.browser.notifications.NotificationMetadata;
 import org.chromium.chrome.browser.notifications.NotificationUmaTracker;
 import org.chromium.chrome.browser.notifications.PendingIntentProvider;
 import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.LegacyHelpers;
@@ -76,10 +75,15 @@ public final class DownloadNotificationFactory {
     public static Notification buildNotification(Context context,
             @DownloadNotificationService.DownloadStatus int downloadStatus,
             DownloadUpdate downloadUpdate, int notificationId) {
+        String channelId = ChannelDefinitions.ChannelId.DOWNLOADS;
+        if (LegacyHelpers.isLegacyDownload(downloadUpdate.getContentId())
+                && downloadStatus == DownloadNotificationService.DownloadStatus.COMPLETED
+                && ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOAD_NOTIFICATION_BADGE)) {
+            channelId = ChannelDefinitions.ChannelId.COMPLETED_DOWNLOADS;
+        }
         ChromeNotificationBuilder builder =
                 NotificationBuilderFactory
-                        .createChromeNotificationBuilder(true /* preferCompat */,
-                                ChannelDefinitions.ChannelId.DOWNLOADS,
+                        .createChromeNotificationBuilder(true /* preferCompat */, channelId,
                                 null /* remoteAppPackageName */,
                                 new NotificationMetadata(LegacyHelpers.isLegacyDownload(
                                                                  downloadUpdate.getContentId())
@@ -164,8 +168,9 @@ public final class DownloadNotificationFactory {
                                         context, cancelIntent, downloadUpdate.getNotificationId()),
                                 cancelActionType);
 
-                if (!downloadUpdate.getIsOffTheRecord())
+                if (!downloadUpdate.getIsOffTheRecord()) {
                     builder.setLargeIcon(downloadUpdate.getIcon());
+                }
 
                 if (!downloadUpdate.getIsDownloadPending()) {
                     boolean indeterminate = downloadUpdate.getProgress().isIndeterminate();
@@ -217,8 +222,9 @@ public final class DownloadNotificationFactory {
                                         context, cancelIntent, downloadUpdate.getNotificationId()),
                                 cancelActionType);
 
-                if (!downloadUpdate.getIsOffTheRecord())
+                if (!downloadUpdate.getIsOffTheRecord()) {
                     builder.setLargeIcon(downloadUpdate.getIcon());
+                }
 
                 if (downloadUpdate.getIsTransient()) {
                     builder.setDeleteIntent(buildPendingIntentProvider(
@@ -282,8 +288,9 @@ public final class DownloadNotificationFactory {
 
                 // It's the job of the service to ensure that the default icon is provided when
                 // in incognito mode.
-                if (downloadUpdate.getIcon() != null)
+                if (downloadUpdate.getIcon() != null) {
                     builder.setLargeIcon(downloadUpdate.getIcon());
+                }
 
                 break;
             case DownloadNotificationService.DownloadStatus.FAILED:
@@ -316,26 +323,11 @@ public final class DownloadNotificationFactory {
         if (!downloadUpdate.getIsTransient() && downloadUpdate.getNotificationId() != -1
                 && downloadStatus != DownloadNotificationService.DownloadStatus.COMPLETED
                 && downloadStatus != DownloadNotificationService.DownloadStatus.FAILED) {
-            if (FeatureUtilities.isNoTouchModeEnabled()) {
-                assert downloadUpdate.getContentId() != null;
-                ComponentName component = new ComponentName(
-                        context.getPackageName(), TouchlessDownloadActivity.class.getName());
-                Intent intent = new Intent(ACTION_NOTIFICATION_CLICKED);
-                intent.setComponent(component);
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                intent.putExtra(EXTRA_DOWNLOAD_CONTENTID_ID, downloadUpdate.getContentId().id);
-                intent.putExtra(EXTRA_DOWNLOAD_CONTENTID_NAMESPACE,
-                        downloadUpdate.getContentId().namespace);
-                builder.setContentIntent(PendingIntentProvider.getActivity(context,
-                        downloadUpdate.getNotificationId(), intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT));
-            } else {
-                Intent downloadHomeIntent = buildActionIntent(context, ACTION_NOTIFICATION_CLICKED,
-                        null, downloadUpdate.getIsOffTheRecord());
-                builder.setContentIntent(PendingIntentProvider.getService(context,
-                        downloadUpdate.getNotificationId(), downloadHomeIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT));
-            }
+            Intent downloadHomeIntent = buildActionIntent(
+                    context, ACTION_NOTIFICATION_CLICKED, null, downloadUpdate.getIsOffTheRecord());
+            builder.setContentIntent(
+                    PendingIntentProvider.getService(context, downloadUpdate.getNotificationId(),
+                            downloadHomeIntent, PendingIntent.FLAG_UPDATE_CURRENT));
         }
 
         if (downloadUpdate.getIsOffTheRecord()) {

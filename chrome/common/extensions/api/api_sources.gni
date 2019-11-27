@@ -98,9 +98,13 @@ if (is_chromeos) {
     "input_method_private.json",
     "launcher_search_provider.idl",
     "login.idl",
+    "login_screen_storage.idl",
     "login_screen_ui.idl",
+    "login_state.idl",
     "platform_keys.idl",
     "platform_keys_internal.idl",
+    "printing.idl",
+    "printing_metrics.idl",
     "quick_unlock_private.idl",
     "terminal_private.json",
     "users_private.idl",
@@ -124,11 +128,12 @@ if (enable_service_discovery) {
 }
 
 uncompiled_sources_ = [
-  "page_action.json",
+  "action.json",
   "browser_action.json",
   "browsing_data.json",
   "extension.json",
   "idltest.idl",
+  "page_action.json",
   "top_sites.json",
 ]
 

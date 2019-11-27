@@ -4,20 +4,25 @@
 
 package org.chromium.chrome.browser.firstrun;
 
+import android.accounts.Account;
 import android.app.Activity;
-import android.app.Fragment;
 import android.os.Bundle;
+import android.support.v4.app.Fragment;
 import android.text.TextUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.SyncFirstSetupCompleteSource;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.sync.SyncAndServicesPreferences;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInCallback;
 import org.chromium.chrome.browser.signin.UnifiedConsentServiceBridge;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.components.signin.AccountManagerFacade;
 
 /**
  * A helper to perform all necessary steps for the automatic FRE sign in.
@@ -65,20 +70,31 @@ public final class FirstRunSignInProcessor {
             return;
         }
         final String accountName = getFirstRunFlowSignInAccountName();
-        if (!FeatureUtilities.canAllowSync() || !signinManager.isSignInAllowed()
+        if (!FirstRunUtils.canAllowSync() || !signinManager.isSignInAllowed()
                 || TextUtils.isEmpty(accountName)) {
             setFirstRunFlowSignInComplete(true);
             return;
         }
 
+        // TODO(https://crbug.com/795292): Move this to SigninFirstRunFragment.
+        Account account = AccountManagerFacade.get().getAccountFromName(accountName);
+        if (account == null) {
+            setFirstRunFlowSignInComplete(true);
+            return;
+        }
+
         final boolean setUp = getFirstRunFlowSignInSetup();
-        signinManager.signIn(accountName, activity, new SignInCallback() {
+        signinManager.signIn(account, new SignInCallback() {
             @Override
             public void onSignInComplete() {
                 UnifiedConsentServiceBridge.setUrlKeyedAnonymizedDataCollectionEnabled(true);
                 // Show sync settings if user pressed the "Settings" button.
                 if (setUp) {
                     openSignInSettings(activity);
+                } else if (ChromeFeatureList.isEnabled(
+                                   ChromeFeatureList.SYNC_MANUAL_START_ANDROID)) {
+                    ProfileSyncService.get().setFirstSetupComplete(
+                            SyncFirstSetupCompleteSource.BASIC_FLOW);
                 }
                 setFirstRunFlowSignInComplete(true);
             }
@@ -96,10 +112,8 @@ public final class FirstRunSignInProcessor {
      * Opens sign in settings as requested in the FRE sign-in dialog.
      */
     private static void openSignInSettings(Activity activity) {
-        final Class<? extends Fragment> fragment;
-        final Bundle arguments;
-        fragment = SyncAndServicesPreferences.class;
-        arguments = SyncAndServicesPreferences.createArguments(true);
+        final Class<? extends Fragment> fragment = SyncAndServicesPreferences.class;
+        final Bundle arguments = SyncAndServicesPreferences.createArguments(true);
         PreferencesLauncher.launchSettingsPage(activity, fragment, arguments);
     }
 

@@ -15,7 +15,10 @@
 #include "base/containers/adapters.h"
 #include "base/containers/stack.h"
 #include "base/containers/stack_container.h"
+#include "base/guid.h"
 #include "base/i18n/string_compare.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/android/chrome_jni_headers/BookmarkBridge_jni.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
@@ -31,12 +34,14 @@
 #include "components/bookmarks/common/android/bookmark_type.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
+#include "components/dom_distiller/core/url_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/query_parser/query_parser.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/undo/bookmark_undo_service.h"
 #include "components/undo/undo_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
@@ -56,6 +61,8 @@ using bookmarks::BookmarkType;
 using content::BrowserThread;
 
 namespace {
+
+const int kInvalidId = -1;
 
 class BookmarkTitleComparer {
  public:
@@ -144,9 +151,40 @@ static jlong JNI_BookmarkBridge_Init(JNIEnv* env,
   return reinterpret_cast<intptr_t>(delegate);
 }
 
-jboolean BookmarkBridge::IsEditBookmarksEnabled(
+static jlong JNI_BookmarkBridge_GetBookmarkIdForWebContents(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
+    const JavaParamRef<jobject>& jweb_contents,
+    jboolean only_editable) {
+  auto* web_contents = content::WebContents::FromJavaWebContents(jweb_contents);
+  if (!web_contents)
+    return kInvalidId;
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  GURL url = dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
+      web_contents->GetURL());
+
+  // Get all the nodes for |url| and sort them by date added.
+  std::vector<const bookmarks::BookmarkNode*> nodes;
+  bookmarks::ManagedBookmarkService* managed =
+      ManagedBookmarkServiceFactory::GetForProfile(profile);
+  bookmarks::BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(profile);
+
+  model->GetNodesByURL(url, &nodes);
+  std::sort(nodes.begin(), nodes.end(), &bookmarks::MoreRecentlyAdded);
+
+  // Return the first node matching the search criteria.
+  for (const auto* node : nodes) {
+    if (only_editable && !managed->CanBeEditedByUser(node))
+      continue;
+    return node->id();
+  }
+
+  return kInvalidId;
+}
+
+jboolean BookmarkBridge::IsEditBookmarksEnabled(JNIEnv* env) {
   return IsEditBookmarksEnabled();
 }
 
@@ -157,6 +195,29 @@ void BookmarkBridge::LoadEmptyPartnerBookmarkShimForTesting(
       return;
   partner_bookmarks_shim_->SetPartnerBookmarksRoot(
       std::make_unique<BookmarkPermanentNode>(0, BookmarkNode::FOLDER));
+  PartnerBookmarksShim::DisablePartnerBookmarksEditing();
+  DCHECK(partner_bookmarks_shim_->IsLoaded());
+}
+
+// Loads a fake partner bookmarks shim for testing.
+// This is used in BookmarkBridgeTest.java.
+void BookmarkBridge::LoadFakePartnerBookmarkShimForTesting(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  if (partner_bookmarks_shim_->IsLoaded())
+    return;
+  std::unique_ptr<BookmarkPermanentNode> root_partner_node =
+      std::make_unique<BookmarkPermanentNode>(0, BookmarkNode::FOLDER);
+  BookmarkNode* partner_bookmark_a =
+      root_partner_node->Add(std::make_unique<BookmarkNode>(
+          1, base::GenerateGUID(), GURL("http://www.a.com")));
+  partner_bookmark_a->SetTitle(base::ASCIIToUTF16("Partner Bookmark A"));
+  BookmarkNode* partner_bookmark_b =
+      root_partner_node->Add(std::make_unique<BookmarkNode>(
+          2, base::GenerateGUID(), GURL("http://www.b.com")));
+  partner_bookmark_b->SetTitle(base::ASCIIToUTF16("Partner Bookmark B"));
+  partner_bookmarks_shim_->SetPartnerBookmarksRoot(
+      std::move(root_partner_node));
   PartnerBookmarksShim::DisablePartnerBookmarksEditing();
   DCHECK(partner_bookmarks_shim_->IsLoaded());
 }
@@ -354,6 +415,18 @@ ScopedJavaLocalRef<jobject> BookmarkBridge::GetDesktopFolderId(
   return folder_id_obj;
 }
 
+ScopedJavaLocalRef<jobject> BookmarkBridge::GetPartnerFolderId(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  DCHECK(partner_bookmarks_shim_->IsLoaded());
+
+  const BookmarkNode* partner_node =
+      partner_bookmarks_shim_->GetPartnerBookmarksRoot();
+  ScopedJavaLocalRef<jobject> folder_id_obj = JavaBookmarkIdCreateBookmarkId(
+      env, partner_node->id(), GetBookmarkType(partner_node));
+  return folder_id_obj;
+}
+
 jint BookmarkBridge::GetChildCount(JNIEnv* env,
                                     const JavaParamRef<jobject>& obj,
                                     jlong id,
@@ -438,6 +511,13 @@ jint BookmarkBridge::GetTotalBookmarkCount(
         nodes.push(child.get());
       else
         ++count;
+    }
+    // If we are looking at the mobile bookmarks folder,
+    // and we have partner bookmarks
+    if (node == bookmark_model_->mobile_node() &&
+        partner_bookmarks_shim_->HasPartnerBookmarks() &&
+        IsReachable(partner_bookmarks_shim_->GetPartnerBookmarksRoot())) {
+      nodes.push(partner_bookmarks_shim_->GetPartnerBookmarksRoot());
     }
   }
 
@@ -581,17 +661,30 @@ void BookmarkBridge::SearchBookmarks(JNIEnv* env,
                                       jint max_results) {
   DCHECK(bookmark_model_->loaded());
 
-  std::vector<bookmarks::TitledUrlMatch> results;
-  bookmark_model_->GetBookmarksMatching(
-      base::android::ConvertJavaStringToUTF16(env, j_query),
-      max_results,
-      query_parser::MatchingAlgorithm::ALWAYS_PREFIX_SEARCH,
-      &results);
-  for (const bookmarks::TitledUrlMatch& match : results) {
-    const BookmarkNode* node = static_cast<const BookmarkNode*>(match.node);
+  std::vector<const BookmarkNode*> results;
 
-    Java_BookmarkBridge_addToBookmarkIdList(env, j_list, node->id(),
-                                            node->type());
+  bookmarks::QueryFields query;
+  query.word_phrase_query.reset(new base::string16(
+      base::android::ConvertJavaStringToUTF16(env, j_query)));
+
+  GetBookmarksMatchingProperties(bookmark_model_, query, max_results, &results);
+
+  if (partner_bookmarks_shim_->HasPartnerBookmarks() &&
+      IsReachable(partner_bookmarks_shim_->GetPartnerBookmarksRoot())) {
+    partner_bookmarks_shim_->GetPartnerBookmarksMatchingProperties(
+        query, max_results, &results);
+  }
+  DCHECK((int)results.size() <= max_results);
+  for (const bookmarks::BookmarkNode* match : results) {
+    // If this bookmark is a partner bookmark
+    if (partner_bookmarks_shim_->IsPartnerBookmark(match) &&
+        IsReachable(match)) {
+      Java_BookmarkBridge_addToBookmarkIdList(
+          env, j_list, match->id(), BookmarkType::BOOKMARK_TYPE_PARTNER);
+    } else {
+      Java_BookmarkBridge_addToBookmarkIdList(
+          env, j_list, match->id(), BookmarkType::BOOKMARK_TYPE_NORMAL);
+    }
   }
 }
 
@@ -626,7 +719,14 @@ void BookmarkBridge::DeleteBookmark(
   long bookmark_id = JavaBookmarkIdGetId(env, j_bookmark_id_obj);
   int type = JavaBookmarkIdGetType(env, j_bookmark_id_obj);
   const BookmarkNode* node = GetNodeByID(bookmark_id, type);
-  DCHECK(IsEditable(node));
+
+  // TODO(twellington): Switch back to a DCHECK after debugging
+  // why this is called with an uneditable node.
+  // See https://crbug.com/981172.
+  if (!IsEditable(node)) {
+    NOTREACHED();
+    return;
+  }
 
   if (partner_bookmarks_shim_->IsPartnerBookmark(node))
     partner_bookmarks_shim_->RemoveBookmark(node);
@@ -658,7 +758,10 @@ void BookmarkBridge::MoveBookmark(
   bookmark_id = JavaBookmarkIdGetId(env, j_parent_id_obj);
   type = JavaBookmarkIdGetType(env, j_parent_id_obj);
   const BookmarkNode* new_parent_node = GetNodeByID(bookmark_id, type);
-  bookmark_model_->Move(node, new_parent_node, size_t{index});
+  // Bookmark should not be moved to its own parent folder
+  if (node->parent() != new_parent_node) {
+    bookmark_model_->Move(node, new_parent_node, size_t{index});
+  }
 }
 
 ScopedJavaLocalRef<jobject> BookmarkBridge::AddBookmark(

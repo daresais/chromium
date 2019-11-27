@@ -82,6 +82,8 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
       metrics::ChromeUserMetricsExtension* uma_proto) override;
 
  private:
+  void ProvideAccessibilityMetrics();
+
   // Update the number of users logged into a multi-profile session.
   // If the number of users change while the log is open, the call invalidates
   // the user count value.
@@ -138,7 +140,7 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
   // ARC release version obtained from build properties.
   base::Optional<std::string> arc_release_ = base::nullopt;
 
-  base::WeakPtrFactory<ChromeOSMetricsProvider> weak_ptr_factory_;
+  base::WeakPtrFactory<ChromeOSMetricsProvider> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeOSMetricsProvider);
 };

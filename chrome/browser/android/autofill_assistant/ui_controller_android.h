@@ -12,29 +12,37 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/android/autofill_assistant/assistant_collect_user_data_delegate.h"
 #include "chrome/browser/android/autofill_assistant/assistant_form_delegate.h"
 #include "chrome/browser/android/autofill_assistant/assistant_header_delegate.h"
 #include "chrome/browser/android/autofill_assistant/assistant_overlay_delegate.h"
-#include "chrome/browser/android/autofill_assistant/assistant_payment_request_delegate.h"
 #include "components/autofill_assistant/browser/chip.h"
 #include "components/autofill_assistant/browser/client.h"
+#include "components/autofill_assistant/browser/controller_observer.h"
 #include "components/autofill_assistant/browser/details.h"
 #include "components/autofill_assistant/browser/info_box.h"
 #include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/overlay_state.h"
-#include "components/autofill_assistant/browser/ui_controller.h"
+#include "components/autofill_assistant/browser/trigger_context.h"
 #include "components/autofill_assistant/browser/user_action.h"
 
 namespace autofill_assistant {
-// Class implements UiController, Client and starts the Controller.
+struct ClientSettings;
+
+// Starts and owns the UI elements required to display AA.
+//
+// This class and its UI elements are tied to a ChromeActivity. A
+// UiControllerAndroid can be attached and detached from an AA controller, which
+// is tied to a BrowserContent.
+//
 // TODO(crbug.com/806868): This class should be renamed to
 // AssistantMediator(Android) and listen for state changes to forward those
 // changes to the UI model.
-class UiControllerAndroid : public UiController {
+class UiControllerAndroid : public ControllerObserver {
  public:
   static std::unique_ptr<UiControllerAndroid> CreateFromWebContents(
       content::WebContents* web_contents,
-      const base::android::JavaParamRef<jobject>& joverlay_coordinator);
+      const base::android::JavaParamRef<jobject>& jonboarding_coordinator);
 
   // pointers to |web_contents|, |client| must remain valid for the lifetime of
   // this instance.
@@ -44,7 +52,7 @@ class UiControllerAndroid : public UiController {
   UiControllerAndroid(
       JNIEnv* env,
       const base::android::JavaRef<jobject>& jactivity,
-      const base::android::JavaParamRef<jobject>& joverlay_coordinator);
+      const base::android::JavaParamRef<jobject>& jonboarding_coordinator);
   ~UiControllerAndroid() override;
 
   // Attaches the UI to the given client, its web contents and delegate.
@@ -58,12 +66,19 @@ class UiControllerAndroid : public UiController {
               Client* client,
               UiDelegate* ui_delegate);
 
-  // Detaches the UI from the its delegate. This guarantees the delegate is not
+  // Detaches the UI from its delegate. This guarantees the delegate is not
   // called anymore after the call.
   void Detach();
 
   // Returns true if the UI is attached to a delegate.
   bool IsAttached() { return ui_delegate_; }
+
+  // Have the UI react as if a close or cancel button was pressed.
+  //
+  // If action_index != -1, execute that action as close/cancel. Otherwise
+  // execute the default close or cancel action.
+  void CloseOrCancel(int action_index,
+                     std::unique_ptr<TriggerContext> trigger_context);
 
   // Overrides UiController:
   void OnStateChanged(AutofillAssistantState new_state) override;
@@ -71,10 +86,10 @@ class UiControllerAndroid : public UiController {
   void OnBubbleMessageChanged(const std::string& message) override;
   void CloseCustomTab() override;
   void OnUserActionsChanged(const std::vector<UserAction>& actions) override;
-  void OnPaymentRequestOptionsChanged(
-      const PaymentRequestOptions* options) override;
-  void OnPaymentRequestInformationChanged(
-      const PaymentInformation* state) override;
+  void OnCollectUserDataOptionsChanged(
+      const CollectUserDataOptions* collect_user_data_options) override;
+  void OnUserDataChanged(const UserData* state,
+                         UserData::FieldChange field_change) override;
   void OnDetailsChanged(const Details* details) override;
   void OnInfoBoxChanged(const InfoBox* info_box) override;
   void OnProgressChanged(int progress) override;
@@ -83,11 +98,12 @@ class UiControllerAndroid : public UiController {
       const RectF& visual_viewport,
       const std::vector<RectF>& touchable_areas,
       const std::vector<RectF>& restricted_areas) override;
-  void OnResizeViewportChanged(bool resize_viewport) override;
+  void OnViewportModeChanged(ViewportMode mode) override;
   void OnPeekModeChanged(
       ConfigureBottomSheetProto::PeekMode peek_mode) override;
   void OnOverlayColorsChanged(const UiDelegate::OverlayColors& colors) override;
   void OnFormChanged(const FormProto* form) override;
+  void OnClientSettingsChanged(const ClientSettings& settings) override;
 
   // Called by AssistantOverlayDelegate:
   void OnUnexpectedTaps();
@@ -97,16 +113,30 @@ class UiControllerAndroid : public UiController {
   // Called by AssistantHeaderDelegate:
   void OnFeedbackButtonClicked();
 
-  // Called by AssistantPaymentRequestDelegate:
+  // Called by AssistantCollectUserDataDelegate:
   void OnShippingAddressChanged(
       std::unique_ptr<autofill::AutofillProfile> address);
-  void OnBillingAddressChanged(
-      std::unique_ptr<autofill::AutofillProfile> address);
-  void OnContactInfoChanged(std::string name,
-                            std::string phone,
-                            std::string email);
-  void OnCreditCardChanged(std::unique_ptr<autofill::CreditCard> card);
+  void OnContactInfoChanged(std::unique_ptr<autofill::AutofillProfile> profile);
+  void OnCreditCardChanged(
+      std::unique_ptr<autofill::CreditCard> card,
+      std::unique_ptr<autofill::AutofillProfile> billing_profile);
   void OnTermsAndConditionsChanged(TermsAndConditionsState state);
+  void OnLoginChoiceChanged(std::string identifier);
+  void OnTermsAndConditionsLinkClicked(int link);
+  void OnFormActionLinkClicked(int link);
+  void OnDateTimeRangeStartChanged(int year,
+                                   int month,
+                                   int day,
+                                   int hour,
+                                   int minute,
+                                   int second);
+  void OnDateTimeRangeEndChanged(int year,
+                                 int month,
+                                 int day,
+                                 int hour,
+                                 int minute,
+                                 int second);
+  void OnKeyValueChanged(const std::string& key, const std::string& value);
 
   // Called by AssistantFormDelegate:
   void OnCounterChanged(int input_index, int counter_index, int value);
@@ -150,7 +180,7 @@ class UiControllerAndroid : public UiController {
   UiDelegate* ui_delegate_ = nullptr;
   AssistantOverlayDelegate overlay_delegate_;
   AssistantHeaderDelegate header_delegate_;
-  AssistantPaymentRequestDelegate payment_request_delegate_;
+  AssistantCollectUserDataDelegate collect_user_data_delegate_;
   AssistantFormDelegate form_delegate_;
 
   // What to do if undo is not pressed on the current snackbar.
@@ -161,7 +191,7 @@ class UiControllerAndroid : public UiController {
   base::android::ScopedJavaLocalRef<jobject> GetHeaderModel();
   base::android::ScopedJavaLocalRef<jobject> GetDetailsModel();
   base::android::ScopedJavaLocalRef<jobject> GetInfoBoxModel();
-  base::android::ScopedJavaLocalRef<jobject> GetPaymentRequestModel();
+  base::android::ScopedJavaLocalRef<jobject> GetCollectUserDataModel();
   base::android::ScopedJavaLocalRef<jobject> GetFormModel();
 
   void SetOverlayState(OverlayState state);
@@ -176,11 +206,11 @@ class UiControllerAndroid : public UiController {
 
   // Hide the UI, show a snackbar with an undo button, and execute the given
   // action after a short delay unless the user taps the undo button.
-  void ShowSnackbar(const std::string& message,
+  void ShowSnackbar(base::TimeDelta delay,
+                    const std::string& message,
                     base::OnceCallback<void()> action);
-  void OnCancelButtonClicked();
-  void OnCancelButtonWithActionIndexClicked(int action_index);
-  void OnCancel(int action_index);
+
+  void OnCancel(int action_index, std::unique_ptr<TriggerContext> context);
 
   // Updates the state of the UI to reflect the UIDelegate's state.
   void SetupForState();
@@ -200,7 +230,7 @@ class UiControllerAndroid : public UiController {
   base::android::ScopedJavaGlobalRef<jobject> java_object_;
 
   OverlayState desired_overlay_state_ = OverlayState::FULL;
-  base::WeakPtrFactory<UiControllerAndroid> weak_ptr_factory_;
+  base::WeakPtrFactory<UiControllerAndroid> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UiControllerAndroid);
 };

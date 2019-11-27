@@ -27,6 +27,7 @@
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
 #include "ui/aura/window_observer.h"
+#include "ui/base/ime/input_method.h"
 #include "ui/base/ime/input_method_keyboard_controller.h"
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/base/ime/text_input_type.h"
@@ -41,7 +42,6 @@ namespace ash {
 class KeyboardControllerObserver;
 }
 namespace ui {
-class InputMethod;
 class TextInputClient;
 }  // namespace ui
 
@@ -188,6 +188,11 @@ class KEYBOARD_EXPORT KeyboardUIController
   // Does not do anything if there is no keyboard window. Bounds are relative to
   // the keyboard window.
   void SetHitTestBounds(const std::vector<gfx::Rect>& bounds_in_window);
+
+  // Sets the area of the keyboard window that should not move off screen. Any
+  // area outside of this can be moved off the user's screen. Note the bounds
+  // here are relative to the window's origin.
+  bool SetAreaToRemainOnScreen(const gfx::Rect& bounds_in_window);
 
   ContainerType GetActiveContainerType() const {
     return container_behavior_->GetType();
@@ -404,7 +409,7 @@ class KEYBOARD_EXPORT KeyboardUIController
   std::unique_ptr<ui::InputMethodKeyboardController>
       input_method_keyboard_controller_;
   KeyboardLayoutDelegate* layout_delegate_ = nullptr;
-  ScopedObserver<ui::InputMethod, ui::InputMethodObserver> ime_observer_;
+  ScopedObserver<ui::InputMethod, ui::InputMethodObserver> ime_observer_{this};
 
   // Container window that the keyboard window is a child of.
   aura::Window* parent_container_ = nullptr;
@@ -453,8 +458,8 @@ class KEYBOARD_EXPORT KeyboardUIController
   base::Time keyboard_load_time_start_;
 
   base::WeakPtrFactory<KeyboardUIController>
-      weak_factory_report_lingering_state_;
-  base::WeakPtrFactory<KeyboardUIController> weak_factory_will_hide_;
+      weak_factory_report_lingering_state_{this};
+  base::WeakPtrFactory<KeyboardUIController> weak_factory_will_hide_{this};
 
   DISALLOW_COPY_AND_ASSIGN(KeyboardUIController);
 };

@@ -10,7 +10,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -32,6 +32,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -429,7 +430,7 @@ class ContentScriptPolicyStartupTest : public ExtensionApiTest {
     // ExtensionManagementPolicyUpdater requires a single-threaded context to
     // call RunLoop::RunUntilIdle internally, and it isn't ready at this setup
     // moment.
-    base::test::ScopedTaskEnvironment env;
+    base::test::TaskEnvironment env;
     ExtensionManagementPolicyUpdater management_policy(&policy_provider_);
     management_policy.AddPolicyBlockedHost("*", "*://example.com");
   }
@@ -498,7 +499,30 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
 
 IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, ContentScriptBypassPageCSP) {
   ASSERT_TRUE(StartEmbeddedTestServer());
-  ASSERT_TRUE(RunExtensionTest("content_scripts/bypass_page_csp")) << message_;
+  extensions::ResultCatcher catcher;
+  ASSERT_TRUE(RunExtensionTest("content_scripts/bypass_page_csp"))
+      << catcher.message();
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+class ContentScriptApiTestWithTrustedDOMTypesEnabled
+    : public ContentScriptApiTest {
+ public:
+  ContentScriptApiTestWithTrustedDOMTypesEnabled() {
+    feature_list_.InitAndEnableFeature(features::kTrustedDOMTypes);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ContentScriptApiTestWithTrustedDOMTypesEnabled,
+                       ContentScriptBypassPageTrustedTypes) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  extensions::ResultCatcher catcher;
+  ASSERT_TRUE(RunExtensionTest("content_scripts/bypass_page_trusted_types"))
+      << catcher.message();
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
 // Test that when injecting a blocking content script, other scripts don't run

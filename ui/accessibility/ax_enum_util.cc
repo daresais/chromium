@@ -4,6 +4,8 @@
 
 #include "ui/accessibility/ax_enum_util.h"
 
+#include "ui/accessibility/ax_enums.mojom.h"
+
 namespace ui {
 
 const char* ToString(ax::mojom::Event event) {
@@ -116,6 +118,10 @@ const char* ToString(ax::mojom::Event event) {
       return "textChanged";
     case ax::mojom::Event::kTextSelectionChanged:
       return "textSelectionChanged";
+    case ax::mojom::Event::kTooltipClosed:
+      return "tooltipClosed";
+    case ax::mojom::Event::kTooltipOpened:
+      return "tooltipOpened";
     case ax::mojom::Event::kWindowActivated:
       return "windowActivated";
     case ax::mojom::Event::kWindowDeactivated:
@@ -240,6 +246,10 @@ ax::mojom::Event ParseEvent(const char* event) {
     return ax::mojom::Event::kTextChanged;
   if (0 == strcmp(event, "textSelectionChanged"))
     return ax::mojom::Event::kTextSelectionChanged;
+  if (0 == strcmp(event, "tooltipClosed"))
+    return ax::mojom::Event::kTooltipClosed;
+  if (0 == strcmp(event, "tooltipOpened"))
+    return ax::mojom::Event::kTooltipOpened;
   if (0 == strcmp(event, "windowActivated"))
     return ax::mojom::Event::kWindowActivated;
   if (0 == strcmp(event, "windowDeactivated"))
@@ -265,8 +275,6 @@ const char* ToString(ax::mojom::Role role) {
       return "alert";
     case ax::mojom::Role::kAnchor:
       return "anchor";
-    case ax::mojom::Role::kAnnotation:
-      return "annotation";
     case ax::mojom::Role::kApplication:
       return "application";
     case ax::mojom::Role::kArticle:
@@ -291,6 +299,8 @@ const char* ToString(ax::mojom::Role role) {
       return "checkBox";
     case ax::mojom::Role::kClient:
       return "client";
+    case ax::mojom::Role::kCode:
+      return "code";
     case ax::mojom::Role::kColorWell:
       return "colorWell";
     case ax::mojom::Role::kColumnHeader:
@@ -301,6 +311,10 @@ const char* ToString(ax::mojom::Role role) {
       return "comboBoxGrouping";
     case ax::mojom::Role::kComboBoxMenuButton:
       return "comboBoxMenuButton";
+    case ax::mojom::Role::kComment:
+      return "comment";
+    case ax::mojom::Role::kCommentSection:
+      return "commentSection";
     case ax::mojom::Role::kComplementary:
       return "complementary";
     case ax::mojom::Role::kContentDeletion:
@@ -413,6 +427,8 @@ const char* ToString(ax::mojom::Role role) {
       return "document";
     case ax::mojom::Role::kEmbeddedObject:
       return "embeddedObject";
+    case ax::mojom::Role::kEmphasis:
+      return "emphasis";
     case ax::mojom::Role::kFeed:
       return "feed";
     case ax::mojom::Role::kFigcaption:
@@ -421,6 +437,8 @@ const char* ToString(ax::mojom::Role role) {
       return "figure";
     case ax::mojom::Role::kFooter:
       return "footer";
+    case ax::mojom::Role::kFooterAsNonLandmark:
+      return "footerAsNonLandmark";
     case ax::mojom::Role::kForm:
       return "form";
     case ax::mojom::Role::kGenericContainer:
@@ -435,6 +453,10 @@ const char* ToString(ax::mojom::Role role) {
       return "grid";
     case ax::mojom::Role::kGroup:
       return "group";
+    case ax::mojom::Role::kHeader:
+      return "header";
+    case ax::mojom::Role::kHeaderAsNonLandmark:
+      return "headerAsNonLandmark";
     case ax::mojom::Role::kHeading:
       return "heading";
     case ax::mojom::Role::kIframe:
@@ -531,6 +553,8 @@ const char* ToString(ax::mojom::Role role) {
       return "radioGroup";
     case ax::mojom::Role::kRegion:
       return "region";
+    case ax::mojom::Role::kRevision:
+      return "revision";
     case ax::mojom::Role::kRootWebArea:
       return "rootWebArea";
     case ax::mojom::Role::kRowHeader:
@@ -539,6 +563,14 @@ const char* ToString(ax::mojom::Role role) {
       return "row";
     case ax::mojom::Role::kRuby:
       return "ruby";
+    case ax::mojom::Role::kRubyAnnotation:
+      return "rubyAnnotation";
+    case ax::mojom::Role::kSection:
+      return "section";
+    case ax::mojom::Role::kStrong:
+      return "strong";
+    case ax::mojom::Role::kSuggestion:
+      return "suggestion";
     case ax::mojom::Role::kSvgRoot:
       return "svgRoot";
     case ax::mojom::Role::kScrollBar:
@@ -623,8 +655,6 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kAlert;
   if (0 == strcmp(role, "anchor"))
     return ax::mojom::Role::kAnchor;
-  if (0 == strcmp(role, "annotation"))
-    return ax::mojom::Role::kAnnotation;
   if (0 == strcmp(role, "application"))
     return ax::mojom::Role::kApplication;
   if (0 == strcmp(role, "article"))
@@ -649,6 +679,8 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kCheckBox;
   if (0 == strcmp(role, "client"))
     return ax::mojom::Role::kClient;
+  if (0 == strcmp(role, "code"))
+    return ax::mojom::Role::kCode;
   if (0 == strcmp(role, "colorWell"))
     return ax::mojom::Role::kColorWell;
   if (0 == strcmp(role, "columnHeader"))
@@ -659,6 +691,10 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kComboBoxGrouping;
   if (0 == strcmp(role, "comboBoxMenuButton"))
     return ax::mojom::Role::kComboBoxMenuButton;
+  if (0 == strcmp(role, "comment"))
+    return ax::mojom::Role::kComment;
+  if (0 == strcmp(role, "commentSection"))
+    return ax::mojom::Role::kCommentSection;
   if (0 == strcmp(role, "complementary"))
     return ax::mojom::Role::kComplementary;
   if (0 == strcmp(role, "contentDeletion"))
@@ -771,6 +807,8 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kDocument;
   if (0 == strcmp(role, "embeddedObject"))
     return ax::mojom::Role::kEmbeddedObject;
+  if (0 == strcmp(role, "emphasis"))
+    return ax::mojom::Role::kEmphasis;
   if (0 == strcmp(role, "feed"))
     return ax::mojom::Role::kFeed;
   if (0 == strcmp(role, "figcaption"))
@@ -779,6 +817,8 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kFigure;
   if (0 == strcmp(role, "footer"))
     return ax::mojom::Role::kFooter;
+  if (0 == strcmp(role, "footerAsNonLandmark"))
+    return ax::mojom::Role::kFooterAsNonLandmark;
   if (0 == strcmp(role, "form"))
     return ax::mojom::Role::kForm;
   if (0 == strcmp(role, "genericContainer"))
@@ -795,6 +835,10 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kGroup;
   if (0 == strcmp(role, "heading"))
     return ax::mojom::Role::kHeading;
+  if (0 == strcmp(role, "header"))
+    return ax::mojom::Role::kHeader;
+  if (0 == strcmp(role, "headerAsNonLandmark"))
+    return ax::mojom::Role::kHeaderAsNonLandmark;
   if (0 == strcmp(role, "iframe"))
     return ax::mojom::Role::kIframe;
   if (0 == strcmp(role, "iframePresentational"))
@@ -889,6 +933,8 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kRadioGroup;
   if (0 == strcmp(role, "region"))
     return ax::mojom::Role::kRegion;
+  if (0 == strcmp(role, "revision"))
+    return ax::mojom::Role::kRevision;
   if (0 == strcmp(role, "rootWebArea"))
     return ax::mojom::Role::kRootWebArea;
   if (0 == strcmp(role, "rowHeader"))
@@ -897,8 +943,10 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kRow;
   if (0 == strcmp(role, "ruby"))
     return ax::mojom::Role::kRuby;
-  if (0 == strcmp(role, "svgRoot"))
-    return ax::mojom::Role::kSvgRoot;
+  if (0 == strcmp(role, "rubyAnnotation"))
+    return ax::mojom::Role::kRubyAnnotation;
+  if (0 == strcmp(role, "section"))
+    return ax::mojom::Role::kSection;
   if (0 == strcmp(role, "scrollBar"))
     return ax::mojom::Role::kScrollBar;
   if (0 == strcmp(role, "scrollView"))
@@ -919,8 +967,14 @@ ax::mojom::Role ParseRole(const char* role) {
     return ax::mojom::Role::kStaticText;
   if (0 == strcmp(role, "status"))
     return ax::mojom::Role::kStatus;
+  if (0 == strcmp(role, "suggestion"))
+    return ax::mojom::Role::kSuggestion;
+  if (0 == strcmp(role, "svgRoot"))
+    return ax::mojom::Role::kSvgRoot;
   if (0 == strcmp(role, "switch"))
     return ax::mojom::Role::kSwitch;
+  if (0 == strcmp(role, "strong"))
+    return ax::mojom::Role::kStrong;
   if (0 == strcmp(role, "tabList"))
     return ax::mojom::Role::kTabList;
   if (0 == strcmp(role, "tabPanel"))
@@ -1372,6 +1426,8 @@ const char* ToString(ax::mojom::StringAttribute string_attribute) {
       return "imageDataUrl";
     case ax::mojom::StringAttribute::kInnerHtml:
       return "innerHtml";
+    case ax::mojom::StringAttribute::kInputType:
+      return "inputType";
     case ax::mojom::StringAttribute::kKeyShortcuts:
       return "keyShortcuts";
     case ax::mojom::StringAttribute::kLanguage:
@@ -1430,6 +1486,8 @@ ax::mojom::StringAttribute ParseStringAttribute(const char* string_attribute) {
     return ax::mojom::StringAttribute::kImageDataUrl;
   if (0 == strcmp(string_attribute, "innerHtml"))
     return ax::mojom::StringAttribute::kInnerHtml;
+  if (0 == strcmp(string_attribute, "inputType"))
+    return ax::mojom::StringAttribute::kInputType;
   if (0 == strcmp(string_attribute, "keyShortcuts"))
     return ax::mojom::StringAttribute::kKeyShortcuts;
   if (0 == strcmp(string_attribute, "language"))
@@ -1779,6 +1837,8 @@ const char* ToString(ax::mojom::BoolAttribute bool_attribute) {
       return "supportsTextLocation";
     case ax::mojom::BoolAttribute::kIsLineBreakingObject:
       return "isLineBreakingObject";
+    case ax::mojom::BoolAttribute::kIsPageBreakingObject:
+      return "isPageBreakingObject";
   }
 
   return "";
@@ -1817,6 +1877,8 @@ ax::mojom::BoolAttribute ParseBoolAttribute(const char* bool_attribute) {
     return ax::mojom::BoolAttribute::kSupportsTextLocation;
   if (0 == strcmp(bool_attribute, "isLineBreakingObject"))
     return ax::mojom::BoolAttribute::kIsLineBreakingObject;
+  if (0 == strcmp(bool_attribute, "isPageBreakingObject"))
+    return ax::mojom::BoolAttribute::kIsPageBreakingObject;
   return ax::mojom::BoolAttribute::kNone;
 }
 
@@ -2473,6 +2535,8 @@ const char* ToString(ax::mojom::DescriptionFrom description_from) {
       return "contents";
     case ax::mojom::DescriptionFrom::kRelatedElement:
       return "relatedElement";
+    case ax::mojom::DescriptionFrom::kTitle:
+      return "title";
   }
 
   return "";
@@ -2489,6 +2553,8 @@ ax::mojom::DescriptionFrom ParseDescriptionFrom(const char* description_from) {
     return ax::mojom::DescriptionFrom::kContents;
   if (0 == strcmp(description_from, "relatedElement"))
     return ax::mojom::DescriptionFrom::kRelatedElement;
+  if (0 == strcmp(description_from, "title"))
+    return ax::mojom::DescriptionFrom::kTitle;
   return ax::mojom::DescriptionFrom::kNone;
 }
 

@@ -84,6 +84,7 @@ class ArcImeService : public KeyedService,
   void OnWindowPropertyChanged(aura::Window* window,
                                const void* key,
                                intptr_t old) override;
+  void OnWindowRemoved(aura::Window* removed_window) override;
 
   // Overridden from aura::client::FocusChangeObserver:
   void OnWindowFocused(aura::Window* gained_focus,
@@ -111,7 +112,7 @@ class ArcImeService : public KeyedService,
 
   // Overridden from ui::TextInputClient:
   void SetCompositionText(const ui::CompositionText& composition) override;
-  void ConfirmCompositionText() override;
+  void ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
   void InsertText(const base::string16& text) override;
   void InsertChar(const ui::KeyEvent& event) override;

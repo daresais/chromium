@@ -7,8 +7,18 @@
 
 namespace updater {
 
+// The updater specific app ID.
+extern const char kUpdaterAppId[];
+
+// Chrome's app ID.
+extern const char kChromeAppId[];
+
 // Command line switches.
 //
+
+// COM server.
+extern const char kComServerSwitch[];
+
 // Crash the program for testing purposes.
 extern const char kCrashMeSwitch[];
 
@@ -16,17 +26,30 @@ extern const char kCrashMeSwitch[];
 extern const char kCrashHandlerSwitch[];
 
 // Installs the updater.
-extern const char kInstall[];
+extern const char kInstallSwitch[];
 
 // Uninstalls the updater.
-extern const char kUninstall[];
+extern const char kUninstallSwitch[];
+
+// Updates all apps registered with the updater.
+extern const char kUpdateAppsSwitch[];
 
 // Runs in test mode. Currently, it exits right away.
 extern const char kTestSwitch[];
 
 // Disables throttling for the crash reported until the following bug is fixed:
 // https://bugs.chromium.org/p/crashpad/issues/detail?id=23
-extern const char kNoRateLimit[];
+extern const char kNoRateLimitSwitch[];
+
+// The handle of an event to signal when the initialization of the main process
+// is complete.
+extern const char kInitDoneNotifierSwitch[];
+
+// Enables logging.
+extern const char kEnableLoggingSwitch[];
+
+// Specifies the logging module filter.
+extern const char kLoggingModuleSwitch[];
 
 // URLs.
 //
@@ -37,7 +60,7 @@ extern const char kUpdaterJSONDefaultUrl[];
 extern const char kCrashUploadURL[];
 extern const char kCrashStagingUploadURL[];
 
-// Paths.
+// File system paths.
 //
 // The directory name where CRX apps get installed. This is provided for demo
 // purposes, since products installed by this updater will be installed in

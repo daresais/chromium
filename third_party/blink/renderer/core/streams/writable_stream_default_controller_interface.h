@@ -16,8 +16,7 @@ namespace blink {
 class Visitor;
 
 class CORE_EXPORT WritableStreamDefaultControllerInterface
-    : public GarbageCollectedFinalized<
-          WritableStreamDefaultControllerInterface> {
+    : public GarbageCollected<WritableStreamDefaultControllerInterface> {
  public:
   WritableStreamDefaultControllerInterface();
   virtual ~WritableStreamDefaultControllerInterface();
@@ -33,7 +32,7 @@ class CORE_EXPORT WritableStreamDefaultControllerInterface
   // Helper method
   template <typename ErrorType>
   void Error(ScriptState* script_state, ErrorType error) {
-    Error(script_state, ToV8(error, script_state).ToV8Value());
+    Error(script_state, ToV8(error, script_state));
   }
 
   virtual void Trace(Visitor*) {}

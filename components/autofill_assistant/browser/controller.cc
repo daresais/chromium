@@ -15,12 +15,14 @@
 #include "base/task/post_task.h"
 #include "base/time/tick_clock.h"
 #include "base/values.h"
+#include "components/autofill_assistant/browser/actions/collect_user_data_action.h"
+#include "components/autofill_assistant/browser/controller_observer.h"
 #include "components/autofill_assistant/browser/features.h"
 #include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/protocol_utils.h"
 #include "components/autofill_assistant/browser/service_impl.h"
 #include "components/autofill_assistant/browser/trigger_context.h"
-#include "components/autofill_assistant/browser/ui_controller.h"
+#include "components/autofill_assistant/browser/user_data.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -41,6 +43,65 @@ static constexpr int kAutostartInitialProgress = 5;
 // Parameter that allows setting the color of the overlay.
 static const char* const kOverlayColorParameterName = "OVERLAY_COLORS";
 
+// Returns true if the state requires a UI to be shown.
+//
+// Note that the UI might be shown in RUNNING state, even if it doesn't require
+// it.
+bool StateNeedsUI(AutofillAssistantState state) {
+  switch (state) {
+    case AutofillAssistantState::STARTING:
+    case AutofillAssistantState::PROMPT:
+    case AutofillAssistantState::AUTOSTART_FALLBACK_PROMPT:
+    case AutofillAssistantState::MODAL_DIALOG:
+      return true;
+
+    case AutofillAssistantState::INACTIVE:
+    case AutofillAssistantState::TRACKING:
+    case AutofillAssistantState::STOPPED:
+    case AutofillAssistantState::RUNNING:
+      return false;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+// Returns true if reaching that state signals the end of a flow.
+bool StateEndsFlow(AutofillAssistantState state) {
+  switch (state) {
+    case AutofillAssistantState::TRACKING:
+    case AutofillAssistantState::STOPPED:
+      return true;
+
+    case AutofillAssistantState::INACTIVE:
+    case AutofillAssistantState::STARTING:
+    case AutofillAssistantState::PROMPT:
+    case AutofillAssistantState::RUNNING:
+    case AutofillAssistantState::AUTOSTART_FALLBACK_PROMPT:
+    case AutofillAssistantState::MODAL_DIALOG:
+      return false;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+// Convenience method to set all fields of a |DateTimeProto|.
+void SetDateTimeProto(DateTimeProto* proto,
+                      int year,
+                      int month,
+                      int day,
+                      int hour,
+                      int minute,
+                      int second) {
+  proto->mutable_date()->set_year(year);
+  proto->mutable_date()->set_month(month);
+  proto->mutable_date()->set_day(day);
+  proto->mutable_time()->set_hour(hour);
+  proto->mutable_time()->set_minute(minute);
+  proto->mutable_time()->set_second(second);
+}
+
 }  // namespace
 
 Controller::Controller(content::WebContents* web_contents,
@@ -53,8 +114,7 @@ Controller::Controller(content::WebContents* web_contents,
       service_(service ? std::move(service)
                        : ServiceImpl::Create(web_contents->GetBrowserContext(),
                                              client_)),
-      navigating_to_new_document_(web_contents->IsWaitingForResponse()),
-      weak_ptr_factory_(this) {}
+      navigating_to_new_document_(web_contents->IsWaitingForResponse()) {}
 
 Controller::~Controller() = default;
 
@@ -76,10 +136,6 @@ const GURL& Controller::GetDeeplinkURL() {
 
 Service* Controller::GetService() {
   return service_.get();
-}
-
-UiController* Controller::GetUiController() {
-  return client_->GetUiController();
 }
 
 WebController* Controller::GetWebController() {
@@ -106,8 +162,20 @@ autofill::PersonalDataManager* Controller::GetPersonalDataManager() {
   return client_->GetPersonalDataManager();
 }
 
+WebsiteLoginFetcher* Controller::GetWebsiteLoginFetcher() {
+  return client_->GetWebsiteLoginFetcher();
+}
+
 content::WebContents* Controller::GetWebContents() {
   return web_contents();
+}
+
+std::string Controller::GetAccountEmailAddress() {
+  return client_->GetAccountEmailAddress();
+}
+
+std::string Controller::GetLocale() {
+  return client_->GetLocale();
 }
 
 void Controller::SetTouchableElementArea(const ElementAreaProto& area) {
@@ -116,7 +184,9 @@ void Controller::SetTouchableElementArea(const ElementAreaProto& area) {
 
 void Controller::SetStatusMessage(const std::string& message) {
   status_message_ = message;
-  GetUiController()->OnStatusMessageChanged(message);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnStatusMessageChanged(message);
+  }
 }
 
 std::string Controller::GetStatusMessage() const {
@@ -125,7 +195,9 @@ std::string Controller::GetStatusMessage() const {
 
 void Controller::SetBubbleMessage(const std::string& message) {
   bubble_message_ = message;
-  GetUiController()->OnBubbleMessageChanged(message);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnBubbleMessageChanged(message);
+  }
 }
 
 std::string Controller::GetBubbleMessage() const {
@@ -134,7 +206,9 @@ std::string Controller::GetBubbleMessage() const {
 
 void Controller::SetDetails(std::unique_ptr<Details> details) {
   details_ = std::move(details);
-  GetUiController()->OnDetailsChanged(details_.get());
+  for (ControllerObserver& observer : observers_) {
+    observer.OnDetailsChanged(details_.get());
+  }
 }
 
 const Details* Controller::GetDetails() const {
@@ -150,12 +224,16 @@ void Controller::SetInfoBox(const InfoBox& info_box) {
     info_box_ = std::make_unique<InfoBox>();
   }
   *info_box_ = info_box;
-  GetUiController()->OnInfoBoxChanged(info_box_.get());
+  for (ControllerObserver& observer : observers_) {
+    observer.OnInfoBoxChanged(info_box_.get());
+  }
 }
 
 void Controller::ClearInfoBox() {
   info_box_.reset();
-  GetUiController()->OnInfoBoxChanged(nullptr);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnInfoBoxChanged(nullptr);
+  }
 }
 
 const InfoBox* Controller::GetInfoBox() const {
@@ -168,7 +246,9 @@ void Controller::SetProgress(int progress) {
     return;
 
   progress_ = progress;
-  GetUiController()->OnProgressChanged(progress);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnProgressChanged(progress);
+  }
 }
 
 void Controller::SetProgressVisible(bool visible) {
@@ -176,7 +256,9 @@ void Controller::SetProgressVisible(bool visible) {
     return;
 
   progress_visible_ = visible;
-  GetUiController()->OnProgressVisibilityChanged(visible);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnProgressVisibilityChanged(visible);
+  }
 }
 
 bool Controller::GetProgressVisible() const {
@@ -194,7 +276,9 @@ void Controller::SetUserActions(
     SetDefaultChipType(user_actions.get());
   }
   user_actions_ = std::move(user_actions);
-  GetUiController()->OnUserActionsChanged(GetUserActions());
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserActionsChanged(GetUserActions());
+  }
 }
 
 bool Controller::IsNavigatingToNewDocument() {
@@ -203,6 +287,14 @@ bool Controller::IsNavigatingToNewDocument() {
 
 bool Controller::HasNavigationError() {
   return navigation_error_;
+}
+
+void Controller::RequireUI() {
+  if (needs_ui_)
+    return;
+
+  needs_ui_ = true;
+  client_->AttachUI();
 }
 
 void Controller::AddListener(ScriptExecutorDelegate::Listener* listener) {
@@ -237,12 +329,14 @@ bool Controller::PerformUserActionWithContext(
   return true;
 }
 
-void Controller::SetResizeViewport(bool resize_viewport) {
-  if (resize_viewport == resize_viewport_)
+void Controller::SetViewportMode(ViewportMode mode) {
+  if (mode == viewport_mode_)
     return;
 
-  resize_viewport_ = resize_viewport;
-  GetUiController()->OnResizeViewportChanged(resize_viewport);
+  viewport_mode_ = mode;
+  for (ControllerObserver& observer : observers_) {
+    observer.OnViewportModeChanged(mode);
+  }
 }
 
 void Controller::SetPeekMode(ConfigureBottomSheetProto::PeekMode peek_mode) {
@@ -250,7 +344,9 @@ void Controller::SetPeekMode(ConfigureBottomSheetProto::PeekMode peek_mode) {
     return;
 
   peek_mode_ = peek_mode;
-  GetUiController()->OnPeekModeChanged(peek_mode);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnPeekModeChanged(peek_mode);
+  }
 }
 
 const FormProto* Controller::GetForm() const {
@@ -259,13 +355,17 @@ const FormProto* Controller::GetForm() const {
 
 bool Controller::SetForm(
     std::unique_ptr<FormProto> form,
-    base::RepeatingCallback<void(const FormProto::Result*)> callback) {
+    base::RepeatingCallback<void(const FormProto::Result*)> changed_callback,
+    base::OnceCallback<void(const ClientStatus&)> cancel_callback) {
   form_.reset();
   form_result_.reset();
-  form_callback_ = base::DoNothing();
+  form_changed_callback_ = base::DoNothing();
+  form_cancel_callback_ = base::DoNothing::Once<const ClientStatus&>();
 
   if (!form) {
-    GetUiController()->OnFormChanged(nullptr);
+    for (ControllerObserver& observer : observers_) {
+      observer.OnFormChanged(nullptr);
+    }
     return true;
   }
 
@@ -310,12 +410,15 @@ bool Controller::SetForm(
   // Form is valid.
   form_ = std::move(form);
   form_result_ = std::move(form_result);
-  form_callback_ = callback;
+  form_changed_callback_ = changed_callback;
+  form_cancel_callback_ = std::move(cancel_callback);
 
   // Call the callback with initial result.
-  form_callback_.Run(form_result_.get());
+  form_changed_callback_.Run(form_result_.get());
 
-  GetUiController()->OnFormChanged(form_.get());
+  for (ControllerObserver& observer : observers_) {
+    observer.OnFormChanged(form_.get());
+  }
   return true;
 }
 
@@ -337,7 +440,7 @@ void Controller::SetCounterValue(int input_index,
   }
 
   input_result->mutable_counter()->set_values(counter_index, value);
-  form_callback_.Run(form_result_.get());
+  form_changed_callback_.Run(form_result_.get());
 }
 
 void Controller::SetChoiceSelected(int input_index,
@@ -358,11 +461,19 @@ void Controller::SetChoiceSelected(int input_index,
   }
 
   input_result->mutable_selection()->set_selected(choice_index, selected);
-  form_callback_.Run(form_result_.get());
+  form_changed_callback_.Run(form_result_.get());
 }
 
-bool Controller::GetResizeViewport() {
-  return resize_viewport_;
+void Controller::AddObserver(ControllerObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void Controller::RemoveObserver(const ControllerObserver* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+ViewportMode Controller::GetViewportMode() {
+  return viewport_mode_;
 }
 
 ConfigureBottomSheetProto::PeekMode Controller::GetPeekMode() {
@@ -372,10 +483,14 @@ ConfigureBottomSheetProto::PeekMode Controller::GetPeekMode() {
 void Controller::SetOverlayColors(std::unique_ptr<OverlayColors> colors) {
   overlay_colors_ = std::move(colors);
   if (overlay_colors_) {
-    GetUiController()->OnOverlayColorsChanged(*overlay_colors_);
+    for (ControllerObserver& observer : observers_) {
+      observer.OnOverlayColorsChanged(*overlay_colors_);
+    }
   } else {
     OverlayColors default_colors;
-    GetUiController()->OnOverlayColorsChanged(default_colors);
+    for (ControllerObserver& observer : observers_) {
+      observer.OnOverlayColorsChanged(default_colors);
+    }
   }
 }
 
@@ -383,6 +498,10 @@ void Controller::GetOverlayColors(OverlayColors* colors) const {
   if (!overlay_colors_)
     return;
   *colors = *overlay_colors_;
+}
+
+const ClientSettings& Controller::GetClientSettings() const {
+  return settings_;
 }
 
 void Controller::ReportNavigationStateChanged() {
@@ -399,7 +518,8 @@ void Controller::EnterStoppedState() {
   ClearInfoBox();
   SetDetails(nullptr);
   SetUserActions(nullptr);
-  SetPaymentRequestOptions(nullptr);
+  SetCollectUserDataOptions(nullptr, nullptr);
+  SetForm(nullptr, base::DoNothing(), base::DoNothing());
   EnterState(AutofillAssistantState::STOPPED);
 }
 
@@ -414,13 +534,17 @@ void Controller::EnterState(AutofillAssistantState state) {
   DCHECK(state_ != AutofillAssistantState::STOPPED ||
          (state == AutofillAssistantState::TRACKING && tracking_));
 
-  bool old_needs_ui = NeedsUI();
   state_ = state;
 
-  GetUiController()->OnStateChanged(state);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnStateChanged(state);
+  }
 
-  if (!old_needs_ui && NeedsUI())
-    client_->AttachUI();
+  if (!needs_ui_ && StateNeedsUI(state)) {
+    RequireUI();
+  } else if (needs_ui_ && StateEndsFlow(state)) {
+    needs_ui_ = false;
+  }
 
   if (ShouldCheckScripts()) {
     GetOrCheckScripts();
@@ -476,11 +600,10 @@ void Controller::StartPeriodicScriptChecks() {
   if (periodic_script_check_scheduled_)
     return;
   periodic_script_check_scheduled_ = true;
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&Controller::OnPeriodicScriptCheck,
-                     weak_ptr_factory_.GetWeakPtr()),
-      settings_.periodic_script_check_interval);
+  base::PostDelayedTask(FROM_HERE, {content::BrowserThread::UI},
+                        base::BindOnce(&Controller::OnPeriodicScriptCheck,
+                                       weak_ptr_factory_.GetWeakPtr()),
+                        settings_.periodic_script_check_interval);
 }
 
 void Controller::StopPeriodicScriptChecks() {
@@ -504,16 +627,16 @@ void Controller::OnPeriodicScriptCheck() {
     std::string script_path = autostart_timeout_script_path_;
     autostart_timeout_script_path_.clear();
     periodic_script_check_scheduled_ = false;
-    ExecuteScript(script_path, TriggerContext::CreateEmpty(), state_);
+    ExecuteScript(script_path, /* start_message= */ "", /* needs_ui= */ false,
+                  TriggerContext::CreateEmpty(), state_);
     return;
   }
 
   script_tracker()->CheckScripts();
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&Controller::OnPeriodicScriptCheck,
-                     weak_ptr_factory_.GetWeakPtr()),
-      settings_.periodic_script_check_interval);
+  base::PostDelayedTask(FROM_HERE, {content::BrowserThread::UI},
+                        base::BindOnce(&Controller::OnPeriodicScriptCheck,
+                                       weak_ptr_factory_.GetWeakPtr()),
+                        settings_.periodic_script_check_interval);
 }
 
 void Controller::OnGetScripts(const GURL& url,
@@ -542,8 +665,12 @@ void Controller::OnGetScripts(const GURL& url,
                  Metrics::DropOutReason::GET_SCRIPTS_UNPARSABLE);
     return;
   }
-  if (response_proto.has_client_settings())
+  if (response_proto.has_client_settings()) {
     settings_.UpdateFromProto(response_proto.client_settings());
+    for (ControllerObserver& observer : observers_) {
+      observer.OnClientSettingsChanged(settings_);
+    }
+  }
 
   std::vector<std::unique_ptr<Script>> scripts;
   for (const auto& script_proto : response_proto.scripts()) {
@@ -588,10 +715,18 @@ void Controller::OnGetScripts(const GURL& url,
 }
 
 void Controller::ExecuteScript(const std::string& script_path,
+                               const std::string& start_message,
+                               bool needs_ui,
                                std::unique_ptr<TriggerContext> context,
                                AutofillAssistantState end_state) {
   DCHECK(!script_tracker()->running());
+
+  if (!start_message.empty())
+    SetStatusMessage(start_message);
+
   EnterState(AutofillAssistantState::RUNNING);
+  if (needs_ui)
+    RequireUI();
 
   touchable_element_area()->Clear();
 
@@ -642,7 +777,9 @@ void Controller::OnScriptExecuted(const std::string& script_path,
       break;
 
     case ScriptExecutor::CLOSE_CUSTOM_TAB:
-      GetUiController()->CloseCustomTab();
+      for (ControllerObserver& observer : observers_) {
+        observer.CloseCustomTab();
+      }
       if (!tracking_) {
         client_->Shutdown(Metrics::DropOutReason::CUSTOM_TAB_CLOSED);
         return;
@@ -675,20 +812,30 @@ bool Controller::MaybeAutostartScript(
   if (!allow_autostart())
     return false;
 
-  int autostart_count = 0;
-  std::string autostart_path;
-  for (const auto& script : runnable_scripts) {
-    if (script.autostart) {
-      autostart_count++;
-      autostart_path = script.path;
+  int autostart_index = -1;
+  for (size_t i = 0; i < runnable_scripts.size(); i++) {
+    if (runnable_scripts[i].autostart) {
+      if (autostart_index != -1) {
+        // To many autostartable scripts.
+        return false;
+      }
+      autostart_index = i;
     }
   }
-  if (autostart_count == 1) {
-    ExecuteScript(autostart_path, TriggerContext::CreateEmpty(),
-                  AutofillAssistantState::PROMPT);
-    return true;
-  }
-  return false;
+
+  if (autostart_index == -1)
+    return false;
+
+  // Copying the strings is necessary, as ExecuteScript will invalidate
+  // runnable_scripts by calling ScriptTracker::ClearRunnableScripts.
+  //
+  // TODO(b/138367403): Cleanup this dangerous issue.
+  std::string path = runnable_scripts[autostart_index].path;
+  std::string start_message = runnable_scripts[autostart_index].start_message;
+  bool needs_ui = runnable_scripts[autostart_index].needs_ui;
+  ExecuteScript(path, start_message, needs_ui, TriggerContext::CreateEmpty(),
+                AutofillAssistantState::PROMPT);
+  return true;
 }
 
 void Controller::InitFromParameters() {
@@ -735,17 +882,15 @@ void Controller::Track(std::unique_ptr<TriggerContext> trigger_context,
   }
 }
 
-bool Controller::NeedsUI() const {
-  return state_ != AutofillAssistantState::INACTIVE &&
-         state_ != AutofillAssistantState::TRACKING &&
-         state_ != AutofillAssistantState::STOPPED;
+bool Controller::HasRunFirstCheck() const {
+  return tracking_ && has_run_first_check_;
 }
 
-void Controller::Start(const GURL& deeplink_url,
+bool Controller::Start(const GURL& deeplink_url,
                        std::unique_ptr<TriggerContext> trigger_context) {
   if (state_ != AutofillAssistantState::INACTIVE &&
       state_ != AutofillAssistantState::TRACKING)
-    return;
+    return false;
 
   trigger_context_ = std::move(trigger_context);
   InitFromParameters();
@@ -759,16 +904,17 @@ void Controller::Start(const GURL& deeplink_url,
       IDS_AUTOFILL_ASSISTANT_LOADING, base::UTF8ToUTF16(deeplink_url_.host())));
   SetProgress(kAutostartInitialProgress);
   EnterState(AutofillAssistantState::STARTING);
+  return true;
 }
 
 AutofillAssistantState Controller::GetState() {
   return state_;
 }
 
-void Controller::OnScriptSelected(const std::string& script_path,
+void Controller::OnScriptSelected(const ScriptHandle& handle,
                                   std::unique_ptr<TriggerContext> context) {
-  DCHECK(!script_path.empty());
-  ExecuteScript(script_path, std::move(context),
+  ExecuteScript(handle.path, handle.start_message, handle.needs_ui,
+                std::move(context),
                 state_ == AutofillAssistantState::TRACKING
                     ? AutofillAssistantState::TRACKING
                     : AutofillAssistantState::PROMPT);
@@ -808,126 +954,212 @@ std::string Controller::GetDebugContext() {
   return output_js;
 }
 
-const PaymentRequestOptions* Controller::GetPaymentRequestOptions() const {
-  return payment_request_options_.get();
+const CollectUserDataOptions* Controller::GetCollectUserDataOptions() const {
+  return collect_user_data_options_.get();
 }
 
-const PaymentInformation* Controller::GetPaymentRequestInformation() const {
-  return payment_request_info_.get();
+const UserData* Controller::GetUserData() const {
+  return user_data_.get();
 }
 
-void Controller::OnPaymentRequestContinueButtonClicked() {
-  if (!payment_request_options_ || !payment_request_info_)
+void Controller::OnCollectUserDataContinueButtonClicked() {
+  if (!collect_user_data_options_ || !user_data_)
     return;
 
-  auto callback = std::move(payment_request_options_->callback);
-  auto payment_request_info = std::move(payment_request_info_);
+  auto callback = std::move(collect_user_data_options_->confirm_callback);
+  auto user_data = std::move(user_data_);
 
   // TODO(crbug.com/806868): succeed is currently always true, but we might want
-  // to set it to false and propagate the result to GetPaymentInformationAction
+  // to set it to false and propagate the result to CollectUserDataAction
   // when the user clicks "Cancel" during that action.
-  payment_request_info->succeed = true;
+  user_data->succeed = true;
 
-  SetPaymentRequestOptions(nullptr);
-  std::move(callback).Run(std::move(payment_request_info));
+  SetCollectUserDataOptions(nullptr, nullptr);
+  std::move(callback).Run(std::move(user_data));
+}
+
+void Controller::OnCollectUserDataAdditionalActionTriggered(int index) {
+  if (!collect_user_data_options_)
+    return;
+
+  auto callback =
+      std::move(collect_user_data_options_->additional_actions_callback);
+  SetCollectUserDataOptions(nullptr, nullptr);
+  std::move(callback).Run(index);
+}
+
+void Controller::OnTermsAndConditionsLinkClicked(int link) {
+  if (!user_data_)
+    return;
+
+  auto callback = std::move(collect_user_data_options_->terms_link_callback);
+  SetCollectUserDataOptions(nullptr, nullptr);
+  std::move(callback).Run(link);
+}
+
+void Controller::OnFormActionLinkClicked(int link) {
+  if (form_cancel_callback_ && form_result_ != nullptr) {
+    form_result_->set_link(link);
+    form_changed_callback_.Run(form_result_.get());
+    std::move(form_cancel_callback_).Run(ClientStatus(ACTION_APPLIED));
+  }
+}
+
+void Controller::SetDateTimeRangeStart(int year,
+                                       int month,
+                                       int day,
+                                       int hour,
+                                       int minute,
+                                       int second) {
+  if (!user_data_)
+    return;
+
+  SetDateTimeProto(&user_data_->date_time_range_start, year, month, day, hour,
+                   minute, second);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::DATE_TIME_RANGE_START);
+  }
+  UpdateCollectUserDataActions();
+}
+
+void Controller::SetDateTimeRangeEnd(int year,
+                                     int month,
+                                     int day,
+                                     int hour,
+                                     int minute,
+                                     int second) {
+  if (!user_data_)
+    return;
+
+  SetDateTimeProto(&user_data_->date_time_range_end, year, month, day, hour,
+                   minute, second);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::DATE_TIME_RANGE_END);
+  }
+  UpdateCollectUserDataActions();
+}
+
+void Controller::SetAdditionalValue(const std::string& client_memory_key,
+                                    const std::string& value) {
+  if (!user_data_)
+    return;
+  auto it = user_data_->additional_values_to_store.find(client_memory_key);
+  if (it == user_data_->additional_values_to_store.end()) {
+    NOTREACHED() << client_memory_key << " not found";
+    return;
+  }
+  it->second.assign(value);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::ADDITIONAL_VALUES);
+  }
+  // It is currently not necessary to call |UpdateCollectUserDataActions|
+  // because all additional values are optional.
 }
 
 void Controller::SetShippingAddress(
     std::unique_ptr<autofill::AutofillProfile> address) {
-  if (!payment_request_info_)
+  if (!user_data_)
     return;
 
-  payment_request_info_->shipping_address = std::move(address);
-  GetUiController()->OnPaymentRequestInformationChanged(
-      payment_request_info_.get());
-  UpdatePaymentRequestActions();
+  user_data_->shipping_address = std::move(address);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::SHIPPING_ADDRESS);
+  }
+  UpdateCollectUserDataActions();
 }
 
-void Controller::SetBillingAddress(
-    std::unique_ptr<autofill::AutofillProfile> address) {
-  if (!payment_request_info_)
+void Controller::SetContactInfo(
+    std::unique_ptr<autofill::AutofillProfile> profile) {
+  if (!user_data_)
     return;
 
-  payment_request_info_->billing_address = std::move(address);
-  GetUiController()->OnPaymentRequestInformationChanged(
-      payment_request_info_.get());
-  UpdatePaymentRequestActions();
+  user_data_->contact_profile = std::move(profile);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::CONTACT_PROFILE);
+  }
+  UpdateCollectUserDataActions();
 }
 
-void Controller::SetContactInfo(std::string name,
-                                std::string phone,
-                                std::string email) {
-  if (!payment_request_info_)
+void Controller::SetCreditCard(
+    std::unique_ptr<autofill::CreditCard> card,
+    std::unique_ptr<autofill::AutofillProfile> billing_profile) {
+  if (!user_data_)
     return;
 
-  payment_request_info_->payer_name = name;
-  payment_request_info_->payer_phone = phone;
-  payment_request_info_->payer_email = email;
-  GetUiController()->OnPaymentRequestInformationChanged(
-      payment_request_info_.get());
-  UpdatePaymentRequestActions();
-}
-
-void Controller::SetCreditCard(std::unique_ptr<autofill::CreditCard> card) {
-  if (!payment_request_info_)
-    return;
-
-  payment_request_info_->card = std::move(card);
-  GetUiController()->OnPaymentRequestInformationChanged(
-      payment_request_info_.get());
-  UpdatePaymentRequestActions();
+  user_data_->billing_address = std::move(billing_profile);
+  user_data_->card = std::move(card);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(), UserData::FieldChange::CARD);
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::BILLING_ADDRESS);
+  }
+  UpdateCollectUserDataActions();
 }
 
 void Controller::SetTermsAndConditions(
     TermsAndConditionsState terms_and_conditions) {
-  if (!payment_request_info_)
+  if (!user_data_)
     return;
 
-  payment_request_info_->terms_and_conditions = terms_and_conditions;
-  UpdatePaymentRequestActions();
-  GetUiController()->OnPaymentRequestInformationChanged(
-      payment_request_info_.get());
+  user_data_->terms_and_conditions = terms_and_conditions;
+  UpdateCollectUserDataActions();
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::TERMS_AND_CONDITIONS);
+  }
 }
 
-void Controller::UpdatePaymentRequestActions() {
+void Controller::SetLoginOption(std::string identifier) {
+  if (!user_data_ || !collect_user_data_options_)
+    return;
+
+  user_data_->login_choice_identifier.assign(identifier);
+  UpdateCollectUserDataActions();
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(),
+                               UserData::FieldChange::LOGIN_CHOICE);
+  }
+}
+
+void Controller::UpdateCollectUserDataActions() {
   // TODO(crbug.com/806868): This method uses #SetUserActions(), which means
   // that updating the PR action buttons will also clear the suggestions. We
   // should update the action buttons only if there are use cases of PR +
   // suggestions.
-  if (!payment_request_options_ || !payment_request_info_) {
+  if (!collect_user_data_options_ || !user_data_) {
+    SetUserActions(nullptr);
     return;
   }
 
-  bool contact_info_ok = (!payment_request_options_->request_payer_name ||
-                          !payment_request_info_->payer_name.empty()) &&
-                         (!payment_request_options_->request_payer_email ||
-                          !payment_request_info_->payer_email.empty()) &&
-                         (!payment_request_options_->request_payer_phone ||
-                          !payment_request_info_->payer_phone.empty());
+  bool confirm_button_enabled = CollectUserDataAction::IsUserDataComplete(
+      *user_data_, *collect_user_data_options_);
 
-  bool shipping_address_ok = !payment_request_options_->request_shipping ||
-                             payment_request_info_->shipping_address;
-
-  bool payment_method_ok = !payment_request_options_->request_payment_method ||
-                           payment_request_info_->card;
-
-  bool terms_ok = payment_request_info_->terms_and_conditions != NOT_SELECTED ||
-                  !payment_request_options_->request_terms_and_conditions;
-
-  bool confirm_button_enabled =
-      contact_info_ok && shipping_address_ok && payment_method_ok && terms_ok;
-
-  UserAction confirm(payment_request_options_->confirm_chip,
-                     payment_request_options_->confirm_direct_action);
+  UserAction confirm(collect_user_data_options_->confirm_action);
   confirm.SetEnabled(confirm_button_enabled);
   if (confirm_button_enabled) {
     confirm.SetCallback(
-        base::BindOnce(&Controller::OnPaymentRequestContinueButtonClicked,
+        base::BindOnce(&Controller::OnCollectUserDataContinueButtonClicked,
                        weak_ptr_factory_.GetWeakPtr()));
   }
 
   auto user_actions = std::make_unique<std::vector<UserAction>>();
   user_actions->emplace_back(std::move(confirm));
+
+  // Add additional actions.
+  for (size_t i = 0; i < collect_user_data_options_->additional_actions.size();
+       ++i) {
+    auto action = collect_user_data_options_->additional_actions[i];
+    user_actions->push_back({action.chip(), action.direct_action()});
+    user_actions->back().SetCallback(
+        base::BindOnce(&Controller::OnCollectUserDataAdditionalActionTriggered,
+                       weak_ptr_factory_.GetWeakPtr(), i));
+  }
+
   SetUserActions(std::move(user_actions));
 }
 
@@ -951,6 +1183,7 @@ void Controller::OnScriptError(const std::string& error_message,
   if (state_ == AutofillAssistantState::STOPPED)
     return;
 
+  RequireUI();
   SetStatusMessage(error_message);
   EnterStoppedState();
 
@@ -992,6 +1225,7 @@ void Controller::PerformDelayedShutdownIfNecessary() {
   if (delayed_shutdown_reason_ && script_domain_ != GetCurrentURL().host()) {
     Metrics::DropOutReason reason = delayed_shutdown_reason_.value();
     delayed_shutdown_reason_ = base::nullopt;
+    tracking_ = false;
     client_->Shutdown(reason);
   }
 }
@@ -1077,9 +1311,8 @@ void Controller::OnRunnableScriptsChanged(
     if (!user_action.has_triggers())
       continue;
 
-    user_action.SetCallback(base::BindOnce(&Controller::OnScriptSelected,
-                                           weak_ptr_factory_.GetWeakPtr(),
-                                           script.path));
+    user_action.SetCallback(base::BindOnce(
+        &Controller::OnScriptSelected, weak_ptr_factory_.GetWeakPtr(), script));
     user_actions->emplace_back(std::move(user_action));
   }
 
@@ -1192,31 +1425,44 @@ void Controller::OnTouchableAreaChanged(
     const RectF& visual_viewport,
     const std::vector<RectF>& touchable_areas,
     const std::vector<RectF>& restricted_areas) {
-  GetUiController()->OnTouchableAreaChanged(visual_viewport, touchable_areas,
-                                            restricted_areas);
+  for (ControllerObserver& observer : observers_) {
+    observer.OnTouchableAreaChanged(visual_viewport, touchable_areas,
+                                    restricted_areas);
+  }
 }
 
-void Controller::SetPaymentRequestOptions(
-    std::unique_ptr<PaymentRequestOptions> options) {
-  DCHECK(!options || options->callback);
+void Controller::SetCollectUserDataOptions(
+    std::unique_ptr<CollectUserDataOptions> options,
+    std::unique_ptr<UserData> information) {
+  DCHECK(!options ||
+         (options->confirm_callback && options->additional_actions_callback &&
+          options->terms_link_callback));
 
-  if (payment_request_options_ == nullptr && options == nullptr)
+  if (collect_user_data_options_ == nullptr && options == nullptr)
     return;
 
-  if (options) {
-    payment_request_info_ = std::make_unique<PaymentInformation>();
-
-    // TODO(crbug.com/806868): set initial state according to proto.
-    payment_request_info_->terms_and_conditions =
-        options->initial_terms_and_conditions;
+  collect_user_data_options_ = std::move(options);
+  user_data_ = std::move(information);
+  UpdateCollectUserDataActions();
+  for (ControllerObserver& observer : observers_) {
+    observer.OnCollectUserDataOptionsChanged(collect_user_data_options_.get());
+    observer.OnUserDataChanged(user_data_.get(), UserData::FieldChange::ALL);
   }
+}
 
-  payment_request_options_ = std::move(options);
-  UpdatePaymentRequestActions();
-  GetUiController()->OnPaymentRequestOptionsChanged(
-      payment_request_options_.get());
-  GetUiController()->OnPaymentRequestInformationChanged(
-      payment_request_info_.get());
+void Controller::WriteUserData(
+    base::OnceCallback<void(const CollectUserDataOptions*,
+                            UserData*,
+                            UserData::FieldChange*)> write_callback) {
+  UserData::FieldChange field_change = UserData::FieldChange::NONE;
+  std::move(write_callback)
+      .Run(collect_user_data_options_.get(), user_data_.get(), &field_change);
+  if (field_change == UserData::FieldChange::NONE) {
+    return;
+  }
+  for (ControllerObserver& observer : observers_) {
+    observer.OnUserDataChanged(user_data_.get(), field_change);
+  }
 }
 
 ElementArea* Controller::touchable_element_area() {

@@ -59,10 +59,10 @@
 #include "ios/chrome/browser/snapshots/snapshots_util.h"
 #include "ios/chrome/browser/webdata_services/web_data_service_factory.h"
 #include "ios/net/http_cache_helper.h"
+#import "ios/web/common/web_view_creation_util.h"
 #import "ios/web/public/browsing_data/browsing_data_removing_util.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_view_creation_util.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider.h"
 #include "net/base/net_errors.h"
 #include "net/cookies/cookie_store.h"
@@ -293,7 +293,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
 
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_COOKIES)) {
     base::RecordAction(base::UserMetricsAction("ClearBrowsingData_Cookies"));
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, task_traits,
         base::BindOnce(
             &ClearCookies, context_getter_,
@@ -336,7 +336,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
     IOSChromeIOThread* ios_chrome_io_thread =
         GetApplicationContext()->GetIOSChromeIOThread();
     if (ios_chrome_io_thread) {
-      base::PostTaskWithTraitsAndReply(
+      base::PostTaskAndReply(
           FROM_HERE, task_traits,
           base::BindOnce(&IOSChromeIOThread::ClearHostCache,
                          base::Unretained(ios_chrome_io_thread)),
@@ -451,7 +451,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_CACHE)) {
     base::RecordAction(base::UserMetricsAction("ClearBrowsingData_Cache"));
     ClearHttpCache(context_getter_,
-                   base::CreateSingleThreadTaskRunnerWithTraits(task_traits),
+                   base::CreateSingleThreadTaskRunner(task_traits),
                    delete_begin, delete_end,
                    base::BindOnce(&NetCompletionCallbackAdapter,
                                   CreatePendingTaskCompletionClosure()));

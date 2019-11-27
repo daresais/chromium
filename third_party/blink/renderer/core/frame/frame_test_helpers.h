@@ -39,11 +39,12 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "cc/trees/layer_tree_host.h"
 #include "content/renderer/compositor/layer_tree_view.h"
 #include "content/test/stub_layer_tree_view_delegate.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
-#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/web_fake_thread_scheduler.h"
 #include "third_party/blink/public/platform/web_mouse_event.h"
@@ -58,7 +59,7 @@
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
-#include "third_party/blink/renderer/core/testing/use_mock_scrollbar_settings.h"
+#include "third_party/blink/renderer/core/testing/scoped_mock_overlay_scrollbars.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -210,13 +211,11 @@ class TestWebWidgetClient : public WebWidgetClient {
   explicit TestWebWidgetClient(content::LayerTreeViewDelegate* = nullptr);
   ~TestWebWidgetClient() override = default;
 
-  // WebWidgetClient:
+  // WebWidgetClient implementation.
   void ScheduleAnimation() override { animation_scheduled_ = true; }
   void SetRootLayer(scoped_refptr<cc::Layer> layer) override;
-  void RegisterViewportLayers(const cc::ViewportLayers& layOAers) override;
   void RegisterSelection(const cc::LayerSelection& selection) override;
   void SetBackgroundColor(SkColor color) override;
-  void SetAllowGpuRasterization(bool allow) override;
   void SetPageScaleStateAndLimits(float page_scale_factor,
                                   bool is_pinch_gesture_active,
                                   float minimum,
@@ -226,6 +225,7 @@ class TestWebWidgetClient : public WebWidgetClient {
                                 ScrollGranularity granularity,
                                 cc::ElementId scrollable_area_element_id,
                                 WebInputEvent::Type injected_type) override;
+  void SetHaveScrollEventHandlers(bool) override;
   void SetEventListenerProperties(
       cc::EventListenerClass event_class,
       cc::EventListenerProperties properties) override;
@@ -235,8 +235,14 @@ class TestWebWidgetClient : public WebWidgetClient {
       override;
   void StartDeferringCommits(base::TimeDelta timeout) override;
   void StopDeferringCommits(cc::PaintHoldingCommitTrigger) override;
+  void DidMeaningfulLayout(WebMeaningfulLayout) override;
+  void SetBrowserControlsShownRatio(float top_ratio,
+                                    float bottom_ratio) override;
+  void SetBrowserControlsHeight(float top_height,
+                                float bottom_height,
+                                bool shrink_viewport) override;
+  viz::FrameSinkId GetFrameSinkId() override;
 
-  content::LayerTreeView* layer_tree_view() { return layer_tree_view_; }
   cc::LayerTreeHost* layer_tree_host() {
     return layer_tree_view_->layer_tree_host();
   }
@@ -248,7 +254,8 @@ class TestWebWidgetClient : public WebWidgetClient {
   bool AnimationScheduled() { return animation_scheduled_; }
   void ClearAnimationScheduled() { animation_scheduled_ = false; }
 
-  void DidMeaningfulLayout(WebMeaningfulLayout) override;
+  // Returns the last value given to SetHaveScrollEventHandlers().
+  bool HaveScrollEventHandlers() const { return have_scroll_event_handlers_; }
 
   int VisuallyNonEmptyLayoutCount() const {
     return visually_non_empty_layout_count_;
@@ -270,6 +277,7 @@ class TestWebWidgetClient : public WebWidgetClient {
   LayerTreeViewFactory layer_tree_view_factory_;
   Vector<InjectedScrollGestureData> injected_scroll_gesture_data_;
   bool animation_scheduled_ = false;
+  bool have_scroll_event_handlers_ = false;
   int visually_non_empty_layout_count_ = 0;
   int finished_parsing_layout_count_ = 0;
   int finished_loading_layout_count_ = 0;
@@ -285,7 +293,6 @@ class TestWebViewClient : public WebViewClient {
   // WebViewClient overrides.
   bool CanHandleGestureEvent() override { return true; }
   bool CanUpdateLayout() override { return true; }
-  blink::WebScreenInfo GetScreenInfo() override { return {}; }
   WebView* CreateView(WebLocalFrame* opener,
                       const WebURLRequest&,
                       const WebWindowFeatures&,
@@ -302,7 +309,7 @@ class TestWebViewClient : public WebViewClient {
 
 // Convenience class for handling the lifetime of a WebView and its associated
 // mainframe in tests.
-class WebViewHelper {
+class WebViewHelper : public ScopedMockOverlayScrollbars {
   USING_FAST_MALLOC(WebViewHelper);
 
  public:
@@ -362,8 +369,11 @@ class WebViewHelper {
   void Reset();
 
   WebViewImpl* GetWebView() const { return web_view_; }
-  content::LayerTreeView* GetLayerTreeView() const {
-    return test_web_widget_client_->layer_tree_view();
+  cc::LayerTreeHost* GetLayerTreeHost() const {
+    return test_web_widget_client_->layer_tree_host();
+  }
+  TestWebWidgetClient* GetWebWidgetClient() const {
+    return test_web_widget_client_;
   }
 
   WebLocalFrameImpl* LocalMainFrame() const;
@@ -382,7 +392,6 @@ class WebViewHelper {
   bool viewport_enabled_ = false;
 
   WebViewImpl* web_view_;
-  UseMockScrollbarSettings mock_scrollbar_settings_;
 
   std::unique_ptr<TestWebViewClient> owned_test_web_view_client_;
   TestWebViewClient* test_web_view_client_ = nullptr;
@@ -401,7 +410,7 @@ class WebViewHelper {
 class TestWebFrameClient : public WebLocalFrameClient {
  public:
   TestWebFrameClient();
-  ~TestWebFrameClient() override = default;
+  ~TestWebFrameClient() override;
 
   static bool IsLoading() { return loads_in_progress_ > 0; }
   Vector<String>& ConsoleMessages() { return console_messages_; }
@@ -443,6 +452,8 @@ class TestWebFrameClient : public WebLocalFrameClient {
                               unsigned source_line,
                               const WebString& stack_trace) override;
   WebPlugin* CreatePlugin(const WebPluginParams& params) override;
+  AssociatedInterfaceProvider* GetRemoteNavigationAssociatedInterfaces()
+      override;
 
  private:
   void CommitNavigation(std::unique_ptr<WebNavigationInfo>);
@@ -455,6 +466,8 @@ class TestWebFrameClient : public WebLocalFrameClient {
   // Use service_manager::InterfaceProvider::TestApi to provide test interfaces
   // through this client.
   std::unique_ptr<service_manager::InterfaceProvider> interface_provider_;
+
+  std::unique_ptr<AssociatedInterfaceProvider> associated_interface_provider_;
 
   // This is null from when the client is created until it is initialized with
   // Bind().
@@ -487,12 +500,17 @@ class TestWebRemoteFrameClient : public WebRemoteFrameClient {
   void ForwardPostMessage(WebLocalFrame* source_frame,
                           WebRemoteFrame* target_frame,
                           WebSecurityOrigin target_origin,
-                          WebDOMMessageEvent,
-                          bool has_user_gesture) override {}
+                          WebDOMMessageEvent) override {}
+
+  AssociatedInterfaceProvider* GetAssociatedInterfaceProvider() {
+    return associated_interface_provider_.get();
+  }
 
  private:
   // If set to a non-null value, self-deletes on frame detach.
   std::unique_ptr<TestWebRemoteFrameClient> self_owned_;
+
+  std::unique_ptr<AssociatedInterfaceProvider> associated_interface_provider_;
 
   // This is null from when the client is created until it is initialized with
   // Bind().

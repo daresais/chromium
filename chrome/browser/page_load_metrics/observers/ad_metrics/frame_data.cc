@@ -8,7 +8,9 @@
 #include <limits>
 #include <string>
 
+#include "base/feature_list.h"
 #include "chrome/browser/page_load_metrics/observers/ad_metrics/ads_page_load_metrics_observer.h"
+#include "chrome/common/chrome_features.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
@@ -53,18 +55,21 @@ FrameData::ResourceMimeType FrameData::GetResourceMimeType(
   return ResourceMimeType::kOther;
 }
 
-FrameData::FrameData(FrameTreeNodeId frame_tree_node_id)
-    : bytes_(0u),
+FrameData::FrameData(FrameTreeNodeId root_frame_tree_node_id,
+                     int heavy_ad_network_threshold_noise)
+    : root_frame_tree_node_id_(root_frame_tree_node_id),
+      bytes_(0u),
       network_bytes_(0u),
       same_origin_bytes_(0u),
-      frame_tree_node_id_(frame_tree_node_id),
       origin_status_(OriginStatus::kUnknown),
       frame_navigated_(false),
       user_activation_status_(UserActivationStatus::kNoActivation),
       is_display_none_(false),
       visibility_(FrameVisibility::kVisible),
       frame_size_(gfx::Size()),
-      size_intervention_status_(FrameSizeInterventionStatus::kNone) {}
+      heavy_ad_status_(HeavyAdStatus::kNone),
+      heavy_ad_status_with_noise_(HeavyAdStatus::kNone),
+      heavy_ad_network_threshold_noise_(heavy_ad_network_threshold_noise) {}
 
 FrameData::~FrameData() = default;
 
@@ -96,10 +101,6 @@ void FrameData::ProcessResourceLoadInFrame(
     const page_load_metrics::mojom::ResourceDataUpdatePtr& resource,
     int process_id,
     const page_load_metrics::ResourceTracker& resource_tracker) {
-  // TODO(968141): Update these metrics to include resources loaded by the
-  // memory cache.
-  if (resource->cache_type == page_load_metrics::mojom::CacheType::kMemory)
-    return;
   bool is_same_origin = origin_.IsSameOriginWith(resource->origin);
   bytes_ += resource->delta_bytes;
   network_bytes_ += resource->delta_bytes;
@@ -116,11 +117,6 @@ void FrameData::ProcessResourceLoadInFrame(
     bytes_ += resource->encoded_body_length;
     if (is_same_origin)
       same_origin_bytes_ += resource->encoded_body_length;
-  }
-
-  if (bytes_ > kFrameSizeInterventionByteThreshold &&
-      user_activation_status_ == UserActivationStatus::kNoActivation) {
-    size_intervention_status_ = FrameSizeInterventionStatus::kTriggered;
   }
 
   if (resource->reported_as_ad_resource) {
@@ -178,8 +174,34 @@ void FrameData::UpdateCpuUsage(base::TimeTicks update_time,
   int current_windowed_cpu_percent =
       100 * cpu_total_for_current_window_.InMilliseconds() /
       kCpuWindowSize.InMilliseconds();
-  if (current_windowed_cpu_percent > peak_windowed_cpu_percent_)
+  if (current_windowed_cpu_percent > peak_windowed_cpu_percent_) {
     peak_windowed_cpu_percent_ = current_windowed_cpu_percent;
+    peak_window_start_time_ =
+        cpu_updates_for_current_window_.front().update_time;
+  }
+}
+
+bool FrameData::MaybeTriggerHeavyAdIntervention() {
+  if (user_activation_status_ == UserActivationStatus::kReceivedActivation ||
+      heavy_ad_status_with_noise_ != HeavyAdStatus::kNone)
+    return false;
+
+  if (heavy_ad_status_ == HeavyAdStatus::kNone) {
+    heavy_ad_status_ =
+        ComputeHeavyAdStatus(false /* use_network_threshold_noise */);
+  }
+
+  heavy_ad_status_with_noise_ =
+      ComputeHeavyAdStatus(true /* use_network_threshold_noise */);
+  if (heavy_ad_status_with_noise_ == HeavyAdStatus::kNone)
+    return false;
+
+  // Only check if the feature is enabled once we have a heavy ad. This is done
+  // to ensure that any experiment for this feature will only be comparing
+  // groups who have seen a heavy ad.
+  if (!base::FeatureList::IsEnabled(features::kHeavyAdIntervention))
+    return false;
+  return true;
 }
 
 base::TimeDelta FrameData::GetInteractiveCpuUsage(
@@ -208,15 +230,6 @@ size_t FrameData::GetAdNetworkBytesForMime(ResourceMimeType mime_type) const {
   return ad_bytes_by_mime_[static_cast<size_t>(mime_type)];
 }
 
-void FrameData::UpdateFrameVisibility() {
-  visibility_ =
-      !is_display_none_ &&
-              frame_size_.GetCheckedArea().ValueOrDefault(
-                  std::numeric_limits<int>::max()) >= kMinimumVisibleFrameArea
-          ? FrameVisibility::kVisible
-          : FrameVisibility::kNonVisible;
-}
-
 void FrameData::MaybeUpdateFrameDepth(
     content::RenderFrameHost* render_frame_host) {
   if (!render_frame_host)
@@ -226,16 +239,20 @@ void FrameData::MaybeUpdateFrameDepth(
     frame_depth_ = render_frame_host->GetFrameDepth() - root_frame_depth_;
 }
 
+bool FrameData::ShouldRecordFrameForMetrics() const {
+  return bytes() != 0 || !GetTotalCpuUsage().is_zero();
+}
+
 void FrameData::RecordAdFrameLoadUkmEvent(ukm::SourceId source_id) const {
-  // Only record events for frames that have non-zero bytes.
-  if (bytes() == 0)
+  if (!ShouldRecordFrameForMetrics())
     return;
+
   auto* ukm_recorder = ukm::UkmRecorder::Get();
   ukm::builders::AdFrameLoad builder(source_id);
   builder
       .SetLoading_NetworkBytes(
           ukm::GetExponentialBucketMinForBytes(network_bytes()))
-      .SetLoading_CacheBytes(
+      .SetLoading_CacheBytes2(
           ukm::GetExponentialBucketMinForBytes((bytes() - network_bytes())))
       .SetLoading_VideoBytes(ukm::GetExponentialBucketMinForBytes(
           GetAdNetworkBytesForMime(ResourceMimeType::kVideo)))
@@ -253,6 +270,8 @@ void FrameData::RecordAdFrameLoadUkmEvent(ukm::SourceId source_id) const {
     builder.SetTiming_PreActivationForegroundDuration(
         pre_activation_foreground_duration().InMilliseconds());
   }
+
+  builder.SetCpuTime_PeakWindowedPercent(peak_windowed_cpu_percent_);
 
   builder
       .SetVisibility_FrameWidth(
@@ -280,4 +299,35 @@ void FrameData::RecordAdFrameLoadUkmEvent(ukm::SourceId source_id) const {
     }
   }
   builder.Record(ukm_recorder->Get());
+}
+
+void FrameData::UpdateFrameVisibility() {
+  visibility_ =
+      !is_display_none_ &&
+              frame_size_.GetCheckedArea().ValueOrDefault(
+                  std::numeric_limits<int>::max()) >= kMinimumVisibleFrameArea
+          ? FrameVisibility::kVisible
+          : FrameVisibility::kNonVisible;
+}
+
+FrameData::HeavyAdStatus FrameData::ComputeHeavyAdStatus(
+    bool use_network_threshold_noise) const {
+  // Check if the frame meets the peak CPU usage threshold.
+  if (peak_windowed_cpu_percent_ >=
+      heavy_ad_thresholds::kMaxPeakWindowedPercent) {
+    return HeavyAdStatus::kPeakCpu;
+  }
+
+  // Check if the frame meets the absolute CPU time threshold.
+  if (GetTotalCpuUsage().InMilliseconds() >= heavy_ad_thresholds::kMaxCpuTime)
+    return HeavyAdStatus::kTotalCpu;
+
+  size_t network_threshold =
+      heavy_ad_thresholds::kMaxNetworkBytes +
+      (use_network_threshold_noise ? heavy_ad_network_threshold_noise_ : 0);
+
+  // Check if the frame meets the network threshold, possible including noise.
+  if (network_bytes_ >= network_threshold)
+    return HeavyAdStatus::kNetwork;
+  return HeavyAdStatus::kNone;
 }

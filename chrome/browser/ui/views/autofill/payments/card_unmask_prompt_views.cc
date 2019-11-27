@@ -24,7 +24,6 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -65,6 +64,19 @@ static views::GridLayout* ResetOverlayLayout(views::View* overlay) {
   return overlay_layout;
 }
 
+std::unique_ptr<views::Checkbox> CreateSaveCheckbox(bool start_state) {
+  auto storage_checkbox =
+      std::make_unique<views::Checkbox>(l10n_util::GetStringUTF16(
+          IDS_AUTOFILL_CARD_UNMASK_PROMPT_STORAGE_CHECKBOX));
+  storage_checkbox->SetBorder(views::CreateEmptyBorder(gfx::Insets()));
+  storage_checkbox->SetChecked(start_state);
+  storage_checkbox->SetEnabledTextColors(views::style::GetColor(
+      *storage_checkbox.get(), ChromeTextContext::CONTEXT_BODY_TEXT_SMALL,
+      views::style::STYLE_SECONDARY));
+
+  return storage_checkbox;
+}
+
 }  // namespace
 
 CardUnmaskPromptViews::CardUnmaskPromptViews(
@@ -72,6 +84,12 @@ CardUnmaskPromptViews::CardUnmaskPromptViews(
     content::WebContents* web_contents)
     : controller_(controller), web_contents_(web_contents) {
   chrome::RecordDialogCreation(chrome::DialogIdentifier::CARD_UNMASK);
+  if (controller_->CanStoreLocally()) {
+    storage_checkbox_ = DialogDelegate::SetFootnoteView(
+        CreateSaveCheckbox(controller_->GetStoreLocallyStartState()));
+  }
+
+  UpdateButtonLabels();
 }
 
 CardUnmaskPromptViews::~CardUnmaskPromptViews() {
@@ -93,6 +111,7 @@ void CardUnmaskPromptViews::DisableAndWaitForVerification() {
   controls_container_->SetVisible(false);
   overlay_->SetVisible(true);
   progress_throbber_->Start();
+  UpdateButtonLabels();
   DialogModelChanged();
   Layout();
 }
@@ -145,16 +164,16 @@ void CardUnmaskPromptViews::GotVerificationResult(
       // Replace the throbber with a warning icon. Since this is a permanent
       // error we do not intend to return to a previous state.
       auto error_icon = std::make_unique<views::ImageView>();
-      // The icon doesn't look good with the dark mode warning text color,
-      // so use the same color in light mode and dark mode.
-      // See https://crbug.com/924507
-      error_icon->SetImage(
-          gfx::CreateVectorIcon(kBrowserToolsErrorIcon, gfx::kGoogleRed700));
+      error_icon->SetImage(gfx::CreateVectorIcon(
+          kBrowserToolsErrorIcon,
+          GetNativeTheme()->GetSystemColor(
+              ui::NativeTheme::kColorId_AlertSeverityHigh)));
 
       layout->StartRow(1.0, 0);
       layout->AddView(std::move(error_icon));
       layout->AddView(std::move(error_label));
     }
+    UpdateButtonLabels();
     DialogModelChanged();
   }
 
@@ -174,6 +193,7 @@ void CardUnmaskPromptViews::LinkClicked(views::Link* source, int event_flags) {
   input_row_->InvalidateLayout();
   cvc_input_->SetInvalid(false);
   cvc_input_->SetText(base::string16());
+  UpdateButtonLabels();
   DialogModelChanged();
   GetWidget()->UpdateWindowTitle();
   instructions_->SetText(controller_->GetInstructionsMessage());
@@ -220,23 +240,6 @@ void CardUnmaskPromptViews::ShowNewCardLink() {
 views::View* CardUnmaskPromptViews::GetContentsView() {
   InitIfNecessary();
   return this;
-}
-
-std::unique_ptr<views::View> CardUnmaskPromptViews::CreateFootnoteView() {
-  if (!controller_->CanStoreLocally())
-    return nullptr;
-
-  auto storage_checkbox =
-      std::make_unique<views::Checkbox>(l10n_util::GetStringUTF16(
-          IDS_AUTOFILL_CARD_UNMASK_PROMPT_STORAGE_CHECKBOX));
-  storage_checkbox->SetBorder(views::CreateEmptyBorder(gfx::Insets()));
-  storage_checkbox->SetChecked(controller_->GetStoreLocallyStartState());
-  storage_checkbox->SetEnabledTextColors(views::style::GetColor(
-      *storage_checkbox.get(), ChromeTextContext::CONTEXT_BODY_TEXT_SMALL,
-      STYLE_SECONDARY));
-  storage_checkbox_ = storage_checkbox.get();
-
-  return storage_checkbox;
 }
 
 gfx::Size CardUnmaskPromptViews::CalculatePreferredSize() const {
@@ -286,14 +289,6 @@ int CardUnmaskPromptViews::GetDialogButtons() const {
   return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
 }
 
-base::string16 CardUnmaskPromptViews::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_OK)
-    return controller_->GetOkButtonLabel();
-
-  return DialogDelegateView::GetDialogButtonLabel(button);
-}
-
 bool CardUnmaskPromptViews::IsDialogButtonEnabled(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_CANCEL)
@@ -302,7 +297,7 @@ bool CardUnmaskPromptViews::IsDialogButtonEnabled(
   DCHECK_EQ(ui::DIALOG_BUTTON_OK, button);
 
   return cvc_input_->GetEnabled() &&
-         controller_->InputCvcIsValid(cvc_input_->text()) &&
+         controller_->InputCvcIsValid(cvc_input_->GetText()) &&
          ExpirationDateIsValid();
 }
 
@@ -322,15 +317,16 @@ bool CardUnmaskPromptViews::Accept() {
   if (!controller_)
     return true;
 
-  controller_->OnUnmaskResponse(
-      cvc_input_->text(),
+  controller_->OnUnmaskPromptAccepted(
+      cvc_input_->GetText(),
       month_input_->GetVisible()
           ? month_input_->GetTextForRow(month_input_->GetSelectedIndex())
           : base::string16(),
       year_input_->GetVisible()
           ? year_input_->GetTextForRow(year_input_->GetSelectedIndex())
           : base::string16(),
-      storage_checkbox_ ? storage_checkbox_->GetChecked() : false);
+      storage_checkbox_ ? storage_checkbox_->GetChecked() : false,
+      /*enable_fido_auth=*/false);
   return false;
 }
 
@@ -340,6 +336,7 @@ void CardUnmaskPromptViews::ContentsChanged(
   if (controller_->InputCvcIsValid(new_contents))
     cvc_input_->SetInvalid(false);
 
+  UpdateButtonLabels();
   DialogModelChanged();
 }
 
@@ -360,6 +357,7 @@ void CardUnmaskPromptViews::OnPerformAction(views::Combobox* combobox) {
         IDS_AUTOFILL_CARD_UNMASK_INVALID_EXPIRATION_DATE));
   }
 
+  UpdateButtonLabels();
   DialogModelChanged();
 }
 
@@ -388,7 +386,7 @@ void CardUnmaskPromptViews::InitIfNecessary() {
       std::make_unique<views::Label>(controller_->GetInstructionsMessage());
   instructions->SetEnabledColor(views::style::GetColor(
       *instructions.get(), ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
-      STYLE_SECONDARY));
+      views::style::STYLE_SECONDARY));
   instructions->SetMultiLine(true);
   instructions->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   instructions_ = controls_container_->AddChildView(std::move(instructions));
@@ -490,6 +488,11 @@ bool CardUnmaskPromptViews::ExpirationDateIsValid() const {
 
 void CardUnmaskPromptViews::ClosePrompt() {
   GetWidget()->Close();
+}
+
+void CardUnmaskPromptViews::UpdateButtonLabels() {
+  DialogDelegate::set_button_label(ui::DIALOG_BUTTON_OK,
+                                   controller_->GetOkButtonLabel());
 }
 
 CardUnmaskPromptView* CreateCardUnmaskPromptView(

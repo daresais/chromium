@@ -45,6 +45,7 @@ enum class PermissionRequestType {
   PERMISSION_CLIPBOARD_READ = 16,
   PERMISSION_SECURITY_KEY_ATTESTATION = 17,
   PERMISSION_PAYMENT_HANDLER = 18,
+  PERMISSION_NFC = 19,
   // NUM must be the last value in the enum.
   NUM
 };
@@ -85,13 +86,22 @@ class PermissionRequest {
   virtual IconId GetIconId() const = 0;
 
 #if defined(OS_ANDROID)
-  // Returns the title of this permission as text. This is currently only used
-  // in touchless mode in Android.
+  // Returns the title of this permission as text.
   virtual base::string16 GetTitleText() const = 0;
 
   // Returns the full prompt text for this permission. This is currently only
   // used on Android.
   virtual base::string16 GetMessageText() const = 0;
+
+  // Returns the title of this permission as text when the permission request is
+  // displayed as a quiet prompt. Only used on Android. By default it returns
+  // the same value as |GetTitleText| unless overridden.
+  virtual base::string16 GetQuietTitleText() const;
+
+  // Returns the full prompt text for this permission as text when the
+  // permission request is displayed as a quiet prompt. Only used on Android. By
+  // default it returns the same value as |GetMessageText| unless overridden.
+  virtual base::string16 GetQuietMessageText() const;
 #endif
 
   // Returns the shortened prompt text for this permission. The permission

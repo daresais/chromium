@@ -9,6 +9,7 @@
 
 #include "ash/app_list/app_list_export.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view_targeter_delegate.h"
 
@@ -22,7 +23,7 @@ class InkDropMask;
 class InkDropRipple;
 }  // namespace views
 
-namespace app_list {
+namespace ash {
 
 class AppListView;
 class ContentsView;
@@ -52,6 +53,12 @@ class APP_LIST_EXPORT ExpandArrowView : public views::Button,
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
+
+  void MaybeEnableHintingAnimation(bool enabled);
+
+  bool IsHintingAnimationRunningForTest() {
+    return hinting_animation_timer_.IsRunning();
+  }
 
  private:
   // gfx::AnimationDelegate overrides:
@@ -86,11 +93,13 @@ class APP_LIST_EXPORT ExpandArrowView : public views::Button,
   // The y position offset of the arrow in this view.
   int arrow_y_offset_;
 
-  base::WeakPtrFactory<ExpandArrowView> weak_ptr_factory_;
+  base::OneShotTimer hinting_animation_timer_;
+
+  base::WeakPtrFactory<ExpandArrowView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExpandArrowView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_EXPAND_ARROW_VIEW_H_

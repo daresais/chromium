@@ -29,6 +29,7 @@ class COMPONENT_EXPORT(UPSTART_CLIENT) FakeUpstartClient
                 const std::vector<std::string>& upstart_env,
                 VoidDBusMethodCallback callback) override;
   void StopJob(const std::string& job,
+               const std::vector<std::string>& upstart_env,
                VoidDBusMethodCallback callback) override;
   void StartAuthPolicyService() override;
   void RestartAuthPolicyService() override;
@@ -40,7 +41,13 @@ class COMPONENT_EXPORT(UPSTART_CLIENT) FakeUpstartClient
   void StartWilcoDtcService(VoidDBusMethodCallback callback) override;
   void StopWilcoDtcService(VoidDBusMethodCallback callback) override;
 
+  void set_start_job_result(bool result) { start_job_result_ = result; }
+  void set_stop_job_result(bool result) { stop_job_result_ = result; }
+
  private:
+  bool start_job_result_ = true;
+  bool stop_job_result_ = true;
+
   DISALLOW_COPY_AND_ASSIGN(FakeUpstartClient);
 };
 

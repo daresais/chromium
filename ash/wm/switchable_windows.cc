@@ -13,26 +13,27 @@
 #include "ui/aura/window.h"
 
 namespace ash {
-namespace wm {
 
 namespace {
 
 // TODO(afakhry): Consolidate the below lists when we launch Virtual Desks.
 // The list of switchable containers IDs when the Virtual Desks feature is
 // enabled.
-constexpr std::array<int, 5> kSwitchableContainersWithDesks = {
+constexpr std::array<int, 6> kSwitchableContainersWithDesks = {
     kShellWindowId_DefaultContainerDeprecated,
     kShellWindowId_DeskContainerB,
     kShellWindowId_DeskContainerC,
     kShellWindowId_DeskContainerD,
     kShellWindowId_AlwaysOnTopContainer,
+    kShellWindowId_PipContainer,
 };
 
 // The list of switchable containers IDs when the Virtual Desks feature is
 // disabled.
-constexpr std::array<int, 2> kSwitchableContainersNoDesks = {
+constexpr std::array<int, 3> kSwitchableContainersNoDesks = {
     kShellWindowId_DefaultContainerDeprecated,
     kShellWindowId_AlwaysOnTopContainer,
+    kShellWindowId_PipContainer,
 };
 
 std::vector<int> GetSwitchableContainersIds() {
@@ -79,5 +80,4 @@ bool IsSwitchableContainer(const aura::Window* window) {
   return base::Contains(GetSwitchableContainersIds(), shell_window_id);
 }
 
-}  // namespace wm
 }  // namespace ash

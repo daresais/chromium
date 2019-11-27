@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -13,13 +14,14 @@
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_factory.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/themes/theme_service_win.h"
-#elif defined(USE_X11)
-#include "chrome/browser/themes/theme_service_aurax11.h"
+#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#include "chrome/browser/themes/theme_service_aura_linux.h"
 #include "ui/views/linux_ui/linux_ui.h"
 #endif
 
@@ -51,6 +53,8 @@ ThemeServiceFactory::ThemeServiceFactory()
           "ThemeService",
           BrowserContextDependencyManager::GetInstance()) {
   DependsOn(extensions::ExtensionRegistryFactory::GetInstance());
+  DependsOn(extensions::ExtensionPrefsFactory::GetInstance());
+  DependsOn(extensions::ExtensionSystemFactory::GetInstance());
 }
 
 ThemeServiceFactory::~ThemeServiceFactory() {}
@@ -60,8 +64,8 @@ KeyedService* ThemeServiceFactory::BuildServiceInstanceFor(
   ThemeService* provider = NULL;
 #if defined(OS_WIN)
   provider = new ThemeServiceWin;
-#elif defined(USE_X11)
-  provider = new ThemeServiceAuraX11;
+#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  provider = new ThemeServiceAuraLinux;
 #else
   provider = new ThemeService;
 #endif
@@ -72,7 +76,7 @@ KeyedService* ThemeServiceFactory::BuildServiceInstanceFor(
 
 void ThemeServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-#if defined(USE_X11)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   bool default_uses_system_theme = false;
 
   const views::LinuxUI* linux_ui = views::LinuxUI::instance();

@@ -70,6 +70,17 @@ Polymer({
   },
 
   /**
+   * @return {string} 'Secondary Accounts disabled' message depending on
+   *    account type
+   * @private
+   */
+  getSecondaryAccountsDisabledUserMessage_: function() {
+    return loadTimeData.getBoolean('isChild')
+      ? this.i18n('accountManagerSecondaryAccountsDisabledChildText')
+      : this.i18n('accountManagerSecondaryAccountsDisabledText');
+  },
+
+  /**
    * @param {string} iconUrl
    * @return {string} A CSS image-set for multiple scale factors.
    * @private
@@ -169,8 +180,7 @@ Polymer({
    * @private
    */
   refreshAccounts_: function() {
-    const includeImages = true;
-    this.browserProxy_.getAccounts(includeImages).then(accounts => {
+    this.browserProxy_.getAccounts().then(accounts => {
       this.set('accounts_', accounts);
     });
   },

@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/views/autofill/view_util.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -54,7 +55,7 @@ class PasswordGenerationPopupViewViews::GeneratedPasswordBox
         suggestion, ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
         state == PasswordGenerationPopupController::kOfferGeneration
             ? views::style::STYLE_PRIMARY
-            : STYLE_SECONDARY));
+            : views::style::STYLE_SECONDARY));
 
     DCHECK(!password_label_);
     password_label_ =
@@ -179,7 +180,7 @@ void PasswordGenerationPopupViewViews::CreateLayoutAndChildren() {
 
   views::Label* help_label = new views::Label(
       controller_->HelpText(), ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
-      STYLE_SECONDARY);
+      views::style::STYLE_SECONDARY);
   help_label->SetMultiLine(true);
   help_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   help_label->SetBackground(

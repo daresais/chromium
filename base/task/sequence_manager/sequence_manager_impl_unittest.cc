@@ -20,6 +20,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/message_loop/message_pump_default.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -72,8 +73,6 @@ namespace sequence_manager {
 namespace internal {
 // To avoid symbol collisions in jumbo builds.
 namespace sequence_manager_impl_unittest {
-
-constexpr TimeDelta kDelay = TimeDelta::FromSeconds(42);
 
 enum class TestType {
   kMockTaskRunner,
@@ -180,7 +179,7 @@ class FixtureWithMockTaskRunner final : public Fixture {
             ThreadTaskRunnerHandle::Get(),
             mock_tick_clock(),
             SequenceManager::Settings::Builder()
-                .SetMessagePumpType(MessagePump::Type::DEFAULT)
+                .SetMessagePumpType(MessagePumpType::DEFAULT)
                 .SetRandomisedSamplingEnabled(false)
                 .SetTickClock(mock_tick_clock())
                 .SetAntiStarvationLogicForPrioritiesDisabled(
@@ -255,7 +254,7 @@ class FixtureWithMockMessagePump : public Fixture {
     pump_ = pump.get();
     auto settings =
         SequenceManager::Settings::Builder()
-            .SetMessagePumpType(MessagePump::Type::DEFAULT)
+            .SetMessagePumpType(MessagePumpType::DEFAULT)
             .SetRandomisedSamplingEnabled(false)
             .SetTickClock(mock_tick_clock())
             .SetAntiStarvationLogicForPrioritiesDisabled(
@@ -344,7 +343,7 @@ class FixtureWithMessageLoop : public Fixture {
 
     sequence_manager_ = SequenceManagerForTest::CreateOnCurrentThread(
         SequenceManager::Settings::Builder()
-            .SetMessagePumpType(MessagePump::Type::DEFAULT)
+            .SetMessagePumpType(MessagePumpType::DEFAULT)
             .SetRandomisedSamplingEnabled(false)
             .SetTickClock(mock_tick_clock())
             .SetAntiStarvationLogicForPrioritiesDisabled(
@@ -520,7 +519,7 @@ class SequenceManagerTest
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     SequenceManagerTest,
     testing::Values(
         std::make_pair(TestType::kMockTaskRunner,
@@ -566,6 +565,18 @@ class TestCountUsesTimeSource : public TickClock {
 
   DISALLOW_COPY_AND_ASSIGN(TestCountUsesTimeSource);
 };
+
+TEST_P(SequenceManagerTest, GetCorrectTaskRunnerForCurrentTask) {
+  auto queue = CreateTaskQueue();
+
+  queue->task_runner()->PostTask(
+      FROM_HERE, BindLambdaForTesting([&]() {
+        EXPECT_EQ(queue->task_runner(),
+                  sequence_manager()->GetTaskRunnerForCurrentTask());
+      }));
+
+  RunLoop().RunUntilIdle();
+}
 
 TEST_P(SequenceManagerTest, NowNotCalledIfUnneeded) {
   sequence_manager()->SetWorkBatchSize(6);
@@ -1577,7 +1588,7 @@ TEST_P(SequenceManagerTest, WorkBatching) {
   EXPECT_THAT(run_order, ElementsAre(0u, 1u, 2u, 3u));
 }
 
-class MockTaskObserver : public MessageLoop::TaskObserver {
+class MockTaskObserver : public TaskObserver {
  public:
   MOCK_METHOD1(DidProcessTask, void(const PendingTask& task));
   MOCK_METHOD1(WillProcessTask, void(const PendingTask& task));
@@ -1614,8 +1625,7 @@ TEST_P(SequenceManagerTest, TaskObserverRemoving) {
   RunLoop().RunUntilIdle();
 }
 
-void RemoveObserverTask(SequenceManagerImpl* manager,
-                        MessageLoop::TaskObserver* observer) {
+void RemoveObserverTask(SequenceManagerImpl* manager, TaskObserver* observer) {
   manager->RemoveTaskObserver(observer);
 }
 
@@ -1668,7 +1678,7 @@ TEST_P(SequenceManagerTest, QueueTaskObserverRemoving) {
 }
 
 void RemoveQueueObserverTask(scoped_refptr<TestTaskQueue> queue,
-                             MessageLoop::TaskObserver* observer) {
+                             TaskObserver* observer) {
   queue->RemoveTaskObserver(observer);
 }
 
@@ -1962,9 +1972,9 @@ TEST_P(SequenceManagerTest, QuitWhileNested) {
   EXPECT_FALSE(was_nested);
 }
 
-class SequenceNumberCapturingTaskObserver : public MessageLoop::TaskObserver {
+class SequenceNumberCapturingTaskObserver : public TaskObserver {
  public:
-  // MessageLoop::TaskObserver overrides.
+  // TaskObserver overrides.
   void WillProcessTask(const PendingTask& pending_task) override {}
   void DidProcessTask(const PendingTask& pending_task) override {
     sequence_numbers_.push_back(pending_task.sequence_num);
@@ -2358,9 +2368,9 @@ TEST_P(SequenceManagerTest, TaskQueueObserver_ImmediateTask) {
   Mock::VerifyAndClearExpectations(&observer);
 
   // Unless the immediate work queue is emptied.
-  sequence_manager()->TakeTask();
+  sequence_manager()->SelectNextTask();
   sequence_manager()->DidRunTask();
-  sequence_manager()->TakeTask();
+  sequence_manager()->SelectNextTask();
   sequence_manager()->DidRunTask();
   EXPECT_CALL(observer, OnPostTask(_, TimeDelta()));
   EXPECT_CALL(observer, OnQueueNextWakeUpChanged(_));
@@ -4161,7 +4171,7 @@ TEST_P(SequenceManagerTest, DeletePendingTasks_Complex) {
 // TODO(altimin): Add a test that posts an infinite number of other tasks
 // from its destructor.
 
-class QueueTimeTaskObserver : public MessageLoop::TaskObserver {
+class QueueTimeTaskObserver : public TaskObserver {
  public:
   void WillProcessTask(const PendingTask& pending_task) override {
     queue_time_ = pending_task.queue_time;
@@ -4828,6 +4838,7 @@ TEST_P(SequenceManagerTest,
 // EnqueueOrder should be less than GetLastUnblockEnqueueOrder().
 TEST_P(SequenceManagerTest,
        GetLastUnblockEnqueueOrder_PostInsertDelayedFencePostAfterFence) {
+  constexpr TimeDelta kDelay = TimeDelta::FromSeconds(42);
   const TimeTicks start_time = mock_tick_clock()->NowTicks();
   auto queue =
       CreateTaskQueue(TaskQueue::Spec("test").SetDelayedFencesAllowed(true));
@@ -4847,6 +4858,7 @@ TEST_P(SequenceManagerTest,
 // queue was never blocked (front task could always run).
 TEST_P(SequenceManagerTest,
        GetLastUnblockEnqueueOrder_PostInsertDelayedFencePostBeforeFence) {
+  constexpr TimeDelta kDelay = TimeDelta::FromSeconds(42);
   const TimeTicks start_time = mock_tick_clock()->NowTicks();
   auto queue =
       CreateTaskQueue(TaskQueue::Spec("test").SetDelayedFencesAllowed(true));

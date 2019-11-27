@@ -16,17 +16,16 @@
 #include "base/optional.h"
 #include "chromeos/components/multidevice/remote_device_ref.h"
 #include "chromeos/components/multidevice/software_feature.h"
+#include "chromeos/services/device_sync/feature_status_change.h"
 #include "chromeos/services/device_sync/public/cpp/device_sync_client.h"
 #include "chromeos/services/device_sync/public/mojom/device_sync.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class TaskRunner;
 }  // namespace base
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
 
 namespace chromeos {
 
@@ -45,15 +44,17 @@ class DeviceSyncClientImpl : public DeviceSyncClient,
     static Factory* Get();
     static void SetInstanceForTesting(Factory* test_factory);
     virtual ~Factory();
-    virtual std::unique_ptr<DeviceSyncClient> BuildInstance(
-        service_manager::Connector* connector);
+    virtual std::unique_ptr<DeviceSyncClient> BuildInstance();
 
    private:
     static Factory* test_factory_;
   };
 
-  explicit DeviceSyncClientImpl(service_manager::Connector* connector);
+  DeviceSyncClientImpl();
   ~DeviceSyncClientImpl() override;
+
+  void Initialize(scoped_refptr<base::TaskRunner> task_runner) override;
+  mojo::Remote<mojom::DeviceSync>* GetDeviceSyncRemote() override;
 
   // DeviceSyncClient:
   void ForceEnrollmentNow(
@@ -68,8 +69,15 @@ class DeviceSyncClientImpl : public DeviceSyncClient,
       bool enabled,
       bool is_exclusive,
       mojom::DeviceSync::SetSoftwareFeatureStateCallback callback) override;
+  void SetFeatureStatus(
+      const std::string& device_instance_id,
+      multidevice::SoftwareFeature feature,
+      FeatureStatusChange status_change,
+      mojom::DeviceSync::SetFeatureStatusCallback callback) override;
   void FindEligibleDevices(multidevice::SoftwareFeature software_feature,
                            FindEligibleDevicesCallback callback) override;
+  void GetDevicesActivityStatus(
+      mojom::DeviceSync::GetDevicesActivityStatusCallback callback) override;
   void GetDebugInfo(mojom::DeviceSync::GetDebugInfoCallback callback) override;
 
   // mojom::DeviceSyncObserver:
@@ -78,9 +86,6 @@ class DeviceSyncClientImpl : public DeviceSyncClient,
 
  private:
   friend class DeviceSyncClientImplTest;
-
-  DeviceSyncClientImpl(service_manager::Connector* connector,
-                       scoped_refptr<base::TaskRunner> task_runner);
 
   void AttemptToBecomeReady();
 
@@ -97,12 +102,12 @@ class DeviceSyncClientImpl : public DeviceSyncClient,
       mojom::NetworkRequestResult result_code,
       mojom::FindEligibleDevicesResponsePtr response);
 
-  mojom::DeviceSyncObserverPtr GenerateInterfacePtr();
+  mojo::PendingRemote<mojom::DeviceSyncObserver> GenerateRemote();
 
   void FlushForTesting();
 
-  mojom::DeviceSyncPtr device_sync_ptr_;
-  mojo::Binding<mojom::DeviceSyncObserver> binding_;
+  mojo::Remote<mojom::DeviceSync> device_sync_;
+  mojo::Receiver<mojom::DeviceSyncObserver> observer_receiver_{this};
   std::unique_ptr<multidevice::ExpiringRemoteDeviceCache>
       expiring_device_cache_;
 
@@ -114,7 +119,7 @@ class DeviceSyncClientImpl : public DeviceSyncClient,
 
   base::Optional<std::string> local_device_id_;
 
-  base::WeakPtrFactory<DeviceSyncClientImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<DeviceSyncClientImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DeviceSyncClientImpl);
 };

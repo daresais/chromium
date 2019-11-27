@@ -14,10 +14,10 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/ntp/features.h"
 #include "ios/chrome/browser/ntp/new_tab_page_tab_helper_delegate.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/web_state/navigation_context.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)

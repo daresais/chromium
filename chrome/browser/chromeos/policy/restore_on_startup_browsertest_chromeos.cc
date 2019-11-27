@@ -24,7 +24,7 @@
 namespace policy {
 
 namespace {
-const char kStartUpURL1[] = "chrome://chrome/";
+const char kStartUpURL1[] = "chrome://help/";
 const char kStartUpURL2[] = "chrome://version/";
 }
 
@@ -85,9 +85,6 @@ IN_PROC_BROWSER_TEST_F(RestoreOnStartupTestChromeOS, PRE_LogInAndVerify) {
 
 // Verify that the policies are honored on an existing user's login.
 IN_PROC_BROWSER_TEST_F(RestoreOnStartupTestChromeOS, LogInAndVerify) {
-  content::WindowedNotificationObserver(
-      chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-      content::NotificationService::AllSources()).Wait();
   LogInAndVerifyStartUpURLs();
 }
 

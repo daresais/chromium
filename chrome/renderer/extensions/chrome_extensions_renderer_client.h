@@ -78,6 +78,7 @@ class ChromeExtensionsRendererClient
   void WillSendRequest(blink::WebLocalFrame* frame,
                        ui::PageTransition transition_type,
                        const blink::WebURL& url,
+                       const blink::WebURL& site_for_cookies,
                        const url::Origin* initiator_origin,
                        GURL* new_url,
                        bool* attach_same_site_cookies);
@@ -88,10 +89,6 @@ class ChromeExtensionsRendererClient
       std::unique_ptr<extensions::Dispatcher> extension_dispatcher);
   extensions::Dispatcher* GetExtensionDispatcherForTest();
 
-  static bool ShouldFork(blink::WebLocalFrame* frame,
-                         const GURL& url,
-                         bool is_initial_navigation,
-                         bool is_server_redirect);
   static content::BrowserPluginDelegate* CreateBrowserPluginDelegate(
       content::RenderFrame* render_frame,
       const content::WebPluginInfo& info,

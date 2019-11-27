@@ -46,8 +46,10 @@ class FakeSyncService : public SyncService {
   GoogleServiceAuthError GetAuthError() const override;
   base::Time GetAuthErrorTime() const override;
   bool RequiresClientUpgrade() const override;
+  std::unique_ptr<crypto::ECPrivateKey> GetExperimentalAuthenticationKey()
+      const override;
   UserShare* GetUserShare() const override;
-  void ReadyForStartChanged(syncer::ModelType type) override;
+  void DataTypePreconditionChanged(syncer::ModelType type) override;
   SyncTokenStatus GetSyncTokenStatusForDebugging() const override;
   bool QueryDetailedSyncStatusForDebugging(SyncStatus* result) const override;
   base::Time GetLastSyncedTimeForDebugging() const override;
@@ -65,6 +67,8 @@ class FakeSyncService : public SyncService {
       const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback)
       override;
   void SetInvalidationsForSessionsEnabled(bool enabled) override;
+  UserDemographicsResult GetUserNoisedBirthYearAndGender(
+      base::Time now) override;
 
   // KeyedService implementation.
   void Shutdown() override;

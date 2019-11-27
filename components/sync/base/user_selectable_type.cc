@@ -7,6 +7,11 @@
 #include <type_traits>
 
 #include "base/logging.h"
+#include "components/sync/base/model_type.h"
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/constants/chromeos_features.h"
+#endif
 
 namespace syncer {
 
@@ -24,10 +29,16 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
   switch (type) {
     case UserSelectableType::kBookmarks:
       return {"bookmarks", BOOKMARKS, {BOOKMARKS}};
-    case UserSelectableType::kPreferences:
-      return {"preferences",
-              PREFERENCES,
-              {PREFERENCES, DICTIONARY, PRIORITY_PREFERENCES, SEARCH_ENGINES}};
+    case UserSelectableType::kPreferences: {
+      ModelTypeSet model_types = {PREFERENCES, DICTIONARY, PRIORITY_PREFERENCES,
+                                  SEARCH_ENGINES};
+#if defined(OS_CHROMEOS)
+      // SplitSettingsSync makes Printers a separate OS setting.
+      if (!chromeos::features::IsSplitSettingsSyncEnabled())
+        model_types.Put(PRINTERS);
+#endif
+      return {"preferences", PREFERENCES, model_types};
+    }
     case UserSelectableType::kPasswords:
       return {"passwords", PASSWORDS, {PASSWORDS}};
     case UserSelectableType::kAutofill:
@@ -44,22 +55,45 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
                FAVICON_TRACKING, USER_EVENTS}};
     case UserSelectableType::kExtensions:
       return {"extensions", EXTENSIONS, {EXTENSIONS, EXTENSION_SETTINGS}};
-    case UserSelectableType::kApps:
-      return {
-          "apps", APPS, {APPS, APP_SETTINGS, APP_LIST, ARC_PACKAGE, WEB_APPS}};
-#if BUILDFLAG(ENABLE_READING_LIST)
+    case UserSelectableType::kApps: {
+      ModelTypeSet model_types = {APPS, APP_SETTINGS, WEB_APPS};
+#if defined(OS_CHROMEOS)
+      // SplitSettingsSync moves ARC apps under a separate OS setting.
+      if (!chromeos::features::IsSplitSettingsSyncEnabled())
+        model_types.PutAll({APP_LIST, ARC_PACKAGE});
+#endif
+      return {"apps", APPS, model_types};
+    }
     case UserSelectableType::kReadingList:
       return {"readingList", READING_LIST, {READING_LIST}};
-#endif
     case UserSelectableType::kTabs:
       return {"tabs",
               PROXY_TABS,
               {PROXY_TABS, SESSIONS, FAVICON_IMAGES, FAVICON_TRACKING,
                SEND_TAB_TO_SELF}};
+    case UserSelectableType::kWifiConfigurations:
+      return {"wifiConfigurations", WIFI_CONFIGURATIONS, {WIFI_CONFIGURATIONS}};
   }
   NOTREACHED();
   return {nullptr, UNSPECIFIED};
 }
+
+#if defined(OS_CHROMEOS)
+UserSelectableTypeInfo GetUserSelectableOsTypeInfo(UserSelectableOsType type) {
+  // UserSelectableTypeInfo::type_name is used in js code and shouldn't be
+  // changed without updating js part.
+  switch (type) {
+    case UserSelectableOsType::kOsApps:
+      return {"osApps", APP_LIST, {APP_LIST, ARC_PACKAGE}};
+    case UserSelectableOsType::kOsPreferences:
+      return {"osPreferences",
+              OS_PREFERENCES,
+              {OS_PREFERENCES, OS_PRIORITY_PREFERENCES}};
+    case UserSelectableOsType::kPrinters:
+      return {"printers", PRINTERS, {PRINTERS}};
+  }
+}
+#endif
 
 }  // namespace
 
@@ -76,7 +110,24 @@ ModelType UserSelectableTypeToCanonicalModelType(UserSelectableType type) {
 }
 
 int UserSelectableTypeToHistogramInt(UserSelectableType type) {
-  return ModelTypeToHistogramInt(UserSelectableTypeToCanonicalModelType(type));
+  // TODO(crbug.com/1007293): Use ModelTypeHistogramValue instead of casting to
+  // int.
+  return static_cast<int>(
+      ModelTypeHistogramValue(UserSelectableTypeToCanonicalModelType(type)));
 }
+
+#if defined(OS_CHROMEOS)
+const char* GetUserSelectableOsTypeName(UserSelectableOsType type) {
+  return GetUserSelectableOsTypeInfo(type).type_name;
+}
+
+ModelTypeSet UserSelectableOsTypeToAllModelTypes(UserSelectableOsType type) {
+  return GetUserSelectableOsTypeInfo(type).model_type_group;
+}
+
+ModelType UserSelectableOsTypeToCanonicalModelType(UserSelectableOsType type) {
+  return GetUserSelectableOsTypeInfo(type).canonical_model_type;
+}
+#endif  // defined(OS_CHROMEOS)
 
 }  // namespace syncer

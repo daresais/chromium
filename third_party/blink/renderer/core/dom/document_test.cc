@@ -43,10 +43,12 @@
 #include "third_party/blink/renderer/core/css/media_query_list_listener.h"
 #include "third_party/blink/renderer/core/css/media_query_matcher.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
+#include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/core/dom/node_with_index.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
 #include "third_party/blink/renderer/core/dom/text.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -58,10 +60,12 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
+#include "third_party/blink/renderer/core/testing/color_scheme_helper.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/core/testing/scoped_mock_overlay_scrollbars.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/mojo/interface_invalidator.h"
+#include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
@@ -89,7 +93,7 @@ void DocumentTest::SetHtmlInnerHTML(const char* html_content) {
 namespace {
 
 class TestSynchronousMutationObserver
-    : public GarbageCollectedFinalized<TestSynchronousMutationObserver>,
+    : public GarbageCollected<TestSynchronousMutationObserver>,
       public SynchronousMutationObserver {
   USING_GARBAGE_COLLECTED_MIXIN(TestSynchronousMutationObserver);
 
@@ -259,7 +263,7 @@ void TestSynchronousMutationObserver::Trace(Visitor* visitor) {
 }
 
 class TestDocumentShutdownObserver
-    : public GarbageCollectedFinalized<TestDocumentShutdownObserver>,
+    : public GarbageCollected<TestDocumentShutdownObserver>,
       public DocumentShutdownObserver {
   USING_GARBAGE_COLLECTED_MIXIN(TestDocumentShutdownObserver);
 
@@ -295,7 +299,7 @@ void TestDocumentShutdownObserver::Trace(Visitor* visitor) {
 }
 
 class MockDocumentValidationMessageClient
-    : public GarbageCollectedFinalized<MockDocumentValidationMessageClient>,
+    : public GarbageCollected<MockDocumentValidationMessageClient>,
       public ValidationMessageClient {
   USING_GARBAGE_COLLECTED_MIXIN(MockDocumentValidationMessageClient);
 
@@ -332,10 +336,11 @@ class MockDocumentValidationMessageClient
 
 class MockApplicationCacheHost final : public ApplicationCacheHostForFrame {
  public:
-  MockApplicationCacheHost(DocumentLoader* loader)
+  explicit MockApplicationCacheHost(DocumentLoader* loader)
       : ApplicationCacheHostForFrame(loader,
-                                     /*interface_broker=*/nullptr,
-                                     /*task_runner=*/nullptr) {}
+                                     GetEmptyBrowserInterfaceBroker(),
+                                     /*task_runner=*/nullptr,
+                                     base::UnguessableToken()) {}
   ~MockApplicationCacheHost() override = default;
 
   void SelectCacheWithoutManifest() override {
@@ -821,6 +826,18 @@ TEST_F(DocumentTest, DocumentShutdownNotifier) {
   EXPECT_EQ(1, observer.CountContextDestroyedCalled());
 }
 
+TEST_F(DocumentTest, AttachExecutionContext) {
+  EXPECT_TRUE(
+      GetDocument().GetAgent()->event_loop()->IsSchedulerAttachedForTest(
+          GetDocument().GetScheduler()));
+  Document* doc = GetDocument().implementation().createHTMLDocument("foo");
+  EXPECT_EQ(GetDocument().GetAgent(), doc->GetAgent());
+  GetDocument().Shutdown();
+  EXPECT_FALSE(doc->GetAgent()->event_loop()->IsSchedulerAttachedForTest(
+      doc->GetScheduler()));
+  doc->Shutdown();
+}
+
 // This tests that meta-theme-color can be found correctly
 TEST_F(DocumentTest, ThemeColor) {
   {
@@ -882,7 +899,7 @@ TEST_F(DocumentTest, SandboxDisablesAppCache) {
 
   GetDocument().Loader()->SetApplicationCacheHostForTesting(
       MakeGarbageCollected<MockApplicationCacheHost>(GetDocument().Loader()));
-  ApplicationCacheHost* appcache_host =
+  ApplicationCacheHostForFrame* appcache_host =
       GetDocument().Loader()->GetApplicationCacheHost();
   appcache_host->SelectCacheWithManifest(
       KURL("https://test.com/foobar/manifest"));
@@ -956,27 +973,6 @@ TEST_F(DocumentTest, ViewportPropagationNoRecalc) {
   int new_element_count = GetDocument().GetStyleEngine().StyleForElementCount();
 
   EXPECT_EQ(1, new_element_count - old_element_count);
-}
-
-class InvalidatorObserver : public InterfaceInvalidator::Observer {
- public:
-  void OnInvalidate() override { ++invalidate_called_counter_; }
-
-  int CountInvalidateCalled() const { return invalidate_called_counter_; }
-
- private:
-  int invalidate_called_counter_ = 0;
-};
-
-TEST_F(DocumentTest, InterfaceInvalidatorDestruction) {
-  InvalidatorObserver obs;
-  InterfaceInvalidator* invalidator = GetDocument().GetInterfaceInvalidator();
-  invalidator->AddObserver(&obs);
-  EXPECT_EQ(obs.CountInvalidateCalled(), 0);
-
-  GetDocument().Shutdown();
-  EXPECT_FALSE(GetDocument().GetInterfaceInvalidator());
-  EXPECT_EQ(1, obs.CountInvalidateCalled());
 }
 
 // Test fixture parameterized on whether the "IsolatedWorldCSP" feature is
@@ -1069,7 +1065,9 @@ TEST_P(IsolatedWorldCSPTest, CSPForWorld) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(, IsolatedWorldCSPTest, testing::Values(true, false));
+INSTANTIATE_TEST_SUITE_P(All,
+                         IsolatedWorldCSPTest,
+                         testing::Values(true, false));
 
 TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
   NavigateTo(KURL("https://www.example.com/"), "", "sandbox");
@@ -1125,7 +1123,7 @@ TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
 TEST_F(DocumentTest, ElementFromPointOnScrollbar) {
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   // This test requires that scrollbars take up space.
-  ScopedOverlayScrollbarsForTest no_overlay_scrollbars(false);
+  ScopedMockOverlayScrollbars no_overlay_scrollbars(false);
 
   SetHtmlInnerHTML(R"HTML(
     <style>
@@ -1153,7 +1151,7 @@ TEST_F(DocumentTest, ElementFromPointOnScrollbar) {
 TEST_F(DocumentTest, ElementFromPointWithPageZoom) {
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   // This test requires that scrollbars take up space.
-  ScopedOverlayScrollbarsForTest no_overlay_scrollbars(false);
+  ScopedMockOverlayScrollbars no_overlay_scrollbars(false);
 
   SetHtmlInnerHTML(R"HTML(
     <style>
@@ -1187,13 +1185,53 @@ TEST_F(DocumentTest, PrefersColorSchemeChanged) {
 
   EXPECT_FALSE(listener->IsNotified());
 
-  GetDocument().GetSettings()->SetPreferredColorScheme(
-      PreferredColorScheme::kDark);
+  ColorSchemeHelper color_scheme_helper;
+  color_scheme_helper.SetPreferredColorScheme(GetDocument(),
+                                              PreferredColorScheme::kDark);
 
   UpdateAllLifecyclePhasesForTest();
   GetDocument().ServiceScriptedAnimations(base::TimeTicks());
 
   EXPECT_TRUE(listener->IsNotified());
+}
+
+TEST_F(DocumentTest, DocumentPolicyFeaturePolicyCoexist) {
+  blink::ScopedDocumentPolicyForTest sdp(true);
+  const auto test_feature = blink::mojom::FeaturePolicyFeature::kFontDisplay;
+  const auto report_option = blink::ReportOptions::kReportOnFailure;
+
+  // When document_policy is not initialized, feature_policy should
+  // be sufficient to determine the result.
+  NavigateTo(KURL("https://www.example.com/"), "font-display-late-swap 'none'",
+             "");
+  EXPECT_FALSE(GetDocument().IsFeatureEnabled(test_feature, report_option));
+
+  NavigateTo(KURL("https://www.example.com/"), "font-display-late-swap *", "");
+  EXPECT_TRUE(GetDocument().IsFeatureEnabled(test_feature, report_option));
+
+  // When document_policy is specified, both feature_policy and
+  // document_policy need to return true for the feature to be
+  // enabled.
+  NavigateTo(KURL("https://www.example.com/"), "font-display-late-swap *", "");
+  GetDocument().SetDocumentPolicyForTesting(
+      DocumentPolicy::CreateWithRequiredPolicy(
+          {{test_feature, blink::PolicyValue(true)}}));
+  EXPECT_TRUE(GetDocument().IsFeatureEnabled(test_feature, report_option));
+  GetDocument().SetDocumentPolicyForTesting(
+      DocumentPolicy::CreateWithRequiredPolicy(
+          {{test_feature, blink::PolicyValue(false)}}));
+  EXPECT_FALSE(GetDocument().IsFeatureEnabled(test_feature, report_option));
+
+  NavigateTo(KURL("https://www.example.com/"), "font-display-late-swap 'none'",
+             "");
+  GetDocument().SetDocumentPolicyForTesting(
+      DocumentPolicy::CreateWithRequiredPolicy(
+          {{test_feature, blink::PolicyValue(true)}}));
+  EXPECT_FALSE(GetDocument().IsFeatureEnabled(test_feature, report_option));
+  GetDocument().SetDocumentPolicyForTesting(
+      DocumentPolicy::CreateWithRequiredPolicy(
+          {{test_feature, blink::PolicyValue(false)}}));
+  EXPECT_FALSE(GetDocument().IsFeatureEnabled(test_feature, report_option));
 }
 
 /**

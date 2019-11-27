@@ -13,11 +13,11 @@ import android.view.View;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ResourceId;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.autofill.AutofillDelegate;
 import org.chromium.components.autofill.AutofillPopup;
 import org.chromium.components.autofill.AutofillSuggestion;
@@ -41,8 +41,7 @@ public class AutofillPopupBridge implements AutofillDelegate, DialogInterface.On
             WindowAndroid windowAndroid) {
         mNativeAutofillPopup = nativeAutofillPopupViewAndroid;
         Activity activity = windowAndroid.getActivity().get();
-        if (activity == null || notEnoughScreenSpace(activity)
-                || FeatureUtilities.isNoTouchModeEnabled()) {
+        if (activity == null || notEnoughScreenSpace(activity)) {
             mAutofillPopup = null;
             mContext = null;
         } else {
@@ -63,17 +62,19 @@ public class AutofillPopupBridge implements AutofillDelegate, DialogInterface.On
 
     @Override
     public void dismissed() {
-        nativePopupDismissed(mNativeAutofillPopup);
+        AutofillPopupBridgeJni.get().popupDismissed(mNativeAutofillPopup, AutofillPopupBridge.this);
     }
 
     @Override
     public void suggestionSelected(int listIndex) {
-        nativeSuggestionSelected(mNativeAutofillPopup, listIndex);
+        AutofillPopupBridgeJni.get().suggestionSelected(
+                mNativeAutofillPopup, AutofillPopupBridge.this, listIndex);
     }
 
     @Override
     public void deleteSuggestion(int listIndex) {
-        nativeDeletionRequested(mNativeAutofillPopup, listIndex);
+        AutofillPopupBridgeJni.get().deletionRequested(
+                mNativeAutofillPopup, AutofillPopupBridge.this, listIndex);
     }
 
     @Override
@@ -84,7 +85,8 @@ public class AutofillPopupBridge implements AutofillDelegate, DialogInterface.On
     @Override
     public void onClick(DialogInterface dialog, int which) {
         assert which == DialogInterface.BUTTON_POSITIVE;
-        nativeDeletionConfirmed(mNativeAutofillPopup);
+        AutofillPopupBridgeJni.get().deletionConfirmed(
+                mNativeAutofillPopup, AutofillPopupBridge.this);
     }
 
     /**
@@ -175,10 +177,13 @@ public class AutofillPopupBridge implements AutofillDelegate, DialogInterface.On
                 suggestionId, isDeletable, isLabelMultiline, isLabelBold);
     }
 
-    private native void nativeSuggestionSelected(long nativeAutofillPopupViewAndroid,
-            int listIndex);
-    private native void nativeDeletionRequested(long nativeAutofillPopupViewAndroid,
-            int listIndex);
-    private native void nativeDeletionConfirmed(long nativeAutofillPopupViewAndroid);
-    private native void nativePopupDismissed(long nativeAutofillPopupViewAndroid);
+    @NativeMethods
+    interface Natives {
+        void suggestionSelected(
+                long nativeAutofillPopupViewAndroid, AutofillPopupBridge caller, int listIndex);
+        void deletionRequested(
+                long nativeAutofillPopupViewAndroid, AutofillPopupBridge caller, int listIndex);
+        void deletionConfirmed(long nativeAutofillPopupViewAndroid, AutofillPopupBridge caller);
+        void popupDismissed(long nativeAutofillPopupViewAndroid, AutofillPopupBridge caller);
+    }
 }

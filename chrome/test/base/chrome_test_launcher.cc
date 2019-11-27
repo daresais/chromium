@@ -20,6 +20,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_file_util.h"
+#include "base/test/test_switches.h"
 #include "chrome/app/chrome_main_delegate.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -65,13 +66,21 @@
 #include "chrome/installer/util/firewall_manager_win.h"
 #endif
 
+#if defined(OS_WIN) || defined(OS_MACOSX) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#include "chrome/browser/first_run/scoped_relaunch_chrome_browser_override.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#endif
+
 ChromeTestSuiteRunner::ChromeTestSuiteRunner() {}
 ChromeTestSuiteRunner::~ChromeTestSuiteRunner() {}
 
 int ChromeTestSuiteRunner::RunTestSuite(int argc, char** argv) {
   ChromeTestSuite test_suite(argc, argv);
-  // Browser tests are expected not to tear-down various globals.
+  // Browser tests are expected not to tear-down various globals and may
+  // complete with the thread priority being above NORMAL.
   test_suite.DisableCheckForLeakedGlobals();
+  test_suite.DisableCheckForThreadPriorityAtTestEnd();
 #if defined(OS_ANDROID)
   // Android browser tests run child processes as threads instead.
   content::ContentTestSuiteBase::RegisterInProcessThreads();
@@ -200,14 +209,12 @@ int LaunchChromeTests(size_t parallel_jobs,
 
   const auto& command_line = *base::CommandLine::ForCurrentProcess();
 
-#if !defined(OS_ANDROID)
   // Initialize sampling profiler for tests that relaunching a browser. This
   // mimics the behavior in standalone Chrome, where this is done in
   // chrome/app/chrome_main.cc, which does not get called by tests.
   std::unique_ptr<MainThreadStackSamplingProfiler> sampling_profiler;
-  if (command_line.HasSwitch(content::kLaunchAsBrowser))
+  if (command_line.HasSwitch(switches::kLaunchAsBrowser))
     sampling_profiler = std::make_unique<MainThreadStackSamplingProfiler>();
-#endif
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
   ChromeCrashReporterClient::Create();
@@ -242,6 +249,20 @@ int LaunchChromeTests(size_t parallel_jobs,
   ash::AmendManifestForTesting(ash::GetManifestOverlayForTesting());
   ash::mojo_interface_factory::SetRegisterInterfacesCallback(
       base::Bind(&ash::mojo_test_interface_factory::RegisterInterfaces));
+#endif
+
+#if defined(OS_WIN) || defined(OS_MACOSX) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+  // Cause a test failure for any test that triggers an unexpected relaunch.
+  // Tests that fail here should likely be restructured to put the "before
+  // relaunch" code into a PRE_ test with its own
+  // ScopedRelaunchChromeBrowserOverride and the "after relaunch" code into the
+  // normal non-PRE_ test.
+  upgrade_util::ScopedRelaunchChromeBrowserOverride fail_on_relaunch(
+      base::BindRepeating([](const base::CommandLine&) {
+        ADD_FAILURE() << "Unexpected call to RelaunchChromeBrowser";
+        return false;
+      }));
 #endif
 
   return content::LaunchTests(delegate, parallel_jobs, argc, argv);

@@ -42,15 +42,11 @@
 #include "net/base/url_util.h"
 #include "net/cert/x509_certificate.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "url/gurl.h"
 
 namespace {
 
-// Parameters and defaults for the |kRecurrentInterstitialFeature| field trial.
-
-// This parameter controls whether the count of recurrent errors is
-// per-browsing-session or persisted to a pref, accumulating across browsing
-// sessions. Default is "in-memory".
 #if defined(OS_ANDROID)
 ChromeSSLHostStateDelegate::RecurrentInterstitialMode
     kRecurrentInterstitialDefaultMode =
@@ -122,7 +118,7 @@ void UpdateRecurrentInterstitialPref(Profile* profile,
     // (i.e. out of order). Save a new list composed of just this one error
     // instance.
     base::ListValue error_list;
-    error_list.GetList().push_back(base::Value(now));
+    error_list.Append(base::Value(now));
     pref_update->SetKey(net::ErrorToShortString(error), std::move(error_list));
   } else {
     // Only up to |threshold| values need to be stored. If the list already
@@ -155,7 +151,7 @@ bool DoesRecurrentInterstitialPrefMeetThreshold(Profile* profile,
   // Assume that the values in the list are in increasing order;
   // UpdateRecurrentInterstitialPref() maintains this ordering. Check if there
   // are more than |threshold| values after the cutoff time.
-  const base::ListValue::ListStorage& error_list = list_value->GetList();
+  base::span<const base::Value> error_list = list_value->GetList();
   for (size_t i = 0; i < error_list.size(); i++) {
     if (base::Time::FromJsTime(error_list[i].GetDouble()) >= cutoff_time)
       return base::MakeStrictNum(error_list.size() - i) >= threshold;
@@ -194,7 +190,7 @@ void MigrateOldSettings(HostContentSettingsMap* map) {
   // leave in some code to remove old-format settings for a long time.
   // crbug.com/569734.
   ContentSettingsForOneType settings;
-  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
+  map->GetSettingsForOneType(ContentSettingsType::SSL_CERT_DECISIONS,
                              std::string(), &settings);
   for (const ContentSettingPatternSource& setting : settings) {
     // Migrate user preference settings only.
@@ -210,25 +206,25 @@ void MigrateOldSettings(HostContentSettingsMap* map) {
       if (setting.primary_pattern == setting.secondary_pattern &&
           url.is_valid()) {
         value = map->GetWebsiteSetting(url, url,
-                                       CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
+                                       ContentSettingsType::SSL_CERT_DECISIONS,
                                        std::string(), nullptr);
       }
       // Remove the old pattern.
       map->SetWebsiteSettingCustomScope(
           setting.primary_pattern, setting.secondary_pattern,
-          CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), nullptr);
+          ContentSettingsType::SSL_CERT_DECISIONS, std::string(), nullptr);
       // Set the new pattern.
       if (value) {
         map->SetWebsiteSettingDefaultScope(
-            url, GURL(), CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
-            std::string(), std::move(value));
+            url, GURL(), ContentSettingsType::SSL_CERT_DECISIONS, std::string(),
+            std::move(value));
       }
     }
   }
 }
 
 bool HostFilterToPatternFilter(
-    const base::Callback<bool(const std::string&)>& host_filter,
+    base::OnceCallback<bool(const std::string&)> host_filter,
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern) {
   // We only ever set origin-scoped exceptions which are of the form
@@ -236,7 +232,7 @@ bool HostFilterToPatternFilter(
   // against its host.
   GURL url = GURL(primary_pattern.ToString());
   DCHECK(url.is_valid());
-  return host_filter.Run(url.host());
+  return std::move(host_filter).Run(url.host());
 }
 
 }  // namespace
@@ -264,7 +260,7 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile_);
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
-      url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
+      url, url, ContentSettingsType::SSL_CERT_DECISIONS, std::string(), NULL));
 
   if (!value.get() || !value->is_dict())
     value.reset(new base::DictionaryValue());
@@ -273,9 +269,8 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   bool success = value->GetAsDictionary(&dict);
   DCHECK(success);
 
-  bool expired_previous_decision;  // unused value in this function
-  base::DictionaryValue* cert_dict = GetValidCertDecisionsDict(
-      dict, CREATE_DICTIONARY_ENTRIES, &expired_previous_decision);
+  base::DictionaryValue* cert_dict =
+      GetValidCertDecisionsDict(dict, CREATE_DICTIONARY_ENTRIES);
   // If a a valid certificate dictionary cannot be extracted from the content
   // setting, that means it's in an unknown format. Unfortunately, there's
   // nothing to be done in that case, so a silent fail is the only option.
@@ -289,41 +284,36 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   // The map takes ownership of the value, so it is released in the call to
   // SetWebsiteSettingDefaultScope.
   map->SetWebsiteSettingDefaultScope(url, GURL(),
-                                     CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
+                                     ContentSettingsType::SSL_CERT_DECISIONS,
                                      std::string(), std::move(value));
 }
 
 void ChromeSSLHostStateDelegate::Clear(
-    const base::Callback<bool(const std::string&)>& host_filter) {
+    base::RepeatingCallback<bool(const std::string&)> host_filter) {
   // Convert host matching to content settings pattern matching. Content
   // settings deletion is done synchronously on the UI thread, so we can use
   // |host_filter| by reference.
   HostContentSettingsMap::PatternSourcePredicate pattern_filter;
   if (!host_filter.is_null()) {
     pattern_filter =
-        base::Bind(&HostFilterToPatternFilter, std::cref(host_filter));
+        base::BindRepeating(&HostFilterToPatternFilter, host_filter);
   }
 
   HostContentSettingsMapFactory::GetForProfile(profile_)
       ->ClearSettingsForOneTypeWithPredicate(
-          CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, base::Time(),
+          ContentSettingsType::SSL_CERT_DECISIONS, base::Time(),
           base::Time::Max(), pattern_filter);
 }
 
 content::SSLHostStateDelegate::CertJudgment
 ChromeSSLHostStateDelegate::QueryPolicy(const std::string& host,
                                         const net::X509Certificate& cert,
-                                        int error,
-                                        bool* expired_previous_decision) {
+                                        int error) {
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile_);
   GURL url = GetSecureGURLForHost(host);
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
-      url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
-
-  // Set a default value in case this method is short circuited and doesn't do a
-  // full query.
-  *expired_previous_decision = false;
+      url, url, ContentSettingsType::SSL_CERT_DECISIONS, std::string(), NULL));
 
   // If the appropriate flag is set, let requests on localhost go
   // through even if there are certificate errors. Errors on localhost
@@ -342,8 +332,8 @@ ChromeSSLHostStateDelegate::QueryPolicy(const std::string& host,
   DCHECK(success);
 
   base::DictionaryValue* cert_error_dict;  // Owned by value
-  cert_error_dict = GetValidCertDecisionsDict(
-      dict, DO_NOT_CREATE_DICTIONARY_ENTRIES, expired_previous_decision);
+  cert_error_dict =
+      GetValidCertDecisionsDict(dict, DO_NOT_CREATE_DICTIONARY_ENTRIES);
   if (!cert_error_dict) {
     // This revoke is necessary to clear any old expired setting that may be
     // lingering in the case that an old decision expried.
@@ -399,7 +389,7 @@ void ChromeSSLHostStateDelegate::RevokeUserAllowExceptions(
       HostContentSettingsMapFactory::GetForProfile(profile_);
 
   map->SetWebsiteSettingDefaultScope(url, GURL(),
-                                     CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
+                                     ContentSettingsType::SSL_CERT_DECISIONS,
                                      std::string(), nullptr);
 }
 
@@ -411,7 +401,7 @@ bool ChromeSSLHostStateDelegate::HasAllowException(const std::string& host) {
       HostContentSettingsMapFactory::GetForProfile(profile_);
 
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
-      url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
+      url, url, ContentSettingsType::SSL_CERT_DECISIONS, std::string(), NULL));
 
   if (!value.get() || !value->is_dict())
     return false;
@@ -563,12 +553,7 @@ ChromeSSLHostStateDelegate::GetRecurrentInterstitialMode() const {
 // expired, a new dictionary will be created.
 base::DictionaryValue* ChromeSSLHostStateDelegate::GetValidCertDecisionsDict(
     base::DictionaryValue* dict,
-    CreateDictionaryEntriesDisposition create_entries,
-    bool* expired_previous_decision) {
-  // This needs to be done first in case the method is short circuited by an
-  // early failure.
-  *expired_previous_decision = false;
-
+    CreateDictionaryEntriesDisposition create_entries) {
   // Extract the version of the certificate decision structure from the content
   // setting.
   int version;
@@ -621,8 +606,6 @@ base::DictionaryValue* ChromeSSLHostStateDelegate::GetValidCertDecisionsDict(
   // - Expired and |create_entries| is CREATE_DICTIONARY_ENTRIES, update the
   // expiration time.
   if (decision_expiration.ToInternalValue() <= now.ToInternalValue()) {
-    *expired_previous_decision = true;
-
     if (create_entries == DO_NOT_CREATE_DICTIONARY_ENTRIES)
       return NULL;
 

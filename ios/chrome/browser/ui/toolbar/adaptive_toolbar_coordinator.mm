@@ -38,8 +38,8 @@
 
 #pragma mark - ChromeCoordinator
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
-  return [super initWithBaseViewController:nil browserState:browserState];
+- (instancetype)initWithBrowser:(Browser*)browser {
+  return [super initWithBaseViewController:nil browser:browser];
 }
 
 - (void)start {
@@ -49,6 +49,11 @@
   self.started = YES;
 
   self.viewController.longPressDelegate = self.longPressDelegate;
+  if (@available(iOS 13, *)) {
+    self.viewController.overrideUserInterfaceStyle =
+        self.browserState->IsOffTheRecord() ? UIUserInterfaceStyleDark
+                                            : UIUserInterfaceStyleUnspecified;
+  }
 
   self.mediator = [[ToolbarMediator alloc] init];
   self.mediator.incognito = self.browserState->IsOffTheRecord();
@@ -58,6 +63,8 @@
   self.mediator.webStateList = self.webStateList;
   self.mediator.bookmarkModel =
       ios::BookmarkModelFactory::GetForBrowserState(self.browserState);
+
+  self.viewController.adaptiveToolbarViewControllerDelegate = self.mediator;
 }
 
 - (void)stop {

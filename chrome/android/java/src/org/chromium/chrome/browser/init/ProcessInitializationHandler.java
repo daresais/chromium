@@ -9,15 +9,15 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.SystemClock;
-import android.support.annotation.WorkerThread;
 import android.text.format.DateUtils;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 
+import androidx.annotation.WorkerThread;
+
 import com.google.ipc.invalidation.external.client.android.service.AndroidLogger;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -49,6 +49,7 @@ import org.chromium.chrome.browser.crash.MinidumpUploadService;
 import org.chromium.chrome.browser.download.DownloadController;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.firstrun.ForcedSigninProcessor;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.history.HistoryDeletionBridge;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory;
 import org.chromium.chrome.browser.identity.UuidBasedUniqueIdentificationGenerator;
@@ -67,15 +68,14 @@ import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.photo_picker.PhotoPickerDialog;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.profiles.ProfileManagerUtils;
 import org.chromium.chrome.browser.rlz.RevenueStats;
 import org.chromium.chrome.browser.searchwidget.SearchWidgetProvider;
 import org.chromium.chrome.browser.services.GoogleServicesManager;
 import org.chromium.chrome.browser.share.ShareHelper;
+import org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardShareActivity;
 import org.chromium.chrome.browser.sync.SyncController;
 import org.chromium.chrome.browser.util.ConversionUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.webapps.WebApkVersionManager;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
@@ -83,12 +83,12 @@ import org.chromium.components.download.DownloadCollectionBridge;
 import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountsChangeObserver;
+import org.chromium.components.viz.common.VizSwitches;
+import org.chromium.components.viz.common.display.DeJellyUtils;
 import org.chromium.content_public.browser.BrowserTaskExecutor;
 import org.chromium.content_public.browser.ChildProcessLauncherHelper;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.common.ContentSwitches;
-import org.chromium.printing.PrintDocumentAdapterWrapper;
-import org.chromium.printing.PrintingControllerImpl;
 import org.chromium.ui.ContactsPickerListener;
 import org.chromium.ui.PhotoPickerListener;
 import org.chromium.ui.UiUtils;
@@ -188,6 +188,12 @@ public class ProcessInitializationHandler {
         // after native is loaded.
         DownloadCollectionBridge.setDownloadCollectionBridge(
                 AppHooks.get().getDownloadCollectionBridge());
+
+        // De-jelly can also be controlled by a system property. As sandboxed processes can't
+        // read this property directly, convert it to the equivalent command line flag.
+        if (DeJellyUtils.externallyEnableDeJelly()) {
+            CommandLine.getInstance().appendSwitch(VizSwitches.ENABLE_DE_JELLY);
+        }
     }
 
     /**
@@ -216,8 +222,6 @@ public class ProcessInitializationHandler {
         ProfileManagerUtils.removeSessionCookiesForAllProfiles();
         AppBannerManager.setAppDetailsDelegate(AppHooks.get().createAppDetailsDelegate());
         ChromeLifetimeController.initialize();
-
-        PrefServiceBridge.getInstance().migratePreferences();
 
         if (ChromeFeatureList.isEnabled(ChromeFeatureList.NEW_PHOTO_PICKER)) {
             UiUtils.setPhotoPickerDelegate(new UiUtils.PhotoPickerDelegate() {
@@ -251,9 +255,10 @@ public class ProcessInitializationHandler {
             @Override
             public void showContactsPicker(Context context, ContactsPickerListener listener,
                     boolean allowMultiple, boolean includeNames, boolean includeEmails,
-                    boolean includeTel, String formattedOrigin) {
+                    boolean includeTel, boolean includeAddresses, boolean includeIcons,
+                    String formattedOrigin) {
                 mDialog = new ContactsPickerDialog(context, listener, allowMultiple, includeNames,
-                        includeEmails, includeTel, formattedOrigin);
+                        includeEmails, includeTel, includeAddresses, includeIcons, formattedOrigin);
                 mDialog.getWindow().getAttributes().windowAnimations =
                         R.style.PickerDialogAnimation;
                 mDialog.show();
@@ -347,12 +352,10 @@ public class ProcessInitializationHandler {
         deferredStartupHandler.addDeferredTask(new Runnable() {
             @Override
             public void run() {
-                if (HomepageManager.shouldShowHomepageSetting()) {
-                    RecordHistogram.recordBooleanHistogram("Settings.ShowHomeButtonPreferenceState",
-                            HomepageManager.isHomepageEnabled());
-                    RecordHistogram.recordBooleanHistogram("Settings.HomePageIsCustomized",
-                            !HomepageManager.getInstance().getPrefHomepageUseDefaultUri());
-                }
+                RecordHistogram.recordBooleanHistogram("Settings.ShowHomeButtonPreferenceState",
+                        HomepageManager.isHomepageEnabled());
+                RecordHistogram.recordBooleanHistogram("Settings.HomePageIsCustomized",
+                        !HomepageManager.getInstance().getPrefHomepageUseDefaultUri());
             }
         });
 
@@ -414,12 +417,6 @@ public class ProcessInitializationHandler {
                     DownloadController.setDownloadNotificationService(
                             DownloadManagerService.getDownloadManagerService());
                 }
-
-                if (ApiCompatibilityUtils.isPrintingSupported()) {
-                    String errorText = ContextUtils.getApplicationContext().getString(
-                            R.string.error_printing_failed);
-                    PrintingControllerImpl.create(new PrintDocumentAdapterWrapper(), errorText);
-                }
             }
         });
 
@@ -444,6 +441,9 @@ public class ProcessInitializationHandler {
 
         deferredStartupHandler.addDeferredTask(
                 () -> IncognitoTabLauncher.updateComponentEnabledState());
+
+        deferredStartupHandler.addDeferredTask(
+                () -> SharedClipboardShareActivity.updateComponentEnabledState());
     }
 
     private void initChannelsAsync() {

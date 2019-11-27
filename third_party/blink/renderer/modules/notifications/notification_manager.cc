@@ -4,8 +4,10 @@
 
 #include "third_party/blink/renderer/modules/notifications/notification_manager.h"
 
+#include <utility>
+
 #include "base/numerics/safe_conversions.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/notifications/notification.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
@@ -21,7 +23,7 @@
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -74,8 +76,8 @@ ScriptPromise NotificationManager::RequestPermission(
         context->GetTaskRunner(TaskType::kMiscPlatformAPI);
     ConnectToPermissionService(
         context,
-        mojo::MakeRequest(&permission_service_, std::move(task_runner)));
-    permission_service_.set_connection_error_handler(
+        permission_service_.BindNewPipeAndPassReceiver(std::move(task_runner)));
+    permission_service_.set_disconnect_handler(
         WTF::Bind(&NotificationManager::OnPermissionServiceConnectionError,
                   WrapWeakPersistent(this)));
   }
@@ -117,7 +119,8 @@ void NotificationManager::DisplayNonPersistentNotification(
     const String& token,
     mojom::blink::NotificationDataPtr notification_data,
     mojom::blink::NotificationResourcesPtr notification_resources,
-    mojom::blink::NonPersistentNotificationListenerPtr event_listener) {
+    mojo::PendingRemote<mojom::blink::NonPersistentNotificationListener>
+        event_listener) {
   DCHECK(!token.IsEmpty());
   DCHECK(notification_resources);
   GetNotificationService()->DisplayNonPersistentNotification(
@@ -211,33 +214,34 @@ void NotificationManager::DidGetNotifications(
     const Vector<String>& notification_ids,
     Vector<mojom::blink::NotificationDataPtr> notification_datas) {
   DCHECK_EQ(notification_ids.size(), notification_datas.size());
+  ExecutionContext* context = resolver->GetExecutionContext();
+  if (!context)
+    return;
 
   HeapVector<Member<Notification>> notifications;
   notifications.ReserveInitialCapacity(notification_ids.size());
 
   for (wtf_size_t i = 0; i < notification_ids.size(); ++i) {
     notifications.push_back(Notification::Create(
-        resolver->GetExecutionContext(), notification_ids[i],
-        std::move(notification_datas[i]), true /* showing */));
+        context, notification_ids[i], std::move(notification_datas[i]),
+        true /* showing */));
   }
 
   resolver->Resolve(notifications);
 }
 
-const mojom::blink::NotificationServicePtr&
+const mojo::Remote<mojom::blink::NotificationService>&
 NotificationManager::GetNotificationService() {
   if (!notification_service_) {
-    if (auto* provider = GetSupplementable()->GetInterfaceProvider()) {
-      // See https://bit.ly/2S0zRAS for task types
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-          GetSupplementable()->GetTaskRunner(TaskType::kMiscPlatformAPI);
-      provider->GetInterface(
-          mojo::MakeRequest(&notification_service_, std::move(task_runner)));
+    // See https://bit.ly/2S0zRAS for task types
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+        GetSupplementable()->GetTaskRunner(TaskType::kMiscPlatformAPI);
+    GetSupplementable()->GetBrowserInterfaceBroker().GetInterface(
+        notification_service_.BindNewPipeAndPassReceiver(task_runner));
 
-      notification_service_.set_connection_error_handler(
-          WTF::Bind(&NotificationManager::OnNotificationServiceConnectionError,
-                    WrapWeakPersistent(this)));
-    }
+    notification_service_.set_disconnect_handler(
+        WTF::Bind(&NotificationManager::OnNotificationServiceConnectionError,
+                  WrapWeakPersistent(this)));
   }
 
   return notification_service_;

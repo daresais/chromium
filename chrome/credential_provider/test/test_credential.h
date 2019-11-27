@@ -14,6 +14,7 @@
 #include <credentialprovider.h>
 
 #include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential_base.h"
@@ -39,9 +40,12 @@ class DECLSPEC_UUID("3710aa3a-13c7-44c2-bc38-09ba137804d8") ITestCredential
   virtual HRESULT STDMETHODCALLTYPE
   SetGaiaIdOverride(const std::string& gaia_id,
                     bool ignore_expected_gaia_id) = 0;
+  virtual HRESULT STDMETHODCALLTYPE
+  SetGaiaFullNameOverride(const std::string& full_name) = 0;
   virtual HRESULT STDMETHODCALLTYPE WaitForGls() = 0;
   virtual HRESULT STDMETHODCALLTYPE
   SetStartGlsEventName(const base::string16& event_name) = 0;
+  virtual HRESULT STDMETHODCALLTYPE FailLoadingGaiaLogonStub() = 0;
   virtual BSTR STDMETHODCALLTYPE GetFinalUsername() = 0;
   virtual std::string STDMETHODCALLTYPE GetFinalEmail() = 0;
   virtual bool STDMETHODCALLTYPE IsAuthenticationResultsEmpty() = 0;
@@ -50,6 +54,8 @@ class DECLSPEC_UUID("3710aa3a-13c7-44c2-bc38-09ba137804d8") ITestCredential
   virtual bool STDMETHODCALLTYPE CanAttemptWindowsLogon() = 0;
   virtual bool STDMETHODCALLTYPE IsWindowsPasswordValidForStoredUser() = 0;
   virtual bool STDMETHODCALLTYPE IsGlsRunning() = 0;
+  virtual bool STDMETHODCALLTYPE IsAdJoinedUser() = 0;
+  virtual bool STDMETHODCALLTYPE ContainsIsAdJoinedUser() = 0;
 };
 
 // Test implementation of an ICredentialProviderCredential backed by a Gaia
@@ -76,6 +82,8 @@ class ATL_NO_VTABLE CTestCredentialBase : public T, public ITestCredential {
   IFACEMETHODIMP SetGlsGaiaPassword(const std::string& gaia_password) override;
   IFACEMETHODIMP SetGaiaIdOverride(const std::string& gaia_id,
                                    bool ignore_expected_gaia_id) override;
+  IFACEMETHODIMP SetGaiaFullNameOverride(const std::string& full_name) override;
+  IFACEMETHODIMP FailLoadingGaiaLogonStub() override;
   IFACEMETHODIMP WaitForGls() override;
   IFACEMETHODIMP SetStartGlsEventName(
       const base::string16& event_name) override;
@@ -87,6 +95,8 @@ class ATL_NO_VTABLE CTestCredentialBase : public T, public ITestCredential {
   bool STDMETHODCALLTYPE CanAttemptWindowsLogon() override;
   bool STDMETHODCALLTYPE IsWindowsPasswordValidForStoredUser() override;
   bool STDMETHODCALLTYPE IsGlsRunning() override;
+  bool STDMETHODCALLTYPE IsAdJoinedUser() override;
+  bool STDMETHODCALLTYPE ContainsIsAdJoinedUser() override;
 
   void SignalGlsCompletion();
 
@@ -119,12 +129,14 @@ class ATL_NO_VTABLE CTestCredentialBase : public T, public ITestCredential {
   std::string gls_email_;
   std::string gaia_password_;
   std::string gaia_id_override_;
+  std::string full_name_override_;
   base::WaitableEvent gls_done_;
   base::win::ScopedHandle process_continue_event_;
   base::string16 start_gls_event_name_;
   CComBSTR error_text_;
   bool gls_process_started_ = false;
   bool ignore_expected_gaia_id_ = false;
+  bool fail_loading_gaia_logon_stub_ = false;
 };
 
 template <class T>
@@ -140,6 +152,12 @@ template <class T>
 HRESULT CTestCredentialBase<T>::SetDefaultExitCode(
     UiExitCodes default_exit_code) {
   default_exit_code_ = default_exit_code;
+  return S_OK;
+}
+
+template <class T>
+HRESULT CTestCredentialBase<T>::FailLoadingGaiaLogonStub() {
+  fail_loading_gaia_logon_stub_ = true;
   return S_OK;
 }
 
@@ -162,6 +180,13 @@ HRESULT CTestCredentialBase<T>::SetGaiaIdOverride(
     bool ignore_expected_gaia_id) {
   ignore_expected_gaia_id_ = ignore_expected_gaia_id;
   gaia_id_override_ = gaia_id;
+  return S_OK;
+}
+
+template <class T>
+HRESULT CTestCredentialBase<T>::SetGaiaFullNameOverride(
+    const std::string& full_name) {
+  full_name_override_ = full_name;
   return S_OK;
 }
 
@@ -209,6 +234,36 @@ std::string CTestCredentialBase<T>::GetFinalEmail() {
 }
 
 template <class T>
+bool CTestCredentialBase<T>::IsAdJoinedUser() {
+  auto& results = this->get_authentication_results();
+
+  if (!results)
+    return false;
+
+  const std::string* is_ad_joined_user =
+      results->FindStringKey(kKeyIsAdJoinedUser);
+
+  if (!is_ad_joined_user)
+    return false;
+  return base::CompareCaseInsensitiveASCII(*is_ad_joined_user, "true") == 0;
+}
+
+template <class T>
+bool CTestCredentialBase<T>::ContainsIsAdJoinedUser() {
+  auto& results = this->get_authentication_results();
+
+  if (!results)
+    return false;
+
+  const std::string* is_ad_joined_user =
+      results->FindStringKey(kKeyIsAdJoinedUser);
+
+  if (!is_ad_joined_user)
+    return false;
+  return true;
+}
+
+template <class T>
 BSTR CTestCredentialBase<T>::GetErrorText() {
   return error_text_;
 }
@@ -244,7 +299,8 @@ HRESULT CTestCredentialBase<T>::GetBaseGlsCommandline(
     base::CommandLine* command_line) {
   return GlsRunnerTestBase::GetFakeGlsCommandline(
       default_exit_code_, gls_email_, gaia_id_override_, gaia_password_,
-      start_gls_event_name_, ignore_expected_gaia_id_, command_line);
+      full_name_override_, start_gls_event_name_, ignore_expected_gaia_id_,
+      command_line);
 }
 
 template <class T>
@@ -252,6 +308,9 @@ HRESULT CTestCredentialBase<T>::ForkGaiaLogonStub(
     OSProcessManager* process_manager,
     const base::CommandLine& command_line,
     CGaiaCredentialBase::UIProcessInfo* uiprocinfo) {
+  if (fail_loading_gaia_logon_stub_)
+    return E_FAIL;
+
   HRESULT hr = T::ForkGaiaLogonStub(process_manager, command_line, uiprocinfo);
 
   if (SUCCEEDED(hr)) {

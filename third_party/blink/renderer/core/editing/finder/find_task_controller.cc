@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/editing/finder/find_task_controller.h"
 
+#include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/idle_request_options.h"
 #include "third_party/blink/renderer/core/dom/range.h"
@@ -15,8 +16,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 
 namespace blink {
 

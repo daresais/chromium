@@ -32,6 +32,26 @@ constexpr int kMouseDragThreshold = 2;
 // Id of OEM folder in app list.
 ASH_PUBLIC_EXPORT extern const char kOemFolderId[];
 
+// App list config types supported by AppListConfig.
+enum class AppListConfigType {
+  // Config type used for all screens when app_list_features::ScalableAppList
+  // feature is disabled. (Note that two configs having this type can differ, in
+  // case one of them is scaled down).
+  kShared,
+
+  // Config used on large screens when app_list_features::ScalableAppList
+  // feature is enabled.
+  kLarge,
+
+  // Config used on medium sized screens when app_list_features::ScalableAppList
+  // feature is enabled.
+  kMedium,
+
+  // Config used on small screens when app_list_features::ScalableAppList
+  // feature is enabled.
+  kSmall
+};
+
 // A structure holding the common information which is sent between ash and,
 // chrome representing an app list item.
 struct ASH_PUBLIC_EXPORT AppListItemMetadata {
@@ -112,17 +132,19 @@ enum class AppListLaunchType {
 };
 
 // Type of the search result, which is set in Chrome.
-enum class SearchResultType {
-  kUnknown,         // Unknown type. Don't use over IPC
-  kInstalledApp,    // Installed apps.
-  kPlayStoreApp,    // Installable apps from PlayStore.
-  kInstantApp,      // Instant apps.
-  kInternalApp,     // Chrome OS apps.
-  kOmnibox,         // Results from Omnibox.
-  kLauncher,        // Results from launcher search (currently only from Files).
-  kAnswerCard,      // WebContents based answer card.
+enum class AppListSearchResultType {
+  kUnknown,       // Unknown type. Don't use over IPC
+  kInstalledApp,  // Installed apps.
+  kPlayStoreApp,  // Installable apps from PlayStore.
+  kInstantApp,    // Instant apps.
+  kInternalApp,   // Chrome OS apps.
+  kOmnibox,       // Results from Omnibox.
+  kLauncher,      // Results from launcher search (currently only from Files).
+  kAnswerCard,    // WebContents based answer card.
   kPlayStoreReinstallApp,  // Reinstall recommendations from PlayStore.
   kArcAppShortcut,         // ARC++ app shortcuts.
+  kZeroStateFile,          // Zero state local file results.
+  kDriveQuickAccess,       // Drive QuickAccess results.
   // Add new values here.
 };
 
@@ -248,7 +270,7 @@ struct ASH_PUBLIC_EXPORT SearchResultMetadata {
   base::string16 formatted_price;
 
   // The type of this result.
-  SearchResultType result_type = SearchResultType::kUnknown;
+  AppListSearchResultType result_type = AppListSearchResultType::kUnknown;
 
   // The subtype of this result. Derived search result classes can use this to
   // represent their own subtypes. Currently, OmniboxResult sets this to
@@ -265,6 +287,10 @@ struct ASH_PUBLIC_EXPORT SearchResultMetadata {
 
   // Which index in the UI container should the result be placed in.
   SearchResultDisplayIndex display_index = SearchResultDisplayIndex::kUndefined;
+
+  // A score to settle conflicts between two apps with the same requested
+  // |display_index|.
+  float position_priority = 0.0f;
 
   // A score to determine the result display order.
   double display_score = 0;
@@ -299,6 +325,22 @@ struct ASH_PUBLIC_EXPORT SearchResultMetadata {
   // the chrome side when this result is set visible/invisible.
   bool notify_visibility_change = false;
 };
+
+// A struct holding a search result id and its corresponding position index that
+// was being shown to the user.
+struct SearchResultIdWithPositionIndex {
+  SearchResultIdWithPositionIndex(std::string result_id, int index)
+      : id(result_id), position_index(index) {}
+
+  // The id of the result.
+  std::string id;
+
+  // The position index of the result.
+  int position_index;
+};
+
+using SearchResultIdWithPositionIndices =
+    std::vector<SearchResultIdWithPositionIndex>;
 
 }  // namespace ash
 

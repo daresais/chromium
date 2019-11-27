@@ -42,6 +42,8 @@ ASH_PUBLIC_EXPORT extern const char
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessPreviousSetting[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessAutoScanEnabled[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilitySwitchAccessAutoScanSpeedMs[];
+ASH_PUBLIC_EXPORT extern const char
+    kAccessibilitySwitchAccessAutoScanKeyboardSpeedMs[];
 ASH_PUBLIC_EXPORT extern const char kAccessibilityDictationEnabled[];
 ASH_PUBLIC_EXPORT extern const char kShouldAlwaysShowAccessibilityMenu[];
 
@@ -57,6 +59,8 @@ ASH_PUBLIC_EXPORT extern const char
     kDictationAcceleratorDialogHasBeenAccepted[];
 ASH_PUBLIC_EXPORT extern const char
     kDisplayRotationAcceleratorDialogHasBeenAccepted[];
+ASH_PUBLIC_EXPORT extern const char
+    kDisplayRotationAcceleratorDialogHasBeenAccepted2[];
 
 ASH_PUBLIC_EXPORT extern const char kDisplayMixedMirrorModeParams[];
 ASH_PUBLIC_EXPORT extern const char kDisplayPowerState[];
@@ -78,6 +82,7 @@ ASH_PUBLIC_EXPORT extern const char kMessageCenterLockScreenModeShow[];
 ASH_PUBLIC_EXPORT extern const char kMessageCenterLockScreenModeHide[];
 ASH_PUBLIC_EXPORT extern const char kMessageCenterLockScreenModeHideSensitive[];
 
+ASH_PUBLIC_EXPORT extern const char kAmbientColorEnabled[];
 ASH_PUBLIC_EXPORT extern const char kNightLightEnabled[];
 ASH_PUBLIC_EXPORT extern const char kNightLightTemperature[];
 ASH_PUBLIC_EXPORT extern const char kNightLightScheduleType[];
@@ -85,6 +90,7 @@ ASH_PUBLIC_EXPORT extern const char kNightLightCustomStartTime[];
 ASH_PUBLIC_EXPORT extern const char kNightLightCustomEndTime[];
 ASH_PUBLIC_EXPORT extern const char kNightLightCachedLatitude[];
 ASH_PUBLIC_EXPORT extern const char kNightLightCachedLongitude[];
+ASH_PUBLIC_EXPORT extern const char kAutoNightLightNotificationDismissed[];
 
 ASH_PUBLIC_EXPORT extern const char kAllowScreenLock[];
 ASH_PUBLIC_EXPORT extern const char kEnableAutoScreenLock[];
@@ -165,7 +171,7 @@ ASH_PUBLIC_EXPORT extern const char kUsbPowerShareEnabled[];
 ASH_PUBLIC_EXPORT extern const char kAssistantPrivacyInfoShownInLauncher[];
 ASH_PUBLIC_EXPORT extern const char kAssistantPrivacyInfoDismissedInLauncher[];
 
-ASH_PUBLIC_EXPORT extern const char kLockScreenMediaKeysEnabled[];
+ASH_PUBLIC_EXPORT extern const char kLockScreenMediaControlsEnabled[];
 
 }  // namespace prefs
 

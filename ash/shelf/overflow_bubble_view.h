@@ -7,6 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/shelf/shelf_bubble.h"
+#include "ash/shelf/shelf_button_delegate.h"
 #include "base/macros.h"
 #include "ui/views/animation/ink_drop_host_view.h"
 #include "ui/views/controls/button/button.h"
@@ -18,12 +19,12 @@ class ShelfView;
 // OverflowBubbleView hosts a ShelfView to display overflown items.
 // Exports to access this class from OverflowBubbleViewTestAPI.
 class ASH_EXPORT OverflowBubbleView : public ShelfBubble,
-                                      views::ButtonListener {
+                                      public ShelfButtonDelegate {
  public:
   enum LayoutStrategy {
     // The arrow buttons are not shown. It means that there is enough space to
     // accommodate all of shelf icons.
-    NOT_SHOW_ARROW_BUTTON,
+    NOT_SHOW_ARROW_BUTTONS,
 
     // Only the left arrow button is shown.
     SHOW_LEFT_ARROW_BUTTON,
@@ -52,6 +53,9 @@ class ASH_EXPORT OverflowBubbleView : public ShelfBubble,
   int ScrollByXOffset(float x_offset, bool animating);
   int ScrollByYOffset(float y_offset, bool animating);
 
+  int GetFirstVisibleIndex() const;
+  int GetLastVisibleIndex() const;
+
   // views::BubbleDialogDelegateView:
   gfx::Rect GetBubbleBounds() override;
   bool CanActivate() const override;
@@ -66,19 +70,20 @@ class ASH_EXPORT OverflowBubbleView : public ShelfBubble,
   bool ShouldCloseOnPressDown() override;
   bool ShouldCloseOnMouseExit() override;
 
+  static int GetArrowButtonSize();
+
   // Padding at the two ends of the shelf in overflow mode.
   static constexpr int kEndPadding = 4;
 
   // Minimum margin around the bubble so that it doesn't hug the screen edges.
   static constexpr int kMinimumMargin = 8;
 
-  // Size of the arrow button.
-  static const int kArrowButtonSize;
+  static constexpr int kFadingZone = 16;
 
  private:
   friend class OverflowBubbleViewTestAPI;
 
-  class ScrollArrowView;
+  class OverflowScrollArrowView;
   class OverflowShelfContainerView;
 
   // Returns the maximum scroll distance.
@@ -97,18 +102,36 @@ class ASH_EXPORT OverflowBubbleView : public ShelfBubble,
   // Creates the animation for scrolling shelf by |scroll_distance|.
   void StartShelfScrollAnimation(float scroll_distance);
 
+  // Update the layout strategy based on the available space.
+  void UpdateLayoutStrategy();
+
+  // Scrolls to a new page of shelf icons. |forward| indicates whether the next
+  // page or previous page is shown.
+  void ScrollToNewPage(bool forward);
+
+  void ScrollToBeginning();
+  void ScrollToEnd();
+
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   void ChildPreferredSizeChanged(views::View* child) override;
   bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
   const char* GetClassName() const override;
+  void ScrollRectToVisible(const gfx::Rect& rect) override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  // ShelfButtonDelegate:
+  void OnShelfButtonAboutToRequestFocusFromTabTraversal(ShelfButton* button,
+                                                        bool reverse) override;
+  void ButtonPressed(views::Button* sender,
+                     const ui::Event& event,
+                     views::InkDrop* ink_drop) override;
 
   // ui::EventHandler:
   void OnScrollEvent(ui::ScrollEvent* event) override;
+
+  Shelf* GetShelf();
+  const Shelf* GetShelf() const;
 
   mutable LayoutStrategy layout_strategy_;
 
@@ -118,7 +141,6 @@ class ASH_EXPORT OverflowBubbleView : public ShelfBubble,
   OverflowShelfContainerView* shelf_container_view_ = nullptr;
 
   // Not owned.
-  Shelf* shelf_;
   ShelfView* shelf_view_;
 
   gfx::Vector2dF scroll_offset_;

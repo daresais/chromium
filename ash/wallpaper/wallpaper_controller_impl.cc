@@ -32,6 +32,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram_macros.h"
@@ -470,8 +471,9 @@ const char WallpaperControllerImpl::kOriginalWallpaperSubDir[] = "original";
 WallpaperControllerImpl::WallpaperControllerImpl(PrefService* local_state)
     : color_profiles_(GetProminentColorProfiles()),
       wallpaper_reload_delay_(kWallpaperReloadDelay),
-      sequenced_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+      sequenced_task_runner_(base::CreateSequencedTaskRunner(
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
       local_state_(local_state) {
   DCHECK(!g_instance_);
@@ -615,12 +617,6 @@ bool WallpaperControllerImpl::ShouldShowInitialAnimation() {
   return true;
 }
 
-void WallpaperControllerImpl::OnWallpaperAnimationFinished() {
-  // TODO(crbug.com/875128): Remove this after web-ui login code is removed.
-  if (wallpaper_controller_client_ && is_first_wallpaper_)
-    wallpaper_controller_client_->OnFirstWallpaperAnimationFinished();
-}
-
 bool WallpaperControllerImpl::CanOpenWallpaperPicker() {
   return ShouldShowWallpaperSetting() &&
          !IsActiveUserWallpaperControlledByPolicy();
@@ -680,12 +676,16 @@ void WallpaperControllerImpl::ShowWallpaperImage(const gfx::ImageSkia& image,
     for (auto& observer : observers_)
       observer.OnFirstWallpaperShown();
   }
+
   for (auto& observer : observers_)
-    observer.OnWallpaperChanged();
+    observer.OnWallpaperChanging();
 
   wallpaper_mode_ = WALLPAPER_IMAGE;
   InstallDesktopControllerForAllWindows();
   ++wallpaper_count_for_testing_;
+
+  for (auto& observer : observers_)
+    observer.OnWallpaperChanged();
 }
 
 bool WallpaperControllerImpl::IsPolicyControlled(
@@ -988,9 +988,8 @@ void WallpaperControllerImpl::SetPolicyWallpaper(
   if (IsInKioskMode())
     return;
 
-  // Updates the screen only when the user has logged in.
-  const bool show_wallpaper =
-      Shell::Get()->session_controller()->IsActiveUserSessionStarted();
+  // Updates the screen only when the user with this account_id has logged in.
+  const bool show_wallpaper = IsActiveUser(account_id);
   LoadedCallback callback = base::BindOnce(
       &WallpaperControllerImpl::SaveAndSetWallpaper, weak_factory_.GetWeakPtr(),
       account_id, wallpaper_files_id, kPolicyWallpaperFile, POLICY,
@@ -1047,6 +1046,11 @@ void WallpaperControllerImpl::ConfirmPreviewWallpaper() {
   }
   std::move(confirm_preview_wallpaper_callback_).Run();
   reload_preview_wallpaper_callback_.Reset();
+
+  // Ensure dimming is applied after confirming the preview wallpaper.
+  if (ShouldApplyDimming())
+    RepaintWallpaper();
+
   for (auto& observer : observers_)
     observer.OnWallpaperPreviewEnded();
 }
@@ -1528,9 +1532,9 @@ void WallpaperControllerImpl::RemoveUserWallpaperImpl(
   wallpaper_path = GetCustomWallpaperDir(kOriginalWallpaperSubDir);
   files_to_remove.push_back(wallpaper_path.Append(wallpaper_files_id));
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&DeleteWallpaperInList, std::move(files_to_remove)));
 }
@@ -1716,10 +1720,9 @@ void WallpaperControllerImpl::SetOnlineWallpaperImpl(
       CustomWallpaperElement(base::FilePath(), image);
 }
 
-void WallpaperControllerImpl::SetWallpaperFromInfo(
-    const AccountId& account_id,
-    const WallpaperInfo& info,
-    bool show_wallpaper) {
+void WallpaperControllerImpl::SetWallpaperFromInfo(const AccountId& account_id,
+                                                   const WallpaperInfo& info,
+                                                   bool show_wallpaper) {
   if (info.type != ONLINE && info.type != DEFAULT) {
     // This method is meant to be used for ONLINE and DEFAULT types. In
     // unexpected cases, revert to default wallpaper to fail safely. See
@@ -1838,8 +1841,9 @@ void WallpaperControllerImpl::SaveAndSetWallpaper(
     // Block shutdown on this task. Otherwise, we may lose the custom wallpaper
     // that the user selected.
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner =
-        base::CreateSequencedTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+        base::CreateSequencedTaskRunner(
+            {base::ThreadPool(), base::MayBlock(),
+             base::TaskPriority::USER_BLOCKING,
              base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
     blocking_task_runner->PostTask(
         FROM_HERE, base::BindOnce(&SaveCustomWallpaper, wallpaper_files_id,
@@ -1855,12 +1859,11 @@ void WallpaperControllerImpl::SaveAndSetWallpaper(
       CustomWallpaperElement(wallpaper_path, image);
 }
 
-void WallpaperControllerImpl::OnWallpaperDecoded(
-    const AccountId& account_id,
-    const base::FilePath& path,
-    const WallpaperInfo& info,
-    bool show_wallpaper,
-    const gfx::ImageSkia& image) {
+void WallpaperControllerImpl::OnWallpaperDecoded(const AccountId& account_id,
+                                                 const base::FilePath& path,
+                                                 const WallpaperInfo& info,
+                                                 bool show_wallpaper,
+                                                 const gfx::ImageSkia& image) {
   // Empty image indicates decode failure. Use default wallpaper in this case.
   if (image.isNull()) {
     LOG(ERROR) << "Failed to decode user wallpaper at " << path.value()

@@ -23,7 +23,9 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
+#include "components/password_manager/core/browser/leak_detection_dialog_utils.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
+#include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/strings/grit/components_strings.h"
@@ -210,6 +212,7 @@ GURL GetGooglePasswordManagerURL(ManagePasswordsReferrer referrer) {
       case ManagePasswordsReferrer::kProfileChooser:
         return "profile_chooser";
       case ManagePasswordsReferrer::kPasswordsAccessorySheet:
+      case ManagePasswordsReferrer::kTouchToFill:
         NOTREACHED();
     }
 
@@ -252,5 +255,12 @@ void NavigateToManagePasswordsPage(Browser* browser,
   }
 
   chrome::ShowPasswordManager(browser);
+}
+
+void NavigateToPasswordCheckupPage(Profile* profile) {
+  NavigateParams params(profile, password_manager::GetPasswordCheckupURL(),
+                        ui::PAGE_TRANSITION_LINK);
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  Navigate(&params);
 }
 #endif  // !defined(OS_ANDROID)

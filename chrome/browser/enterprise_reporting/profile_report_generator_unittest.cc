@@ -4,32 +4,24 @@
 
 #include "chrome/browser/enterprise_reporting/profile_report_generator.h"
 
-#include "base/logging.h"
-#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/account_id/account_id.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
-#include "content/public/browser/plugin_service.h"
-#include "content/public/common/webplugininfo.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace enterprise_reporting {
 namespace {
 
-const char kProfile[] = "Profile";
-const char kIdleProfile[] = "IdleProfile";
-
-const char kPluginName[] = "plugin";
-const char kPluginVersion[] = "1.0";
-const char kPluginDescription[] = "This is a plugin.";
-const char kPluginFileName[] = "file_name";
+constexpr char kProfile[] = "Profile";
+constexpr char kIdleProfile[] = "IdleProfile";
+constexpr char kExtensionId[] = "abcdefghijklmnopabcdefghijklmnop";
 
 }  // namespace
 
@@ -41,26 +33,17 @@ class ProfileReportGeneratorTest : public ::testing::Test {
 
   void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
-    profile_ = profile_manager_.CreateTestingProfile(kProfile);
-    content::PluginService::GetInstance()->Init();
+    profile_ = profile_manager_.CreateTestingProfile(
+        kProfile, {}, base::UTF8ToUTF16(kProfile), 0, {},
+        IdentityTestEnvironmentProfileAdaptor::
+            GetIdentityTestEnvironmentFactories());
   }
 
   std::unique_ptr<em::ChromeUserProfileInfo> GenerateReport(
       const base::FilePath& path,
       const std::string& name) {
-    base::RunLoop run_loop;
     std::unique_ptr<em::ChromeUserProfileInfo> report =
-        std::make_unique<em::ChromeUserProfileInfo>();
-    generator_.MaybeGenerate(
-        path, name,
-        base::BindLambdaForTesting(
-            [&run_loop, report = report.get()](
-                std::unique_ptr<em::ChromeUserProfileInfo> response) {
-              DCHECK(response);
-              report->Swap(response.get());
-              run_loop.Quit();
-            }));
-    run_loop.Run();
+        generator_.MaybeGenerate(path, name);
     return report;
   }
 
@@ -75,17 +58,13 @@ class ProfileReportGeneratorTest : public ::testing::Test {
     return report;
   }
 
-  void CreatePlugin() {
-    content::WebPluginInfo info;
-    info.name = base::ASCIIToUTF16(kPluginName);
-    info.version = base::ASCIIToUTF16(kPluginVersion);
-    info.desc = base::ASCIIToUTF16(kPluginDescription);
-    info.path =
-        base::FilePath().AppendASCII("path").AppendASCII(kPluginFileName);
-    content::PluginService* plugin_service =
-        content::PluginService::GetInstance();
-    plugin_service->RegisterInternalPlugin(info, true);
-    plugin_service->RefreshPlugins();
+  void SetExtensionToPendingList(const std::vector<std::string>& ids) {
+    base::Value::ListStorage id_values;
+    for (auto id : ids)
+      id_values.push_back(base::Value(id));
+    profile()->GetTestingPrefService()->SetUserPref(
+        prefs::kCloudExtensionRequestIds,
+        std::make_unique<base::Value>(std::move(id_values)));
   }
 
   TestingProfile* profile() { return profile_; }
@@ -94,7 +73,7 @@ class ProfileReportGeneratorTest : public ::testing::Test {
   ProfileReportGenerator generator_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager_;
   TestingProfile* profile_;
 
@@ -106,16 +85,10 @@ TEST_F(ProfileReportGeneratorTest, ProfileNotActivated) {
       profile_manager()->profiles_dir().AppendASCII(kIdleProfile);
   profile_manager()->profile_attributes_storage()->AddProfile(
       profile_path, base::ASCIIToUTF16(kIdleProfile), std::string(),
-      base::string16(), 0, std::string(), EmptyAccountId());
-  base::RunLoop run_loop;
-  generator_.MaybeGenerate(
-      profile_path, kIdleProfile,
-      base::BindLambdaForTesting(
-          [&run_loop](std::unique_ptr<em::ChromeUserProfileInfo> response) {
-            EXPECT_FALSE(response);
-            run_loop.Quit();
-          }));
-  run_loop.Run();
+      base::string16(), false, 0, std::string(), EmptyAccountId());
+  std::unique_ptr<em::ChromeUserProfileInfo> response =
+      generator_.MaybeGenerate(profile_path, kIdleProfile);
+  ASSERT_FALSE(response.get());
 }
 
 TEST_F(ProfileReportGeneratorTest, UnsignedInProfile) {
@@ -132,26 +105,26 @@ TEST_F(ProfileReportGeneratorTest, SignedInProfile) {
   EXPECT_TRUE(report->has_chrome_signed_in_user());
   EXPECT_EQ(expected_info.email, report->chrome_signed_in_user().email());
   EXPECT_EQ(expected_info.gaia,
-            report->chrome_signed_in_user().obfudscated_gaiaid());
+            report->chrome_signed_in_user().obfudscated_gaia_id());
 }
 
-TEST_F(ProfileReportGeneratorTest, PluginIsDisabled) {
-  CreatePlugin();
-  generator_.set_extensions_and_plugins_enabled(false);
+TEST_F(ProfileReportGeneratorTest, PendingRequest) {
+  generator_.set_extension_request_enabled(true);
+  std::vector<std::string> ids = {kExtensionId};
+  SetExtensionToPendingList(ids);
+
   auto report = GenerateReport();
-  EXPECT_EQ(0, report->plugins_size());
+  EXPECT_EQ(1, report->extension_requests_size());
+  EXPECT_EQ(kExtensionId, report->extension_requests(0).id());
 }
 
-TEST_F(ProfileReportGeneratorTest, PluginIsEnabled) {
-  CreatePlugin();
+TEST_F(ProfileReportGeneratorTest, NoPendingRequestWhenItsDisabled) {
+  generator_.set_extension_request_enabled(false);
+  std::vector<std::string> ids = {kExtensionId};
+  SetExtensionToPendingList(ids);
+
   auto report = GenerateReport();
-  // There might be other plugins like PDF plugin, however, our fake plugin
-  // should be the first one in the report.
-  EXPECT_LE(1, report->plugins_size());
-  EXPECT_EQ(kPluginName, report->plugins(0).name());
-  EXPECT_EQ(kPluginVersion, report->plugins(0).version());
-  EXPECT_EQ(kPluginDescription, report->plugins(0).description());
-  EXPECT_EQ(kPluginFileName, report->plugins(0).filename());
+  EXPECT_EQ(0, report->extension_requests_size());
 }
 
 }  // namespace enterprise_reporting

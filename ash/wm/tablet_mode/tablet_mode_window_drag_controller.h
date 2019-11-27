@@ -13,11 +13,9 @@
 #include "base/memory/weak_ptr.h"
 
 namespace ash {
-class TabletModeWindowDragDelegate;
 
-namespace wm {
+class TabletModeWindowDragDelegate;
 class WindowState;
-}  // namespace wm
 
 // WindowResizer implementation for windows in tablet mode. Currently we
 // don't allow any resizing and any dragging happening on the area other than
@@ -28,7 +26,7 @@ class WindowState;
 class ASH_EXPORT TabletModeWindowDragController : public WindowResizer {
  public:
   TabletModeWindowDragController(
-      wm::WindowState* window_state,
+      WindowState* window_state,
       std::unique_ptr<TabletModeWindowDragDelegate> drag_delegate);
   ~TabletModeWindowDragController() override;
 
@@ -53,7 +51,7 @@ class ASH_EXPORT TabletModeWindowDragController : public WindowResizer {
 
   // Used to determine if this has been deleted during a drag such as when a tab
   // gets dragged into another browser window.
-  base::WeakPtrFactory<TabletModeWindowDragController> weak_ptr_factory_;
+  base::WeakPtrFactory<TabletModeWindowDragController> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TabletModeWindowDragController);
 };

@@ -4,131 +4,123 @@
 
 #include "chrome/browser/password_manager/touch_to_fill_controller.h"
 
-#include <string>
 #include <utility>
 
-#include "base/feature_list.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/autofill/manual_filling_controller.h"
-#include "chrome/browser/ui/autofill/autofill_popup_controller.h"
-#include "components/autofill/core/browser/ui/popup_item_ids.h"
-#include "components/autofill/core/browser/ui/suggestion.h"
-#include "components/password_manager/core/common/password_manager_features.h"
+#include "base/util/type_safety/pass_key.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
+#include "chrome/browser/touch_to_fill/touch_to_fill_view.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
+#include "components/password_manager/core/browser/origin_credential_store.h"
+#include "components/password_manager/core/browser/password_manager_driver.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
+#include "components/ukm/content/source_url_recorder.h"
+#include "components/url_formatter/elide_url.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 
-using content::WebContents;
+using ShowVirtualKeyboard =
+    password_manager::PasswordManagerDriver::ShowVirtualKeyboard;
+using password_manager::CredentialPair;
+using password_manager::PasswordManagerDriver;
 
-// static
-TouchToFillController* TouchToFillController::GetOrCreate(
-    WebContents* web_contents) {
-  DCHECK(web_contents) << "Need valid WebContents to attach controller to!";
-  DCHECK(TouchToFillController::AllowedForWebContents(web_contents));
+namespace {
 
-  TouchToFillController::CreateForWebContents(web_contents);
-  return TouchToFillController::FromWebContents(web_contents);
+void OnImageFetched(base::OnceCallback<void(const gfx::Image&)> callback,
+                    const favicon_base::FaviconRawBitmapResult& bitmap_result) {
+  gfx::Image image;
+  if (bitmap_result.is_valid())
+    image = gfx::Image::CreateFrom1xPNGBytes(bitmap_result.bitmap_data);
+  std::move(callback).Run(image);
 }
 
-// static
-std::unique_ptr<TouchToFillController> TouchToFillController::CreateForTesting(
-    base::WeakPtr<ManualFillingController> mf_controller) {
-  // Using `new` to access a non-public constructor.
-  return base::WrapUnique(new TouchToFillController(mf_controller));
-}
+}  // namespace
+
+TouchToFillController::TouchToFillController(
+    util::PassKey<TouchToFillControllerTest>) {}
+
+TouchToFillController::TouchToFillController(
+    ChromePasswordManagerClient* password_client,
+    favicon::FaviconService* favicon_service)
+    : password_client_(password_client),
+      favicon_service_(favicon_service),
+      source_id_(ukm::GetSourceIdForWebContentsDocument(
+          password_client_->web_contents())) {}
 
 TouchToFillController::~TouchToFillController() = default;
 
-// static
-bool TouchToFillController::AllowedForWebContents(WebContents* web_contents) {
-  return base::FeatureList::IsEnabled(
-      password_manager::features::kTouchToFillAndroid);
+void TouchToFillController::Show(base::span<const CredentialPair> credentials,
+                                 base::WeakPtr<PasswordManagerDriver> driver) {
+  DCHECK(!driver_ || driver_.get() == driver.get());
+  driver_ = std::move(driver);
+
+  if (!view_)
+    view_ = TouchToFillViewFactory::Create(this);
+
+  const GURL& url = driver_->GetLastCommittedURL();
+  view_->Show(url,
+              TouchToFillView::IsOriginSecure(
+                  network::IsUrlPotentiallyTrustworthy(url)),
+              credentials);
 }
 
-void TouchToFillController::Show(
-    base::span<const autofill::Suggestion> suggestions,
-    base::WeakPtr<autofill::AutofillPopupController> popup_controller) {
-  popup_controller_ = std::move(popup_controller);
-
-  autofill::AccessorySheetData::Builder builder(
-      autofill::AccessoryTabType::TOUCH_TO_FILL,
-      // TODO(crbug.com/957532): Update title once mocks are finalized.
-      base::ASCIIToUTF16("Touch to Fill"));
-  for (size_t i = 0; i < suggestions.size(); ++i) {
-    const auto& suggestion = suggestions[i];
-    // Ignore suggestions that don't directly correspond to user credentials.
-    if (suggestion.frontend_id != autofill::POPUP_ITEM_ID_USERNAME_ENTRY &&
-        suggestion.frontend_id != autofill::POPUP_ITEM_ID_PASSWORD_ENTRY) {
-      continue;
-    }
-
-    // This needs to stay in sync with how the PasswordAutofillManager creates
-    // Suggestions out of PasswordFormFillData.
-    const base::string16& username = suggestion.value;
-    const base::string16& password = suggestion.additional_label;
-    // This is only set if the credential's realm differs from the realm of the
-    // form.
-    const base::string16& maybe_realm = suggestion.label;
-
-    std::string field_id = base::NumberToString(i);
-    builder.AddUserInfo();
-    builder.AppendField(username, username, field_id,
-                        /*is_obfuscated=*/false,
-                        /*is_selectable=*/true);
-    builder.AppendField(password, password, field_id, /*is_obfuscated=*/true,
-                        /*is_selectable=*/false);
-    builder.AppendField(maybe_realm, maybe_realm, std::move(field_id),
-                        /*is_obfuscated=*/false,
-                        /*is_selectable=*/false);
-  }
-
-  GetManualFillingController()->RefreshSuggestions(std::move(builder).Build());
-}
-
-void TouchToFillController::OnFillingTriggered(
-    const autofill::UserInfo::Field& selection) {
-  if (!popup_controller_) {
-    LOG(DFATAL) << "|popup_controller_| is not set or has been invalidated.";
+void TouchToFillController::OnCredentialSelected(
+    const CredentialPair& credential) {
+  if (!driver_)
     return;
-  }
 
-  int index = 0;
-  if (!base::StringToInt(selection.id(), &index)) {
-    LOG(DFATAL) << "Failed to convert selection.id(): " << selection.id();
+  password_manager::metrics_util::LogFilledCredentialIsFromAndroidApp(
+      password_manager::IsValidAndroidFacetURI(credential.origin_url.spec()));
+  driver_->TouchToFillClosed(ShowVirtualKeyboard(false));
+  std::exchange(driver_, nullptr)
+      ->FillSuggestion(credential.username, credential.password);
+
+  ukm::builders::TouchToFill_Shown(source_id_)
+      .SetUserAction(static_cast<int64_t>(UserAction::kSelectedCredential))
+      .Record(ukm::UkmRecorder::Get());
+}
+
+void TouchToFillController::OnManagePasswordsSelected() {
+  if (!driver_)
     return;
-  }
 
-  if (popup_controller_->GetLineCount() <= index) {
-    LOG(DFATAL) << "Received invalid suggestion index: " << index;
+  std::exchange(driver_, nullptr)
+      ->TouchToFillClosed(ShowVirtualKeyboard(false));
+  password_client_->NavigateToManagePasswordsPage(
+      password_manager::ManagePasswordsReferrer::kTouchToFill);
+
+  ukm::builders::TouchToFill_Shown(source_id_)
+      .SetUserAction(static_cast<int64_t>(UserAction::kSelectedManagePasswords))
+      .Record(ukm::UkmRecorder::Get());
+}
+
+void TouchToFillController::OnDismiss() {
+  if (!driver_)
     return;
-  }
 
-  // Ivalidate |popup_controller_| to ignore future invocations of
-  // OnFillingTriggered for the same suggestions.
-  std::exchange(popup_controller_, nullptr)->AcceptSuggestion(index);
+  std::exchange(driver_, nullptr)->TouchToFillClosed(ShowVirtualKeyboard(true));
+
+  ukm::builders::TouchToFill_Shown(source_id_)
+      .SetUserAction(static_cast<int64_t>(UserAction::kDismissed))
+      .Record(ukm::UkmRecorder::Get());
 }
 
-void TouchToFillController::OnOptionSelected(
-    autofill::AccessoryAction selected_action) {
-  // Not applicable for TouchToFillController. All user interactions should
-  // result in OnFillingTriggered().
-  NOTREACHED();
+gfx::NativeView TouchToFillController::GetNativeView() {
+  return password_client_->web_contents()->GetNativeView();
 }
 
-TouchToFillController::TouchToFillController(WebContents* web_contents)
-    : web_contents_(web_contents) {}
-
-TouchToFillController::TouchToFillController(
-    base::WeakPtr<ManualFillingController> mf_controller)
-    : mf_controller_(std::move(mf_controller)) {
-  DCHECK(mf_controller_);
+void TouchToFillController::FetchFavicon(
+    const GURL& credential_origin,
+    const GURL& frame_origin,
+    int desired_size_in_pixel,
+    base::OnceCallback<void(const gfx::Image&)> callback) {
+  favicon_service_->GetRawFaviconForPageURL(
+      url::Origin::Create(credential_origin).opaque() ? frame_origin
+                                                      : credential_origin,
+      {favicon_base::IconType::kFavicon}, desired_size_in_pixel,
+      /* fallback_to_host = */ true,
+      base::BindOnce(&OnImageFetched, std::move(callback)), &favicon_tracker_);
 }
-
-ManualFillingController* TouchToFillController::GetManualFillingController() {
-  if (!mf_controller_)
-    mf_controller_ = ManualFillingController::GetOrCreate(web_contents_);
-  DCHECK(mf_controller_);
-  return mf_controller_.get();
-}
-
-WEB_CONTENTS_USER_DATA_KEY_IMPL(TouchToFillController)

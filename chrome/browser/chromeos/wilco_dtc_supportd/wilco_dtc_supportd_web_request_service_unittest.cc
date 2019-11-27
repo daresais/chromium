@@ -14,7 +14,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/chromeos/wilco_dtc_supportd/mojo_utils.h"
 #include "chrome/services/wilco_dtc_supportd/public/mojom/wilco_dtc_supportd.mojom.h"
 #include "net/base/net_errors.h"
@@ -106,11 +106,11 @@ class WilcoDtcSupportdWebRequestServiceTest : public testing::Test {
       std::unique_ptr<net::HttpStatusCode> response_status,
       net::Error net_error,
       const std::string& response_body) {
-    network::ResourceResponseHead response_head;
-    if (response_status)
-      response_head = network::CreateResourceResponseHead(*response_status);
+    auto response_head = response_status
+                             ? network::CreateURLResponseHead(*response_status)
+                             : network::mojom::URLResponseHead::New();
     test_url_loader_factory_.AddResponse(
-        GURL(url), response_head, response_body,
+        GURL(url), std::move(response_head), response_body,
         network::URLLoaderCompletionStatus(net_error));
   }
 
@@ -150,7 +150,7 @@ class WilcoDtcSupportdWebRequestServiceTest : public testing::Test {
 
   std::unique_ptr<WilcoDtcSupportdWebRequestService> web_request_service_;
   network::TestURLLoaderFactory test_url_loader_factory_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 }  // namespace

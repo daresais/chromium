@@ -24,7 +24,7 @@ const base::Feature kV8MemoryReducerForSmallHeaps{
 
 // Increase V8 heap size to 4GB if the physical memory is bigger than 16 GB.
 const base::Feature kV8HugeMaxOldGenerationSize{
-    "V8HugeMaxOldGenerationSize", base::FEATURE_DISABLED_BY_DEFAULT};
+    "V8HugeMaxOldGenerationSize", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables new background GC scheduling heuristics.
 const base::Feature kV8GCBackgroundSchedule{"V8GCBackgroundSchedule",
@@ -33,5 +33,9 @@ const base::Feature kV8GCBackgroundSchedule{"V8GCBackgroundSchedule",
 // Perform less compaction in non-memory reducing mode.
 const base::Feature kV8GCLessCompaction{"V8GCLessCompaction",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Always promote young objects in Mark-Compact GC.
+const base::Feature kV8GCAlwaysPromoteYoungMC{
+    "V8GCAlwaysPromoteYoungMC", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace features

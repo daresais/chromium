@@ -44,6 +44,7 @@
 
 namespace {
 
+using base::trace_event::MemoryDumpDeterminism;
 using base::trace_event::MemoryDumpType;
 using memory_instrumentation::GlobalMemoryDump;
 using memory_instrumentation::mojom::ProcessType;
@@ -88,6 +89,7 @@ void OnStartTracingDoneCallback(
   memory_instrumentation::MemoryInstrumentation::GetInstance()
       ->RequestGlobalDumpAndAppendToTrace(
           MemoryDumpType::EXPLICITLY_TRIGGERED, explicit_dump_type,
+          MemoryDumpDeterminism::NONE,
           Bind(&RequestGlobalDumpCallback, quit_closure));
 }
 
@@ -510,7 +512,8 @@ class ProcessMemoryMetricsEmitterTest
   DISALLOW_COPY_AND_ASSIGN(ProcessMemoryMetricsEmitterTest);
 };
 
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
+// TODO(crbug.com/732501): Re-enable on Win once not flaky.
+#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || defined(OS_WIN)
 #define MAYBE_FetchAndEmitMetrics DISABLED_FetchAndEmitMetrics
 #else
 #define MAYBE_FetchAndEmitMetrics FetchAndEmitMetrics
@@ -545,8 +548,10 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
   CheckPageInfoUkmMetrics(url, true);
 }
 
+// TODO(https://crbug.com/990148): Re-enable on Win and Linux once not flaky.
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
+#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
+    defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_FetchAndEmitMetricsWithExtensions \
   DISABLED_FetchAndEmitMetricsWithExtensions
 #else
@@ -700,7 +705,8 @@ IN_PROC_BROWSER_TEST_F(ProcessMemoryMetricsEmitterTest,
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
+// TODO(crbug.com/989810): Re-enable on Win once not flaky.
+#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || defined(OS_WIN)
 #define MAYBE_FetchDuringTrace DISABLED_FetchDuringTrace
 #else
 #define MAYBE_FetchDuringTrace FetchDuringTrace

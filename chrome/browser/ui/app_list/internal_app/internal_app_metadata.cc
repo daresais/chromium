@@ -14,10 +14,13 @@
 #include "base/logging.h"
 #include "base/metrics/user_metrics.h"
 #include "base/no_destructor.h"
+#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "chrome/browser/apps/app_service/app_service_metrics.h"
+#include "chrome/browser/apps/launch_service/launch_service.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_manager.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -27,8 +30,10 @@
 #include "chrome/browser/ui/app_list/extension_app_utils.h"
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/chromeos/camera/camera_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/discover/discover_window_manager.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
@@ -58,20 +63,27 @@ const std::vector<InternalApp>& GetInternalAppListImpl(bool get_all,
   DCHECK(get_all || profile);
   static const base::NoDestructor<std::vector<InternalApp>>
       internal_app_list_static(
-          {{kInternalAppIdKeyboardShortcutViewer,
+          {{ash::kInternalAppIdKeyboardShortcutViewer,
             IDS_INTERNAL_APP_KEYBOARD_SHORTCUT_VIEWER,
             IDR_SHORTCUT_VIEWER_LOGO_192,
             /*recommendable=*/false,
             /*searchable=*/true,
             /*show_in_launcher=*/false,
-            InternalAppName::kKeyboardShortcutViewer,
+            apps::BuiltInAppName::kKeyboardShortcutViewer,
             IDS_LAUNCHER_SEARCHABLE_KEYBOARD_SHORTCUT_VIEWER},
 
-           {kInternalAppIdContinueReading, IDS_INTERNAL_APP_CONTINUOUS_READING,
-            IDR_PRODUCT_LOGO_256,
+           {ash::kInternalAppIdContinueReading,
+            IDS_INTERNAL_APP_CONTINUOUS_READING, IDR_PRODUCT_LOGO_256,
             /*recommendable=*/true,
             /*searchable=*/false,
-            /*show_in_launcher=*/false, InternalAppName::kContinueReading,
+            /*show_in_launcher=*/false, apps::BuiltInAppName::kContinueReading,
+            /*searchable_string_resource_id=*/0},
+
+           {ash::kReleaseNotesAppId, IDS_RELEASE_NOTES_NOTIFICATION_TITLE,
+            IDR_RELEASE_NOTES_APP_192,
+            /*recommendable=*/true,
+            /*searchable=*/false,
+            /*show_in_launcher=*/false, apps::BuiltInAppName::kReleaseNotes,
             /*searchable_string_resource_id=*/0}});
 
   static base::NoDestructor<std::vector<InternalApp>> internal_app_list;
@@ -81,13 +93,14 @@ const std::vector<InternalApp>& GetInternalAppListImpl(bool get_all,
                             internal_app_list_static->end());
 
   const bool add_camera_app = get_all || !profile->IsGuestSession();
-  if (add_camera_app) {
-    internal_app_list->push_back(
-        {kInternalAppIdCamera, IDS_INTERNAL_APP_CAMERA, IDR_CAMERA_LOGO_192,
-         /*recommendable=*/true,
-         /*searchable=*/true,
-         /*show_in_launcher=*/true, InternalAppName::kCamera,
-         /*searchable_string_resource_id=*/0});
+  if (add_camera_app && !chromeos::CameraUI::IsEnabled()) {
+    internal_app_list->push_back({ash::kInternalAppIdCamera,
+                                  IDS_INTERNAL_APP_CAMERA, IDR_CAMERA_LOGO_192,
+                                  /*recommendable=*/true,
+                                  /*searchable=*/true,
+                                  /*show_in_launcher=*/true,
+                                  apps::BuiltInAppName::kCamera,
+                                  /*searchable_string_resource_id=*/0});
   }
 
   const bool add_discover_app =
@@ -95,21 +108,24 @@ const std::vector<InternalApp>& GetInternalAppListImpl(bool get_all,
   if (base::FeatureList::IsEnabled(chromeos::features::kDiscoverApp) &&
       add_discover_app) {
     internal_app_list->push_back(
-        {kInternalAppIdDiscover, IDS_INTERNAL_APP_DISCOVER,
+        {ash::kInternalAppIdDiscover, IDS_INTERNAL_APP_DISCOVER,
          IDR_DISCOVER_APP_192,
          /*recommendable=*/false,
          /*searchable=*/true,
-         /*show_in_launcher=*/true, InternalAppName::kDiscover,
+         /*show_in_launcher=*/true, apps::BuiltInAppName::kDiscover,
          /*searchable_string_resource_id=*/IDS_INTERNAL_APP_DISCOVER});
   }
 
+  // TODO(calamity/nigeltao): when removing the
+  // web_app::SystemWebAppManager::IsEnabled condition, we can probably also
+  // remove the apps::BuiltInChromeOsApps::SetHideSettingsAppForTesting hack.
   if (!web_app::SystemWebAppManager::IsEnabled()) {
     internal_app_list->push_back(
-        {kInternalAppIdSettings, IDS_INTERNAL_APP_SETTINGS,
+        {ash::kInternalAppIdSettings, IDS_INTERNAL_APP_SETTINGS,
          IDR_SETTINGS_LOGO_192,
          /*recommendable=*/true,
          /*searchable=*/true,
-         /*show_in_launcher=*/true, InternalAppName::kSettings,
+         /*show_in_launcher=*/true, apps::BuiltInAppName::kSettings,
          /*searchable_string_resource_id=*/0});
   }
 
@@ -119,7 +135,7 @@ const std::vector<InternalApp>& GetInternalAppListImpl(bool get_all,
          IDR_LOGO_PLUGIN_VM_DEFAULT_192,
          /*recommendable=*/true,
          /*searchable=*/true,
-         /*show_in_launcher=*/true, InternalAppName::kPluginVm,
+         /*show_in_launcher=*/true, apps::BuiltInAppName::kPluginVm,
          /*searchable_string_resource_id=*/0});
   }
   return *internal_app_list;
@@ -129,6 +145,18 @@ const std::vector<InternalApp>& GetInternalAppListImpl(bool get_all,
 
 const std::vector<InternalApp>& GetInternalAppList(const Profile* profile) {
   return GetInternalAppListImpl(false, profile);
+}
+
+bool IsSuggestionChip(const std::string& app_id) {
+  // App IDs for internal apps which should only be shown as suggestion chips.
+  static const char* kSuggestionChipIds[] = {ash::kInternalAppIdContinueReading,
+                                             ash::kReleaseNotesAppId};
+
+  for (size_t i = 0; i < base::size(kSuggestionChipIds); ++i) {
+    if (base::LowerCaseEqualsASCII(app_id, kSuggestionChipIds[i]))
+      return true;
+  }
+  return false;
 }
 
 const InternalApp* FindInternalApp(const std::string& app_id) {
@@ -161,12 +189,12 @@ void OpenChromeCameraApp(Profile* profile, int event_flags) {
       registry->GetInstalledExtension(extension_misc::kChromeCameraAppId);
   if (extension) {
     AppListClientImpl* controller = AppListClientImpl::GetInstance();
-    AppLaunchParams params = CreateAppLaunchParamsWithEventFlags(
+    apps::AppLaunchParams params = CreateAppLaunchParamsWithEventFlags(
         profile, extension, event_flags,
-        extensions::AppLaunchSource::kSourceAppLauncher,
+        apps::mojom::AppLaunchSource::kSourceAppLauncher,
         controller->GetAppListDisplayId());
     params.launch_id = ash::ShelfID(extension->id()).launch_id;
-    OpenApplication(params);
+    apps::LaunchService::Get(profile)->OpenApplication(params);
     VLOG(1) << "Launched CCA.";
   } else {
     LOG(ERROR) << "CCA not found on device";
@@ -176,14 +204,14 @@ void OpenChromeCameraApp(Profile* profile, int event_flags) {
 void OpenInternalApp(const std::string& app_id,
                      Profile* profile,
                      int event_flags) {
-  if (app_id == kInternalAppIdKeyboardShortcutViewer) {
+  if (app_id == ash::kInternalAppIdKeyboardShortcutViewer) {
     ash::ToggleKeyboardShortcutViewer();
-  } else if (app_id == kInternalAppIdSettings) {
+  } else if (app_id == ash::kInternalAppIdSettings) {
     chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(profile);
-  } else if (app_id == kInternalAppIdCamera) {
+  } else if (app_id == ash::kInternalAppIdCamera) {
     // In case Camera app is already running, use it to prevent appearing double
     // apps, from Chrome and Android domains.
-    const ash::ShelfID shelf_id(kInternalAppIdCamera);
+    const ash::ShelfID shelf_id(ash::kInternalAppIdCamera);
     AppWindowLauncherItemController* const app_controller =
         ChromeLauncherController::instance()
             ->shelf_model()
@@ -195,7 +223,7 @@ void OpenInternalApp(const std::string& app_id,
     } else {
       OpenChromeCameraApp(profile, event_flags);
     }
-  } else if (app_id == kInternalAppIdDiscover) {
+  } else if (app_id == ash::kInternalAppIdDiscover) {
     base::RecordAction(base::UserMetricsAction("ShowDiscover"));
     chromeos::DiscoverWindowManager::GetInstance()
         ->ShowChromeDiscoverPageForProfile(profile);
@@ -205,6 +233,10 @@ void OpenInternalApp(const std::string& app_id,
     } else {
       plugin_vm::ShowPluginVmLauncherView(profile);
     }
+  } else if (app_id == ash::kReleaseNotesAppId) {
+    base::RecordAction(
+        base::UserMetricsAction("ReleaseNotes.SuggestionChipLaunched"));
+    chrome::LaunchReleaseNotes(profile);
   }
 }
 
@@ -280,13 +312,6 @@ bool HasRecommendableForeignTab(
     }
   }
   return has_recommendation;
-}
-
-InternalAppName GetInternalAppNameByAppId(
-    const std::string& app_id) {
-  const auto* app = FindInternalApp(app_id);
-  DCHECK(app);
-  return app->internal_app_name;
 }
 
 size_t GetNumberOfInternalAppsShowInLauncherForTest(std::string* apps_name,

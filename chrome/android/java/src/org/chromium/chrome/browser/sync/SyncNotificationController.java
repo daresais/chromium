@@ -4,9 +4,9 @@
 
 package org.chromium.chrome.browser.sync;
 
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 import org.chromium.base.ContextUtils;
@@ -27,7 +27,7 @@ import org.chromium.chrome.browser.preferences.sync.SyncAndServicesPreferences;
 import org.chromium.chrome.browser.sync.GoogleServiceAuthError.State;
 import org.chromium.chrome.browser.sync.ui.PassphraseActivity;
 import org.chromium.components.sync.AndroidSyncSettings;
-import org.chromium.components.sync.Passphrase;
+import org.chromium.components.sync.PassphraseType;
 
 /**
  * {@link SyncNotificationController} provides functionality for displaying Android notifications
@@ -62,17 +62,17 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
                     GoogleServiceAuthError.getMessageID(mProfileSyncService.getAuthError()),
                     createSettingsIntent());
         } else if (mProfileSyncService.isEngineInitialized()
-                && mProfileSyncService.isPassphraseRequiredForDecryption()) {
+                && mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             if (mProfileSyncService.isPassphrasePrompted()) {
                 return;
             }
             switch (mProfileSyncService.getPassphraseType()) {
-                case Passphrase.Type.IMPLICIT: // Falling through intentionally.
-                case Passphrase.Type.FROZEN_IMPLICIT: // Falling through intentionally.
-                case Passphrase.Type.CUSTOM:
+                case PassphraseType.IMPLICIT_PASSPHRASE: // Falling through intentionally.
+                case PassphraseType.FROZEN_IMPLICIT_PASSPHRASE: // Falling through intentionally.
+                case PassphraseType.CUSTOM_PASSPHRASE:
                     showSyncNotification(R.string.sync_need_passphrase, createPasswordIntent());
                     break;
-                case Passphrase.Type.KEYSTORE: // Falling through intentionally.
+                case PassphraseType.KEYSTORE_PASSPHRASE: // Falling through intentionally.
                 default:
                     mNotificationManager.cancel(NotificationConstants.NOTIFICATION_ID_SYNC);
                     return;
@@ -91,9 +91,17 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
      */
     private void showSyncNotification(int message, Intent intent) {
         Context applicationContext = ContextUtils.getApplicationContext();
-        String title = applicationContext.getString(R.string.app_name);
-        String text = applicationContext.getString(R.string.sign_in_sync) + ": "
-                + applicationContext.getString(message);
+        String title = null, text = null;
+        // From Android N, notification by default has the app name and title should not be the same
+        // as app name.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            title = applicationContext.getString(R.string.sign_in_sync);
+            text = applicationContext.getString(message);
+        } else {
+            title = applicationContext.getString(R.string.app_name);
+            text = applicationContext.getString(R.string.sign_in_sync) + ": "
+                    + applicationContext.getString(message);
+        }
 
         PendingIntentProvider contentIntent =
                 PendingIntentProvider.getActivity(applicationContext, 0, intent, 0);
@@ -160,10 +168,7 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
         // Make sure we don't prompt too many times.
         mProfileSyncService.setPassphrasePrompted(true);
 
-        Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.setComponent(
-                new ComponentName(ContextUtils.getApplicationContext(), PassphraseActivity.class));
-        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        Intent intent = new Intent(ContextUtils.getApplicationContext(), PassphraseActivity.class);
         // This activity will become the start of a new task on this history stack.
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         // Clears the task stack above this activity if it already exists.

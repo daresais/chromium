@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/views/extensions/web_app_info_image_source.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
-#include "chrome/browser/ui/views/page_action/omnibox_page_action_icon_container_view.h"
+#include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
@@ -25,7 +25,6 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace {
 
@@ -35,7 +34,7 @@ bool g_auto_accept_pwa_for_testing = false;
 
 // Returns an ImageView containing the app icon.
 std::unique_ptr<views::ImageView> CreateIconView(
-    const std::vector<WebApplicationInfo::IconInfo>& icons) {
+    const std::vector<WebApplicationIconInfo>& icons) {
   constexpr int kIconSize = 48;
   gfx::ImageSkia image(
       std::make_unique<WebAppInfoImageSource>(kIconSize, icons),
@@ -59,7 +58,7 @@ std::unique_ptr<views::Label> CreateOriginLabel(const url::Origin& origin) {
   auto origin_label = std::make_unique<views::Label>(
       FormatOriginForSecurityDisplay(
           origin, url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS),
-      CONTEXT_BODY_TEXT_SMALL, STYLE_SECONDARY);
+      CONTEXT_BODY_TEXT_SMALL, views::style::STYLE_SECONDARY);
 
   origin_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
@@ -84,10 +83,13 @@ PWAConfirmationBubbleView::PWAConfirmationBubbleView(
     views::Button* highlight_button,
     std::unique_ptr<WebApplicationInfo> web_app_info,
     chrome::AppInstallationAcceptanceCallback callback)
-    : LocationBarBubbleDelegateView(anchor_view, gfx::Point(), nullptr),
+    : LocationBarBubbleDelegateView(anchor_view, nullptr),
       web_app_info_(std::move(web_app_info)),
       callback_(std::move(callback)) {
   DCHECK(web_app_info_);
+  DialogDelegate::set_button_label(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_INSTALL_PWA_BUTTON_LABEL));
   base::TrimWhitespace(web_app_info_->title, base::TRIM_ALL,
                        &web_app_info_->title);
   // PWAs should always be configured to open in a window.
@@ -120,9 +122,6 @@ PWAConfirmationBubbleView::PWAConfirmationBubbleView(
 
   chrome::RecordDialogCreation(chrome::DialogIdentifier::PWA_CONFIRMATION);
 
-  if (g_auto_accept_pwa_for_testing)
-    Accept();
-
   SetHighlightedButton(highlight_button);
 }
 
@@ -135,13 +134,6 @@ bool PWAConfirmationBubbleView::ShouldShowCloseButton() const {
 base::string16 PWAConfirmationBubbleView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(
       IDS_INSTALL_TO_OS_LAUNCH_SURFACE_BUBBLE_TITLE);
-}
-
-base::string16 PWAConfirmationBubbleView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK
-                                       ? IDS_INSTALL_PWA_BUTTON_LABEL
-                                       : IDS_CANCEL);
 }
 
 views::View* PWAConfirmationBubbleView::GetInitiallyFocusedView() {
@@ -177,16 +169,19 @@ void ShowPWAInstallBubble(content::WebContents* web_contents,
 
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   views::View* anchor_view =
-      browser_view->toolbar_button_provider()->GetAnchorView();
+      browser_view->toolbar_button_provider()->GetAnchorView(
+          PageActionIconType::kPwaInstall);
   PageActionIconView* icon =
       browser_view->toolbar_button_provider()
-          ->GetOmniboxPageActionIconContainerView()
           ->GetPageActionIconView(PageActionIconType::kPwaInstall);
 
   g_bubble_ = new PWAConfirmationBubbleView(
       anchor_view, icon, std::move(web_app_info), std::move(callback));
 
   views::BubbleDialogDelegateView::CreateBubble(g_bubble_)->Show();
+
+  if (g_auto_accept_pwa_for_testing)
+    g_bubble_->AcceptDialog();
 
   icon->Update();
   DCHECK(icon->GetVisible());

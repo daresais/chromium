@@ -17,7 +17,9 @@
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_piece_forward.h"
 #include "base/system/sys_info.h"
+#include "components/policy/core/common/cloud/dm_token.h"
 
 namespace policy {
 
@@ -45,9 +47,17 @@ class BrowserDMTokenStorage {
   // indicate success or failure. It is an error to attempt concurrent store
   // operations.
   void StoreDMToken(const std::string& dm_token, StoreCallback callback);
+  // Asynchronously invalidates |dm_token_| and calls |callback| with a boolean
+  // to indicate success or failure. It is an error to attempt concurrent store
+  // operations.
+  void InvalidateDMToken(StoreCallback callback);
+  // Asynchronously clears |dm_token_| and calls |callback| with a boolean to
+  // indicate success or failure. It is an error to attempt concurrent store
+  // operations.
+  void ClearDMToken(StoreCallback callback);
   // Returns an already stored DM token. An empty token is returned if no DM
   // token exists on the system or an error is encountered.
-  std::string RetrieveDMToken();
+  DMToken RetrieveDMToken();
   // Must be called after the DM token is saved, to ensure that the callback is
   // invoked.
   void OnDMTokenStored(bool success);
@@ -102,7 +112,7 @@ class BrowserDMTokenStorage {
   std::string client_id_;
   base::Optional<std::string> serial_number_;
   std::string enrollment_token_;
-  std::string dm_token_;
+  DMToken dm_token_;
   bool should_display_error_message_on_failure_;
 
   SEQUENCE_CHECKER(sequence_checker_);

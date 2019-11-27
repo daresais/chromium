@@ -12,7 +12,7 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "components/invalidation/impl/invalidation_switches.h"
 #include "components/invalidation/impl/profile_identity_provider.h"
@@ -20,7 +20,7 @@
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "net/http/http_status_code.h"
-#include "services/data_decoder/public/cpp/testing_json_parser.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -69,11 +69,11 @@ TopicSet TopicSetFromTopics(const Topics& topics) {
   return topic_set;
 }
 
-network::ResourceResponseHead CreateHeadersForTest(int responce_code) {
-  network::ResourceResponseHead head;
-  head.headers = new net::HttpResponseHeaders(base::StringPrintf(
+network::mojom::URLResponseHeadPtr CreateHeadersForTest(int responce_code) {
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = new net::HttpResponseHeaders(base::StringPrintf(
       "HTTP/1.1 %d OK\nContent-type: text/html\n\n", responce_code));
-  head.mime_type = "text/html";
+  head->mime_type = "text/html";
   return head;
 }
 
@@ -136,7 +136,6 @@ class PerUserTopicRegistrationManagerTest : public testing::Test {
       bool migrate_prefs = true) {
     auto reg_manager = std::make_unique<PerUserTopicRegistrationManager>(
         identity_provider_.get(), &pref_service_, url_loader_factory(),
-        base::BindRepeating(&data_decoder::SafeJsonParser::Parse, nullptr),
         kProjectId, migrate_prefs);
     reg_manager->Init();
     reg_manager->AddObserver(&state_observer_);
@@ -182,12 +181,12 @@ class PerUserTopicRegistrationManagerTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
-  data_decoder::TestingJsonParser::ScopedFactoryOverride factory_override_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
   network::TestURLLoaderFactory url_loader_factory_;
   TestingPrefServiceSimple pref_service_;
 
-  identity::IdentityTestEnvironment identity_test_env_;
+  signin::IdentityTestEnvironment identity_test_env_;
   std::unique_ptr<invalidation::ProfileIdentityProvider> identity_provider_;
 
   RegistrationManagerStateObserver state_observer_;

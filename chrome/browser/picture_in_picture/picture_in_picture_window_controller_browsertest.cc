@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/views/overlay/mute_image_button.h"
 #include "chrome/browser/ui/views/overlay/overlay_window_views.h"
 #include "chrome/browser/ui/views/overlay/playback_image_button.h"
 #include "chrome/browser/ui/views/overlay/skip_ad_label_button.h"
@@ -29,11 +28,13 @@
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "components/viz/common/surfaces/surface_id.h"
+#include "content/public/browser/media_session.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/overlay_window.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/web_preferences.h"
 #include "content/public/test/browser_test_utils.h"
@@ -75,14 +76,10 @@ class MockPictureInPictureWindowController
   MOCK_METHOD0(GetWindowForTesting, content::OverlayWindow*());
   MOCK_METHOD0(UpdateLayerBounds, void());
   MOCK_METHOD0(IsPlayerActive, bool());
-  MOCK_METHOD0(IsPlayerMuted, bool());
   MOCK_METHOD0(GetInitiatorWebContents, content::WebContents*());
   MOCK_METHOD2(UpdatePlaybackState, void(bool, bool));
-  MOCK_METHOD0(UpdateMutedState, void());
   MOCK_METHOD0(TogglePlayPause, bool());
-  MOCK_METHOD0(ToggleMute, bool());
   MOCK_METHOD1(SetAlwaysHidePlayPauseButton, void(bool));
-  MOCK_METHOD1(SetAlwaysHideMuteButton, void(bool));
   MOCK_METHOD0(SkipAd, void());
   MOCK_METHOD0(NextTrack, void());
   MOCK_METHOD0(PreviousTrack, void());
@@ -511,8 +508,14 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
 
 // Tests that when closing a Picture-in-Picture window, the video element is
 // reflected as no longer in Picture-in-Picture.
+// TODO(crbug.com/1001421): Flaky on ASan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_CloseWindowWhilePlaying DISABLED_CloseWindowWhilePlaying
+#else
+#define MAYBE_CloseWindowWhilePlaying CloseWindowWhilePlaying
+#endif
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       CloseWindowWhilePlaying) {
+                       MAYBE_CloseWindowWhilePlaying) {
   GURL test_page_url = ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(kPictureInPictureWindowSizePage));
@@ -623,8 +626,9 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
 
 // Tests that when closing a Picture-in-Picture window from the Web API, the
 // video element is not paused.
+// Flaky on Linux and Windows: http://crbug.com/1001538
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       CloseWindowFromWebAPIWhilePlaying) {
+                       DISABLED_CloseWindowFromWebAPIWhilePlaying) {
   GURL test_page_url = ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(kPictureInPictureWindowSizePage));
@@ -661,8 +665,16 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
 
 // Tests that when starting a new Picture-in-Picture session from the same
 // video, the video stays in Picture-in-Picture mode.
+// TODO(crbug.com/1001446): Flaky on ASan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_RequestPictureInPictureTwiceFromSameVideo \
+  DISABLED_RequestPictureInPictureTwiceFromSameVideo
+#else
+#define MAYBE_RequestPictureInPictureTwiceFromSameVideo \
+  RequestPictureInPictureTwiceFromSameVideo
+#endif
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       RequestPictureInPictureTwiceFromSameVideo) {
+                       MAYBE_RequestPictureInPictureTwiceFromSameVideo) {
   GURL test_page_url = ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(kPictureInPictureWindowSizePage));
@@ -718,8 +730,16 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
 
 // Tests that when starting a new Picture-in-Picture session from the same tab,
 // the previous video is no longer in Picture-in-Picture mode.
+// TODO(crbug.com/1001421): Flaky on ASan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_OpenSecondPictureInPictureStopsFirst \
+  DISABLED_OpenSecondPictureInPictureStopsFirst
+#else
+#define MAYBE_OpenSecondPictureInPictureStopsFirst \
+  OpenSecondPictureInPictureStopsFirst
+#endif
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       OpenSecondPictureInPictureStopsFirst) {
+                       MAYBE_OpenSecondPictureInPictureStopsFirst) {
   GURL test_page_url = ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(kPictureInPictureWindowSizePage));
@@ -1416,8 +1436,14 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
 
 // Tests that the play/pause icon state is properly updated when a
 // Picture-in-Picture is created after a reload.
+// TODO(crbug.com/1001421): Flaky on ASan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_PlayPauseStateAtCreation DISABLED_PlayPauseStateAtCreation
+#else
+#define MAYBE_PlayPauseStateAtCreation PlayPauseStateAtCreation
+#endif
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       PlayPauseStateAtCreation) {
+                       MAYBE_PlayPauseStateAtCreation) {
   LoadTabAndEnterPictureInPicture(
       browser(), base::FilePath(kPictureInPictureWindowSizePage));
 
@@ -1529,8 +1555,14 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
 // changing source willproperly update the associated media player id. This is
 // checked by closing the window because the test it at a too high level to be
 // able to check the actual media player id being used.
+// TODO(crbug.com/1001421): Flaky on ASan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_PreloadNoneSrcChangeThenLoad DISABLED_PreloadNoneSrcChangeThenLoad
+#else
+#define MAYBE_PreloadNoneSrcChangeThenLoad PreloadNoneSrcChangeThenLoad
+#endif
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       PreloadNoneSrcChangeThenLoad) {
+                       MAYBE_PreloadNoneSrcChangeThenLoad) {
   GURL test_page_url = ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(FILE_PATH_LITERAL(
@@ -1673,7 +1705,7 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
   EXPECT_FALSE(is_paused);
 }
 
-// Tests that the back-to-tab, close, mute and resize controls move properly as
+// Tests that the back-to-tab, close, and resize controls move properly as
 // the window changes quadrants.
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
                        MovingQuadrantsMovesBackToTabAndResizeControls) {
@@ -2324,6 +2356,24 @@ IN_PROC_BROWSER_TEST_F(MediaSessionPictureInPictureWindowControllerBrowserTest,
                 .WaitAndGetTitle());
 }
 
+// Tests that stopping Media Sessions closes the Picture-in-Picture window.
+IN_PROC_BROWSER_TEST_F(MediaSessionPictureInPictureWindowControllerBrowserTest,
+                       StopMediaSessionClosesPictureInPictureWindow) {
+  LoadTabAndEnterPictureInPicture(
+      browser(), base::FilePath(kPictureInPictureWindowSizePage));
+  content::WebContents* active_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(content::ExecuteScript(active_web_contents, "video.play();"));
+  base::RunLoop().RunUntilIdle();
+
+  content::MediaSession::Get(active_web_contents)
+      ->Stop(content::MediaSession::SuspendType::kUI);
+  base::string16 expected_title = base::ASCIIToUTF16("leavepictureinpicture");
+  EXPECT_EQ(expected_title,
+            content::TitleWatcher(active_web_contents, expected_title)
+                .WaitAndGetTitle());
+}
+
 class AutoPictureInPictureWindowControllerBrowserTest
     : public PictureInPictureWindowControllerBrowserTest {
  public:
@@ -2701,10 +2751,11 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_TRUE(in_picture_in_picture);
 }
 
+// TODO(http://crbug/1001249): flaky.
 // Check that Auto Picture-in-Picture applies only to the video element whose
 // autoPictureInPicture attribute was set most recently
 IN_PROC_BROWSER_TEST_F(WebAppPictureInPictureWindowControllerBrowserTest,
-                       AutoPictureInPictureAttributeApplies) {
+                       DISABLED_AutoPictureInPictureAttributeApplies) {
   InstallAndLaunchPWA();
   bool result = false;
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(web_contents(),
@@ -2915,198 +2966,6 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
                 .WaitAndGetTitle());
 }
 
-class MuteButtonPictureInPictureWindowControllerBrowserTest
-    : public PictureInPictureWindowControllerBrowserTest {
- public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    PictureInPictureWindowControllerBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII("enable-blink-features", "MuteButton");
-  }
-};
-
-// Tests the mute button and its state in the Picture-in-Picture window when
-// experimental feature MuteButton is enabled.
-IN_PROC_BROWSER_TEST_F(MuteButtonPictureInPictureWindowControllerBrowserTest,
-                       MuteButtonEnabled) {
-  LoadTabAndEnterPictureInPicture(
-      browser(), base::FilePath(kPictureInPictureWindowSizePage));
-
-  OverlayWindowViews* overlay_window = static_cast<OverlayWindowViews*>(
-      window_controller()->GetWindowForTesting());
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-
-  content::WebContents* active_web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-
-  // Play video-only mediastream.
-  bool result = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrcToMediaStream();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Play back video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrc();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-
-  // Play no-audio track video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrcToNoAudioTrackVideo();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Play back video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrc();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-
-  // Mute second video and enter Picture-in-Picture for second video.
-  EXPECT_TRUE(
-      content::ExecuteScript(active_web_contents, "secondVideo.muted = true;"));
-  ASSERT_TRUE(
-      content::ExecuteScript(active_web_contents, "secondPictureInPicture();"));
-  base::string16 expected_title = base::ASCIIToUTF16("leavepictureinpicture");
-  EXPECT_EQ(expected_title,
-            content::TitleWatcher(active_web_contents, expected_title)
-                .WaitAndGetTitle());
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kMuted);
-
-  // Re-enter Picture-in-Picture for first video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "enterPictureInPicture();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-
-  // Mute video from website.
-  EXPECT_TRUE(
-      content::ExecuteScript(active_web_contents, "video.muted = true;"));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kMuted);
-
-  // Unmute video from website.
-  EXPECT_TRUE(
-      content::ExecuteScript(active_web_contents, "video.muted = false;"));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-
-  ASSERT_TRUE(content::ExecuteScript(active_web_contents,
-                                     "addVolumeChangeEventListener();"));
-
-  // Simulates user clicking mute button.
-  window_controller()->ToggleMute();
-  expected_title = base::ASCIIToUTF16("muted: true");
-  EXPECT_EQ(expected_title,
-            content::TitleWatcher(active_web_contents, expected_title)
-                .WaitAndGetTitle());
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kMuted);
-
-  // Simulates user clicking unmute button.
-  window_controller()->ToggleMute();
-  expected_title = base::ASCIIToUTF16("muted: false");
-  EXPECT_EQ(expected_title,
-            content::TitleWatcher(active_web_contents, expected_title)
-                .WaitAndGetTitle());
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-
-  // Umute second video and enter Picture-in-Picture for second video.
-  EXPECT_TRUE(content::ExecuteScript(active_web_contents,
-                                     "secondVideo.muted = false;"));
-  ASSERT_TRUE(
-      content::ExecuteScript(active_web_contents, "secondPictureInPicture();"));
-  expected_title = base::ASCIIToUTF16("leavepictureinpicture");
-  EXPECT_EQ(expected_title,
-            content::TitleWatcher(active_web_contents, expected_title)
-                .WaitAndGetTitle());
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kUnmuted);
-}
-
-// Tests the mute button and its state in the Picture-in-Picture window when
-// experimental feature MuteButton is disabled.
-IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       MuteButtonDisabled) {
-  LoadTabAndEnterPictureInPicture(
-      browser(), base::FilePath(kPictureInPictureWindowSizePage));
-
-  OverlayWindowViews* overlay_window = static_cast<OverlayWindowViews*>(
-      window_controller()->GetWindowForTesting());
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  content::WebContents* active_web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-
-  // Play video-only mediastream.
-  bool result = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrcToMediaStream();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Play back video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrc();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Play no-audio track video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrcToNoAudioTrackVideo();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Play back video.
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      active_web_contents, "changeVideoSrc();", &result));
-  EXPECT_TRUE(result);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Mute video from website.
-  EXPECT_TRUE(
-      content::ExecuteScript(active_web_contents, "video.muted = true;"));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-
-  // Unmute video from website.
-  EXPECT_TRUE(
-      content::ExecuteScript(active_web_contents, "video.muted = false;"));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(overlay_window->muted_state_for_testing(),
-            OverlayWindowViews::MutedState::kNoAudio);
-}
-
 // Tests that when closing the window after the player was reset, the <video>
 // element is still notified.
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
@@ -3138,8 +2997,14 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
   ExpectLeavePictureInPicture(active_web_contents);
 }
 
+// TODO(crbug.com/1002489): Test is flaky on Linux.
+#if defined(OS_LINUX)
+#define MAYBE_UpdateMaxSize DISABLED_UpdateMaxSize
+#else
+#define MAYBE_UpdateMaxSize UpdateMaxSize
+#endif
 IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
-                       UpdateMaxSize) {
+                       MAYBE_UpdateMaxSize) {
   LoadTabAndEnterPictureInPicture(
       browser(), base::FilePath(kPictureInPictureWindowSizePage));
 
@@ -3166,4 +3031,33 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
   window_size = overlay_window->UpdateMaxSize(gfx::Rect(50, 50), window_size);
   EXPECT_EQ(gfx::Size(25, 25), window_size);
   EXPECT_EQ(gfx::Size(25, 25), overlay_window->GetMaximumSize());
+}
+
+// Tests that play/pause video playback is toggled if there are no focus
+// afforfances on the Picture-in-Picture window buttons when user hits space
+// keyboard key.
+IN_PROC_BROWSER_TEST_F(PictureInPictureWindowControllerBrowserTest,
+                       SpaceKeyTogglePlayPause) {
+  LoadTabAndEnterPictureInPicture(
+      browser(), base::FilePath(kPictureInPictureWindowSizePage));
+
+  content::WebContents* active_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(content::ExecuteScript(active_web_contents, "video.play();"));
+  ASSERT_TRUE(
+      content::ExecuteScript(active_web_contents, "addPauseEventListener();"));
+
+  OverlayWindowViews* overlay_window = static_cast<OverlayWindowViews*>(
+      window_controller()->GetWindowForTesting());
+  ASSERT_TRUE(overlay_window);
+  ASSERT_FALSE(overlay_window->GetFocusManager()->GetFocusedView());
+
+  ui::KeyEvent space_key_pressed(ui::ET_KEY_PRESSED, ui::VKEY_SPACE,
+                                 ui::DomCode::SPACE, ui::EF_NONE);
+  overlay_window->OnKeyEvent(&space_key_pressed);
+
+  base::string16 expected_title = base::ASCIIToUTF16("pause");
+  EXPECT_EQ(expected_title,
+            content::TitleWatcher(active_web_contents, expected_title)
+                .WaitAndGetTitle());
 }

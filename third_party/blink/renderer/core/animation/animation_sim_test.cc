@@ -4,9 +4,11 @@
 
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/renderer/core/animation/animatable.h"
+#include "third_party/blink/renderer/core/animation/keyframe_effect_model.h"
+#include "third_party/blink/renderer/core/animation/string_keyframe.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
-#include "third_party/blink/renderer/core/css/property_descriptor.h"
-#include "third_party/blink/renderer/core/css/property_registration.h"
+#include "third_party/blink/renderer/core/css/css_test_helpers.h"
+#include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
@@ -14,7 +16,6 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -49,16 +50,10 @@ TEST_F(AnimationSimTest, CustomPropertyBaseComputedStyle) {
   //   initialValue: '0%',
   //   inherits: false
   // })
-  DummyExceptionStateForTesting exception_state;
-  PropertyDescriptor* property_descriptor = PropertyDescriptor::Create();
-  property_descriptor->setName("--x");
-  property_descriptor->setSyntax("<percentage>");
-  property_descriptor->setInitialValue("0%");
-  property_descriptor->setInherits(false);
-  PropertyRegistration::registerProperty(&GetDocument(), property_descriptor,
-                                         exception_state);
-  EXPECT_FALSE(exception_state.HadException());
+  css_test_helpers::RegisterProperty(GetDocument(), "--x", "<percentage>", "0%",
+                                     false);
 
+  DummyExceptionStateForTesting exception_state;
   // target.style.setProperty('--x', '100%');
   target->style()->setProperty(&GetDocument(), "--x", "100%", g_empty_string,
                                exception_state);
@@ -66,8 +61,8 @@ TEST_F(AnimationSimTest, CustomPropertyBaseComputedStyle) {
 
   // target.animate({'--x': '100%'}, 1000);
   auto* keyframe = MakeGarbageCollected<StringKeyframe>();
-  keyframe->SetCSSPropertyValue("--x", GetDocument().GetPropertyRegistry(),
-                                "100%", GetDocument().GetSecureContextMode(),
+  keyframe->SetCSSPropertyValue("--x", "100%",
+                                GetDocument().GetSecureContextMode(),
                                 GetDocument().ElementSheet().Contents());
   StringKeyframeVector keyframes;
   keyframes.push_back(keyframe);
@@ -88,8 +83,8 @@ TEST_F(AnimationSimTest, CustomPropertyBaseComputedStyle) {
 
   // target.animate({'--x': '100%'}, 1000);
   keyframe = MakeGarbageCollected<StringKeyframe>();
-  keyframe->SetCSSPropertyValue("--x", GetDocument().GetPropertyRegistry(),
-                                "100%", GetDocument().GetSecureContextMode(),
+  keyframe->SetCSSPropertyValue("--x", "100%",
+                                GetDocument().GetSecureContextMode(),
                                 GetDocument().ElementSheet().Contents());
   keyframes.clear();
   keyframes.push_back(std::move(keyframe));

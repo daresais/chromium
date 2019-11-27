@@ -555,7 +555,29 @@ void CloudPolicyClient::UploadChromeDesktopReport(
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
-void CloudPolicyClient::UploadRealtimeReport(base::Value event,
+void CloudPolicyClient::UploadChromeOsUserReport(
+    std::unique_ptr<enterprise_management::ChromeOsUserReportRequest>
+        chrome_os_user_report,
+    const CloudPolicyClient::StatusCallback& callback) {
+  CHECK(is_registered());
+  DCHECK(chrome_os_user_report);
+  std::unique_ptr<DMServerJobConfiguration> config =
+      std::make_unique<DMServerJobConfiguration>(
+          DeviceManagementService::JobConfiguration::TYPE_CHROME_OS_USER_REPORT,
+          this,
+          /*critical=*/false, DMAuth::FromDMToken(dm_token_),
+          /*oauth_token=*/base::nullopt,
+          base::BindRepeating(&CloudPolicyClient::OnReportUploadCompleted,
+                              weak_ptr_factory_.GetWeakPtr(), callback));
+
+  em::DeviceManagementRequest* request = config->request();
+  request->set_allocated_chrome_os_user_report_request(
+      chrome_os_user_report.release());
+
+  request_jobs_.push_back(service_->CreateJob(std::move(config)));
+}
+
+void CloudPolicyClient::UploadRealtimeReport(base::Value report,
                                              const StatusCallback& callback) {
   CHECK(is_registered());
   std::unique_ptr<RealtimeReportingJobConfiguration> config =
@@ -565,7 +587,7 @@ void CloudPolicyClient::UploadRealtimeReport(base::Value event,
               &CloudPolicyClient::OnRealtimeReportUploadCompleted,
               weak_ptr_factory_.GetWeakPtr(), callback));
 
-  config->AddEvent(std::move(event));
+  config->AddReport(std::move(report));
 
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
@@ -622,6 +644,8 @@ void CloudPolicyClient::FetchRemoteCommands(
 
   for (const auto& command_result : command_results)
     *request->add_command_results() = command_result;
+
+  request->set_send_secure_commands(true);
 
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
@@ -1118,15 +1142,21 @@ void CloudPolicyClient::OnRemoteCommandsFetched(
     int net_error,
     const em::DeviceManagementResponse& response) {
   std::vector<em::RemoteCommand> commands;
+  std::vector<em::SignedData> signed_commands;
   if (status == DM_STATUS_SUCCESS) {
     if (response.has_remote_command_response()) {
       for (const auto& command : response.remote_command_response().commands())
         commands.push_back(command);
+
+      for (const auto& secure_command :
+           response.remote_command_response().secure_commands()) {
+        signed_commands.push_back(secure_command);
+      }
     } else {
       status = DM_STATUS_RESPONSE_DECODING_ERROR;
     }
   }
-  std::move(callback).Run(status, commands);
+  std::move(callback).Run(status, commands, signed_commands);
   // Must call RemoveJob() last, because it frees |callback|.
   RemoveJob(job);
 }

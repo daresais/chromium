@@ -397,7 +397,7 @@ ImageData* ImageData::Create(NotShared<DOMUint8ClampedArray> data,
                                                nullptr, &exception_state))
     return nullptr;
 
-  unsigned height = data.View()->length() / (width * 4);
+  unsigned height = data.View()->deprecatedLengthAsUnsigned() / (width * 4);
   return MakeGarbageCollected<ImageData>(IntSize(width, height), data.View());
 }
 
@@ -550,7 +550,7 @@ ScriptPromise ImageData::CreateImageBitmap(ScriptState* script_state,
                                            EventTarget& event_target,
                                            base::Optional<IntRect> crop_rect,
                                            const ImageBitmapOptions* options) {
-  if (BufferBase()->IsNeutered()) {
+  if (BufferBase()->IsDetached()) {
     return ScriptPromise::RejectWithDOMException(
         script_state, MakeGarbageCollected<DOMException>(
                           DOMExceptionCode::kInvalidStateError,
@@ -674,7 +674,7 @@ unsigned ImageData::StorageFormatDataSize(
 
 DOMArrayBufferView*
 ImageData::ConvertPixelsFromCanvasPixelFormatToImageDataStorageFormat(
-    WTF::ArrayBufferContents& content,
+    ArrayBufferContents& content,
     CanvasPixelFormat pixel_format,
     ImageDataStorageFormat storage_format) {
   if (!content.DataLength())
@@ -683,8 +683,8 @@ ImageData::ConvertPixelsFromCanvasPixelFormatToImageDataStorageFormat(
   if (pixel_format == kRGBA8CanvasPixelFormat &&
       storage_format == kUint8ClampedArrayStorageFormat) {
     DOMArrayBuffer* array_buffer = DOMArrayBuffer::Create(content);
-    return DOMUint8ClampedArray::Create(array_buffer, 0,
-                                        array_buffer->ByteLength());
+    return DOMUint8ClampedArray::Create(
+        array_buffer, 0, array_buffer->DeprecatedByteLengthAsUnsigned());
   }
 
   skcms_PixelFormat src_format = skcms_PixelFormat_RGBA_8888;
@@ -746,7 +746,8 @@ CanvasColorParams ImageData::GetCanvasColorParams() {
   CanvasPixelFormat pixel_format = kRGBA8CanvasPixelFormat;
   if (color_settings_->storageFormat() != kUint8ClampedArrayStorageFormatName)
     pixel_format = kF16CanvasPixelFormat;
-  return CanvasColorParams(color_space, pixel_format, kNonOpaque);
+  return CanvasColorParams(color_space, pixel_format, kNonOpaque,
+                           CanvasForceRGBA::kNotForced);
 }
 
 bool ImageData::ImageDataInCanvasColorSettings(
@@ -760,7 +761,8 @@ bool ImageData::ImageDataInCanvasColorSettings(
     return false;
 
   CanvasColorParams canvas_color_params =
-      CanvasColorParams(canvas_color_space, canvas_pixel_format, kNonOpaque);
+      CanvasColorParams(canvas_color_space, canvas_pixel_format, kNonOpaque,
+                        CanvasForceRGBA::kNotForced);
 
   unsigned char* src_data = static_cast<unsigned char*>(BufferBase()->Data());
 
@@ -880,8 +882,9 @@ ImageData::ImageData(const IntSize& size,
           static_cast<const DOMUint8ClampedArray*>(data));
       DCHECK(data_);
       data_union_.SetUint8ClampedArray(data_);
-      SECURITY_CHECK(static_cast<unsigned>(size.Width() * size.Height() * 4) <=
-                     data_->length());
+      SECURITY_CHECK(
+          (base::CheckedNumeric<size_t>(size.Width()) * size.Height() * 4)
+              .ValueOrDie() <= data_->lengthAsSizeT());
       break;
 
     case kUint16ArrayStorageFormat:
@@ -890,8 +893,9 @@ ImageData::ImageData(const IntSize& size,
           const_cast<DOMUint16Array*>(static_cast<const DOMUint16Array*>(data));
       DCHECK(data_u16_);
       data_union_.SetUint16Array(data_u16_);
-      SECURITY_CHECK(static_cast<unsigned>(size.Width() * size.Height() * 4) <=
-                     data_u16_->length());
+      SECURITY_CHECK(
+          (base::CheckedNumeric<size_t>(size.Width()) * size.Height() * 4)
+              .ValueOrDie() <= data_u16_->lengthAsSizeT());
       break;
 
     case kFloat32ArrayStorageFormat:
@@ -900,8 +904,9 @@ ImageData::ImageData(const IntSize& size,
           static_cast<const DOMFloat32Array*>(data));
       DCHECK(data_f32_);
       data_union_.SetFloat32Array(data_f32_);
-      SECURITY_CHECK(static_cast<unsigned>(size.Width() * size.Height() * 4) <=
-                     data_f32_->length());
+      SECURITY_CHECK(
+          (base::CheckedNumeric<size_t>(size.Width()) * size.Height() * 4)
+              .ValueOrDie() <= data_f32_->lengthAsSizeT());
       break;
 
     default:

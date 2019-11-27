@@ -61,6 +61,7 @@
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/web_associated_url_loader_client.h"
 #include "third_party/blink/public/web/web_plugin.h"
+#include "ui/accessibility/ax_mode.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
@@ -275,6 +276,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void PrintEnd();
   bool GetPrintPresetOptionsFromDocument(
       blink::WebPrintPresetOptions* preset_options);
+  bool IsPdfPlugin();
 
   bool CanRotateView();
   void RotateView(blink::WebPlugin::RotationType type);
@@ -414,6 +416,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool CanRedo() override;
   void Undo() override;
   void Redo() override;
+  void HandleAccessibilityAction(
+      const PP_PdfAccessibilityActionData& action_data) override;
 
   // PPB_Instance_API implementation.
   PP_Bool BindGraphics(PP_Instance instance, PP_Resource device) override;
@@ -504,7 +508,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
       std::unique_ptr<viz::SingleReleaseCallback>* release_callback) override;
 
   // RenderFrameObserver
-  void AccessibilityModeChanged() override;
+  void AccessibilityModeChanged(const ui::AXMode& mode) override;
   void OnDestruct() override;
 
   // PluginInstanceThrottler::Observer
@@ -649,7 +653,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   bool SetFullscreenCommon(bool fullscreen) const;
 
   bool IsMouseLocked();
-  bool LockMouse();
+  bool LockMouse(bool request_unadjusted_movement);
   MouseLockDispatcher* GetMouseLockDispatcher();
   MouseLockDispatcher::LockTarget* GetOrCreateLockTargetAdapter();
   void UnSetAndDeleteLockTargetAdapter();
@@ -683,6 +687,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
 
   // Whether a given viz::TransferableResource is in use by |texture_layer_|.
   bool IsTextureInUse(const viz::TransferableResource& resource) const;
+
+  void HandleAccessibilityChange();
 
   RenderFrameImpl* render_frame_;
   scoped_refptr<PluginModule> module_;
@@ -865,6 +871,11 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
 
   scoped_refptr<ppapi::TrackedCallback> lock_mouse_callback_;
 
+  // Last mouse position from mouse event, used for calculating movements. Null
+  // means no mouse event received yet. This value is updated by
+  // |CreateInputEventData|.
+  std::unique_ptr<gfx::PointF> last_mouse_position_;
+
   // We store the arguments so we can re-send them if we are reset to talk to
   // NaCl via the IPC NaCl proxy.
   std::vector<std::string> argn_;
@@ -908,6 +919,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   std::vector<MailboxRefCount> texture_ref_counts_;
 
   bool initialized_;
+  bool created_in_process_instance_;
 
   // The controller for all active audios of this pepper instance.
   std::unique_ptr<PepperAudioController> audio_controller_;

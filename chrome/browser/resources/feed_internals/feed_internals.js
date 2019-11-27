@@ -6,7 +6,7 @@
 
 /**
  * Reference to the backend.
- * @type {feedInternals.mojom.PageHandlerProxy}
+ * @type {feedInternals.mojom.PageHandlerRemote}
  */
 let pageHandler = null;
 
@@ -52,6 +52,7 @@ function updatePageWithLastFetchProperties() {
     $('last-fetch-time').textContent = toDateString(properties.lastFetchTime);
     $('refresh-suppress-time').textContent =
         toDateString(properties.refreshSuppressTime);
+    $('last-fetch-bless-nonce').textContent = properties.lastBlessNonce;
   });
 }
 
@@ -149,11 +150,15 @@ function setupEventListeners() {
       $('feed-histograms-details').open = true;
     });
   });
+
+  $('feed-host-override-apply').addEventListener('click', function() {
+    pageHandler.overrideFeedHost($('feed-host-override').value);
+  });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
   // Setup backend mojo.
-  pageHandler = feedInternals.mojom.PageHandler.getProxy();
+  pageHandler = feedInternals.mojom.PageHandler.getRemote();
 
   updatePageWithProperties();
   updatePageWithUserClass();

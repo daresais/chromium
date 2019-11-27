@@ -230,7 +230,7 @@ CreditCardEditorViewController::CreateHeaderView() {
         selected_network.empty() || selected_network == supported_network
             ? 1.0f
             : kDimmedCardIconOpacity;
-    std::unique_ptr<views::ImageView> card_icon_view = CreateInstrumentIconView(
+    std::unique_ptr<views::ImageView> card_icon_view = CreateAppIconView(
         autofill::data_util::GetPaymentRequestData(autofill_card_type)
             .icon_resource_id,
         gfx::ImageSkia(), base::UTF8ToUTF16(supported_network), opacity);
@@ -431,7 +431,7 @@ bool CreditCardEditorViewController::ValidateModelAndSave() {
     DCHECK_EQ(autofill::CREDIT_CARD,
               autofill::AutofillType(field.second.type).group());
     credit_card.SetInfo(autofill::AutofillType(field.second.type),
-                        field.first->text(), locale);
+                        field.first->GetText(), locale);
   }
   for (const auto& field : comboboxes()) {
     // ValidatingCombobox* is the key, EditorField is the value.
@@ -615,7 +615,7 @@ void CreditCardEditorViewController::ButtonPressed(views::Button* sender,
         /*on_added=*/
         base::BindOnce(
             &CreditCardEditorViewController::AddAndSelectNewBillingAddress,
-            base::Unretained(this)),
+            weak_ptr_factory_.GetWeakPtr()),
         /*profile=*/nullptr);
   } else {
     EditorViewController::ButtonPressed(sender, event);
@@ -666,7 +666,7 @@ CreditCardEditorViewController::CreditCardValidationDelegate::Format(
 bool CreditCardEditorViewController::CreditCardValidationDelegate::
     IsValidTextfield(views::Textfield* textfield,
                      base::string16* error_message) {
-  return ValidateValue(textfield->text(), error_message);
+  return ValidateValue(textfield->GetText(), error_message);
 }
 
 bool CreditCardEditorViewController::CreditCardValidationDelegate::
@@ -680,7 +680,7 @@ bool CreditCardEditorViewController::CreditCardValidationDelegate::
   if (field_.type == autofill::CREDIT_CARD_NUMBER) {
     std::string basic_card_network =
         autofill::data_util::GetPaymentRequestData(
-            autofill::CreditCard::GetCardNetwork(textfield->text()))
+            autofill::CreditCard::GetCardNetwork(textfield->GetText()))
             .basic_card_issuer_network;
     controller_->SelectBasicCardNetworkIcon(basic_card_network);
   }
@@ -691,7 +691,7 @@ bool CreditCardEditorViewController::CreditCardValidationDelegate::
     return true;
 
   base::string16 error_message;
-  bool is_valid = ValidateValue(textfield->text(), &error_message);
+  bool is_valid = ValidateValue(textfield->GetText(), &error_message);
   controller_->DisplayErrorMessageForField(field_.type, error_message);
 
   return is_valid;

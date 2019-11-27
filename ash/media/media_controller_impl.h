@@ -10,7 +10,8 @@
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "components/account_id/account_id.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/media_session/public/mojom/media_controller.mojom.h"
 
 class PrefRegistrySimple;
@@ -81,6 +82,8 @@ class ASH_EXPORT MediaControllerImpl
       override;
   void MediaSessionChanged(
       const base::Optional<base::UnguessableToken>& request_id) override {}
+  void MediaSessionPositionChanged(
+      const base::Optional<media_session::MediaPosition>& position) override {}
 
  private:
   friend class MediaControllerTest;
@@ -102,7 +105,7 @@ class ASH_EXPORT MediaControllerImpl
                            MediaGlobalAccelerators_UpdateForceKeyHandling);
 
   void SetMediaSessionControllerForTest(
-      media_session::mojom::MediaControllerPtr controller);
+      mojo::Remote<media_session::mojom::MediaController> controller);
 
   void FlushForTesting();
 
@@ -134,12 +137,13 @@ class ASH_EXPORT MediaControllerImpl
   bool media_controls_dismissed_ = false;
 
   // Mojo pointer to the active media session controller.
-  media_session::mojom::MediaControllerPtr media_session_controller_ptr_;
+  mojo::Remote<media_session::mojom::MediaController>
+      media_session_controller_remote_;
 
   service_manager::Connector* const connector_;
 
-  mojo::Binding<media_session::mojom::MediaControllerObserver>
-      media_controller_observer_binding_{this};
+  mojo::Receiver<media_session::mojom::MediaControllerObserver>
+      media_controller_observer_receiver_{this};
 
   MediaClient* client_ = nullptr;
 

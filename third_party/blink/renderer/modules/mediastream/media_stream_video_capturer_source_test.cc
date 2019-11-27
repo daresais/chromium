@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/mediastream/media_stream_video_capturer_source.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_video_capturer_source.h"
 
 #include <utility>
 
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "media/base/bind_to_current_loop.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
@@ -16,9 +17,9 @@
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_sink.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
-#include "third_party/blink/public/web/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/modules/mediastream/mock_mojo_media_stream_dispatcher_host.h"
+#include "third_party/blink/renderer/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
@@ -54,7 +55,7 @@ class MockVideoCapturerSource : public media::VideoCapturerSource {
   void SetRunning(bool is_running) {
     PostCrossThreadTask(*scheduler::GetSingleThreadTaskRunnerForTesting(),
                         FROM_HERE,
-                        CrossThreadBindRepeating(running_cb_, is_running));
+                        CrossThreadBindOnce(running_cb_, is_running));
   }
   const media::VideoCaptureParams& capture_params() const {
     return capture_params_;
@@ -108,13 +109,12 @@ class MediaStreamVideoCapturerSourceTest : public testing::Test {
     delegate_ = delegate.get();
     EXPECT_CALL(*delegate_, GetPreferredFormats());
     source_ = new MediaStreamVideoCapturerSource(
-        WTF::BindRepeating(&MediaStreamVideoCapturerSourceTest::OnSourceStopped,
-                           WTF::Unretained(this)),
+        /*LocalFrame =*/nullptr,
+        WTF::Bind(&MediaStreamVideoCapturerSourceTest::OnSourceStopped,
+                  WTF::Unretained(this)),
         std::move(delegate));
-    mojom::blink::MediaStreamDispatcherHostPtr dispatcher_host =
-        mock_dispatcher_host_.CreateInterfacePtrAndBind();
-    // source_->impl_->dispatcher_host_ = std::move(dispatcher_host);
-    source_->SetMediaStreamDispatcherHostForTesting(&dispatcher_host);
+    source_->SetMediaStreamDispatcherHostForTesting(
+        mock_dispatcher_host_.CreatePendingRemoteAndBind());
     webkit_source_.Initialize(WebString::FromASCII("dummy_source_id"),
                               WebMediaStreamSource::kTypeVideo,
                               WebString::FromASCII("dummy_source_name"),
@@ -144,9 +144,8 @@ class MediaStreamVideoCapturerSourceTest : public testing::Test {
     return MediaStreamVideoTrack::CreateVideoTrack(
         source_, adapter_settings, noise_reduction, is_screencast,
         min_frame_rate,
-        WTF::BindRepeating(
-            &MediaStreamVideoCapturerSourceTest::OnConstraintsApplied,
-            base::Unretained(this)),
+        WTF::Bind(&MediaStreamVideoCapturerSourceTest::OnConstraintsApplied,
+                  base::Unretained(this)),
         enabled);
   }
 
@@ -167,7 +166,7 @@ class MediaStreamVideoCapturerSourceTest : public testing::Test {
   MOCK_METHOD0(MockNotification, void());
 
   std::unique_ptr<media::VideoCapturerSource> RecreateVideoCapturerSource(
-      int session_id) {
+      const base::UnguessableToken& session_id) {
     auto delegate = std::make_unique<MockVideoCapturerSource>();
     delegate_ = delegate.get();
     EXPECT_CALL(*delegate_, MockStartCapture(_, _, _));
@@ -246,9 +245,9 @@ TEST_F(MediaStreamVideoCapturerSourceTest, CaptureTimeAndMetadataPlumbing) {
   const scoped_refptr<media::VideoFrame> frame =
       media::VideoFrame::CreateBlackFrame(gfx::Size(2, 2));
   frame->metadata()->SetDouble(media::VideoFrameMetadata::FRAME_RATE, 30.0);
-  PostCrossThreadTask(*Platform::Current()->GetIOTaskRunner(), FROM_HERE,
-                      CrossThreadBindRepeating(deliver_frame_cb, frame,
-                                               reference_capture_time));
+  PostCrossThreadTask(
+      *Platform::Current()->GetIOTaskRunner(), FROM_HERE,
+      CrossThreadBindOnce(deliver_frame_cb, frame, reference_capture_time));
   run_loop.Run();
   fake_sink.DisconnectFromTrack();
   EXPECT_EQ(reference_capture_time, capture_time);

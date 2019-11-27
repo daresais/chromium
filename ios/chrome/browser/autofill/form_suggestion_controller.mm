@@ -14,17 +14,16 @@
 #import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/autofill/ios/browser/form_suggestion_provider.h"
 #include "components/autofill/ios/form_util/form_activity_params.h"
-#import "ios/chrome/browser/autofill/form_input_accessory_view_controller.h"
 #import "ios/chrome/browser/autofill/form_input_navigator.h"
 #import "ios/chrome/browser/autofill/form_input_suggestions_provider.h"
 #import "ios/chrome/browser/autofill/form_suggestion_view.h"
 #import "ios/chrome/browser/passwords/password_generation_utils.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/web/common/url_scheme_util.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
-#import "ios/web/public/url_scheme_util.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -131,8 +130,7 @@ AutofillSuggestionState::AutofillSuggestionState(
       base::mac::ObjCCast<JsSuggestionManager>(
           [webState->GetJSInjectionReceiver()
               instanceOfClass:[JsSuggestionManager class]]);
-  [jsSuggestionManager
-      setWebFramesManager:web::WebFramesManager::FromWebState(webState)];
+  [jsSuggestionManager setWebFramesManager:webState->GetWebFramesManager()];
   return [self initWithWebState:webState
                       providers:providers
             JsSuggestionManager:jsSuggestionManager];

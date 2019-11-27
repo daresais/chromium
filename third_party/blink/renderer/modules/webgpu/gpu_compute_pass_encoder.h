@@ -10,25 +10,30 @@
 namespace blink {
 
 class GPUBindGroup;
+class GPUBuffer;
 class GPUComputePipeline;
 
-class GPUComputePassEncoder : public DawnObject<DawnComputePassEncoder> {
+class GPUComputePassEncoder : public DawnObject<WGPUComputePassEncoder> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static GPUComputePassEncoder* Create(
       GPUDevice* device,
-      DawnComputePassEncoder compute_pass_encoder);
+      WGPUComputePassEncoder compute_pass_encoder);
   explicit GPUComputePassEncoder(GPUDevice* device,
-                                 DawnComputePassEncoder compute_pass_encoder);
+                                 WGPUComputePassEncoder compute_pass_encoder);
   ~GPUComputePassEncoder() override;
 
   // gpu_compute_pass_encoder.idl
   void setBindGroup(uint32_t index,
                     GPUBindGroup* bindGroup,
-                    const Vector<uint64_t>& dynamicOffsets);
+                    const Vector<uint32_t>& dynamicOffsets);
+  void pushDebugGroup(String groupLabel);
+  void popDebugGroup();
+  void insertDebugMarker(String markerLabel);
   void setPipeline(GPUComputePipeline* pipeline);
   void dispatch(uint32_t x, uint32_t y, uint32_t z);
+  void dispatchIndirect(GPUBuffer* indirectBuffer, uint64_t indirectOffset);
   void endPass();
 
  private:

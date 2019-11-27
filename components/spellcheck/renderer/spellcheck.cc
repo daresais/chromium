@@ -25,8 +25,6 @@
 #include "components/spellcheck/renderer/spellcheck_language.h"
 #include "components/spellcheck/renderer/spellcheck_provider.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
-#include "content/public/common/service_manager_connection.h"
-#include "content/public/common/simple_connection_filter.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_visitor.h"
 #include "content/public/renderer/render_thread.h"
@@ -154,19 +152,12 @@ class SpellCheck::SpellcheckRequest {
 // values.
 // TODO(groby): Simplify this.
 SpellCheck::SpellCheck(
-    service_manager::BinderRegistry* registry,
     service_manager::LocalInterfaceProvider* embedder_provider)
     : embedder_provider_(embedder_provider), spellcheck_enabled_(true) {
   DCHECK(embedder_provider);
-  if (!registry)
-    return;  // Can be NULL in tests.
-  registry->AddInterface(base::BindRepeating(&SpellCheck::SpellCheckerRequest,
-                                             weak_factory_.GetWeakPtr()),
-                         base::ThreadTaskRunnerHandle::Get());
 }
 
-SpellCheck::~SpellCheck() {
-}
+SpellCheck::~SpellCheck() = default;
 
 void SpellCheck::FillSuggestions(
     const std::vector<std::vector<base::string16>>& suggestions_list,
@@ -197,9 +188,9 @@ void SpellCheck::FillSuggestions(
   }
 }
 
-void SpellCheck::SpellCheckerRequest(
-    spellcheck::mojom::SpellCheckerRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void SpellCheck::BindReceiver(
+    mojo::PendingReceiver<spellcheck::mojom::SpellChecker> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void SpellCheck::Initialize(

@@ -98,7 +98,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
         ios::HostContentSettingsMapFactory::GetForBrowserState(browserState);
     _disablePopupsSetting = [[ContentSettingBackedBoolean alloc]
         initWithHostContentSettingsMap:settingsMap
-                             settingID:CONTENT_SETTINGS_TYPE_POPUPS
+                             settingID:ContentSettingsType::POPUPS
                               inverted:YES];
     [_disablePopupsSetting setObserver:self];
   }
@@ -227,7 +227,12 @@ typedef NS_ENUM(NSInteger, ItemType) {
 #pragma mark - PrefObserverDelegate
 
 - (void)onPreferenceChanged:(const std::string&)preferenceName {
-  if (preferenceName == prefs::kOfferTranslateEnabled) {
+  // _translateDetailItem is lazily initialized when -translateItem is called.
+  // TODO(crbug.com/1008433): If kLanguageSettings feature is enabled,
+  // -translateItem is not called, leaving _translateDetailItem uninitialized.
+  // This logic can be simplified when kLanguageSettings feature flag is
+  // removed (when feature is fully enabled).
+  if (_translateDetailItem && preferenceName == prefs::kOfferTranslateEnabled) {
     BOOL enabled = browserState_->GetPrefs()->GetBoolean(preferenceName);
     NSString* subtitle = enabled ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
                                  : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);

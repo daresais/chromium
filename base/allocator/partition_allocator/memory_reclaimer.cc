@@ -13,24 +13,6 @@
 
 namespace base {
 
-namespace internal {
-
-const Feature kNoPartitionAllocDecommit{"NoPartitionAllocDecommit",
-                                        FEATURE_DISABLED_BY_DEFAULT};
-const Feature kPartitionAllocPeriodicDecommit{"PartitionAllocPeriodicDecommit",
-                                              FEATURE_DISABLED_BY_DEFAULT};
-
-}  // namespace internal
-
-namespace {
-
-bool IsDeprecatedDecommitEnabled() {
-  return !(FeatureList::IsEnabled(internal::kNoPartitionAllocDecommit) ||
-           FeatureList::IsEnabled(internal::kPartitionAllocPeriodicDecommit));
-}
-
-}  // namespace
-
 constexpr TimeDelta PartitionAllocMemoryReclaimer::kStatsRecordingTimeDelta;
 
 // static
@@ -43,7 +25,6 @@ void PartitionAllocMemoryReclaimer::RegisterPartition(
     internal::PartitionRootBase* partition) {
   AutoLock lock(lock_);
   DCHECK(partition);
-  DCHECK(!timer_);
   auto it_and_whether_inserted = partitions_.insert(partition);
   DCHECK(it_and_whether_inserted.second);
 }
@@ -65,9 +46,6 @@ void PartitionAllocMemoryReclaimer::Start(
     AutoLock lock(lock_);
     DCHECK(!partitions_.empty());
   }
-
-  if (!FeatureList::IsEnabled(internal::kPartitionAllocPeriodicDecommit))
-    return;
 
   // This does not need to run on the main thread, however there are a few
   // reasons to do it there:
@@ -123,13 +101,6 @@ void PartitionAllocMemoryReclaimer::Reclaim() {
   has_called_reclaim_ = true;
   if (timer.is_supported())
     total_reclaim_thread_time_ += timer.Elapsed();
-}
-
-void PartitionAllocMemoryReclaimer::DeprecatedReclaim() {
-  if (!IsDeprecatedDecommitEnabled())
-    return;
-
-  Reclaim();
 }
 
 void PartitionAllocMemoryReclaimer::RecordStatistics() {

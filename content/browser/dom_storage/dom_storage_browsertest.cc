@@ -4,20 +4,19 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "components/services/leveldb/public/cpp/util.h"
-#include "components/services/leveldb/public/mojom/leveldb.mojom.h"
+#include "components/services/storage/public/cpp/constants.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/dom_storage_database.h"
-#include "content/browser/dom_storage/dom_storage_task_runner.h"
+#include "content/browser/dom_storage/dom_storage_types.h"
 #include "content/browser/dom_storage/local_storage_context_mojo.h"
 #include "content/browser/dom_storage/session_storage_context_mojo.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/dom_storage/dom_storage_types.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
@@ -58,13 +57,15 @@ class DOMStorageBrowserTest : public ContentBrowserTest {
     }
   }
 
+  StoragePartition* partition() {
+    return BrowserContext::GetDefaultStoragePartition(
+        shell()->web_contents()->GetBrowserContext());
+  }
+
   std::vector<StorageUsageInfo> GetUsage() {
-    auto* context = BrowserContext::GetDefaultStoragePartition(
-                        shell()->web_contents()->GetBrowserContext())
-                        ->GetDOMStorageContext();
     base::RunLoop loop;
     std::vector<StorageUsageInfo> usage;
-    context->GetLocalStorageUsage(
+    partition()->GetDOMStorageContext()->GetLocalStorageUsage(
         base::BindLambdaForTesting([&](const std::vector<StorageUsageInfo>& u) {
           usage = u;
           loop.Quit();
@@ -74,51 +75,23 @@ class DOMStorageBrowserTest : public ContentBrowserTest {
   }
 
   void DeletePhysicalOrigin(url::Origin origin) {
-    auto* context = BrowserContext::GetDefaultStoragePartition(
-                        shell()->web_contents()->GetBrowserContext())
-                        ->GetDOMStorageContext();
     base::RunLoop loop;
-    context->DeleteLocalStorage(origin, loop.QuitClosure());
+    partition()->GetDOMStorageContext()->DeleteLocalStorage(origin,
+                                                            loop.QuitClosure());
     loop.Run();
   }
 
   DOMStorageContextWrapper* context_wrapper() {
     return static_cast<DOMStorageContextWrapper*>(
-        BrowserContext::GetDefaultStoragePartition(
-            shell()->web_contents()->GetBrowserContext())
-            ->GetDOMStorageContext());
+        partition()->GetDOMStorageContext());
   }
 
   base::SequencedTaskRunner* mojo_task_runner() {
     return context_wrapper()->mojo_task_runner();
   }
 
-  LocalStorageContextMojo* context() { return context_wrapper()->mojo_state_; }
-
   SessionStorageContextMojo* session_storage_context() {
     return context_wrapper()->mojo_session_state_;
-  }
-
-  base::FilePath legacy_localstorage_path() {
-    return context()->old_localstorage_path_;
-  }
-
-  void EnsureConnected() {
-    base::RunLoop run_loop;
-    mojo_task_runner()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&LocalStorageContextMojo::RunWhenConnected,
-                       base::Unretained(context()), run_loop.QuitClosure()));
-    run_loop.Run();
-  }
-
-  void EnsureSessionStorageConnected() {
-    base::RunLoop run_loop;
-    mojo_task_runner()->PostTask(
-        FROM_HERE, base::BindOnce(&SessionStorageContextMojo::RunWhenConnected,
-                                  base::Unretained(session_storage_context()),
-                                  run_loop.QuitClosure()));
-    run_loop.Run();
   }
 };
 
@@ -134,17 +107,12 @@ IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, SanityCheckIncognito) {
 }
 
 // http://crbug.com/654704 PRE_ tests aren't supported on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_DataPersists DISABLED_DataPersists
-#else
-#define MAYBE_DataPersists DataPersists
-#endif
+// Also crbug/1027940: Fails on linux-chromeos-rel and other platforms.
 IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, PRE_DataPersists) {
-  EnsureConnected();
   SimpleTest(GetTestUrl("dom_storage", "store_data.html"), kNotIncognito);
 }
 
-IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, MAYBE_DataPersists) {
+IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, DISABLED_DataPersists) {
   SimpleTest(GetTestUrl("dom_storage", "verify_data.html"), kNotIncognito);
 }
 
@@ -189,12 +157,14 @@ IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, FileUrlWithHost) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(DOMStorageBrowserTest, DataMigrates) {
-  base::FilePath db_path = legacy_localstorage_path().Append(
+  const base::FilePath legacy_local_storage_path =
+      partition()->GetPath().Append(storage::kLocalStoragePath);
+  base::FilePath db_path = legacy_local_storage_path.Append(
       LocalStorageContextMojo::LegacyDatabaseFileNameFromOrigin(
           url::Origin::Create(GetTestUrl("dom_storage", "store_data.html"))));
   {
     base::ScopedAllowBlockingForTesting allow_blocking;
-    EXPECT_TRUE(base::CreateDirectory(legacy_localstorage_path()));
+    EXPECT_TRUE(base::CreateDirectory(legacy_local_storage_path));
     DOMStorageDatabase db(db_path);
     DOMStorageValuesMap data;
     data[base::ASCIIToUTF16("foo")] =

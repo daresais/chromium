@@ -11,7 +11,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "components/account_id/account_id.h"
-#include "components/arc/common/notifications.mojom.h"
+#include "components/arc/mojom/notifications.mojom.h"
 #include "components/arc/session/connection_holder.h"
 #include "components/arc/session/connection_observer.h"
 #include "ui/message_center/message_center.h"
@@ -62,6 +62,8 @@ class ArcNotificationManager
   // Methods called from ArcNotificationItem:
   void SendNotificationRemovedFromChrome(const std::string& key);
   void SendNotificationClickedOnChrome(const std::string& key);
+  void SendNotificationActivatedInChrome(const std::string& key,
+                                         bool activated);
   void CreateNotificationWindow(const std::string& key);
   void CloseNotificationWindow(const std::string& key);
   void OpenNotificationSettings(const std::string& key);

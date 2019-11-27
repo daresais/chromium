@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/bind_test_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/input/synthetic_gesture.h"
@@ -157,7 +158,7 @@ class TouchActionBrowserTest : public ContentBrowserTest,
  protected:
   void LoadURL(const char* touch_action_url) {
     const GURL data_url(touch_action_url);
-    NavigateToURL(shell(), data_url);
+    EXPECT_TRUE(NavigateToURL(shell(), data_url));
 
     RenderWidgetHostImpl* host = GetWidgetHost();
     frame_observer_ = std::make_unique<RenderFrameSubmissionObserver>(
@@ -169,9 +170,8 @@ class TouchActionBrowserTest : public ContentBrowserTest,
     ignore_result(watcher.WaitAndGetTitle());
 
     // We need to wait until hit test data is available. We use our own
-    // HitTestRegionObserver here, rather than
-    // WaitForHitTestDataOrChildSurfaceReady, because we have the
-    // RenderWidgetHostImpl available.
+    // HitTestRegionObserver here because we have the RenderWidgetHostImpl
+    // available.
     HitTestRegionObserver observer(host->GetFrameSinkId());
     observer.WaitForHitTestData();
   }
@@ -288,6 +288,8 @@ class TouchActionBrowserTest : public ContentBrowserTest,
                      const base::TimeDelta& jank_time) {
     DCHECK(URLLoaded());
     EXPECT_EQ(0, GetScrollTop());
+
+    EnsureInitializedForSyntheticGestures();
 
     int scroll_height =
         ExecuteScriptAndExtractInt("document.documentElement.scrollHeight");
@@ -408,6 +410,22 @@ class TouchActionBrowserTest : public ContentBrowserTest,
     run_loop_.reset();
   }
 
+  // Sends a no-op gesture to the page to ensure the SyntheticGestureController
+  // is initialized. We need to do this if the first sent gesture happens when
+  // the main thread is janked, otherwise the initialization won't happen
+  // because of the blocked main thread.
+  void EnsureInitializedForSyntheticGestures() {
+    DCHECK(URLLoaded());
+
+    base::RunLoop run_loop;
+
+    GetWidgetHost()->EnsureReadyForSyntheticGestures(
+        base::BindLambdaForTesting([&]() { run_loop.Quit(); }));
+
+    // Runs until we get the OnSyntheticGestureCompleted callback
+    run_loop.Run();
+  }
+
   void CheckScrollOffset(
       bool wait_until_scrolled,
       const gfx::Vector2d& expected_scroll_position_after_scroll) {
@@ -458,7 +476,7 @@ class TouchActionBrowserTest : public ContentBrowserTest,
   DISALLOW_COPY_AND_ASSIGN(TouchActionBrowserTest);
 };
 
-INSTANTIATE_TEST_SUITE_P(, TouchActionBrowserTest, testing::Bool());
+INSTANTIATE_TEST_SUITE_P(All, TouchActionBrowserTest, testing::Bool());
 
 #if !defined(NDEBUG) || defined(ADDRESS_SANITIZER) ||       \
     defined(MEMORY_SANITIZER) || defined(LEAK_SANITIZER) || \

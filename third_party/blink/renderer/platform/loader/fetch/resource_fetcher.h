@@ -31,9 +31,9 @@
 #include <utility>
 
 #include "base/single_thread_task_runner.h"
-#include "services/network/public/cpp/cors/preflight_timing_info.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
-#include "third_party/blink/public/mojom/service_worker/controller_service_worker_mode.mojom-blink.h"
+#include "third_party/blink/public/mojom/service_worker/controller_service_worker_mode.mojom-blink-forward.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/preload_key.h"
@@ -44,7 +44,6 @@
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -57,7 +56,6 @@ class FetchContext;
 class FrameScheduler;
 class MHTMLArchive;
 class KURL;
-class PreflightTimingInfo;
 class Resource;
 class ResourceError;
 class ResourceLoadObserver;
@@ -79,12 +77,12 @@ struct ResourceLoaderOptions;
 // keep a ResourceFetcher alive past detach if scripts still reference the
 // Document.
 class PLATFORM_EXPORT ResourceFetcher
-    : public GarbageCollectedFinalized<ResourceFetcher> {
+    : public GarbageCollected<ResourceFetcher> {
   USING_PRE_FINALIZER(ResourceFetcher, ClearPreloads);
 
  public:
   // An abstract interface for creating loaders.
-  class LoaderFactory : public GarbageCollectedFinalized<LoaderFactory> {
+  class LoaderFactory : public GarbageCollected<LoaderFactory> {
    public:
     virtual ~LoaderFactory() = default;
 
@@ -129,6 +127,7 @@ class PLATFORM_EXPORT ResourceFetcher
   // This must be called right after construction.
   void SetResourceLoadObserver(ResourceLoadObserver* observer) {
     DCHECK(!IsDetached());
+    DCHECK(!resource_load_observer_);
     resource_load_observer_ = observer;
   }
 
@@ -210,10 +209,8 @@ class PLATFORM_EXPORT ResourceFetcher
                           base::TimeTicks finish_time,
                           LoaderFinishType,
                           uint32_t inflight_keepalive_bytes,
-                          bool should_report_corb_blocking,
-                          const WebVector<network::cors::PreflightTimingInfo>&
-                              cors_preflight_timing_info,
-							  DetachableConsoleLogger&);
+                          DetachableConsoleLogger&,
+                          bool should_report_corb_blocking);
   void HandleLoaderError(Resource*,
                          const ResourceError&,
                          uint32_t inflight_keepalive_bytes);
@@ -228,8 +225,6 @@ class PLATFORM_EXPORT ResourceFetcher
       IsImageSet);
 
   void UpdateAllImageResourcePriorities();
-
-  void ReloadLoFiImages();
 
   // Returns whether the given resource is contained as a preloaded resource.
   bool ContainsAsPreload(Resource*) const;
@@ -250,8 +245,6 @@ class PLATFORM_EXPORT ResourceFetcher
   // counting.
   void PrepareForLeakDetection();
 
-  void SetStaleWhileRevalidateEnabled(bool enabled);
-
   using ResourceFetcherSet = HeapHashSet<WeakMember<ResourceFetcher>>;
   static const ResourceFetcherSet& MainThreadFetchers();
 
@@ -268,6 +261,10 @@ class PLATFORM_EXPORT ResourceFetcher
       bool is_link_preload) {
     return ComputeLoadPriority(type, request, visibility_statue, defer_option,
                                speculative_preload_type, is_link_preload);
+  }
+
+  void SetShouldLogRequestAsInvalidInImportedDocument() {
+    should_log_request_as_invalid_in_imported_document_ = true;
   }
 
  private:
@@ -413,17 +410,19 @@ class PLATFORM_EXPORT ResourceFetcher
 
   uint32_t inflight_keepalive_bytes_ = 0;
 
-  mojom::blink::BlobRegistryPtr blob_registry_ptr_;
+  mojo::Remote<mojom::blink::BlobRegistry> blob_registry_remote_;
 
   // This is not in the bit field below because we want to use AutoReset.
   bool is_in_request_resource_ = false;
 
-  // 27 bits left
+  // 26 bits left
   bool auto_load_images_ : 1;
   bool images_enabled_ : 1;
   bool allow_stale_resources_ : 1;
   bool image_fetched_ : 1;
   bool stale_while_revalidate_enabled_ : 1;
+  // for https://crbug.com/961614
+  bool should_log_request_as_invalid_in_imported_document_ : 1;
 
   static constexpr uint32_t kKeepaliveInflightBytesQuota = 64 * 1024;
 

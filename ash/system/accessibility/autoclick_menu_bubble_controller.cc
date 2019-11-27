@@ -4,7 +4,7 @@
 
 #include "ash/system/accessibility/autoclick_menu_bubble_controller.h"
 
-#include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
@@ -177,6 +177,9 @@ void AutoclickMenuBubbleController::SetPosition(
       bubble_widget_->GetLayer()->GetAnimator());
   settings.SetPreemptionStrategy(
       ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
+  settings.SetTransitionDuration(
+      base::TimeDelta::FromMilliseconds(kAnimationDurationMs));
+  settings.SetTweenType(gfx::Tween::EASE_OUT);
   bubble_widget_->SetBounds(resting_bounds);
 
   if (!scroll_bubble_controller_)
@@ -239,7 +242,7 @@ void AutoclickMenuBubbleController::ShowBubble(AutoclickEventType type,
       CollisionDetectionUtils::RelativePriority::kAutomaticClicksMenu);
   bubble_view_->InitializeAndShowBubble();
 
-  if (app_list_features::IsBackgroundBlurEnabled()) {
+  if (features::IsBackgroundBlurEnabled()) {
     bubble_widget_->client_view()->layer()->SetBackgroundBlur(
         kUnifiedMenuBackgroundBlur);
   }

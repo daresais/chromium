@@ -60,7 +60,8 @@ class ASH_EXPORT UnifiedMessageListView
 
   // Count the number of notifications whose bottom position is above
   // |y_offset|. O(n) where n is number of notifications.
-  int CountNotificationsAboveY(int y_offset) const;
+  std::vector<message_center::Notification*> GetNotificationsAboveY(
+      int y_offset) const;
 
   // Returns the total number of notifications in the list.
   int GetTotalNotificationCount() const;
@@ -102,7 +103,8 @@ class ASH_EXPORT UnifiedMessageListView
       const message_center::Notification& notification);
 
   // Virtual for testing.
-  virtual int GetStackedNotificationCount() const;
+  virtual std::vector<message_center::Notification*> GetStackedNotifications()
+      const;
 
  private:
   friend class UnifiedMessageCenterViewTest;
@@ -175,6 +177,11 @@ class ASH_EXPORT UnifiedMessageListView
 
   // Updates the state between each Clear All animation phase.
   void UpdateClearAllAnimation();
+
+  // Returns a vector of visible notifications that is sorted in the appropriate
+  // order to be displayed. See implementation for exact sorting order.
+  std::vector<message_center::Notification*> GetSortedVisibleNotifications()
+      const;
 
   UnifiedMessageCenterView* const message_center_view_;
   UnifiedSystemTrayModel* const model_;

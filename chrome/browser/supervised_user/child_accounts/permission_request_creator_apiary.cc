@@ -46,8 +46,6 @@ const char kStateKey[] = "state";
 
 // Request values.
 const char kEventTypeURLRequest[] = "PERMISSION_CHROME_URL";
-const char kEventTypeInstallRequest[] = "PERMISSION_CHROME_CWS_ITEM_INSTALL";
-const char kEventTypeUpdateRequest[] = "PERMISSION_CHROME_CWS_ITEM_UPDATE";
 const char kState[] = "PENDING";
 
 // Response keys.
@@ -63,7 +61,7 @@ struct PermissionRequestCreatorApiary::Request {
   std::string request_type;
   std::string object_ref;
   SuccessCallback callback;
-  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher>
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
       access_token_fetcher;
   std::string access_token;
   bool access_token_expired;
@@ -82,7 +80,7 @@ PermissionRequestCreatorApiary::Request::Request(
 PermissionRequestCreatorApiary::Request::~Request() {}
 
 PermissionRequestCreatorApiary::PermissionRequestCreatorApiary(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : identity_manager_(identity_manager),
       url_loader_factory_(std::move(url_loader_factory)),
@@ -109,18 +107,6 @@ void PermissionRequestCreatorApiary::CreateURLAccessRequest(
     SuccessCallback callback) {
   CreateRequest(kEventTypeURLRequest, url_requested.spec(),
                 std::move(callback));
-}
-
-void PermissionRequestCreatorApiary::CreateExtensionInstallRequest(
-    const std::string& id,
-    SuccessCallback callback) {
-  CreateRequest(kEventTypeInstallRequest, id, std::move(callback));
-}
-
-void PermissionRequestCreatorApiary::CreateExtensionUpdateRequest(
-    const std::string& id,
-    SuccessCallback callback) {
-  CreateRequest(kEventTypeUpdateRequest, id, std::move(callback));
 }
 
 GURL PermissionRequestCreatorApiary::GetApiUrl() const {
@@ -162,18 +148,18 @@ void PermissionRequestCreatorApiary::StartFetching(Request* request) {
   // will not be invoked if this object is deleted. Likewise, |request|
   // only comes from |requests_|, which are owned by this object too.
   request->access_token_fetcher =
-      std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
           "permissions_creator", identity_manager_, scopes,
           base::BindOnce(
               &PermissionRequestCreatorApiary::OnAccessTokenFetchComplete,
               base::Unretained(this), request),
-          identity::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
 }
 
 void PermissionRequestCreatorApiary::OnAccessTokenFetchComplete(
     Request* request,
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   auto it = requests_.begin();
   while (it != requests_.end()) {
     if (request->access_token_fetcher.get() ==
@@ -228,8 +214,7 @@ void PermissionRequestCreatorApiary::OnAccessTokenFetchComplete(
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GetApiUrl();
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   resource_request->headers.SetHeader(
       net::HttpRequestHeaders::kAuthorization,

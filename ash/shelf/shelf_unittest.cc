@@ -19,6 +19,7 @@
 #include "ash/test/ash_test_base.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/session_manager/session_manager_types.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 
@@ -103,6 +104,11 @@ TEST_F(ShelfTest, CheckHoverAfterMenu) {
 }
 
 TEST_F(ShelfTest, ShowOverflowBubble) {
+  // No overflow bubble when scrollable shelf enabled.
+  // TODO(https://crbug.com/1002576): revisit when scrollable shelf is launched.
+  if (chromeos::switches::ShouldShowScrollableShelf())
+    return;
+
   ShelfWidget* shelf_widget = GetPrimaryShelf()->shelf_widget();
 
   // Add app buttons until overflow occurs.
@@ -117,7 +123,7 @@ TEST_F(ShelfTest, ShowOverflowBubble) {
 
   // Shows overflow bubble.
   test_api()->ShowOverflowBubble();
-  EXPECT_TRUE(shelf_widget->IsShowingOverflowBubble());
+  EXPECT_TRUE(shelf_widget->hotseat_widget()->IsShowingOverflowBubble());
 
   // Remove one of the first items in the main shelf view.
   ASSERT_GT(shelf_model()->item_count(), 2);
@@ -125,7 +131,7 @@ TEST_F(ShelfTest, ShowOverflowBubble) {
 
   // Waits for all transitions to finish and there should be no crash.
   test_api()->RunMessageLoopUntilAnimationsDone();
-  EXPECT_FALSE(shelf_widget->IsShowingOverflowBubble());
+  EXPECT_FALSE(shelf_widget->hotseat_widget()->IsShowingOverflowBubble());
 }
 
 // Tests if shelf is hidden on secondary display after the primary display is

@@ -4,21 +4,28 @@
 
 #include "ash/ambient/ui/ambient_container_view.h"
 
+#include <memory>
+#include <utility>
+
 #include "ash/ambient/ambient_controller.h"
-#include "ash/ambient/ui/ambient_container_view.h"
+#include "ash/ambient/ui/ambient_assistant_container_view.h"
 #include "ash/ambient/ui/photo_view.h"
 #include "ash/ambient/util/ambient_util.h"
+#include "ash/assistant/assistant_controller.h"
 #include "ash/login/ui/lock_screen.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ui/aura/window.h"
-#include "ui/views/layout/fill_layout.h"
+#include "ui/views/background.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
 
 namespace {
+
+// Ambient Assistant container view appearance.
+constexpr int kAmbientAssistantContainerViewPreferredHeightDip = 128;
 
 aura::Window* GetContainer() {
   aura::Window* container = nullptr;
@@ -37,7 +44,7 @@ void CreateWidget(AmbientContainerView* view) {
   params.name = view->GetClassName();
 
   views::Widget* widget = new views::Widget;
-  widget->Init(params);
+  widget->Init(std::move(params));
   widget->SetFullscreen(true);
 }
 
@@ -56,8 +63,18 @@ const char* AmbientContainerView::GetClassName() const {
 }
 
 gfx::Size AmbientContainerView::CalculatePreferredSize() const {
-  // TODO(wutao): Handle multiple displays.
+  // TODO(b/139953389): Handle multiple displays.
   return GetWidget()->GetNativeWindow()->GetRootWindow()->bounds().size();
+}
+
+void AmbientContainerView::Layout() {
+  if (!ambient_assistant_container_view_)
+    return;
+
+  // Set bounds for the ambient Assistant container view.
+  ambient_assistant_container_view_->SetBoundsRect(
+      gfx::Rect(0, 0, GetWidget()->GetRootView()->size().width(),
+                kAmbientAssistantContainerViewPreferredHeightDip));
 }
 
 void AmbientContainerView::OnMouseEvent(ui::MouseEvent* event) {
@@ -76,9 +93,15 @@ void AmbientContainerView::OnGestureEvent(ui::GestureEvent* event) {
 
 void AmbientContainerView::Init() {
   CreateWidget(this);
-  SetLayoutManager(std::make_unique<views::FillLayout>());
-  photo_view_ = new PhotoView(ambient_controller_);
-  AddChildView(photo_view_);
+  // TODO(b/139954108): Choose a better dark mode theme color.
+  SetBackground(views::CreateSolidBackground(SK_ColorBLACK));
+
+  photo_view_ = AddChildView(std::make_unique<PhotoView>(ambient_controller_));
+
+  ambient_assistant_container_view_ =
+      AddChildView(std::make_unique<AmbientAssistantContainerView>(
+          ambient_controller_->assistant_controller()->view_delegate()));
+  ambient_assistant_container_view_->SetVisible(false);
 }
 
 }  // namespace ash

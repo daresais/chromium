@@ -15,20 +15,21 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/tab_footprint_aggregator.h"
-#include "chrome/browser/performance_manager/graph/frame_node_impl.h"
-#include "chrome/browser/performance_manager/graph/graph_impl.h"
-#include "chrome/browser/performance_manager/graph/graph_impl_operations.h"
-#include "chrome/browser/performance_manager/graph/page_node_impl.h"
-#include "chrome/browser/performance_manager/graph/process_node_impl.h"
-#include "chrome/browser/performance_manager/performance_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "components/performance_manager/public/graph/frame_node.h"
+#include "components/performance_manager/public/graph/graph.h"
+#include "components/performance_manager/public/graph/graph_operations.h"
+#include "components/performance_manager/public/graph/page_node.h"
+#include "components/performance_manager/public/graph/process_node.h"
+#include "components/performance_manager/public/performance_manager.h"
 #include "content/public/browser/audio_service_info.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_names.mojom.h"
 #include "extensions/buildflags/buildflags.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
+#include "services/network/public/mojom/network_service.mojom.h"
+#include "services/resource_coordinator/public/cpp/memory_instrumentation/browser_metrics.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "url/gurl.h"
 
@@ -39,11 +40,12 @@
 #endif
 
 using base::trace_event::MemoryAllocatorDump;
+using memory_instrumentation::GetPrivateFootprintHistogramName;
 using memory_instrumentation::GlobalMemoryDump;
+using memory_instrumentation::HistogramProcessType;
+using memory_instrumentation::HistogramProcessTypeToString;
+using memory_instrumentation::kMemoryHistogramPrefix;
 using ukm::builders::Memory_Experimental;
-
-const base::Feature kMemoryMetricsOldTiming{"MemoryMetricsOldTiming",
-                                            base::FEATURE_ENABLED_BY_DEFAULT};
 
 namespace {
 
@@ -52,7 +54,12 @@ const char kSize[] = "size";
 const char kAllocatedObjectsSize[] = "allocated_objects_size";
 const bool kLargeMetric = true;
 
-enum class EmitTo { kCountsInUkmOnly, kSizeInUkmAndUma, kSizeInUmaOnly };
+enum class EmitTo {
+  kCountsInUkmOnly,
+  kSizeInUkmAndUma,
+  kSizeInUmaOnly,
+  kIgnored
+};
 
 struct Metric {
   // The root dump name that represents the required metric.
@@ -73,8 +80,8 @@ struct Metric {
 const Metric kAllocatorDumpNamesForMetrics[] = {
     {"blink_gc", "BlinkGC", kLargeMetric, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetBlinkGC},
-    {"blink_gc/allocated_objects", "BlinkGC.AllocatedObjects", kLargeMetric,
-     kEffectiveSize, EmitTo::kSizeInUkmAndUma,
+    {"blink_gc", "BlinkGC.AllocatedObjects", kLargeMetric,
+     kAllocatedObjectsSize, EmitTo::kSizeInUkmAndUma,
      &Memory_Experimental::SetBlinkGC_AllocatedObjects},
     {"blink_objects/Document", "NumberOfDocuments", !kLargeMetric,
      MemoryAllocatorDump::kNameObjectCount, EmitTo::kCountsInUkmOnly,
@@ -104,10 +111,20 @@ const Metric kAllocatorDumpNamesForMetrics[] = {
      &Memory_Experimental::SetExtensions_ValueStore},
     {"font_caches", "FontCaches", !kLargeMetric, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetFontCaches},
+    {"gpu/discardable_cache", "ServiceDiscardableManager", !kLargeMetric, kSize,
+     EmitTo::kSizeInUmaOnly, nullptr},
+    {"gpu/discardable_cache", "ServiceDiscardableManager.AvgImageSize",
+     !kLargeMetric, "average_size", EmitTo::kSizeInUmaOnly, nullptr},
     {"gpu/gl", "CommandBuffer", kLargeMetric, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetCommandBuffer},
     {"gpu/gr_shader_cache", "Gpu.GrShaderCache", !kLargeMetric, kEffectiveSize,
      EmitTo::kSizeInUmaOnly, nullptr},
+    {"gpu/shared_images", "gpu::SharedImageStub", !kLargeMetric, kEffectiveSize,
+     EmitTo::kIgnored, nullptr},
+    {"gpu/transfer_cache", "ServiceTransferCache", !kLargeMetric, kSize,
+     EmitTo::kSizeInUmaOnly, nullptr},
+    {"gpu/transfer_cache", "ServiceTransferCache.AvgImageSize", !kLargeMetric,
+     "average_size", EmitTo::kSizeInUmaOnly, nullptr},
     {"history", "History", !kLargeMetric, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetHistory},
     {"java_heap", "JavaHeap", kLargeMetric, kEffectiveSize,
@@ -164,6 +181,10 @@ const Metric kAllocatorDumpNamesForMetrics[] = {
      &Memory_Experimental::SetSiteStorage_SessionStorage},
     {"skia", "Skia", kLargeMetric, kEffectiveSize, EmitTo::kSizeInUkmAndUma,
      &Memory_Experimental::SetSkia},
+    {"skia/gpu_resources", "SharedContextState", kLargeMetric, kEffectiveSize,
+     EmitTo::kIgnored, nullptr},
+    {"skia/gpu_resources", "VizProcessContextProvider", kLargeMetric,
+     kEffectiveSize, EmitTo::kIgnored, nullptr},
     {"skia/sk_glyph_cache", "Skia.SkGlyphCache", kLargeMetric, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetSkia_SkGlyphCache},
     {"skia/sk_resource_cache", "Skia.SkResourceCache", kLargeMetric,
@@ -282,14 +303,9 @@ const Metric kAllocatorDumpNamesForMetrics[] = {
      &Memory_Experimental::SetWebCache_OtherResources},
 };
 
-#define UMA_PREFIX "Memory."
 #define EXPERIMENTAL_UMA_PREFIX "Memory.Experimental."
 #define VERSION_SUFFIX_NORMAL "2."
 #define VERSION_SUFFIX_SMALL "2.Small."
-
-// Use the values from UMA_HISTOGRAM_MEMORY_LARGE_MB.
-#define MEMORY_METRICS_HISTOGRAM_MB(name, value) \
-  base::UmaHistogramCustomCounts(name, value, 1, 64000, 100)
 
 // Used to measure KB-granularity memory stats. Range is from 1KB to 500,000KB
 // (500MB).
@@ -303,7 +319,7 @@ void EmitProcessUkm(const Metric& item,
   (builder->*(item.ukm_setter))(value);
 }
 
-void EmitProcessUma(const char* process_name,
+void EmitProcessUma(HistogramProcessType process_type,
                     const Metric& item,
                     uint64_t value) {
   std::string uma_name;
@@ -317,8 +333,9 @@ void EmitProcessUma(const char* process_name,
   } else {
     const char* version_suffix =
         item.is_large_metric ? VERSION_SUFFIX_NORMAL : VERSION_SUFFIX_SMALL;
-    uma_name = std::string(EXPERIMENTAL_UMA_PREFIX) + process_name +
-               version_suffix + item.uma_name;
+    uma_name = std::string(EXPERIMENTAL_UMA_PREFIX) +
+               HistogramProcessTypeToString(process_type) + version_suffix +
+               item.uma_name;
   }
 
   if (item.is_large_metric) {
@@ -329,7 +346,7 @@ void EmitProcessUma(const char* process_name,
 }
 
 void EmitProcessUmaAndUkm(const GlobalMemoryDump::ProcessDump& pmd,
-                          const char* process_name,
+                          HistogramProcessType process_type,
                           const base::Optional<base::TimeDelta>& uptime,
                           bool record_uma,
                           Memory_Experimental* builder) {
@@ -344,13 +361,15 @@ void EmitProcessUmaAndUkm(const GlobalMemoryDump::ProcessDump& pmd,
         break;
       case EmitTo::kSizeInUmaOnly:
         if (record_uma)
-          EmitProcessUma(process_name, item, value.value());
+          EmitProcessUma(process_type, item, value.value());
         break;
       case EmitTo::kSizeInUkmAndUma:
         // For each 'size' metric, emit size as MB.
         EmitProcessUkm(item, value.value() / 1024 / 1024, builder);
         if (record_uma)
-          EmitProcessUma(process_name, item, value.value());
+          EmitProcessUma(process_type, item, value.value());
+        break;
+      case EmitTo::kIgnored:
         break;
       default:
         NOTREACHED();
@@ -373,24 +392,24 @@ void EmitProcessUmaAndUkm(const GlobalMemoryDump::ProcessDump& pmd,
   if (!record_uma)
     return;
 
+  const char* process_name = HistogramProcessTypeToString(process_type);
 #if defined(OS_MACOSX)
   // Resident set is not populated on Mac.
   DCHECK_EQ(pmd.os_dump().resident_set_kb, 0U);
 #else
   MEMORY_METRICS_HISTOGRAM_MB(
-      std::string(UMA_PREFIX) + process_name + ".ResidentSet",
+      std::string(kMemoryHistogramPrefix) + process_name + ".ResidentSet",
       pmd.os_dump().resident_set_kb / 1024);
 #endif
-  MEMORY_METRICS_HISTOGRAM_MB(
-      std::string(UMA_PREFIX) + process_name + ".PrivateMemoryFootprint",
-      pmd.os_dump().private_footprint_kb / 1024);
-  MEMORY_METRICS_HISTOGRAM_MB(
-      std::string(UMA_PREFIX) + process_name + ".SharedMemoryFootprint",
-      pmd.os_dump().shared_footprint_kb / 1024);
+  MEMORY_METRICS_HISTOGRAM_MB(GetPrivateFootprintHistogramName(process_type),
+                              pmd.os_dump().private_footprint_kb / 1024);
+  MEMORY_METRICS_HISTOGRAM_MB(std::string(kMemoryHistogramPrefix) +
+                                  process_name + ".SharedMemoryFootprint",
+                              pmd.os_dump().shared_footprint_kb / 1024);
 #if defined(OS_LINUX) || defined(OS_ANDROID)
-  MEMORY_METRICS_HISTOGRAM_MB(
-      std::string(UMA_PREFIX) + process_name + ".PrivateSwapFootprint",
-      pmd.os_dump().private_footprint_swap_kb / 1024);
+  MEMORY_METRICS_HISTOGRAM_MB(std::string(kMemoryHistogramPrefix) +
+                                  process_name + ".PrivateSwapFootprint",
+                              pmd.os_dump().private_footprint_swap_kb / 1024);
 #endif
 }
 
@@ -400,7 +419,7 @@ void EmitSummedGpuMemory(const GlobalMemoryDump::ProcessDump& pmd,
   // Combine several categories together to sum up Chrome-reported gpu memory.
   static const char* gpu_categories[] = {
       "gpu/gl",
-      "gpu/shared-images",
+      "gpu/shared_images",
       "skia/gpu_resources",
   };
   Metric synthetic_metric = {nullptr,
@@ -416,11 +435,17 @@ void EmitSummedGpuMemory(const GlobalMemoryDump::ProcessDump& pmd,
         pmd.GetMetric(gpu_categories[i], synthetic_metric.metric).value_or(0);
   }
 
-  // Always use "Gpu" as the process name for this even for the in process
+  // We log this metric for both the browser and GPU process, and only one will
+  // have entries for |gpu_categories|, so only log if |total| > 0. There should
+  // be almost no meaningful cases where |total| is actually zero.
+  if (total == 0)
+    return;
+
+  // Always use kGpu as the process name for this even for the in process
   // command buffer case.
   EmitProcessUkm(synthetic_metric, total, builder);
   if (record_uma)
-    EmitProcessUma("Gpu", synthetic_metric, total);
+    EmitProcessUma(HistogramProcessType::kGpu, synthetic_metric, total);
 }
 
 void EmitBrowserMemoryMetrics(const GlobalMemoryDump::ProcessDump& pmd,
@@ -431,7 +456,8 @@ void EmitBrowserMemoryMetrics(const GlobalMemoryDump::ProcessDump& pmd,
   Memory_Experimental builder(ukm_source_id);
   builder.SetProcessType(static_cast<int64_t>(
       memory_instrumentation::mojom::ProcessType::BROWSER));
-  EmitProcessUmaAndUkm(pmd, "Browser", uptime, record_uma, &builder);
+  EmitProcessUmaAndUkm(pmd, HistogramProcessType::kBrowser, uptime, record_uma,
+                       &builder);
   EmitSummedGpuMemory(pmd, &builder, record_uma);
 
   builder.Record(ukm_recorder);
@@ -451,8 +477,10 @@ void EmitRendererMemoryMetrics(
       memory_instrumentation::mojom::ProcessType::RENDERER));
   builder.SetNumberOfExtensions(number_of_extensions);
 
-  const char* process = number_of_extensions == 0 ? "Renderer" : "Extension";
-  EmitProcessUmaAndUkm(pmd, process, uptime, record_uma, &builder);
+  const HistogramProcessType process_type =
+      (number_of_extensions == 0) ? HistogramProcessType::kRenderer
+                                  : HistogramProcessType::kExtension;
+  EmitProcessUmaAndUkm(pmd, process_type, uptime, record_uma, &builder);
 
   if (page_info) {
     builder.SetIsVisible(page_info->is_visible);
@@ -473,7 +501,8 @@ void EmitGpuMemoryMetrics(const GlobalMemoryDump::ProcessDump& pmd,
   Memory_Experimental builder(ukm_source_id);
   builder.SetProcessType(
       static_cast<int64_t>(memory_instrumentation::mojom::ProcessType::GPU));
-  EmitProcessUmaAndUkm(pmd, "Gpu", uptime, record_uma, &builder);
+  EmitProcessUmaAndUkm(pmd, HistogramProcessType::kGpu, uptime, record_uma,
+                       &builder);
   EmitSummedGpuMemory(pmd, &builder, record_uma);
   builder.Record(ukm_recorder);
 }
@@ -486,7 +515,8 @@ void EmitUtilityMemoryMetrics(const GlobalMemoryDump::ProcessDump& pmd,
   Memory_Experimental builder(ukm_source_id);
   builder.SetProcessType(static_cast<int64_t>(
       memory_instrumentation::mojom::ProcessType::UTILITY));
-  EmitProcessUmaAndUkm(pmd, "Utility", uptime, record_uma, &builder);
+  EmitProcessUmaAndUkm(pmd, HistogramProcessType::kUtility, uptime, record_uma,
+                       &builder);
 
   builder.Record(ukm_recorder);
 }
@@ -500,7 +530,8 @@ void EmitAudioServiceMemoryMetrics(
   Memory_Experimental builder(ukm_source_id);
   builder.SetProcessType(static_cast<int64_t>(
       memory_instrumentation::mojom::ProcessType::UTILITY));
-  EmitProcessUmaAndUkm(pmd, "AudioService", uptime, record_uma, &builder);
+  EmitProcessUmaAndUkm(pmd, HistogramProcessType::kAudioService, uptime,
+                       record_uma, &builder);
 
   builder.Record(ukm_recorder);
 }
@@ -514,7 +545,8 @@ void EmitNetworkServiceMemoryMetrics(
   Memory_Experimental builder(ukm_source_id);
   builder.SetProcessType(static_cast<int64_t>(
       memory_instrumentation::mojom::ProcessType::UTILITY));
-  EmitProcessUmaAndUkm(pmd, "NetworkService", uptime, record_uma, &builder);
+  EmitProcessUmaAndUkm(pmd, HistogramProcessType::kNetworkService, uptime,
+                       record_uma, &builder);
 
   builder.Record(ukm_recorder);
 }
@@ -547,10 +579,6 @@ void ProcessMemoryMetricsEmitter::FetchAndEmitProcessMemoryMetrics() {
         ->RequestGlobalDump(mad_list, callback);
   }
 
-  // The callback keeps this object alive until the callback is invoked.
-  performance_manager::PerformanceManager* performance_manager =
-      performance_manager::PerformanceManager::GetInstance();
-
   // Use a lambda adapter to post the results back to this sequence.
   GetProcessToPageInfoMapCallback callback2 = base::BindOnce(
       [](scoped_refptr<base::SequencedTaskRunner> task_runner,
@@ -564,7 +592,7 @@ void ProcessMemoryMetricsEmitter::FetchAndEmitProcessMemoryMetrics() {
       base::SequencedTaskRunnerHandle::Get(),
       scoped_refptr<ProcessMemoryMetricsEmitter>(this));
 
-  performance_manager->CallOnGraph(
+  performance_manager::PerformanceManager::CallOnGraph(
       FROM_HERE,
       base::BindOnce(&ProcessMemoryMetricsEmitter::GetProcessToPageInfoMap,
                      std::move(callback2)));
@@ -751,8 +779,8 @@ void ProcessMemoryMetricsEmitter::CollateResults() {
           EmitAudioServiceMemoryMetrics(
               pmd, ukm::UkmRecorder::GetNewSourceID(), GetUkmRecorder(),
               GetProcessUptime(now, pmd.pid()), emit_metrics_for_all_processes);
-        } else if (base::Contains(pmd.service_names(),
-                                  content::mojom::kNetworkServiceName)) {
+        } else if (pmd.service_name() ==
+                   network::mojom::NetworkService::Name_) {
           EmitNetworkServiceMemoryMetrics(
               pmd, ukm::UkmRecorder::GetNewSourceID(), GetUkmRecorder(),
               GetProcessUptime(now, pmd.pid()), emit_metrics_for_all_processes);
@@ -833,50 +861,50 @@ namespace {
 
 // Returns true iff the given |process| is responsible for hosting the
 // main-frame of the given |page|.
-bool HostsMainFrame(performance_manager::ProcessNodeImpl* process,
-                    performance_manager::PageNodeImpl* page) {
-  performance_manager::FrameNodeImpl* main_frame = page->GetMainFrameNodeImpl();
+bool HostsMainFrame(const performance_manager::ProcessNode* process,
+                    const performance_manager::PageNode* page) {
+  const performance_manager::FrameNode* main_frame = page->GetMainFrameNode();
   if (main_frame == nullptr) {
     // |process| can't host a frame that doesn't exist.
     return false;
   }
 
-  return main_frame->process_node() == process;
+  return main_frame->GetProcessNode() == process;
 }
 
 }  // namespace
 
 void ProcessMemoryMetricsEmitter::GetProcessToPageInfoMap(
     GetProcessToPageInfoMapCallback callback,
-    performance_manager::GraphImpl* graph) {
+    performance_manager::Graph* graph) {
   std::vector<ProcessInfo> process_infos;
-  std::vector<performance_manager::ProcessNodeImpl*> process_nodes =
-      graph->GetAllProcessNodeImpls();
+  std::vector<const performance_manager::ProcessNode*> process_nodes =
+      graph->GetAllProcessNodes();
   for (auto* process_node : process_nodes) {
-    if (process_node->process_id() == base::kNullProcessId)
+    if (process_node->GetProcessId() == base::kNullProcessId)
       continue;
 
     ProcessInfo process_info;
-    process_info.pid = process_node->process_id();
-    process_info.launch_time = process_node->launch_time();
+    process_info.pid = process_node->GetProcessId();
+    process_info.launch_time = process_node->GetLaunchTime();
 
-    base::flat_set<performance_manager::PageNodeImpl*> page_nodes =
-        performance_manager::GraphImplOperations::GetAssociatedPageNodes(
+    base::flat_set<const performance_manager::PageNode*> page_nodes =
+        performance_manager::GraphOperations::GetAssociatedPageNodes(
             process_node);
-    for (performance_manager::PageNodeImpl* page_node : page_nodes) {
-      if (page_node->ukm_source_id() == ukm::kInvalidSourceId)
+    for (const performance_manager::PageNode* page_node : page_nodes) {
+      if (page_node->GetUkmSourceID() == ukm::kInvalidSourceId)
         continue;
 
       PageInfo page_info;
-      page_info.ukm_source_id = page_node->ukm_source_id();
+      page_info.ukm_source_id = page_node->GetUkmSourceID();
       page_info.tab_id =
-          performance_manager::NodeBase::GetSerializationId(page_node);
+          performance_manager::Node::GetSerializationId(page_node);
       page_info.hosts_main_frame = HostsMainFrame(process_node, page_node);
-      page_info.is_visible = page_node->is_visible();
+      page_info.is_visible = page_node->IsVisible();
       page_info.time_since_last_visibility_change =
-          page_node->TimeSinceLastVisibilityChange();
+          page_node->GetTimeSinceLastVisibilityChange();
       page_info.time_since_last_navigation =
-          page_node->TimeSinceLastNavigation();
+          page_node->GetTimeSinceLastNavigation();
       process_info.page_infos.push_back(std::move(page_info));
     }
     process_infos.push_back(std::move(process_info));

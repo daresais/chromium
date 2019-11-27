@@ -11,12 +11,11 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/capture/video_capture_types.h"
-#include "third_party/blink/public/web/modules/mediastream/media_stream_constraints_util_video_device.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_device.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
@@ -35,10 +34,6 @@ void ResetCallback(
   // |callback| will be deleted when this exits.
 }
 
-// Empty method used for keeping a reference to the original media::VideoFrame.
-// The reference to |frame| is kept in the closure that calls this method.
-void ReleaseOriginalFrame(scoped_refptr<media::VideoFrame> frame) {}
-
 }  // namespace
 
 // MediaStreamVideoTrack::FrameDeliverer is a helper class used for registering
@@ -48,7 +43,7 @@ void ReleaseOriginalFrame(scoped_refptr<media::VideoFrame> frame) {}
 // is disabled, a black frame is instead forwarded to the sinks at the same
 // frame rate.
 class MediaStreamVideoTrack::FrameDeliverer
-    : public base::RefCountedThreadSafe<FrameDeliverer> {
+    : public WTF::ThreadSafeRefCounted<FrameDeliverer> {
  public:
   using VideoSinkId = WebMediaStreamSink*;
 
@@ -74,7 +69,7 @@ class MediaStreamVideoTrack::FrameDeliverer
                         base::TimeTicks estimated_capture_time);
 
  private:
-  friend class base::RefCountedThreadSafe<FrameDeliverer>;
+  friend class WTF::ThreadSafeRefCounted<FrameDeliverer>;
   virtual ~FrameDeliverer();
   void AddCallbackOnIO(VideoSinkId id,
                        VideoCaptureDeliverFrameInternalCallback callback);
@@ -230,13 +225,11 @@ MediaStreamVideoTrack::FrameDeliverer::GetBlackFrame(
   // Wrap |black_frame_| so we get a fresh timestamp we can modify. Frames
   // returned from this function may still be in use.
   scoped_refptr<media::VideoFrame> wrapped_black_frame =
-      media::VideoFrame::WrapVideoFrame(*black_frame_, black_frame_->format(),
+      media::VideoFrame::WrapVideoFrame(black_frame_, black_frame_->format(),
                                         black_frame_->visible_rect(),
                                         black_frame_->natural_size());
   if (!wrapped_black_frame)
     return nullptr;
-  wrapped_black_frame->AddDestructionObserver(ConvertToBaseOnceCallback(
-      CrossThreadBindOnce(&ReleaseOriginalFrame, black_frame_)));
 
   wrapped_black_frame->set_timestamp(reference_frame.timestamp());
   base::TimeTicks reference_time;
@@ -252,12 +245,12 @@ MediaStreamVideoTrack::FrameDeliverer::GetBlackFrame(
 // static
 WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
     MediaStreamVideoSource* source,
-    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled) {
   WebMediaStreamTrack track;
   track.Initialize(source->Owner());
-  track.SetPlatformTrack(
-      std::make_unique<MediaStreamVideoTrack>(source, callback, enabled));
+  track.SetPlatformTrack(std::make_unique<MediaStreamVideoTrack>(
+      source, std::move(callback), enabled));
   return track;
 }
 
@@ -265,12 +258,12 @@ WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
 WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
     const WebString& id,
     MediaStreamVideoSource* source,
-    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled) {
   WebMediaStreamTrack track;
   track.Initialize(id, source->Owner());
-  track.SetPlatformTrack(
-      std::make_unique<MediaStreamVideoTrack>(source, callback, enabled));
+  track.SetPlatformTrack(std::make_unique<MediaStreamVideoTrack>(
+      source, std::move(callback), enabled));
   return track;
 }
 
@@ -281,13 +274,13 @@ WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
     const base::Optional<bool>& noise_reduction,
     bool is_screencast,
     const base::Optional<double>& min_frame_rate,
-    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled) {
   WebMediaStreamTrack track;
   track.Initialize(source->Owner());
   track.SetPlatformTrack(std::make_unique<MediaStreamVideoTrack>(
       source, adapter_settings, noise_reduction, is_screencast, min_frame_rate,
-      callback, enabled));
+      std::move(callback), enabled));
   return track;
 }
 
@@ -303,7 +296,7 @@ MediaStreamVideoTrack* MediaStreamVideoTrack::GetVideoTrack(
 
 MediaStreamVideoTrack::MediaStreamVideoTrack(
     MediaStreamVideoSource* source,
-    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled)
     : WebPlatformMediaStreamTrack(true),
       adapter_settings_(std::make_unique<VideoTrackAdapterSettings>(
@@ -323,7 +316,7 @@ MediaStreamVideoTrack::MediaStreamVideoTrack(
                    media::BindToCurrentLoop(WTF::BindRepeating(
                        &MediaStreamVideoTrack::set_computed_source_format,
                        weak_factory_.GetWeakPtr())),
-                   callback);
+                   std::move(callback));
 }
 
 MediaStreamVideoTrack::MediaStreamVideoTrack(
@@ -332,7 +325,7 @@ MediaStreamVideoTrack::MediaStreamVideoTrack(
     const base::Optional<bool>& noise_reduction,
     bool is_screen_cast,
     const base::Optional<double>& min_frame_rate,
-    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    MediaStreamVideoSource::ConstraintsOnceCallback callback,
     bool enabled)
     : WebPlatformMediaStreamTrack(true),
       adapter_settings_(
@@ -354,7 +347,7 @@ MediaStreamVideoTrack::MediaStreamVideoTrack(
                    media::BindToCurrentLoop(WTF::BindRepeating(
                        &MediaStreamVideoTrack::set_computed_source_format,
                        weak_factory_.GetWeakPtr())),
-                   callback);
+                   std::move(callback));
 }
 
 MediaStreamVideoTrack::~MediaStreamVideoTrack() {

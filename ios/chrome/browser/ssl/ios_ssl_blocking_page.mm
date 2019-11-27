@@ -11,14 +11,14 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/security_interstitials/core/metrics_helper.h"
+#include "components/security_interstitials/core/ssl_error_options_mask.h"
 #include "components/security_interstitials/core/ssl_error_ui.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/interstitials/ios_chrome_controller_client.h"
 #include "ios/chrome/browser/interstitials/ios_chrome_metrics_helper.h"
-#import "ios/web/public/navigation_item.h"
+#import "ios/web/public/navigation/navigation_item.h"
 #include "ios/web/public/security/ssl_status.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "net/base/net_errors.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -27,6 +27,7 @@
 #error "This file requires ARC support."
 #endif
 
+using security_interstitials::SSLErrorOptionsMask;
 using security_interstitials::SSLErrorUI;
 
 namespace {
@@ -62,9 +63,9 @@ IOSSSLBlockingPage::IOSSSLBlockingPage(web::WebState* web_state,
                                                IsOverridable(options_mask))))) {
   // Override prefs for the SSLErrorUI.
   if (overridable_)
-    options_mask |= SSLErrorUI::SOFT_OVERRIDE_ENABLED;
+    options_mask |= SSLErrorOptionsMask::SOFT_OVERRIDE_ENABLED;
   else
-    options_mask &= ~SSLErrorUI::SOFT_OVERRIDE_ENABLED;
+    options_mask &= ~SSLErrorOptionsMask::SOFT_OVERRIDE_ENABLED;
 
   ssl_error_ui_.reset(new SSLErrorUI(request_url, cert_error, ssl_info,
                                      options_mask, time_triggered, GURL(),
@@ -144,6 +145,6 @@ void IOSSSLBlockingPage::NotifyDenyCertificate() {
 
 // static
 bool IOSSSLBlockingPage::IsOverridable(int options_mask) {
-  return (options_mask & SSLErrorUI::SOFT_OVERRIDE_ENABLED) &&
-         !(options_mask & SSLErrorUI::STRICT_ENFORCEMENT);
+  return (options_mask & SSLErrorOptionsMask::SOFT_OVERRIDE_ENABLED) &&
+         !(options_mask & SSLErrorOptionsMask::STRICT_ENFORCEMENT);
 }

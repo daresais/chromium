@@ -32,8 +32,12 @@ class BrowserTestBase : public testing::Test {
   BrowserTestBase();
   ~BrowserTestBase() override;
 
-  // Configures everything for an in process browser test, then invokes
-  // BrowserMain. BrowserMain ends up invoking RunTestOnMainThreadLoop.
+  // Configures everything for an in process browser test (e.g. thread pool,
+  // etc.) by invoking ContentMain (or manually on OS_ANDROID). As such all
+  // single-threaded initialization must be done before this step.
+  //
+  // ContentMain then ends up invoking RunTestOnMainThreadLoop with browser
+  // threads already running.
   void SetUp() override;
 
   // Restores state configured in SetUp.

@@ -29,9 +29,9 @@
 #include "components/payments/core/features.h"
 #include "components/payments/core/journey_logger.h"
 #include "components/payments/core/payment_address.h"
+#include "components/payments/core/payment_app.h"
 #include "components/payments/core/payment_details.h"
 #include "components/payments/core/payment_details_validation.h"
-#include "components/payments/core/payment_instrument.h"
 #include "components/payments/core/payment_prefs.h"
 #include "components/payments/core/payment_request_base_delegate.h"
 #include "components/payments/core/payment_request_data_util.h"
@@ -57,20 +57,19 @@
 #import "ios/chrome/browser/ui/payments/payment_request_coordinator.h"
 #import "ios/chrome/browser/ui/payments/payment_request_error_coordinator.h"
 #include "ios/web/common/origin_util.h"
+#import "ios/web/common/url_scheme_util.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #include "ios/web/public/deprecated/url_verification_constants.h"
 #include "ios/web/public/favicon/favicon_status.h"
 #include "ios/web/public/js_messaging/web_frame.h"
-#include "ios/web/public/js_messaging/web_frame_util.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
-#include "ios/web/public/navigation_item.h"
-#include "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#include "ios/web/public/navigation/navigation_item.h"
+#include "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/security/ssl_status.h"
-#import "ios/web/public/url_scheme_util.h"
-#import "ios/web/public/web_state/navigation_context.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 #include "third_party/libaddressinput/chromium/chrome_metadata_source.h"
 #include "third_party/libaddressinput/chromium/chrome_storage_impl.h"
 #include "url/gurl.h"
@@ -136,6 +135,9 @@ struct PendingPaymentResponse {
   // Storage for data to return in the payment response, until we're ready to
   // send an actual PaymentResponse.
   PendingPaymentResponse _pendingPaymentResponse;
+
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> _subscription;
 }
 
 // YES if Payment Request is enabled on the active web state.
@@ -309,7 +311,6 @@ struct PendingPaymentResponse {
     _paymentRequestJsManager = nil;
 
     _activeWebState->RemoveObserver(_activeWebStateObserver.get());
-    _activeWebState->RemoveScriptCommandCallback(kCommandPrefix);
     _activeWebStateObserver.reset();
     _activeWebState = nullptr;
   }
@@ -320,7 +321,7 @@ struct PendingPaymentResponse {
     _paymentRequestJsManager = nil;
 
     _activeWebState->RemoveObserver(_activeWebStateObserver.get());
-    _activeWebState->RemoveScriptCommandCallback(kCommandPrefix);
+    _subscription.reset();
     _activeWebState = nullptr;
   }
 
@@ -338,7 +339,8 @@ struct PendingPaymentResponse {
           }
         });
     _activeWebState->AddObserver(_activeWebStateObserver.get());
-    _activeWebState->AddScriptCommandCallback(callback, kCommandPrefix);
+    _subscription =
+        _activeWebState->AddScriptCommandCallback(callback, kCommandPrefix);
 
     _paymentRequestJsManager =
         base::mac::ObjCCastStrict<JSPaymentRequestManager>(
@@ -679,7 +681,8 @@ paymentRequestFromMessage:(const base::DictionaryValue&)message
   BOOL connectionSecure =
       _activeWebState->GetLastCommittedURL().SchemeIs(url::kHttpsScheme);
   // Payment Request is only enabled in main frame.
-  web::WebFrame* main_frame = web::GetMainWebFrame(_activeWebState);
+  web::WebFrame* main_frame =
+      _activeWebState->GetWebFramesManager()->GetMainWebFrame();
   autofill::AutofillManager* autofillManager =
       autofill::AutofillDriverIOS::FromWebStateAndWebFrame(_activeWebState,
                                                            main_frame)
@@ -1030,8 +1033,7 @@ requestFullCreditCard:(const autofill::CreditCard&)creditCard
 
 - (void)paymentInstrument:(payments::IOSPaymentInstrument*)paymentInstrument
     launchAppWithUniversalLink:(GURL)universalLink
-            instrumentDelegate:
-                (payments::PaymentInstrument::Delegate*)delegate {
+            instrumentDelegate:(payments::PaymentApp::Delegate*)delegate {
   DCHECK(_pendingPaymentRequest);
   DCHECK(_activeWebState);
 
@@ -1059,7 +1061,7 @@ requestFullCreditCard:(const autofill::CreditCard&)creditCard
       payments::JourneyLogger::EVENT_PAY_CLICKED);
   coordinator.paymentRequest->journey_logger().SetEventOccurred(
       coordinator.paymentRequest->selected_payment_method()->type() ==
-              payments::PaymentInstrument::Type::AUTOFILL
+              payments::PaymentApp::Type::AUTOFILL
           ? payments::JourneyLogger::EVENT_SELECTED_CREDIT_CARD
           : payments::JourneyLogger::EVENT_SELECTED_OTHER);
 

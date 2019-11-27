@@ -29,6 +29,9 @@ class StubWebView : public WebView {
   Status Resume(const Timeout* timeout) override;
   Status SendCommand(const std::string& cmd,
                      const base::DictionaryValue& params) override;
+  Status SendCommandFromWebSocket(const std::string& cmd,
+                                  const base::DictionaryValue& params,
+                                  const int client_cmd_id) override;
   Status SendCommandAndGetResult(const std::string& cmd,
                                  const base::DictionaryValue& params,
                                  std::unique_ptr<base::Value>* value) override;
@@ -60,10 +63,17 @@ class StubWebView : public WebView {
                             const base::ListValue& args,
                             std::string* out_frame) override;
   Status DispatchMouseEvents(const std::list<MouseEvent>& events,
-                             const std::string& frame) override;
-  Status DispatchTouchEvent(const TouchEvent& event) override;
-  Status DispatchTouchEvents(const std::list<TouchEvent>& events) override;
-  Status DispatchKeyEvents(const std::list<KeyEvent>& events) override;
+                             const std::string& frame,
+                             bool async_dispatch_events = false) override;
+  Status DispatchTouchEvent(const TouchEvent& event,
+                            bool async_dispatch_events = false) override;
+  Status DispatchTouchEvents(const std::list<TouchEvent>& events,
+                             bool async_dispatch_events = false) override;
+  Status DispatchTouchEventWithMultiPoints(
+      const std::list<TouchEvent>& events,
+      bool async_dispatch_events = false) override;
+  Status DispatchKeyEvents(const std::list<KeyEvent>& events,
+                           bool async_dispatch_events = false) override;
   Status GetCookies(std::unique_ptr<base::ListValue>* cookies,
                     const std::string& current_page_url) override;
   Status DeleteCookie(const std::string& name,
@@ -83,7 +93,7 @@ class StubWebView : public WebView {
                                    bool stop_load_on_timeout) override;
   Status IsPendingNavigation(const std::string& frame_id,
                              const Timeout* timeout,
-                             bool* is_pending) override;
+                             bool* is_pending) const override;
   JavaScriptDialogManager* GetJavaScriptDialogManager() override;
   Status OverrideGeolocation(const Geoposition& geoposition) override;
   Status OverrideNetworkConditions(
@@ -108,10 +118,12 @@ class StubWebView : public WebView {
                                  int y,
                                  int xoffset,
                                  int yoffset) override;
+  bool IsNonBlocking() const override;
   bool IsOOPIF(const std::string& frame_id) override;
   FrameTracker* GetFrameTracker() const override;
   std::unique_ptr<base::Value> GetCastSinks() override;
   std::unique_ptr<base::Value> GetCastIssueMessage() override;
+  void ClearNavigationState(const std::string& new_frame_id) override;
 
  private:
   std::string id_;

@@ -63,7 +63,7 @@ class ASH_EXPORT OverviewWindowDragController {
 
   OverviewWindowDragController(OverviewSession* overview_session,
                                OverviewItem* item,
-                               bool allow_drag_to_close);
+                               bool is_touch_dragging);
   ~OverviewWindowDragController();
 
   void InitiateDrag(const gfx::PointF& location_in_screen);
@@ -103,6 +103,9 @@ class ASH_EXPORT OverviewWindowDragController {
   void UpdateDragIndicatorsAndOverviewGrid(
       const gfx::PointF& location_in_screen);
 
+  const aura::Window* GetRootWindowBeingDraggedIn() const;
+  gfx::Rect GetWorkAreaOfDisplayBeingDraggedIn() const;
+
   // Dragged items should not attempt to update the indicators or snap if
   // the drag started in a snap region and has not been dragged pass the
   // threshold.
@@ -111,14 +114,9 @@ class ASH_EXPORT OverviewWindowDragController {
   SplitViewController::SnapPosition GetSnapPosition(
       const gfx::PointF& location_in_screen) const;
 
-  // Returns the expected window grid bounds based on |snap_position|.
-  gfx::Rect GetGridBounds(SplitViewController::SnapPosition snap_position);
-
   void SnapWindow(SplitViewController::SnapPosition snap_position);
 
   OverviewSession* overview_session_;
-
-  SplitViewController* split_view_controller_;
 
   // The drag target window in the overview mode.
   OverviewItem* item_ = nullptr;
@@ -142,11 +140,24 @@ class ASH_EXPORT OverviewWindowDragController {
   // with the DesksBarView.
   gfx::SizeF original_scaled_size_;
 
+  // Cached values related to dragging items while the desks bar is shown.
+  // |desks_bar_bounds_| is the bounds of the desks bar in screen coordinates.
+  // |shrink_bounds_| is a rectangle around the desks bar which the items starts
+  // shrinking when the event location is contained. The item will shrink until
+  // it is contained in |desks_bar_bounds_|, at which it has reached its minimum
+  // size and will no longer shrink. |shrink_region_distance_| is a vector
+  // contained the distance from the origin of |desks_bar_bounds_| to the origin
+  // of |shrink_bounds_|. It's used to determine the size of the dragged item
+  // when it's within |shrink_bounds_|.
+  gfx::RectF desks_bar_bounds_;
+  gfx::RectF shrink_bounds_;
+  gfx::Vector2dF shrink_region_distance_;
+
   const size_t display_count_;
 
-  // True if the drag-to-close mode is allowed (generally when the item is
-  // dragged by touch gestures).
-  const bool should_allow_drag_to_close_;
+  // Indicates touch dragging, as opposed to mouse dragging. The drag-to-close
+  // mode is only allowed when |is_touch_dragging_| is true.
+  const bool is_touch_dragging_;
 
   // True if SplitView is enabled.
   const bool should_allow_split_view_;

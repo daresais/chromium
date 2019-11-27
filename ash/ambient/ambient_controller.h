@@ -19,21 +19,37 @@ class ImageSkia;
 namespace ash {
 
 class AmbientContainerView;
+class AssistantController;
 class PhotoModelObserver;
 
 // Class to handle all ambient mode functionalities.
 class ASH_EXPORT AmbientController : views::WidgetObserver {
  public:
-  AmbientController();
+  explicit AmbientController(AssistantController* assistant_controller);
   ~AmbientController() override;
 
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
 
   void Toggle();
+
   void AddPhotoModelObserver(PhotoModelObserver* observer);
+
   void RemovePhotoModelObserver(PhotoModelObserver* observer);
-  AmbientContainerView* GetAmbientContainerViewForTesting();
+
+  const PhotoModel& model() const { return model_; }
+
+  AmbientContainerView* get_container_view_for_testing() {
+    return container_view_;
+  }
+
+  const base::OneShotTimer& get_timer_for_testing() const {
+    return refresh_timer_;
+  }
+
+  AssistantController* assistant_controller() { return assistant_controller_; }
+
+  bool is_showing() const { return !!container_view_; }
 
  private:
   void Start();
@@ -41,9 +57,12 @@ class ASH_EXPORT AmbientController : views::WidgetObserver {
   void CreateContainerView();
   void DestroyContainerView();
   void RefreshImage();
+  void ScheduleRefreshImage();
+  void GetNextImage();
   void OnPhotoDownloaded(const gfx::ImageSkia& image);
 
-  AmbientContainerView* container_view_ = nullptr;
+  AssistantController* const assistant_controller_;  // Owned by Shell.
+  AmbientContainerView* container_view_ = nullptr;   // Owned by view hierarchy.
   PhotoModel model_;
   base::OneShotTimer refresh_timer_;
   base::WeakPtrFactory<AmbientController> weak_factory_{this};

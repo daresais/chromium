@@ -35,7 +35,7 @@ class BackgroundTracingManager {
   //
   // void Upload(const scoped_refptr<base::RefCountedString>& data,
   //             FinishedProcessingCallback done_callback) {
-  //   base::PostTaskWithTraitsAndReply(
+  //   base::PostTaskAndReply(
   //       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
   //       base::BindOnce(&DoUploadInBackground, data),
   //       std::move(done_callback));
@@ -43,8 +43,7 @@ class BackgroundTracingManager {
   //
   using FinishedProcessingCallback = base::OnceCallback<void(bool success)>;
   using ReceiveCallback =
-      base::RepeatingCallback<void(const scoped_refptr<base::RefCountedString>&,
-                                   std::unique_ptr<const base::DictionaryValue>,
+      base::RepeatingCallback<void(std::unique_ptr<std::string>,
                                    FinishedProcessingCallback)>;
 
   // Set the triggering rules for when to start recording.

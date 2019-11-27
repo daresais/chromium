@@ -20,10 +20,10 @@
 #include "content/public/browser/network_service_instance.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/common/file_system/file_system_types.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
 namespace file_manager {
@@ -171,8 +171,8 @@ void FileTasksNotifier::NotifyObservers(
 void FileTasksNotifier::GetFileAvailability(PendingFileAvailabilityTask task) {
   if (task.url.type() != storage::kFileSystemTypeDriveFs) {
     base::FilePath path = std::move(task.url.path());
-    base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, {base::MayBlock()},
+    base::PostTaskAndReplyWithResult(
+        FROM_HERE, {base::ThreadPool(), base::MayBlock()},
         base::BindOnce(&base::PathExists, std::move(path)),
         base::BindOnce(&FileTasksNotifier::ForwardQueryResult,
                        std::move(task)));

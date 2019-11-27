@@ -30,14 +30,14 @@ import org.chromium.android_webview.AwContents.InternalAccessDelegate;
 import org.chromium.android_webview.AwContents.NativeDrawFunctorFactory;
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsStatics;
-import org.chromium.android_webview.AwSafeBrowsingConfigHelper;
-import org.chromium.android_webview.AwSafeBrowsingConversionHelper;
-import org.chromium.android_webview.AwSafeBrowsingResponse;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.AwSwitches;
 import org.chromium.android_webview.AwWebContentsObserver;
 import org.chromium.android_webview.ErrorCodeConversionHelper;
 import org.chromium.android_webview.SafeBrowsingAction;
+import org.chromium.android_webview.safe_browsing.AwSafeBrowsingConfigHelper;
+import org.chromium.android_webview.safe_browsing.AwSafeBrowsingConversionHelper;
+import org.chromium.android_webview.safe_browsing.AwSafeBrowsingResponse;
 import org.chromium.android_webview.test.TestAwContentsClient.OnReceivedError2Helper;
 import org.chromium.android_webview.test.util.GraphicsTestUtils;
 import org.chromium.base.BuildInfo;
@@ -47,11 +47,9 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.InMemorySharedPreferences;
 import org.chromium.components.safe_browsing.SafeBrowsingApiBridge;
 import org.chromium.components.safe_browsing.SafeBrowsingApiHandler;
-import org.chromium.components.safe_browsing.SafeBrowsingApiHandler.Observer;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.Criteria;
@@ -78,9 +76,8 @@ public class SafeBrowsingTest {
          * sites are malicious
          */
         @Override
-        public AwBrowserContext createAwBrowserContextOnUiThread(
-                InMemorySharedPreferences prefs, Context appContext) {
-            return new MockAwBrowserContext(prefs, appContext);
+        public AwBrowserContext createAwBrowserContextOnUiThread(InMemorySharedPreferences prefs) {
+            return new MockAwBrowserContext(prefs);
         }
     };
 
@@ -195,15 +192,19 @@ public class SafeBrowsingTest {
                         callbackId, SafeBrowsingResult.SUCCESS, metadata, CHECK_DELTA_US));
             // clang-format on
         }
+
+        @Override
+        public boolean startAllowlistLookup(final String uri, int threatType) {
+            return false;
+        }
     }
 
     /**
      * A fake AwBrowserContext which loads the MockSafeBrowsingApiHandler instead of the real one.
      */
     private static class MockAwBrowserContext extends AwBrowserContext {
-        public MockAwBrowserContext(
-                SharedPreferences sharedPreferences, Context applicationContext) {
-            super(sharedPreferences, applicationContext);
+        public MockAwBrowserContext(SharedPreferences sharedPreferences) {
+            super(sharedPreferences, 0, true);
             SafeBrowsingApiBridge.setSafeBrowsingHandlerType(MockSafeBrowsingApiHandler.class);
         }
     }
@@ -340,7 +341,7 @@ public class SafeBrowsingTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new SafeBrowsingContentsClient();
         mContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(
                 mContentsClient, false, new SafeBrowsingDependencyFactory());
@@ -355,7 +356,7 @@ public class SafeBrowsingTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -392,7 +393,7 @@ public class SafeBrowsingTest {
         return helper.getValue();
     }
 
-    private void waitForInterstitialDomToLoad() throws Exception {
+    private void waitForInterstitialDomToLoad() {
         final String script = "document.readyState;";
         final String expected = "\"complete\"";
 
@@ -443,21 +444,21 @@ public class SafeBrowsingTest {
                         mAwContents, mContainerView)));
     }
 
-    private void assertGreenPageShowing() throws Exception {
+    private void assertGreenPageShowing() {
         Assert.assertEquals("Original page should be showing",
                 colorToString(GREEN_PAGE_BACKGROUND_COLOR),
                 colorToString(GraphicsTestUtils.getPixelColorAtCenterOfView(
                         mAwContents, mContainerView)));
     }
 
-    private void assertGreenPageNotShowing() throws Exception {
+    private void assertGreenPageNotShowing() {
         assertNotEquals("Original page should not be showing",
                 colorToString(GREEN_PAGE_BACKGROUND_COLOR),
                 colorToString(GraphicsTestUtils.getPixelColorAtCenterOfView(
                         mAwContents, mContainerView)));
     }
 
-    private void assertTargetPageNotShowing(int pageColor) throws Exception {
+    private void assertTargetPageNotShowing(int pageColor) {
         assertNotEquals("Target page should not be showing", colorToString(pageColor),
                 colorToString(GraphicsTestUtils.getPixelColorAtCenterOfView(
                         mAwContents, mContainerView)));
@@ -570,6 +571,31 @@ public class SafeBrowsingTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
+    public void testSafeBrowsingWhitelistHardcodedWebUiPageBackToSafety() throws Throwable {
+        mContentsClient.setSafeBrowsingAction(SafeBrowsingAction.BACK_TO_SAFETY);
+
+        loadGreenPage();
+        OnReceivedError2Helper errorHelper = mContentsClient.getOnReceivedError2Helper();
+        int errorCount = errorHelper.getCallCount();
+        mActivityTestRule.loadUrlSync(
+                mAwContents, mContentsClient.getOnPageFinishedHelper(), WEB_UI_MALWARE_URL);
+        errorHelper.waitForCallback(errorCount);
+        Assert.assertEquals(
+                ErrorCodeConversionHelper.ERROR_UNSAFE_RESOURCE, errorHelper.getError().errorCode);
+        Assert.assertEquals("Network error is for the malicious page", WEB_UI_MALWARE_URL,
+                errorHelper.getRequest().url);
+
+        assertGreenPageShowing();
+
+        // Check onSafeBrowsingHit arguments
+        Assert.assertEquals(WEB_UI_MALWARE_URL, mContentsClient.getLastRequest().url);
+        Assert.assertEquals(AwSafeBrowsingConversionHelper.SAFE_BROWSING_THREAT_MALWARE,
+                mContentsClient.getLastThreatType());
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
     public void testCallbackCalledOnSafeBrowsingBadWhitelistRule() throws Throwable {
         verifyWhiteListRule("http://www.google.com", false);
     }
@@ -631,7 +657,6 @@ public class SafeBrowsingTest {
     }
 
     @Test
-    @FlakyTest(message = "crbug.com/984705")
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testSafeBrowsingProceedThroughInterstitialForSubresource() throws Throwable {
@@ -863,9 +888,9 @@ public class SafeBrowsingTest {
 
         loadGreenPage();
         final String responseUrl = mTestServer.getURL(MALWARE_HTML_PATH);
-        mActivityTestRule.loadUrlAsync(mAwContents, responseUrl);
         OnReceivedError2Helper errorHelper = mContentsClient.getOnReceivedError2Helper();
         int errorCount = errorHelper.getCallCount();
+        mActivityTestRule.loadUrlAsync(mAwContents, responseUrl);
         errorHelper.waitForCallback(errorCount);
         Assert.assertEquals(
                 ErrorCodeConversionHelper.ERROR_UNSAFE_RESOURCE, errorHelper.getError().errorCode);
@@ -1198,7 +1223,7 @@ public class SafeBrowsingTest {
         // As long as we've reached this line without crashing, there should be no bug.
     }
 
-    private void destroyOnMainSync() throws Exception {
+    private void destroyOnMainSync() {
         // The AwActivityTestRule method invokes AwContents#destroy() on the main thread, but
         // Awcontents#destroy() posts an asynchronous task itself to destroy natives. Therefore, we
         // still need to wait for the real work to actually finish.

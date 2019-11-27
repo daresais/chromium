@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.exportPath('multidevice_setup');
-
-/** @enum {string} */
-multidevice_setup.PageName = {
-  PASSWORD: 'password-page',
-  SUCCESS: 'setup-succeeded-page',
-  START: 'start-setup-page',
-};
-
 cr.define('multidevice_setup', function() {
-  const PageName = multidevice_setup.PageName;
+  /** @enum {string} */
+  const PageName = {
+    PASSWORD: 'password-page',
+    SUCCESS: 'setup-succeeded-page',
+    START: 'start-setup-page',
+  };
 
   const MultiDeviceSetup = Polymer({
     is: 'multidevice-setup',
@@ -95,7 +91,7 @@ cr.define('multidevice_setup', function() {
       /**
        * Array of objects representing all potential MultiDevice hosts.
        *
-       * @private {!Array<!chromeos.multidevice.mojom.RemoteDevice>}
+       * @private {!Array<!chromeos.multideviceSetup.mojom.HostDevice>}
        */
       devices_: Array,
 
@@ -149,8 +145,8 @@ cr.define('multidevice_setup', function() {
     },
 
     initializeSetupFlow: function() {
-      this.mojoInterfaceProvider_.getMojoServiceProxy()
-          .getEligibleHostDevices()
+      this.mojoInterfaceProvider_.getMojoServiceRemote()
+          .getEligibleActiveHostDevices()
           .then((responseParams) => {
             if (responseParams.eligibleHostDevices.length == 0) {
               console.warn('Potential host list is empty.');
@@ -322,5 +318,6 @@ cr.define('multidevice_setup', function() {
 
   return {
     MultiDeviceSetup: MultiDeviceSetup,
+    PageName: PageName,
   };
 });

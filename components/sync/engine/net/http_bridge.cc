@@ -18,7 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
-#include "components/sync/base/cancelation_signal.h"
+#include "base/threading/thread_restrictions.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_cache.h"
@@ -52,36 +52,20 @@ base::LazyInstance<scoped_refptr<base::SequencedTaskRunner>>::Leaky
 }  // namespace
 
 HttpBridgeFactory::HttpBridgeFactory(
+    const std::string& user_agent,
     std::unique_ptr<network::SharedURLLoaderFactoryInfo>
         url_loader_factory_info,
-    const NetworkTimeUpdateCallback& network_time_update_callback,
-    CancelationSignal* cancelation_signal)
-    : network_time_update_callback_(network_time_update_callback),
-      cancelation_signal_(cancelation_signal) {
+    const NetworkTimeUpdateCallback& network_time_update_callback)
+    : user_agent_(user_agent),
+      network_time_update_callback_(network_time_update_callback) {
   // Some tests pass null'ed out url_loader_factory_info instances.
   if (url_loader_factory_info) {
     url_loader_factory_ = network::SharedURLLoaderFactory::Create(
         std::move(url_loader_factory_info));
   }
-  // This registration is happening on the Sync thread, while signalling occurs
-  // on the UI thread. We must handle the possibility signalling has already
-  // occurred.
-  if (cancelation_signal_->TryRegisterHandler(this)) {
-    registered_for_cancelation_ = true;
-  } else {
-    OnSignalReceived();
-  }
 }
 
-HttpBridgeFactory::~HttpBridgeFactory() {
-  if (registered_for_cancelation_) {
-    cancelation_signal_->UnregisterHandler(this);
-  }
-}
-
-void HttpBridgeFactory::Init(const std::string& user_agent) {
-  user_agent_ = user_agent;
-}
+HttpBridgeFactory::~HttpBridgeFactory() = default;
 
 HttpPostProviderInterface* HttpBridgeFactory::Create() {
   DCHECK(url_loader_factory_);
@@ -94,16 +78,6 @@ HttpPostProviderInterface* HttpBridgeFactory::Create() {
 
 void HttpBridgeFactory::Destroy(HttpPostProviderInterface* http) {
   static_cast<HttpBridge*>(http)->Release();
-}
-
-void HttpBridgeFactory::OnSignalReceived() {
-  // TODO(tonikitoo): Remove this method.
-  //
-  // Prior to the URLLoader conversion the sync code was holding on to a
-  // scoped_refptr of a URLRequestContextGetter it was changing the lifetime
-  // of net objects. With URLLoader, it's only holding on to mojo pipes
-  // that issue doesn't exist.
-  NOTIMPLEMENTED();
 }
 
 HttpBridge::URLFetchState::URLFetchState()
@@ -123,10 +97,10 @@ HttpBridge::HttpBridge(
       http_post_completed_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                            base::WaitableEvent::InitialState::NOT_SIGNALED),
       url_loader_factory_info_(std::move(url_loader_factory_info)),
-      network_task_runner_(
-          g_io_capable_task_runner_for_tests.Get()
-              ? g_io_capable_task_runner_for_tests.Get()
-              : base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()})),
+      network_task_runner_(g_io_capable_task_runner_for_tests.Get()
+                               ? g_io_capable_task_runner_for_tests.Get()
+                               : base::CreateSequencedTaskRunner(
+                                     {base::ThreadPool(), base::MayBlock()})),
       network_time_update_callback_(network_time_update_callback) {}
 
 HttpBridge::~HttpBridge() {}
@@ -199,7 +173,10 @@ bool HttpBridge::MakeSynchronousPost(int* net_error_code,
 
   // Block until network request completes or is aborted. See
   // OnURLFetchComplete and Abort.
-  http_post_completed_.Wait();
+  {
+    base::ScopedAllowBaseSyncPrimitives allow_wait;
+    http_post_completed_.Wait();
+  }
 
   base::AutoLock lock(fetch_state_lock_);
   DCHECK(fetch_state_.request_completed || fetch_state_.aborted);
@@ -267,8 +244,8 @@ void HttpBridge::MakeAsynchronousPost() {
   resource_request->url = url_for_request_;
   resource_request->method = "POST";
   resource_request->load_flags =
-      net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
-      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES;
+      net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   if (!extra_headers_.empty())
     resource_request->headers.AddHeadersFromString(extra_headers_);

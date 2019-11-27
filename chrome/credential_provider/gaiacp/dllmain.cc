@@ -24,6 +24,7 @@
 #include "base/win/current_module.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
+#include "build/branding_buildflags.h"
 #include "chrome/common/chrome_version.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential.h"
@@ -56,8 +57,6 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstance,
                                LPVOID reserved) {
   return _AtlModule.DllMain(hinstance, reason, reserved);
 }
-
-using namespace ATL;
 
 // Used to determine whether the DLL can be unloaded by OLE.
 STDAPI DllCanUnloadNow(void) {
@@ -99,7 +98,7 @@ STDAPI DllRegisterServer(void) {
     LOGFN(INFO) << "_AtlModule.DllRegisterServer hr=" << putHR(hr);
   }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Register with Google Update.
   if (SUCCEEDED(hr)) {
     base::win::RegKey key(HKEY_LOCAL_MACHINE,
@@ -119,14 +118,14 @@ STDAPI DllRegisterServer(void) {
       }
     }
   }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   return hr;
 }
 
 // DllUnregisterServer - Removes entries from the system registry.
 STDAPI DllUnregisterServer(void) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Unregister with Google Update.
   base::win::RegKey key(HKEY_LOCAL_MACHINE, L"", DELETE | KEY_WOW64_32KEY);
   LONG sts = key.DeleteKey(credential_provider::kRegUpdaterClientsAppPath);
@@ -161,26 +160,41 @@ void CALLBACK SaveAccountInfoW(HWND /*hwnd*/,
     return;
   }
 
-  char buffer[credential_provider::CGaiaCredentialBase::kAccountInfoBufferSize];
-  DWORD buffer_len_bytes = static_cast<DWORD>(sizeof(buffer));  // In bytes.
-  if (!::ReadFile(hStdin, buffer, buffer_len_bytes, &buffer_len_bytes,
+  // First, read the buffer size.
+  DWORD buffer_size = 0;
+  DWORD bytes_read = 0;
+  if (!::ReadFile(hStdin, &buffer_size, sizeof(buffer_size), &bytes_read,
                   nullptr)) {
+    HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
+    LOGFN(ERROR) << "ReadFile for buffer size failed. hr=" << putHR(hr);
+    return;
+  }
+
+  // For security, we check for a max of 1 MB buffer size.
+  const DWORD kMaxBufferSizeAllowed = 1024 * 1024;  // 1MB
+  if (!buffer_size || buffer_size > kMaxBufferSizeAllowed) {
+    LOGFN(ERROR) << "Invalid buffer size.";
+    return;
+  }
+
+  // Second, read the buffer.
+  std::vector<char> buffer(buffer_size, 0);
+  if (!::ReadFile(hStdin, buffer.data(), buffer.size(), &bytes_read, nullptr)) {
     HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
     LOGFN(ERROR) << "ReadFile hr=" << putHR(hr);
     return;
   }
-  buffer[buffer_len_bytes] = 0;
   // Don't log |buffer| since it contains sensitive info like password.
 
   HRESULT hr = S_OK;
   base::Optional<base::Value> properties =
-      base::JSONReader::Read(buffer, base::JSON_ALLOW_TRAILING_COMMAS);
+      base::JSONReader::Read(buffer.data(), base::JSON_ALLOW_TRAILING_COMMAS);
 
-  credential_provider::SecurelyClearBuffer(buffer, base::size(buffer));
+  credential_provider::SecurelyClearBuffer(buffer.data(), buffer.size());
 
   if (!properties || !properties->is_dict()) {
-    LOGFN(ERROR) << "base::JSONReader::Read failed length=" << buffer_len_bytes;
-    hr = E_FAIL;
+    LOGFN(ERROR) << "base::JSONReader::Read failed length=" << buffer.size();
+    return;
   }
 
   hr = credential_provider::CGaiaCredentialBase::SaveAccountInfo(*properties);

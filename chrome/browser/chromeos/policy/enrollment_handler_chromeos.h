@@ -17,7 +17,7 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_validator.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
-#include "chromeos/dbus/auth_policy/auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/authpolicy_client.h"
 #include "chromeos/dbus/constants/attestation_constants.h"
 #include "chromeos/tpm/install_attributes.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
@@ -263,7 +263,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
   // initialization.
   int lockbox_init_duration_ = 0;
 
-  base::WeakPtrFactory<EnrollmentHandlerChromeOS> weak_ptr_factory_;
+  base::WeakPtrFactory<EnrollmentHandlerChromeOS> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(EnrollmentHandlerChromeOS);
 };

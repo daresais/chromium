@@ -12,21 +12,23 @@
 namespace spellcheck {
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
-extern const base::Feature kSpellingServiceRestApi;
+
+bool UseBrowserSpellChecker();
 
 #if defined(OS_WIN)
 extern const base::Feature kWinUseBrowserSpellChecker;
-#endif
 
-bool UseBrowserSpellChecker();
-#endif  // BUILDFLAG(ENABLE_SPELLCHECK)
+bool WindowsVersionSupportsSpellchecker();
+#endif  // defined(OS_WIN)
 
-#if BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
+#if defined(OS_ANDROID)
 extern const base::Feature kAndroidSpellChecker;
 extern const base::Feature kAndroidSpellCheckerNonLowEnd;
 
 bool IsAndroidSpellCheckFeatureEnabled();
-#endif  // BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
+#endif  // defined(OS_ANDROID)
+
+#endif  // BUILDFLAG(ENABLE_SPELLCHECK)
 
 }  // namespace spellcheck
 

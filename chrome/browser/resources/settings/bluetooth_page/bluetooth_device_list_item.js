@@ -19,7 +19,20 @@ Polymer({
     device: {
       type: Object,
     },
+
+    /**
+     * The aria-label attribute for the top-level bluetooth-device-list-item
+     * element.
+     */
+    ariaLabel: {
+      type: String,
+      notify: true,
+      reflectToAttribute: true,
+      computed: 'getAriaLabel_(device)',
+    },
   },
+
+  hostAttributes: {role: 'button'},
 
   /**
    * @param {!Event} event
@@ -81,6 +94,25 @@ Polymer({
 
   /**
    * @param {!chrome.bluetooth.Device} device
+   * @return {string} The aria label to use for a |device| that will include the
+   * device name and device type if known.
+   * @private
+   */
+  getAriaLabel_: function(device) {
+    // We need to turn the device name and type into a single localized string.
+    // The possible device type enum values can be seen here:
+    // https://developer.chrome.com/apps/bluetooth#type-Device.
+    // The localization id is computed dynamically to avoid maintaining a
+    // mapping from the enum string value to the localization id.
+    // if device.type is not defined, we fall back to an unknown device string.
+    const deviceName = this.getDeviceName_(device);
+    return (device.type) ?
+        this.i18n('bluetoothDeviceType_' + device.type, deviceName) :
+        this.i18n('bluetoothDeviceType_unknown', deviceName);
+  },
+
+  /**
+   * @param {!chrome.bluetooth.Device} device
    * @return {string} The text to display the connection status of |device|.
    * @private
    */
@@ -132,24 +164,24 @@ Polymer({
       case 'computer':
         return 'cr:computer';
       case 'phone':
-        return 'settings:smartphone';
+        return 'os-settings:smartphone';
       case 'audio':
       case 'carAudio':
-        return 'settings:headset';
+        return 'os-settings:headset';
       case 'video':
         return 'cr:videocam';
       case 'joystick':
       case 'gamepad':
-        return 'settings:gamepad';
+        return 'os-settings:gamepad';
       case 'keyboard':
       case 'keyboardMouseCombo':
-        return 'settings:keyboard';
+        return 'os-settings:keyboard';
       case 'tablet':
-        return 'settings:tablet';
+        return 'os-settings:tablet';
       case 'mouse':
-        return 'settings:mouse';
+        return 'os-settings:mouse';
       default:
-        return device.connected ? 'settings:bluetooth-connected' :
+        return device.connected ? 'os-settings:bluetooth-connected' :
                                   'cr:bluetooth';
     }
   },

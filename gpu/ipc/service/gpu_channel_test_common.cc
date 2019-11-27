@@ -4,7 +4,7 @@
 
 #include "gpu/ipc/service/gpu_channel_test_common.h"
 
-#include "base/memory/shared_memory.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/common/activity_flags.h"
@@ -23,10 +23,13 @@ namespace gpu {
 
 class TestGpuChannelManagerDelegate : public GpuChannelManagerDelegate {
  public:
-  TestGpuChannelManagerDelegate() = default;
+  TestGpuChannelManagerDelegate(Scheduler* scheduler) : scheduler_(scheduler) {}
   ~TestGpuChannelManagerDelegate() override = default;
 
   // GpuChannelManagerDelegate implementation:
+  void RegisterDisplayContext(gpu::DisplayContext* context) override {}
+  void UnregisterDisplayContext(gpu::DisplayContext* context) override {}
+  void LoseAllContexts() override {}
   void DidCreateContextSuccessfully() override {}
   void DidCreateOffscreenContext(const GURL& active_url) override {}
   void DidDestroyChannel(int client_id) override {}
@@ -44,8 +47,11 @@ class TestGpuChannelManagerDelegate : public GpuChannelManagerDelegate {
                               SurfaceHandle child_window) override {}
 #endif
 
+  Scheduler* GetGpuScheduler() override { return scheduler_; }
+
  private:
   bool is_exiting_ = false;
+  Scheduler* const scheduler_;
 
   DISALLOW_COPY_AND_ASSIGN(TestGpuChannelManagerDelegate);
 };
@@ -61,7 +67,8 @@ GpuChannelTestCommon::GpuChannelTestCommon(
       sync_point_manager_(new SyncPointManager()),
       shared_image_manager_(new SharedImageManager(false /* thread_safe */)),
       scheduler_(new Scheduler(task_runner_, sync_point_manager_.get())),
-      channel_manager_delegate_(new TestGpuChannelManagerDelegate()) {
+      channel_manager_delegate_(
+          new TestGpuChannelManagerDelegate(scheduler_.get())) {
   // We need GL bindings to actually initialize command buffers.
   if (use_stub_bindings)
     gl::GLSurfaceTestSupport::InitializeOneOffWithStubBindings();

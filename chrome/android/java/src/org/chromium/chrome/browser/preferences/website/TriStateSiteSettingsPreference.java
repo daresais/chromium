@@ -8,23 +8,22 @@ import android.content.Context;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceViewHolder;
 import android.util.AttributeSet;
+import android.widget.RadioGroup;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.RadioButtonWithDescription;
-
-import java.util.Arrays;
-import java.util.List;
+import org.chromium.chrome.browser.ui.widget.RadioButtonWithDescription;
 
 /**
  * A 3-state Allowed/Ask/Blocked radio group Preference used for SiteSettings.
  */
 public class TriStateSiteSettingsPreference
-        extends Preference implements RadioButtonWithDescription.OnCheckedChangeListener {
+        extends Preference implements RadioGroup.OnCheckedChangeListener {
     private @ContentSettingValues int mSetting = ContentSettingValues.DEFAULT;
     private int[] mDescriptionIds;
     private RadioButtonWithDescription mAllowed;
     private RadioButtonWithDescription mAsk;
     private RadioButtonWithDescription mBlocked;
+    private RadioGroup mRadioGroup;
 
     public TriStateSiteSettingsPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -57,13 +56,14 @@ public class TriStateSiteSettingsPreference
     }
 
     @Override
-    public void onCheckedChanged() {
-        if (mAllowed.isChecked())
+    public void onCheckedChanged(RadioGroup group, int checkedId) {
+        if (mAllowed.isChecked()) {
             mSetting = ContentSettingValues.ALLOW;
-        else if (mAsk.isChecked())
+        } else if (mAsk.isChecked()) {
             mSetting = ContentSettingValues.ASK;
-        else if (mBlocked.isChecked())
+        } else if (mBlocked.isChecked()) {
             mSetting = ContentSettingValues.BLOCK;
+        }
 
         callChangeListener(mSetting);
     }
@@ -75,17 +75,13 @@ public class TriStateSiteSettingsPreference
         mAllowed = (RadioButtonWithDescription) holder.findViewById(R.id.allowed);
         mAsk = (RadioButtonWithDescription) holder.findViewById(R.id.ask);
         mBlocked = (RadioButtonWithDescription) holder.findViewById(R.id.blocked);
+        mRadioGroup = (RadioGroup) holder.findViewById(R.id.radio_button_layout);
+        mRadioGroup.setOnCheckedChangeListener(this);
 
         if (mDescriptionIds != null) {
             mAllowed.setDescriptionText(getContext().getText(mDescriptionIds[0]));
             mAsk.setDescriptionText(getContext().getText(mDescriptionIds[1]));
             mBlocked.setDescriptionText(getContext().getText(mDescriptionIds[2]));
-        }
-
-        List<RadioButtonWithDescription> radioGroup = Arrays.asList(mAllowed, mAsk, mBlocked);
-        for (RadioButtonWithDescription option : radioGroup) {
-            option.setRadioButtonGroup(radioGroup);
-            option.setOnCheckedChangeListener(this);
         }
 
         RadioButtonWithDescription radioButton = findRadioButton(mSetting);
@@ -96,13 +92,14 @@ public class TriStateSiteSettingsPreference
      * @param setting The setting to find RadioButton for.
      */
     private RadioButtonWithDescription findRadioButton(@ContentSettingValues int setting) {
-        if (setting == ContentSettingValues.ALLOW)
+        if (setting == ContentSettingValues.ALLOW) {
             return mAllowed;
-        else if (setting == ContentSettingValues.ASK)
+        } else if (setting == ContentSettingValues.ASK) {
             return mAsk;
-        else if (setting == ContentSettingValues.BLOCK)
+        } else if (setting == ContentSettingValues.BLOCK) {
             return mBlocked;
-        else
+        } else {
             return null;
+        }
     }
 }

@@ -82,14 +82,14 @@ void StatusIconLinuxX11::OnSetDelegate() {
 
   int visual_id;
   if (ui::GetIntProperty(manager, "_NET_SYSTEM_TRAY_VISUAL", &visual_id))
-    host->SetVisualId(visual_id);
+    host->SetPendingXVisualId(visual_id);
 
   const int width = std::max(1, delegate_->GetImage().width());
   const int height = std::max(1, delegate_->GetImage().height());
 
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_CONTROL;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.remove_standard_frame = true;
   params.bounds =
@@ -103,7 +103,7 @@ void StatusIconLinuxX11::OnSetDelegate() {
   // creating a compositor would only be wasteful of resources.
   params.force_software_compositing = true;
 
-  widget_->Init(params);
+  widget_->Init(std::move(params));
 
   Window window = host_->GetAcceleratedWidget();
   DCHECK(window);

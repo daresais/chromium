@@ -33,21 +33,21 @@ class CloudPolicyClientRegistrationHelper::IdentityManagerHelper {
  public:
   IdentityManagerHelper() = default;
 
-  void FetchAccessToken(identity::IdentityManager* identity_manager,
-                        const std::string& username,
+  void FetchAccessToken(signin::IdentityManager* identity_manager,
+                        const CoreAccountId& account_id,
                         const StringCallback& callback);
 
  private:
   void OnAccessTokenFetchComplete(GoogleServiceAuthError error,
-                                  identity::AccessTokenInfo token_info);
+                                  signin::AccessTokenInfo token_info);
 
   StringCallback callback_;
-  std::unique_ptr<identity::AccessTokenFetcher> access_token_fetcher_;
+  std::unique_ptr<signin::AccessTokenFetcher> access_token_fetcher_;
 };
 
 void CloudPolicyClientRegistrationHelper::IdentityManagerHelper::
-    FetchAccessToken(identity::IdentityManager* identity_manager,
-                     const std::string& account_id,
+    FetchAccessToken(signin::IdentityManager* identity_manager,
+                     const CoreAccountId& account_id,
                      const StringCallback& callback) {
   DCHECK(!access_token_fetcher_);
   // The caller must supply a username.
@@ -65,12 +65,12 @@ void CloudPolicyClientRegistrationHelper::IdentityManagerHelper::
       base::BindOnce(&CloudPolicyClientRegistrationHelper::
                          IdentityManagerHelper::OnAccessTokenFetchComplete,
                      base::Unretained(this)),
-      identity::AccessTokenFetcher::Mode::kImmediate);
+      signin::AccessTokenFetcher::Mode::kImmediate);
 }
 
 void CloudPolicyClientRegistrationHelper::IdentityManagerHelper::
     OnAccessTokenFetchComplete(GoogleServiceAuthError error,
-                               identity::AccessTokenInfo token_info) {
+                               signin::AccessTokenInfo token_info) {
   DCHECK(access_token_fetcher_);
   access_token_fetcher_.reset();
 
@@ -95,12 +95,12 @@ CloudPolicyClientRegistrationHelper::~CloudPolicyClientRegistrationHelper() {
 }
 
 void CloudPolicyClientRegistrationHelper::StartRegistration(
-    identity::IdentityManager* identity_manager,
-    const std::string& account_id,
-    const base::Closure& callback) {
+    signin::IdentityManager* identity_manager,
+    const CoreAccountId& account_id,
+    base::OnceClosure callback) {
   DVLOG(1) << "Starting registration process with account_id";
   DCHECK(!client_->is_registered());
-  callback_ = callback;
+  callback_ = std::move(callback);
   client_->AddObserver(this);
 
   identity_manager_helper_.reset(new IdentityManagerHelper());
@@ -113,10 +113,10 @@ void CloudPolicyClientRegistrationHelper::StartRegistration(
 void CloudPolicyClientRegistrationHelper::StartRegistrationWithEnrollmentToken(
     const std::string& token,
     const std::string& client_id,
-    const base::Closure& callback) {
+    base::OnceClosure callback) {
   DVLOG(1) << "Starting registration process with enrollment token";
   DCHECK(!client_->is_registered());
-  callback_ = callback;
+  callback_ = std::move(callback);
   client_->AddObserver(this);
   client_->RegisterWithToken(token, client_id);
 }
@@ -201,7 +201,7 @@ void CloudPolicyClientRegistrationHelper::RequestCompleted() {
     client_->RemoveObserver(this);
     // |client_| may be freed by the callback so clear it now.
     client_ = nullptr;
-    callback_.Run();
+    std::move(callback_).Run();
   }
 }
 

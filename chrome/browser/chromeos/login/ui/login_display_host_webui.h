@@ -42,8 +42,13 @@ namespace chromeos {
 class LoginDisplayWebUI;
 class WebUILoginView;
 
-// An implementation class for OOBE/login WebUI screen host.
-// It encapsulates controllers, wallpaper integration and flow.
+// An implementation class for OOBE and user adding screen host via WebUI.
+// For OOBE, it provides wizard screens such as welcome, network, EULA, update,
+// GAIA etc. For user adding, it is legacy support and provides the user
+// selection screen (aka account picker).
+// The WebUI (chrome://oobe) is loaded hidden on start and made visible when
+// WebUI signals ready (via NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE) or there
+// is a network error (via NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN).
 class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
                               public content::WebContentsObserver,
                               public chromeos::SessionManagerClient::Observer,
@@ -75,17 +80,18 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   void OnPreferencesChanged() override;
   void OnStartAppLaunch() override;
   void OnStartArcKiosk() override;
+  void OnStartWebKiosk() override;
   void OnBrowserCreated() override;
   void ShowGaiaDialog(bool can_close,
                       const AccountId& prefilled_account) override;
   void HideOobeDialog() override;
-  void UpdateOobeDialogSize(int width, int height) override;
   void UpdateOobeDialogState(ash::OobeDialogState state) override;
   const user_manager::UserList GetUsers() override;
   void ShowFeedback() override;
   void ShowResetScreen() override;
   void HandleDisplayCaptivePortal() override;
   void UpdateAddUserButtonStatus() override;
+  void RequestSystemInfoUpdate() override;
 
   void OnCancelPasswordChangedFlow() override;
 
@@ -166,10 +172,6 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // Shows OOBE/sign in WebUI that was previously initialized in hidden state.
   void ShowWebUI();
 
-  // Starts postponed WebUI (OOBE/sign in) if it was waiting for
-  // wallpaper animation end.
-  void StartPostponedWebUI();
-
   // Initializes |login_window_| and |login_view_| fields if needed.
   void InitLoginWindowAndView();
 
@@ -216,23 +218,9 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // True if the login display is the current screen.
   bool is_showing_login_ = false;
 
-  // True if NOTIFICATION_WALLPAPER_ANIMATION_FINISHED notification has been
-  // received.
-  bool is_wallpaper_loaded_ = false;
-
   // Stores status area current visibility to be applied once login WebUI
   // is shown.
   bool status_area_saved_visibility_ = false;
-
-  // If true, WebUI is initialized in a hidden state and shown after the
-  // wallpaper animation is finished (when it is enabled) or the user pods have
-  // been loaded (otherwise).
-  // By default is true. Could be used to tune performance if needed.
-  bool initialize_webui_hidden_;
-
-  // True if WebUI is initialized in hidden state and we're waiting for
-  // wallpaper load animation to finish.
-  bool waiting_for_wallpaper_load_;
 
   // True if WebUI is initialized in hidden state, the OOBE is not completed
   // and we're waiting for OOBE configuration check to finish.
@@ -271,7 +259,7 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // True if we need to play startup sound when audio device becomes available.
   bool need_to_play_startup_sound_ = false;
 
-  base::WeakPtrFactory<LoginDisplayHostWebUI> weak_factory_;
+  base::WeakPtrFactory<LoginDisplayHostWebUI> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(LoginDisplayHostWebUI);
 };

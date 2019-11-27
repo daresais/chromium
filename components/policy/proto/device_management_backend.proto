@@ -312,6 +312,10 @@ message PolicyFetchRequest {
   //   google/chrome/machine-level-extension => ExternalPolicyData
   //   google/chromeos/signinextension => ExternalPolicyData
   //   google/android/user => ChromeSettingsProto
+  //   google/chromeos/remotecommand => RemoteCommand (*)
+  //
+  // Types marked with an (*) are not policies, but data signed with the policy
+  // key. It is illegal to try to fetch policies with those types.
   optional string policy_type = 1;
 
   // This is the last policy timestamp that client received from server. The
@@ -744,9 +748,10 @@ message ActiveTimePeriod {
 message NetworkInterface {
   // Indicates the type of network device.
   enum NetworkDeviceType {
+    reserved 2;
+
     TYPE_ETHERNET = 0;
     TYPE_WIFI = 1;
-    TYPE_WIMAX = 2;
     TYPE_BLUETOOTH = 3;
     TYPE_CELLULAR = 4;
   }
@@ -835,6 +840,24 @@ message VolumeInfo {
   optional int64 storage_free = 3;
 }
 
+// Information about a single CPU utilization.
+message CpuUtilizationInfo {
+  // CPU utilization (0-100).
+  optional int32 cpu_utilization_pct = 1;
+  // The timestamp representing time at which the information was collected.
+  // [timestamp] is milliseconds since Epoch in UTC timezone (Java time).
+  optional int64 timestamp = 2;
+}
+
+// Information about a single free RAM.
+message SystemFreeRamInfo {
+  // Free RAM [in bytes] (unreliable due to GC).
+  optional int64 size_in_bytes = 1;
+  // The timestamp representing time at which the information was collected.
+  // [timestamp] is milliseconds since Epoch in UTC timezone (Java time).
+  optional int64 timestamp = 2;
+}
+
 // Information about a single CPU temperature channel.
 message CPUTempInfo {
   // Temperature channel label.
@@ -843,6 +866,15 @@ message CPUTempInfo {
   optional int32 cpu_temp = 2;
   // Unix timestamp.
   optional int64 timestamp = 3;
+}
+
+// Contains the Stateful Partition Information for user data storage in the
+// device.
+message StatefulPartitionInfo {
+  // Available space for user data storage in the device in bytes.
+  optional int64 available_space = 1;
+  // Total space for user data storage in the device in bytes.
+  optional int64 total_space = 2;
 }
 
 // Chrome release channel, shared for different reports.
@@ -915,7 +947,7 @@ message DiskInfo {
   optional string model = 3;
   // Size in bytes
   optional int64 size = 4;
-  // SSD / MMC / HDD
+  // eMMC / NVMe / ATA / SCSI.
   optional string type = 5;
   optional string health = 6;
   // volume_id for volumes on this disk.
@@ -984,9 +1016,11 @@ message DeviceStatusReportRequest {
   repeated NetworkState network_states = 11;
 
   // Samples of CPU utilization (0-100), sampled once every 120 seconds.
+  // To deprecate: Use CpuUtilizationInfo instead.
   repeated int32 cpu_utilization_pct_samples = 12;
 
   // Total RAM on the device.
+  // To deprecate: Use SystemFreeRamInfo instead.
   optional int64 system_ram_total = 14;
 
   // Samples of free RAM [in bytes] (unreliable due to GC).
@@ -1031,6 +1065,15 @@ message DeviceStatusReportRequest {
 
   // Status for various system-wide non-hardware elements.
   optional SystemStatus system_status = 28;
+
+  // Stateful Partition Information for user data.
+  optional StatefulPartitionInfo stateful_partition_info = 29;
+
+  // Samples of CPU utilization (0-100), sampled once every 120 seconds.
+  repeated CpuUtilizationInfo cpu_utilization_infos = 30;
+
+  // Samples of free RAM [in bytes] (unreliable due to GC).
+  repeated SystemFreeRamInfo system_ram_free_infos = 31;
 }
 
 message OsUpdateStatus {
@@ -1052,6 +1095,14 @@ message OsUpdateStatus {
 
   // New required platform version from the pending updated kiosk app.
   optional string new_required_platform_version = 3;
+
+  // The timestamp of the last update check.
+  // [timestamp] is milliseconds since Epoch in UTC timezone (Java time).
+  optional int64 last_checked_timestamp = 4;
+
+  // The timestamp of the last reboot.
+  // [timestamp] is milliseconds since Epoch in UTC timezone (Java time).
+  optional int64 last_reboot_timestamp = 5;
 }
 
 // Provides status information for an installed app/extension.
@@ -1107,6 +1158,8 @@ message ChromeUserProfileReport {
   // The name of the loaded profile, which was entered by the user when creating
   // the profile. Empty when in incognito mode.
   optional string name = 9;
+  // A list of extensions requested for installation.
+  repeated ExtensionRequest extension_requests = 10;
 }
 
 // Sign in information of Profile.
@@ -1114,15 +1167,18 @@ message ChromeSignedInUser {
   // The email of the signed in user.
   optional string email = 1;
   // The obfuscated GaiaID of the signed in user.
-  optional string obfudscated_gaiaid = 2;
+  optional string obfudscated_gaia_id = 2;
 }
 
-// Extension information.
+// Extension request information.
 message ExtensionRequest {
   // ID of the installed app/extension for a Chrome app or extension.
   optional string id = 1;
-  // User generated justification for why the extension should be installed.
-  optional string justification = 2;
+
+  // When the user commits to requesting the extension.
+  // [request_timestamp] is milliseconds since Epoch in UTC timezone
+  // (Java time).
+  optional int64 request_timestamp = 2;
 }
 
 // Extension information.
@@ -1181,6 +1237,12 @@ message Extension {
 
   // The list of host based permissions the extension requires.
   repeated string host_permissions = 11;
+
+  // URL of the app, used by (legacy) packaged app and hosted app.
+  optional string app_launch_url = 12;
+
+  // True if the extension comes from web store.
+  optional bool from_webstore = 13;
 }
 
 // Plugin information.
@@ -1286,6 +1348,8 @@ message PolicyFetchTimestamp {
 // Chrome user profile level status, used by activated Profiles. Profile name is
 // not listed here as they are in the ChromeUserProfileBasicInfo.
 message ChromeUserProfileInfo {
+  reserved 6;
+
   // A string to uniquely identify this profile within the browser.
   optional string id = 1;
 
@@ -1306,9 +1370,6 @@ message ChromeUserProfileInfo {
 
   // A list of extensions requested for installation.
   repeated ExtensionRequest extension_requests = 10;
-
-  // A list of plugins installed in the browser.
-  repeated Plugin plugins = 6;
 
   // A list of Chrome browser policies set for this user profile.
   repeated Policy chrome_policies = 7;
@@ -1340,12 +1401,15 @@ message BrowserReport {
   // Deprecated by ChromeUserProfileInfo and only used by old Chrome browser.
   repeated ChromeUserProfileReport chrome_user_profile_reports = 4;
 
-  // A list of all Profiles that is created in the currently browser instance.
-  // Only activated Profiles is able to upload full details while the idle ones
+  // A list of all Profiles that are created in the current browser instance.
+  // Only activated Profiles are able to upload full details while the idle ones
   // contain id and name only. Please note that some activated Profiles may not
-  // upload full details like idle one due to the limitation of report size.
+  // upload full details due to the limitation of the report size.
   // These details will be uploaded in the following reports.
-  repeated ChromeUserProfileInfo profile_info_list = 6;
+  repeated ChromeUserProfileInfo chrome_user_profile_infos = 6;
+
+  // A list of plugins installed in the browser.
+  repeated Plugin plugins = 7;
 }
 
 // Report Operating system related information.
@@ -1388,12 +1452,20 @@ message ChromeDesktopReportRequest {
   optional string os_user_name = 8;
 }
 
+// Report user level status on Chrome OS platform. Chrome OS equivalent of
+// ChromeDesktopReportRequest.
+message ChromeOsUserReportRequest {
+  // Browser related info.
+  optional BrowserReport browser_report = 1;
+}
+
 // A validation issue from validating a policy value that was contained in
 // the payload of the policy fetch response.
 message PolicyValueValidationIssue {
   // Policy name of the faulty value.
   optional string policy_name = 1;
 
+  //# LINT.IfChange
   enum ValueValidationIssueSeverity {
     // Default value for when a severity is not specified.
     VALUE_VALIDATION_ISSUE_SEVERITY_UNSPECIFIED = 0;
@@ -1404,7 +1476,8 @@ message PolicyValueValidationIssue {
     // This result is an error. The policy blob was rejected completely and not
     // updated on the device.
     VALUE_VALIDATION_ISSUE_SEVERITY_ERROR = 2;
-  }
+  }  // LINT.ThenChange(
+  // //depot/google3/chrome/cros/reporting/proto/chrome_os_policy_validation_report.proto)
 
   // Severity of this policy value validation result.
   optional ValueValidationIssueSeverity severity = 2;
@@ -1435,6 +1508,7 @@ message PolicyValidationReportRequest {
   //     The client has accepted and applied the fetched policy blob.
   // - Policy blob rejected:
   //     The client has completely rejected the fetched policy blob.
+  // LINT.IfChange
   enum ValidationResultType {
     // An enum value was received which is not known in this version of the
     // proto.
@@ -1493,7 +1567,8 @@ message PolicyValidationReportRequest {
     // payload validation errors, and zero or more payload validation warnings.
     // Client behavior: Policy blob rejected.
     VALIDATION_RESULT_TYPE_VALUE_ERROR = 15;
-  }
+  }  // LINT.ThenChange(
+  // //depot/google3/chrome/cros/reporting/proto/chrome_os_policy_validation_report.proto)
 
   // The validation result.
   optional ValidationResultType validation_result_type = 3;
@@ -1600,6 +1675,11 @@ message DeviceStatusReportResponse {
 // upload errors will be set in the containing DeviceManagementResponse or
 // eventually at the HTTP level as mentioned in a TODO.
 message ChromeDesktopReportResponse {}
+
+// Response from DMServer to a ChromeOS user report request. The report
+// upload errors will be set in the containing DeviceManagementResponse or
+// eventually at the HTTP level as mentioned in a TODO.
+message ChromeOsUserReportResponse {}
 
 // Response from DMServer to update user devices' status.
 // It is possible that status report fails but policy request succeed.  In such
@@ -1936,7 +2016,7 @@ message RemoteCommandResult {
 
 message DeviceRemoteCommandRequest {
   // The command ID of the last command received from the server until
-  // now.  Omitted if no commands have been received yet.
+  // now. Omitted if no commands have been received yet.
   optional int64 last_command_unique_id = 1;
 
   // The execution results of previously fetched commands.
@@ -1948,19 +2028,17 @@ message DeviceRemoteCommandRequest {
 }
 
 message DeviceRemoteCommandResponse {
-  // The queue of pending, non secure commands. If this is present
-  // then there shall be no secure commands in this response (and
-  // vice versa).
+  // The queue of pending, non secure commands. If this is present then there
+  // shall be no secure commands in this response (and vice versa).
   repeated RemoteCommand commands = 1;
 
-  // The queue of pending, secure commands. If this is present
-  // then there shall be no non secure commands in this response
-  // (and vice versa).
+  // The queue of pending, secure commands. If this is present then there shall
+  // be no non secure commands in this response (and vice versa).
   //
-  // The secure_commands.data field contains a serialized
-  // RemoteCommand. The secure_commands.signature field is a
-  // signature of the data field with the policy key for the
-  // domain the device belongs to.
+  // The secure_commands.data field contains a serialized PolicyData with a
+  // “google/chromeos/remotecommand” policy_type. The secure_commands.signature
+  // field is a signature of the data field with the policy key for the domain
+  // the device belongs to.
   repeated SignedData secure_commands = 2;
 }
 
@@ -2105,6 +2183,20 @@ message SamlParametersProto {
   // Auth Session ID which the client is supposed to use in the subsequent
   // DMServer request (to be sent after SAML flow completes).
   optional string auth_session_id = 2;
+}
+
+// Gets a URL to the SAML IdP authentication flow for using it with public
+// SAML session. Sent when a user logs in to a SAML public session account.
+message PublicSamlUserRequest {
+  // Identifier for the public saml account. Same as
+  // DeviceLocalAccountInfoProto.account_id.
+  optional string account_id = 1;
+}
+
+// The result when a user logs in to a SAML public session account.
+message PublicSamlUserResponse {
+  // SAML flow parameters are specified in this proto.
+  optional SamlParametersProto saml_parameters = 1;
 }
 
 // Reports that a managed Google Play account is used. This makes the garbage
@@ -2257,7 +2349,7 @@ message AppInstallReportLogEvent {
     RESUME = 4;
   }
 
-  // Timestamp, in milliseconds since epoch. Set for all log
+  // Timestamp, in microseconds since epoch. Set for all log
   // events.
   optional int64 timestamp = 1;
 
@@ -2411,6 +2503,7 @@ message ChildStatusReportResponse {
 //     * device_state_retrieval
 //     * enterprise_check
 //     * chrome_desktop_report
+//     * chrome_os_user_report
 //     * ping
 //     * policy
 //     * register
@@ -2446,8 +2539,8 @@ message ChildStatusReportResponse {
 //   * For unregister, policy, status, cert_upload, remote_commands,
 //     gcm_id_update, active_directory_enroll_play_user,
 //     active_directory_play_activity, active_directory_user_signin,
-//     policy_validation_report, chrome_desktop_report
-//     and refresh_account requests
+//     policy_validation_report, chrome_desktop_report,
+//     chrome_os_user_report and refresh_account requests
 //     Authorization: GoogleDMToken token=<dm token from register>
 //
 //   * The Authorization header isn't used for enterprise_check,
@@ -2459,6 +2552,7 @@ message ChildStatusReportResponse {
 // HTTP query parameter - request, as listed below. Other requests within the
 // container will be ignored.
 //   chrome_desktop_report: chrome_desktop_report_request
+//   chrome_os_user_report: chrome_os_user_report_request
 //   cert_upload: cert_upload_request
 //   check_device_pairing: check_device_pairing_request
 //   device_pairing: device_pairing_request
@@ -2582,7 +2676,13 @@ message DeviceManagementRequest {
   // Request from device to upload RSU lookup key.
   optional RsuLookupKeyUploadRequest rsu_lookup_key_upload_request = 31;
 
-  // Next id: 32.
+  // Request from device for SAML IdP URL address.
+  optional PublicSamlUserRequest public_saml_user_request = 32;
+
+  // A ChromeOS user report request.
+  optional ChromeOsUserReportRequest chrome_os_user_report_request = 33;
+
+  // Next id: 34.
 }
 
 // Response from server to device.
@@ -2701,5 +2801,11 @@ message DeviceManagementResponse {
   // Response to RSU lookup key upload request.
   optional RsuLookupKeyUploadResponse rsu_lookup_key_upload_response = 30;
 
-  // Next id: 31.
+  // Response to public SAML session user request.
+  optional PublicSamlUserResponse public_saml_user_response = 31;
+
+  // Response to a ChromeOS user report request.
+  optional ChromeOsUserReportResponse chrome_os_user_report_response = 32;
+
+  // Next id: 33.
 }

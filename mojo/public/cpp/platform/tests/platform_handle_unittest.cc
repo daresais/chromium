@@ -164,7 +164,7 @@ class PlatformHandleTest : public testing::Test,
 #if defined(OS_FUCHSIA)
             handle.GetHandle().get()
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
-            handle.GetMachPort().get()
+            handle.GetMachSendRight().get()
 #endif
                 );
     auto generic_region = base::subtle::PlatformSharedMemoryRegion::Take(
@@ -244,7 +244,7 @@ TEST_P(PlatformHandleTest, CStructConversion) {
   EXPECT_EQ(kTestData, GetObjectContents(handle));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          PlatformHandleTest,
 #if defined(OS_WIN)
                          testing::Values(HandleType::kHandle)

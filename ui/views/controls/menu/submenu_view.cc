@@ -8,6 +8,7 @@
 #include <numeric>
 
 #include "base/compiler_specific.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/compositor/paint_recorder.h"
@@ -38,7 +39,7 @@ SubmenuView::SubmenuView(MenuItemView* parent)
     : parent_menu_item_(parent),
       host_(nullptr),
       drop_item_(nullptr),
-      drop_position_(MenuDelegate::DROP_NONE),
+      drop_position_(MenuDelegate::DropPosition::kNone),
       scroll_view_container_(nullptr),
       max_minor_text_width_(0),
       minimum_preferred_width_(0),
@@ -213,12 +214,12 @@ void SubmenuView::PaintChildren(const PaintInfo& paint_info) {
   bool paint_drop_indicator = false;
   if (drop_item_) {
     switch (drop_position_) {
-      case MenuDelegate::DROP_NONE:
-      case MenuDelegate::DROP_ON:
+      case MenuDelegate::DropPosition::kNone:
+      case MenuDelegate::DropPosition::kOn:
         break;
-      case MenuDelegate::DROP_UNKNOWN:
-      case MenuDelegate::DROP_BEFORE:
-      case MenuDelegate::DROP_AFTER:
+      case MenuDelegate::DropPosition::kUnknow:
+      case MenuDelegate::DropPosition::kBefore:
+      case MenuDelegate::DropPosition::kAfter:
         paint_drop_indicator = true;
         break;
     }
@@ -407,9 +408,13 @@ void SubmenuView::Reposition(const gfx::Rect& bounds) {
 
 void SubmenuView::Close() {
   if (host_) {
-    NotifyAccessibilityEvent(ax::mojom::Event::kMenuPopupEnd, true);
+    // We send the event to the ScrollViewContainer first because the View
+    // accessibility delegate sets up a focus override when receiving the
+    // kMenuStart event that we want to be disabled when we send the
+    // kMenuPopupEnd event in order to access the previously focused node.
     GetScrollViewContainer()->NotifyAccessibilityEvent(
         ax::mojom::Event::kMenuEnd, true);
+    NotifyAccessibilityEvent(ax::mojom::Event::kMenuPopupEnd, true);
 
     host_->DestroyMenuHost();
     host_ = nullptr;
@@ -455,7 +460,8 @@ bool SubmenuView::GetShowSelection(MenuItemView* item) {
   // Something is being dropped on one of this menus items. Show the
   // selection if the drop is on the passed in item and the drop position is
   // ON.
-  return (drop_item_ == item && drop_position_ == MenuDelegate::DROP_ON);
+  return (drop_item_ == item &&
+          drop_position_ == MenuDelegate::DropPosition::kOn);
 }
 
 MenuScrollViewContainer* SubmenuView::GetScrollViewContainer() {
@@ -489,9 +495,9 @@ void SubmenuView::SchedulePaintForDropIndicator(
   if (item == nullptr)
     return;
 
-  if (position == MenuDelegate::DROP_ON) {
+  if (position == MenuDelegate::DropPosition::kOn) {
     item->SchedulePaint();
-  } else if (position != MenuDelegate::DROP_NONE) {
+  } else if (position != MenuDelegate::DropPosition::kNone) {
     SchedulePaintInRect(CalculateDropIndicatorBounds(item, position));
   }
 }
@@ -499,15 +505,15 @@ void SubmenuView::SchedulePaintForDropIndicator(
 gfx::Rect SubmenuView::CalculateDropIndicatorBounds(
     MenuItemView* item,
     MenuDelegate::DropPosition position) {
-  DCHECK(position != MenuDelegate::DROP_NONE);
+  DCHECK(position != MenuDelegate::DropPosition::kNone);
   gfx::Rect item_bounds = item->bounds();
   switch (position) {
-    case MenuDelegate::DROP_BEFORE:
+    case MenuDelegate::DropPosition::kBefore:
       item_bounds.Offset(0, -kDropIndicatorHeight / 2);
       item_bounds.set_height(kDropIndicatorHeight);
       return item_bounds;
 
-    case MenuDelegate::DROP_AFTER:
+    case MenuDelegate::DropPosition::kAfter:
       item_bounds.Offset(0, item_bounds.height() - kDropIndicatorHeight / 2);
       item_bounds.set_height(kDropIndicatorHeight);
       return item_bounds;

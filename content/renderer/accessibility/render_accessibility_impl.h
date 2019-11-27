@@ -12,10 +12,10 @@
 #include "base/memory/weak_ptr.h"
 #include "content/common/ax_content_node_data.h"
 #include "content/common/content_export.h"
+#include "content/public/renderer/plugin_ax_tree_source.h"
 #include "content/public/renderer/render_accessibility.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/renderer/accessibility/blink_ax_tree_source.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/blink/public/mojom/renderer_preference_watcher.mojom.h"
 #include "third_party/blink/public/web/web_ax_context.h"
 #include "third_party/blink/public/web/web_ax_object.h"
@@ -30,6 +30,7 @@ class WebDocument;
 
 namespace ui {
 struct AXActionData;
+class AXActionTarget;
 struct AXEvent;
 }
 
@@ -84,7 +85,7 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   void DidCreateNewDocument() override;
   void DidCommitProvisionalLoad(bool is_same_document_navigation,
                                 ui::PageTransition transition) override;
-  void AccessibilityModeChanged() override;
+  void AccessibilityModeChanged(const ui::AXMode& mode) override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // blink::mojom::RendererPreferenceObserver implementation.
@@ -105,7 +106,9 @@ class CONTENT_EXPORT RenderAccessibilityImpl
       const blink::WebAXObject& end_object,
       int end_offset);
 
-  void AccessibilityFocusedElementChanged(const blink::WebElement& element);
+  // Called when a find in page result is terminated and all results are
+  // cleared.
+  void HandleAccessibilityFindInPageTermination();
 
   void HandleAXEvent(
       const blink::WebAXObject& obj,
@@ -144,8 +147,9 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   void OnHitTest(const gfx::Point& point,
                  ax::mojom::Event event_to_fire,
                  int action_request_id);
-  void OnLoadInlineTextBoxes(const blink::WebAXObject& obj);
-  void OnGetImageData(const blink::WebAXObject& obj, const gfx::Size& max_size);
+  void OnLoadInlineTextBoxes(const ui::AXActionTarget* target);
+  void OnGetImageData(const ui::AXActionTarget* target,
+                      const gfx::Size& max_size);
   void AddPluginTreeToUpdate(AXContentTreeUpdate* update,
                              bool invalidate_plugin_subtree);
 
@@ -161,9 +165,8 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   // Marks all AXObjects with the given role in the current tree dirty.
   void MarkAllAXObjectsDirty(ax::mojom::Role role);
 
-  void Scroll(const blink::WebAXObject& target,
+  void Scroll(const ui::AXActionTarget* target,
               ax::mojom::Action scroll_action);
-  void ScrollPlugin(int id_to_make_visible);
   void ScheduleSendAccessibilityEventsIfNeeded();
   void RecordImageMetrics(AXContentTreeUpdate* update);
   void AddImageAnnotationDebuggingAttributes(
@@ -181,8 +184,9 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   // Manages the automatic image annotations, if enabled.
   std::unique_ptr<AXImageAnnotator> ax_image_annotator_;
 
-  // The Mojo binding for this object as a RenderPreferenceWatcher.
-  mojo::Binding<blink::mojom::RendererPreferenceWatcher> pref_watcher_binding_;
+  // The Mojo receiver for this object as a RenderPreferenceWatcher.
+  mojo::Receiver<blink::mojom::RendererPreferenceWatcher>
+      pref_watcher_receiver_{this};
 
   // Events from Blink are collected until they are ready to be
   // sent to the browser.
@@ -236,13 +240,12 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   // for debugging.
   bool image_annotation_debugging_ = false;
 
-  // Has all data related to the initial page load been processed.
-  bool is_initial_load_processed_ = false;
-
   // So we can queue up tasks to be executed later.
   base::WeakPtrFactory<RenderAccessibilityImpl> weak_factory_{this};
 
   friend class AXImageAnnotatorTest;
+  friend class PluginActionHandlingTest;
+
   DISALLOW_COPY_AND_ASSIGN(RenderAccessibilityImpl);
 };
 

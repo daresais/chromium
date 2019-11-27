@@ -20,6 +20,7 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
+#import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
 #import "ios/testing/nserror_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -33,26 +34,6 @@ namespace {
 
 // The delay to wait for an element to appear before tapping on it.
 const NSTimeInterval kWaitElementTimeout = 3;
-
-// Shows the tab switcher by tapping the switcher button.  Works on both phone
-// and tablet.
-bool ShowTabSwitcher() {
-  id<GREYMatcher> matcher = chrome_test_util::TabGridOpenButton();
-  // Perform a tap with a timeout. Occasionally EG doesn't sync up properly to
-  // the animations of tab switcher, so it is necessary to poll here.
-  GREYCondition* tapTabSwitcher =
-      [GREYCondition conditionWithName:@"Tap tab switcher button"
-                                 block:^BOOL {
-                                   NSError* error;
-                                   [[EarlGrey selectElementWithMatcher:matcher]
-                                       performAction:grey_tap()
-                                               error:&error];
-                                   return error == nil;
-                                 }];
-
-  // Wait until 2 seconds for the tap.
-  return [tapTabSwitcher waitWithTimeout:2];
-}
 
 }  // namespace
 
@@ -82,7 +63,7 @@ void SwitchToNormalMode() {
                  @"Switching to normal mode is only allowed from Incognito.");
 
   // Enter the tab grid to switch modes.
-  GREYAssertTrue(ShowTabSwitcher(), @"Tab switcher could not be tapped.");
+  [ChromeEarlGrey showTabSwitcher];
 
   // Switch modes and exit the tab grid.
   TabModel* model = chrome_test_util::GetMainController()
@@ -94,18 +75,15 @@ void SwitchToNormalMode() {
   [[EarlGrey selectElementWithMatcher:chrome_test_util::TabGridCellAtIndex(
                                           tab_index)] performAction:grey_tap()];
 
+  BOOL success = NO;
   // Turn off synchronization of GREYAssert to test the pending states.
-  [[GREYConfiguration sharedInstance]
-          setValue:@(NO)
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+  {
+    ScopedSynchronizationDisabler disabler;
+    success = WaitUntilConditionOrTimeout(kWaitElementTimeout, ^{
+      return ![ChromeEarlGrey isIncognitoMode];
+    });
+  }
 
-  bool success = WaitUntilConditionOrTimeout(kWaitElementTimeout, ^{
-    return ![ChromeEarlGrey isIncognitoMode];
-  });
-
-  [[GREYConfiguration sharedInstance]
-          setValue:@(YES)
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
   if (!success) {
     // TODO(crbug.com/951600): Avoid asserting directly unless the test fails,
     // due to timing issues.

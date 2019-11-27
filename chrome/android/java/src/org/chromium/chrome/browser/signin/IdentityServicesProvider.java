@@ -5,38 +5,46 @@
 package org.chromium.chrome.browser.signin;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.signin.AccountTrackerService;
-import org.chromium.components.signin.OAuth2TokenService;
+import org.chromium.components.signin.identitymanager.IdentityManager;
 
 /**
  * Provides access to sign-in related services that are profile-keyed on the native side. Java
  * equivalent of AccountTrackerServiceFactory and similar classes.
  */
 public final class IdentityServicesProvider {
-    /** Getter for {@link AccountTrackerService} instance. */
-    public static AccountTrackerService getAccountTrackerService() {
+    /** Getter for {@link IdentityManager} instance. */
+    public static IdentityManager getIdentityManager() {
         ThreadUtils.assertOnUiThread();
-        AccountTrackerService result = nativeGetAccountTrackerService(Profile.getLastUsedProfile());
+        IdentityManager result =
+                IdentityServicesProviderJni.get().getIdentityManager(Profile.getLastUsedProfile());
         assert result != null;
         return result;
     }
 
-    public static OAuth2TokenService getOAuth2TokenService() {
+    /** Getter for {@link AccountTrackerService} instance. */
+    public static AccountTrackerService getAccountTrackerService() {
         ThreadUtils.assertOnUiThread();
-        OAuth2TokenService result = nativeGetOAuth2TokenService(Profile.getLastUsedProfile());
+        AccountTrackerService result = IdentityServicesProviderJni.get().getAccountTrackerService(
+                Profile.getLastUsedProfile());
         assert result != null;
         return result;
     }
 
     public static SigninManager getSigninManager() {
         ThreadUtils.assertOnUiThread();
-        SigninManager result = nativeGetSigninManager(Profile.getLastUsedProfile());
+        SigninManager result =
+                IdentityServicesProviderJni.get().getSigninManager(Profile.getLastUsedProfile());
         assert result != null;
         return result;
     }
 
-    private static native AccountTrackerService nativeGetAccountTrackerService(Profile profile);
-    private static native OAuth2TokenService nativeGetOAuth2TokenService(Profile profile);
-    private static native SigninManager nativeGetSigninManager(Profile profile);
+    @NativeMethods
+    interface Natives {
+        public IdentityManager getIdentityManager(Profile profile);
+        public AccountTrackerService getAccountTrackerService(Profile profile);
+        public SigninManager getSigninManager(Profile profile);
+    }
 }

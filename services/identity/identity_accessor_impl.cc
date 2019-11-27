@@ -9,7 +9,10 @@
 #include "base/bind.h"
 #include "base/time/time.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/account_info.h"
+#include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "services/identity/public/cpp/account_state.h"
 
 namespace identity {
 
@@ -18,7 +21,7 @@ void IdentityAccessorImpl::OnTokenRequestCompleted(
     scoped_refptr<base::RefCountedData<bool>> is_callback_done,
     GetAccessTokenCallback consumer_callback,
     GoogleServiceAuthError error,
-    AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   if (error.state() == GoogleServiceAuthError::NONE) {
     std::move(consumer_callback)
         .Run(access_token_info.token, access_token_info.expiration_time, error);
@@ -30,7 +33,8 @@ void IdentityAccessorImpl::OnTokenRequestCompleted(
   access_token_fetchers_.erase(callback_id);
 }
 
-IdentityAccessorImpl::IdentityAccessorImpl(IdentityManager* identity_manager)
+IdentityAccessorImpl::IdentityAccessorImpl(
+    signin::IdentityManager* identity_manager)
     : identity_manager_(identity_manager) {
   identity_manager_->AddObserver(this);
 }
@@ -74,13 +78,13 @@ void IdentityAccessorImpl::GetAccessToken(const CoreAccountId& account_id,
   auto is_callback_done =
       base::MakeRefCounted<base::RefCountedData<bool>>(false);
 
-  std::unique_ptr<AccessTokenFetcher> fetcher =
+  std::unique_ptr<signin::AccessTokenFetcher> fetcher =
       identity_manager_->CreateAccessTokenFetcherForAccount(
           account_id, consumer_id, scopes,
           base::BindOnce(&IdentityAccessorImpl::OnTokenRequestCompleted,
                          base::Unretained(this), callback_id, is_callback_done,
                          std::move(callback)),
-          identity::AccessTokenFetcher::Mode::kImmediate);
+          signin::AccessTokenFetcher::Mode::kImmediate);
 
   // If our callback hasn't already been run, hold on to the AccessTokenFetcher
   // so it won't be cleaned up until the request is done.
@@ -99,10 +103,12 @@ void IdentityAccessorImpl::OnPrimaryAccountSet(
   OnAccountStateChange(primary_account_info.account_id);
 }
 
-void IdentityAccessorImpl::OnAccountStateChange(const std::string& account_id) {
+void IdentityAccessorImpl::OnAccountStateChange(
+    const CoreAccountId& account_id) {
   base::Optional<AccountInfo> account_info =
-      identity_manager_->FindAccountInfoForAccountWithRefreshTokenByAccountId(
-          account_id);
+      identity_manager_
+          ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
+              account_id);
   if (account_info.has_value()) {
     AccountState account_state = GetStateOfAccount(account_info.value());
 

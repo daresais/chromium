@@ -36,29 +36,28 @@
 #include "ui/views/view.h"
 #include "ui/views/view_model.h"
 
-namespace ash {
-class PaginationController;
-}
-
 namespace views {
 class ButtonListener;
 }
 
-namespace app_list {
+namespace ash {
 
 namespace test {
+class AppsGridViewTest;
 class AppsGridViewTestApi;
 }
 
 class ApplicationDragAndDropHost;
+class AppListConfig;
 class AppListItemView;
 class AppsGridViewFolderDelegate;
 class ContentsView;
+class PaginationController;
 class PulsingBlockView;
 class GhostImageView;
 
 // Represents the index to an item view in the grid.
-struct GridIndex {
+struct APP_LIST_EXPORT GridIndex {
   GridIndex() : page(-1), slot(-1) {}
   GridIndex(int page, int slot) : page(page), slot(slot) {}
 
@@ -257,7 +256,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void OnFolderItemRemoved();
 
   // Updates the opacity of all the items in the grid during dragging.
-  void UpdateOpacity();
+  void UpdateOpacity(bool restore_opacity);
 
   // Passes scroll information from AppListView to the PaginationController,
   // returns true if this scroll would change pages.
@@ -277,6 +276,21 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Returns true if tablet mode is active.
   bool IsTabletMode() const;
+
+  // Should be called by AppListView if the app list config it uses changes.
+  // This will update all app list items (as the icon sizes and bounds might
+  // need updating), so it should be used sparingly.
+  void OnAppListConfigUpdated();
+
+  // Returns the expected bounds rect in grid coordinates for the item with the
+  // provided id, if the item is in the first page.
+  // If the item is not in the current page (or cannot be found), this will
+  // return 1x1 rectangle in the apps grid center.
+  gfx::Rect GetExpectedItemBoundsInFirstPage(const std::string& id) const;
+
+  // Helper for getting current app list config from the parents in the app list
+  // view hierarchy.
+  const AppListConfig& GetAppListConfig() const;
 
   // Return the view model.
   views::ViewModelT<AppListItemView>* view_model() { return &view_model_; }
@@ -310,6 +324,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
  private:
   class FadeoutLayerDelegate;
   friend class test::AppsGridViewTestApi;
+  friend class test::AppsGridViewTest;
   friend class PagedViewStructure;
 
   enum DropTargetRegion {
@@ -471,8 +486,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void OnAppListItemHighlight(size_t index, bool highlight) override;
 
   // Overridden from PaginationModelObserver:
-  void TotalPagesChanged() override;
+  void TotalPagesChanged(int previous_page_count, int new_page_count) override;
   void SelectedPageChanged(int old_selected, int new_selected) override;
+  void TransitionStarting() override;
   void TransitionStarted() override;
   void TransitionChanged() override;
   void TransitionEnded() override;
@@ -511,8 +527,8 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   gfx::Rect GetExpectedTileBounds(const GridIndex& index) const;
 
   // Gets the item view currently displayed at |slot| on the current page. If
-  // there is no item displayed at |slot|, returns NULL. Note that this finds an
-  // item *displayed* at a slot, which may differ from the item's location in
+  // there is no item displayed at |slot|, returns nullptr. Note that this finds
+  // an item *displayed* at a slot, which may differ from the item's location in
   // the model (as it may have been temporarily moved during a drag operation).
   AppListItemView* GetViewDisplayedAtSlotOnCurrentPage(int slot) const;
 
@@ -607,7 +623,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void CalculateIdealBounds();
 
   // Returns model index of the item view of the specified item.
-  int GetModelIndexOfItem(const AppListItem* item);
+  int GetModelIndexOfItem(const AppListItem* item) const;
 
   // Returns the target model index based on item index. (Item index is the
   // index of an item in item list.) This should be used when the item is
@@ -652,11 +668,20 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // folder or creating a folder with two apps.
   void MaybeCreateFolderDroppingAccessibilityEvent();
 
-  // Modifies the announcement view to verbalize |moving_view_title| is creating
-  // a folder or moving into an existing folder with |target_view_title|.
+  // Modifies the announcement view to verbalize that the current drag will move
+  // |moving_view_title| and create a folder or move it into an existing folder
+  // with |target_view_title|.
   void AnnounceFolderDrop(const base::string16& moving_view_title,
                           const base::string16& target_view_title,
                           bool target_is_folder);
+
+  // Modifies the announcement view to vervalize that the most recent keyboard
+  // foldering action has either moved |moving_view_title| into
+  // |target_view_title| folder or that |moving_view_title| and
+  // |target_view_title| have formed a new folder.
+  void AnnounceKeyboardFoldering(const base::string16& moving_view_title,
+                                 const base::string16& target_view_title,
+                                 bool target_is_folder);
 
   // During an app drag, creates an a11y event to verbalize drop target
   // location.
@@ -678,7 +703,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   AppListModel* model_ = nullptr;         // Owned by AppListView.
   AppListItemList* item_list_ = nullptr;  // Not owned.
 
-  // This can be NULL. Only grid views inside folders have a folder delegate.
+  // This can be nullptr. Only grid views inside folders have a folder delegate.
   AppsGridViewFolderDelegate* folder_delegate_ = nullptr;
 
   ash::PaginationModel pagination_model_{this};
@@ -687,6 +712,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Created by AppListMainView, owned by views hierarchy.
   ContentsView* contents_view_ = nullptr;
+
+  // Keeps the individual AppListItemView. Owned by views hierarchy.
+  views::View* items_container_ = nullptr;
 
   int cols_ = 0;
   int rows_per_page_ = 0;
@@ -757,7 +785,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Target page to switch to when |page_flip_timer_| fires.
   int page_flip_target_ = -1;
 
-  views::BoundsAnimator bounds_animator_;
+  std::unique_ptr<views::BoundsAnimator> bounds_animator_;
 
   // The most recent activated folder item view.
   AppListItemView* activated_folder_item_view_ = nullptr;
@@ -829,6 +857,6 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   DISALLOW_COPY_AND_ASSIGN(AppsGridView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_APPS_GRID_VIEW_H_

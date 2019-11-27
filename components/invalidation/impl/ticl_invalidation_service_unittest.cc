@@ -9,9 +9,8 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/gcm_driver/fake_gcm_driver.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/invalidation/impl/fake_invalidation_state_tracker.h"
@@ -47,18 +46,18 @@ class TiclInvalidationServiceTestDelegate {
         identity_test_env_.identity_manager());
     DCHECK(identity_provider_);
     invalidation_service_ = std::make_unique<TiclInvalidationService>(
-        "TestUserAgent", identity_provider_.get(),
-        gcm_driver_.get(),
+        "TestUserAgent", identity_provider_.get(), gcm_driver_.get(),
         base::RepeatingCallback<void(
             base::WeakPtr<TiclInvalidationService>,
-            network::mojom::ProxyResolvingSocketFactoryRequest)>(),
+            mojo::PendingReceiver<
+                network::mojom::ProxyResolvingSocketFactory>)>(),
         nullptr, nullptr, network::TestNetworkConnectionTracker::GetInstance());
   }
 
   void InitializeInvalidationService() {
     fake_invalidator_ = new syncer::FakeInvalidator();
     invalidation_service_->InitForTest(
-        base::WrapUnique(new syncer::FakeInvalidationStateTracker),
+        std::make_unique<syncer::FakeInvalidationStateTracker>(),
         fake_invalidator_);
   }
 
@@ -79,8 +78,8 @@ class TiclInvalidationServiceTestDelegate {
     fake_invalidator_->EmitOnIncomingInvalidation(invalidation_map);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  identity::IdentityTestEnvironment identity_test_env_;
+  base::test::TaskEnvironment task_environment_;
+  signin::IdentityTestEnvironment identity_test_env_;
   std::unique_ptr<gcm::GCMDriver> gcm_driver_;
   std::unique_ptr<invalidation::IdentityProvider> identity_provider_;
   syncer::FakeInvalidator* fake_invalidator_;  // Owned by the service.

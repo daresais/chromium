@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 
+#include "base/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/autoplay/autoplay.mojom-blink.h"
@@ -12,6 +13,7 @@
 #include "third_party/blink/renderer/core/html/media/html_audio_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/media/media_error.h"
+#include "third_party/blink/renderer/core/html/time_ranges.h"
 #include "third_party/blink/renderer/core/html/track/audio_track_list.h"
 #include "third_party/blink/renderer/core/html/track/video_track_list.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
@@ -21,10 +23,12 @@
 #include "third_party/blink/renderer/platform/testing/empty_web_media_player.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
-using ::testing::AnyNumber;
-using ::testing::Return;
 using ::testing::_;
+using ::testing::AnyNumber;
+using ::testing::NanSensitiveDoubleEq;
+using ::testing::Return;
 
 namespace blink {
 
@@ -34,6 +38,7 @@ class MockWebMediaPlayer : public EmptyWebMediaPlayer {
   MOCK_CONST_METHOD0(HasVideo, bool());
   MOCK_CONST_METHOD0(Duration, double());
   MOCK_CONST_METHOD0(CurrentTime, double());
+  MOCK_METHOD1(SetLatencyHint, void(double));
   MOCK_METHOD1(EnabledAudioTracksChanged, void(const WebVector<TrackId>&));
   MOCK_METHOD1(SelectedVideoTrackChanged, void(TrackId*));
   MOCK_METHOD3(
@@ -42,6 +47,8 @@ class MockWebMediaPlayer : public EmptyWebMediaPlayer {
                                  const blink::WebMediaPlayerSource& source,
                                  CorsMode cors_mode));
   MOCK_CONST_METHOD0(DidLazyLoad, bool());
+
+  MOCK_METHOD0(GetSrcAfterRedirects, GURL());
 };
 
 class WebMediaStubLocalFrameClient : public EmptyLocalFrameClient {
@@ -52,8 +59,7 @@ class WebMediaStubLocalFrameClient : public EmptyLocalFrameClient {
   std::unique_ptr<WebMediaPlayer> CreateWebMediaPlayer(
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
-      WebMediaPlayerClient* client,
-      WebLayerTreeView*) override {
+      WebMediaPlayerClient* client) override {
     DCHECK(player_) << " Empty injected player - already used?";
     return std::move(player_);
   }
@@ -293,6 +299,28 @@ TEST_P(HTMLMediaElementTest, CouldPlayIfEnoughDataRespondsToError) {
   EXPECT_FALSE(CouldPlayIfEnoughData());
 }
 
+TEST_P(HTMLMediaElementTest, SetLatencyHint) {
+  const double kNan = std::numeric_limits<double>::quiet_NaN();
+
+  // Initial value.
+  Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
+  EXPECT_CALL(*MockMediaPlayer(), SetLatencyHint(NanSensitiveDoubleEq(kNan)));
+
+  test::RunPendingTasks();
+  testing::Mock::VerifyAndClearExpectations(MockMediaPlayer());
+
+  // Valid value.
+  EXPECT_CALL(*MockMediaPlayer(), SetLatencyHint(NanSensitiveDoubleEq(1.0)));
+  Media()->setLatencyHint(1.0);
+
+  test::RunPendingTasks();
+  testing::Mock::VerifyAndClearExpectations(MockMediaPlayer());
+
+  // Invalid value.
+  EXPECT_CALL(*MockMediaPlayer(), SetLatencyHint(NanSensitiveDoubleEq(kNan)));
+  Media()->setLatencyHint(-1.0);
+}
+
 TEST_P(HTMLMediaElementTest, CouldPlayIfEnoughDataInfiniteStreamNeverEnds) {
   Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
   Media()->Play();
@@ -486,6 +514,63 @@ TEST_P(HTMLMediaElementTest, ContextPaused) {
   GetExecutionContext()->SetLifecycleState(
       mojom::FrameLifecycleState::kRunning);
   EXPECT_TRUE(Media()->paused());
+}
+
+TEST_P(HTMLMediaElementTest, GcMarkingNoAllocWebTimeRanges) {
+  auto* thread_state = ThreadState::Current();
+  ThreadState::NoAllocationScope no_allocation_scope(thread_state);
+  EXPECT_FALSE(thread_state->IsAllocationAllowed());
+  // Use of TimeRanges is not allowed during GC marking (crbug.com/970150)
+  EXPECT_DCHECK_DEATH(MakeGarbageCollected<TimeRanges>(0, 0));
+  // Instead of using TimeRanges, WebTimeRanges can be used without GC
+  Vector<WebTimeRanges> ranges;
+  ranges.emplace_back();
+  ranges[0].emplace_back(0, 0);
+}
+
+// Reproduce crbug.com/970150
+TEST_P(HTMLMediaElementTest, GcMarkingNoAllocHasActivity) {
+  Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
+  Media()->Play();
+
+  test::RunPendingTasks();
+  SetReadyState(HTMLMediaElement::kHaveFutureData);
+  SetError(MakeGarbageCollected<MediaError>(MediaError::kMediaErrDecode, ""));
+
+  EXPECT_FALSE(Media()->paused());
+
+  auto* thread_state = ThreadState::Current();
+  ThreadState::NoAllocationScope no_allocation_scope(thread_state);
+  EXPECT_FALSE(thread_state->IsAllocationAllowed());
+  Media()->HasPendingActivity();
+}
+
+TEST_P(HTMLMediaElementTest, CapturesRedirectedSrc) {
+  // Verify that the element captures the redirected URL.
+  Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
+  Media()->Play();
+  test::RunPendingTasks();
+
+  // Should start at the original.
+  EXPECT_EQ(Media()->downloadURL(), Media()->currentSrc());
+
+  GURL redirected_url("https://redirected.com");
+  EXPECT_CALL(*MockMediaPlayer(), GetSrcAfterRedirects())
+      .WillRepeatedly(Return(redirected_url));
+  SetReadyState(HTMLMediaElement::kHaveFutureData);
+
+  EXPECT_EQ(Media()->downloadURL(), redirected_url);
+}
+
+TEST_P(HTMLMediaElementTest, EmptyRedirectedSrcUsesOriginal) {
+  // If the player returns an empty URL for the redirected src, then the element
+  // should continue using currentSrc().
+  Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
+  Media()->Play();
+  test::RunPendingTasks();
+  EXPECT_EQ(Media()->downloadURL(), Media()->currentSrc());
+  SetReadyState(HTMLMediaElement::kHaveFutureData);
+  EXPECT_EQ(Media()->downloadURL(), Media()->currentSrc());
 }
 
 }  // namespace blink

@@ -137,8 +137,9 @@ ios::ChromeBrowserState* ChromeBrowserStateManagerImpl::GetBrowserState(
   // this profile are executed in expected order (what was previously assured by
   // the FILE thread).
   scoped_refptr<base::SequencedTaskRunner> io_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
-          {base::TaskShutdownBehavior::BLOCK_SHUTDOWN, base::MayBlock()});
+      base::CreateSequencedTaskRunner(
+          {base::ThreadPool(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN,
+           base::MayBlock()});
 
   std::unique_ptr<ChromeBrowserStateImpl> browser_state_impl(
       new ChromeBrowserStateImpl(io_task_runner, path));
@@ -190,9 +191,9 @@ void ChromeBrowserStateManagerImpl::DoFinalInit(
   // Log the browser state size after a reasonable startup delay.
   base::FilePath path =
       browser_state->GetOriginalChromeBrowserState()->GetStatePath();
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&BrowserStateSizeTask, path),
       base::TimeDelta::FromSeconds(112));
@@ -219,7 +220,7 @@ void ChromeBrowserStateManagerImpl::AddBrowserStateToCache(
   if (browser_state->GetStatePath().DirName() != cache->GetUserDataDir())
     return;
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(browser_state);
   CoreAccountInfo account_info = identity_manager->GetPrimaryAccountInfo();
   base::string16 username = base::UTF8ToUTF16(account_info.email);

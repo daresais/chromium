@@ -10,6 +10,10 @@
 * [Commandline flags](/android_webview/docs/commandline-flags.md)
 * [Net debugging](/android_webview/docs/net-debugging.md)
 * [FAQ (for users)](/android_webview/docs/faq.md)
+* [AOSP system integration](/android_webview/docs/aosp-system-integration.md)
+* [Threading](/android_webview/docs/threading.md)
+  <!-- Link new docs above this line. -->
+* [More docs](/android_webview/docs/)
 
 [home]: /android_webview/docs/README.md
 [logo]: /android_webview/docs/images/webview_logo.png

@@ -33,7 +33,8 @@ class EphemeralTabSceneLayer : public SceneLayer {
   void SetResourceIds(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& object,
                       jint text_resource_id,
-                      jint bar_background_resource_id,
+                      jint panel_shadow_resource_id,
+                      jint rounded_bar_top_resource_id,
                       jint bar_shadow_resource_id,
                       jint panel_icon_resource_id,
                       jint drag_handlebar_resource_id,
@@ -44,6 +45,8 @@ class EphemeralTabSceneLayer : public SceneLayer {
               const base::android::JavaParamRef<jobject>& object,
               jint title_view_resource_id,
               jint caption_view_resource_id,
+              jint caption_icon_resource_id,
+              jfloat caption_icon_opacity,
               jfloat caption_animation_percentage,
               jfloat text_layer_min_height,
               jfloat term_caption_spacing,
@@ -64,15 +67,14 @@ class EphemeralTabSceneLayer : public SceneLayer {
               jfloat bar_height,
               jboolean bar_border_visible,
               jfloat bar_border_height,
-              jboolean bar_shadow_visible,
-              jfloat bar_shadow_opacity,
               jint icon_color,
               jint drag_handlebar_color,
               jfloat favicon_opacity,
               jboolean progress_bar_visible,
               jfloat progress_bar_height,
               jfloat progress_bar_opacity,
-              jint progress_bar_completion);
+              jfloat progress_bar_completion,
+              jint separator_line_color);
 
   void SetContentTree(
       JNIEnv* env,
@@ -87,6 +89,7 @@ class EphemeralTabSceneLayer : public SceneLayer {
   scoped_refptr<EphemeralTabLayer> ephemeral_tab_layer_;
   scoped_refptr<cc::SolidColorLayer> color_overlay_;
   scoped_refptr<cc::Layer> content_container_;
+  bool is_new_layout_;
   DISALLOW_COPY_AND_ASSIGN(EphemeralTabSceneLayer);
 };
 

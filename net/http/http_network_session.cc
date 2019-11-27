@@ -32,6 +32,7 @@
 #include "net/socket/client_socket_pool_manager_impl.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/third_party/quiche/src/quic/core/crypto/quic_random.h"
 #include "net/third_party/quiche/src/quic/core/quic_packets.h"
@@ -39,19 +40,6 @@
 #include "net/third_party/quiche/src/quic/core/quic_utils.h"
 
 namespace net {
-
-namespace {
-
-SSLClientSocketContext CreateClientSocketContext(
-    const HttpNetworkSession::Context& context,
-    SSLClientSessionCache* ssl_client_session_cache) {
-  return SSLClientSocketContext(
-      context.cert_verifier, context.transport_security_state,
-      context.cert_transparency_verifier, context.ct_policy_enforcer,
-      ssl_client_session_cache);
-}
-
-}  // unnamed namespace
 
 // The maximum receive window sizes for HTTP/2 sessions and streams.
 const int32_t kSpdySessionMaxRecvWindowSize = 15 * 1024 * 1024;  // 15 MB
@@ -79,6 +67,11 @@ spdy::SettingsMap AddDefaultHttp2Settings(spdy::SettingsMap http2_settings) {
     http2_settings[spdy::SETTINGS_INITIAL_WINDOW_SIZE] =
         kSpdyStreamMaxRecvWindowSize;
 
+  it = http2_settings.find(spdy::SETTINGS_MAX_HEADER_LIST_SIZE);
+  if (it == http2_settings.end())
+    http2_settings[spdy::SETTINGS_MAX_HEADER_LIST_SIZE] =
+        kSpdyMaxHeaderListSize;
+
   return http2_settings;
 }
 
@@ -93,13 +86,14 @@ HttpNetworkSession::Params::Params()
       enable_spdy_ping_based_connection_checking(true),
       enable_http2(true),
       spdy_session_max_recv_window_size(kSpdySessionMaxRecvWindowSize),
+      spdy_session_max_queued_capped_frames(kSpdySessionMaxQueuedCappedFrames),
       time_func(&base::TimeTicks::Now),
       enable_http2_alternative_service(false),
       enable_websocket_over_http2(false),
       enable_quic(false),
       enable_quic_proxies_for_https_urls(false),
-      http_09_on_non_default_ports_enabled(false),
-      disable_idle_sockets_close_on_memory_pressure(false) {
+      disable_idle_sockets_close_on_memory_pressure(false),
+      key_auth_cache_server_entries_by_network_isolation_key(false) {
   enable_early_data =
       base::FeatureList::IsEnabled(features::kEnableTLS13EarlyData);
 }
@@ -123,12 +117,11 @@ HttpNetworkSession::Context::Context()
       net_log(nullptr),
       socket_performance_watcher_factory(nullptr),
       network_quality_estimator(nullptr),
+      quic_context(nullptr),
 #if BUILDFLAG(ENABLE_REPORTING)
       reporting_service(nullptr),
       network_error_logging_service(nullptr),
 #endif
-      quic_clock(nullptr),
-      quic_random(nullptr),
       quic_crypto_client_stream_factory(
           QuicCryptoClientStreamFactory::GetDefaultFactory()) {
 }
@@ -151,36 +144,41 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
 #endif
       proxy_resolution_service_(context.proxy_resolution_service),
       ssl_config_service_(context.ssl_config_service),
+      http_auth_cache_(
+          params.key_auth_cache_server_entries_by_network_isolation_key),
       ssl_client_session_cache_(SSLClientSessionCache::Config()),
-      ssl_client_session_cache_privacy_mode_(SSLClientSessionCache::Config()),
+      ssl_client_context_(context.ssl_config_service,
+                          context.cert_verifier,
+                          context.transport_security_state,
+                          context.cert_transparency_verifier,
+                          context.ct_policy_enforcer,
+                          &ssl_client_session_cache_),
       push_delegate_(nullptr),
-      quic_stream_factory_(
-          context.net_log,
-          context.host_resolver,
-          context.ssl_config_service,
-          context.client_socket_factory
-              ? context.client_socket_factory
-              : ClientSocketFactory::GetDefaultFactory(),
-          context.http_server_properties,
-          context.cert_verifier,
-          context.ct_policy_enforcer,
-          context.transport_security_state,
-          context.cert_transparency_verifier,
-          context.socket_performance_watcher_factory,
-          context.quic_crypto_client_stream_factory,
-          context.quic_random ? context.quic_random
-                              : quic::QuicRandom::GetInstance(),
-          context.quic_clock ? context.quic_clock
-                             : quic::QuicChromiumClock::GetInstance(),
-          params.quic_params),
+      quic_stream_factory_(context.net_log,
+                           context.host_resolver,
+                           context.ssl_config_service,
+                           context.client_socket_factory
+                               ? context.client_socket_factory
+                               : ClientSocketFactory::GetDefaultFactory(),
+                           context.http_server_properties,
+                           context.cert_verifier,
+                           context.ct_policy_enforcer,
+                           context.transport_security_state,
+                           context.cert_transparency_verifier,
+                           context.socket_performance_watcher_factory,
+                           context.quic_crypto_client_stream_factory,
+                           context.quic_context,
+                           params.quic_params),
       spdy_session_pool_(context.host_resolver,
-                         context.ssl_config_service,
+                         &ssl_client_context_,
                          context.http_server_properties,
                          context.transport_security_state,
                          params.quic_params.supported_versions,
                          params.enable_spdy_ping_based_connection_checking,
-                         params.quic_params.support_ietf_format_quic_altsvc,
+                         params.enable_http2,
+                         params.enable_quic,
                          params.spdy_session_max_recv_window_size,
+                         params.spdy_session_max_queued_capped_frames,
                          AddDefaultHttp2Settings(params.http2_settings),
                          params.greased_http2_frame,
                          params.time_func,
@@ -195,12 +193,12 @@ HttpNetworkSession::HttpNetworkSession(const Params& params,
   normal_socket_pool_manager_ = std::make_unique<ClientSocketPoolManagerImpl>(
       CreateCommonConnectJobParams(false /* for_websockets */),
       CreateCommonConnectJobParams(true /* for_websockets */),
-      context_.ssl_config_service, NORMAL_SOCKET_POOL);
+      NORMAL_SOCKET_POOL);
   websocket_socket_pool_manager_ =
       std::make_unique<ClientSocketPoolManagerImpl>(
           CreateCommonConnectJobParams(false /* for_websockets */),
           CreateCommonConnectJobParams(true /* for_websockets */),
-          context_.ssl_config_service, WEBSOCKET_SOCKET_POOL);
+          WEBSOCKET_SOCKET_POOL);
 
   if (params_.enable_http2)
     next_protos_.push_back(kProtoHTTP2);
@@ -282,9 +280,6 @@ std::unique_ptr<base::Value> HttpNetworkSession::QuicInfoToValue() const {
                    params_.quic_params.idle_connection_timeout.InSeconds());
   dict->SetInteger("reduced_ping_timeout_seconds",
                    params_.quic_params.reduced_ping_timeout.InSeconds());
-  dict->SetBoolean(
-      "mark_quic_broken_when_network_blackholes",
-      params_.quic_params.mark_quic_broken_when_network_blackholes);
   dict->SetBoolean("retry_without_alt_svc_on_quic_errors",
                    params_.quic_params.retry_without_alt_svc_on_quic_errors);
   dict->SetBoolean("race_cert_verification",
@@ -351,22 +346,6 @@ void HttpNetworkSession::CloseIdleConnections() {
   spdy_session_pool_.CloseCurrentIdleSessions();
 }
 
-bool HttpNetworkSession::IsProtocolEnabled(NextProto protocol) const {
-  switch (protocol) {
-    case kProtoUnknown:
-      NOTREACHED();
-      return false;
-    case kProtoHTTP11:
-      return true;
-    case kProtoHTTP2:
-      return params_.enable_http2;
-    case kProtoQUIC:
-      return IsQuicEnabled();
-  }
-  NOTREACHED();
-  return false;
-}
-
 void HttpNetworkSession::SetServerPushDelegate(
     std::unique_ptr<ServerPushDelegate> push_delegate) {
   DCHECK(push_delegate);
@@ -382,10 +361,8 @@ void HttpNetworkSession::GetAlpnProtos(NextProtoVector* alpn_protos) const {
   *alpn_protos = next_protos_;
 }
 
-void HttpNetworkSession::GetSSLConfig(const HttpRequestInfo& request,
-                                      SSLConfig* server_config,
+void HttpNetworkSession::GetSSLConfig(SSLConfig* server_config,
                                       SSLConfig* proxy_config) const {
-  ssl_config_service_->GetSSLConfig(server_config);
   GetAlpnProtos(&server_config->alpn_protos);
   server_config->ignore_certificate_errors = params_.ignore_certificate_errors;
   *proxy_config = *server_config;
@@ -433,7 +410,6 @@ void HttpNetworkSession::DisableQuic() {
 
 void HttpNetworkSession::ClearSSLSessionCache() {
   ssl_client_session_cache_.Flush();
-  ssl_client_session_cache_privacy_mode_.Flush();
 }
 
 CommonConnectJobParams HttpNetworkSession::CreateCommonConnectJobParams(
@@ -447,10 +423,7 @@ CommonConnectJobParams HttpNetworkSession::CreateCommonConnectJobParams(
       context_.http_auth_handler_factory, &spdy_session_pool_,
       &params_.quic_params.supported_versions, &quic_stream_factory_,
       context_.proxy_delegate, context_.http_user_agent_settings,
-      CreateClientSocketContext(context_, &ssl_client_session_cache_),
-      CreateClientSocketContext(context_,
-                                &ssl_client_session_cache_privacy_mode_),
-      context_.socket_performance_watcher_factory,
+      &ssl_client_context_, context_.socket_performance_watcher_factory,
       context_.network_quality_estimator, context_.net_log,
       for_websockets ? &websocket_endpoint_lock_manager_ : nullptr);
 }

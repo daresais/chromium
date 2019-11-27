@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_rendering_context_2d.h"
 
 #include "base/metrics/histogram_functions.h"
+#include "base/rand_util.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -55,6 +56,7 @@
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/scroll/scroll_alignment.h"
+#include "third_party/blink/renderer/core/typed_arrays/array_buffer/array_buffer_contents.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_style.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/hit_region.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/path_2d.h"
@@ -73,7 +75,6 @@
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
-#include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_contents.h"
 
 namespace blink {
 
@@ -133,7 +134,9 @@ CanvasRenderingContext2D::CanvasRenderingContext2D(
           canvas->GetDocument().GetTaskRunner(TaskType::kMiscPlatformAPI),
           this,
           &CanvasRenderingContext2D::TryRestoreContextEvent),
-      should_prune_local_font_cache_(false) {
+      should_prune_local_font_cache_(false),
+      random_generator_((uint32_t)base::RandUint64()),
+      bernoulli_distribution_(kRasterMetricProbability) {
   if (canvas->GetDocument().GetSettings() &&
       canvas->GetDocument().GetSettings()->GetAntialiasedClips2dCanvasEnabled())
     clip_antialiasing_ = kAntiAliased;
@@ -174,8 +177,8 @@ bool CanvasRenderingContext2D::IsAccelerated() const {
 
 bool CanvasRenderingContext2D::IsOriginTopLeft() const {
   // Accelerated 2D contexts have the origin of coordinates on the bottom left,
-  // except if they are single buffered (needed for front buffer rendering).
-  return !IsAccelerated() || canvas()->ResourceProvider()->IsSingleBuffered();
+  // except if they are used for low latency mode (front buffer rendering).
+  return !IsAccelerated() || canvas()->LowLatencyEnabled();
 }
 
 bool CanvasRenderingContext2D::IsComposited() const {
@@ -314,7 +317,7 @@ CanvasPixelFormat CanvasRenderingContext2D::PixelFormat() const {
 }
 
 void CanvasRenderingContext2D::Reset() {
-  // This is a multiple inherritance bootstrap
+  // This is a multiple inheritance bootstrap
   BaseRenderingContext2D::Reset();
 }
 
@@ -438,13 +441,15 @@ cc::PaintCanvas* CanvasRenderingContext2D::DrawingCanvas() const {
   if (isContextLost())
     return nullptr;
   if (canvas()->GetOrCreateCanvas2DLayerBridge())
-    return canvas()->GetCanvas2DLayerBridge()->Canvas();
+    return canvas()->GetCanvas2DLayerBridge()->DrawingCanvas();
   return nullptr;
 }
 
 cc::PaintCanvas* CanvasRenderingContext2D::ExistingDrawingCanvas() const {
+  if (isContextLost())
+    return nullptr;
   if (IsPaintable())
-    return canvas()->GetCanvas2DLayerBridge()->Canvas();
+    return canvas()->GetCanvas2DLayerBridge()->DrawingCanvas();
   return nullptr;
 }
 
@@ -574,10 +579,11 @@ void CanvasRenderingContext2D::setFont(const String& new_font) {
       new_font);  // Create a string copy since newFont can be
                   // deleted inside realizeSaves.
   ModifiableState().SetUnparsedFont(new_font_safe_copy);
-
-  base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
-  base::UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
-      "Canvas.TextMetrics.SetFont", elapsed);
+  if (bernoulli_distribution_(random_generator_)) {
+    base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
+    base::UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
+        "Canvas.TextMetrics.SetFont", elapsed);
+  }
 }
 
 void CanvasRenderingContext2D::DidProcessTask(
@@ -659,10 +665,17 @@ bool CanvasRenderingContext2D::CanCreateCanvas2dResourceProvider() const {
 }
 
 scoped_refptr<StaticBitmapImage> blink::CanvasRenderingContext2D::GetImage(
-    AccelerationHint hint) const {
+    AccelerationHint hint) {
   if (!IsPaintable())
     return nullptr;
   return canvas()->GetCanvas2DLayerBridge()->NewImageSnapshot(hint);
+}
+
+void CanvasRenderingContext2D::FinalizeFrame() {
+  TRACE_EVENT0("blink", "CanvasRenderingContext2D::FinalizeFrame");
+  if (canvas() && canvas()->GetCanvas2DLayerBridge())
+    canvas()->GetCanvas2DLayerBridge()->FinalizeFrame();
+  usage_counters_.num_frames_since_reset++;
 }
 
 bool CanvasRenderingContext2D::ParseColorOrCurrentColor(
@@ -794,7 +807,6 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text) {
   if (!canvas()->GetDocument().GetFrame())
     return MakeGarbageCollected<TextMetrics>();
 
-  base::TimeTicks start_time = base::TimeTicks::Now();
   canvas()->GetDocument().UpdateStyleAndLayoutTreeForNode(canvas());
 
   const Font& font = AccessFont();
@@ -806,13 +818,9 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text) {
   else
     direction = ToTextDirection(GetState().GetDirection(), canvas());
 
-  TextMetrics* text_metrics = MakeGarbageCollected<TextMetrics>(
-      font, direction, GetState().GetTextBaseline(), GetState().GetTextAlign(),
-      text);
-  base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
-  base::UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
-      "Canvas.TextMetrics.MeasureText", elapsed);
-  return text_metrics;
+  return MakeGarbageCollected<TextMetrics>(font, direction,
+                                           GetState().GetTextBaseline(),
+                                           GetState().GetTextAlign(), text);
 }
 
 void CanvasRenderingContext2D::DrawTextInternal(
@@ -1124,15 +1132,18 @@ void CanvasRenderingContext2D::DisableAcceleration() {
   canvas()->DisableAcceleration();
 }
 
-void CanvasRenderingContext2D::DidInvokeGPUReadbackInCurrentFrame() {
-  canvas()->DidInvokeGPUReadbackInCurrentFrame();
-}
-
 bool CanvasRenderingContext2D::IsCanvas2DBufferValid() const {
   if (IsPaintable()) {
     return canvas()->GetCanvas2DLayerBridge()->IsValid();
   }
   return false;
+}
+
+bool CanvasRenderingContext2D::IsDeferralEnabled() const {
+  Canvas2DLayerBridge* layer_bridge = canvas()->GetCanvas2DLayerBridge();
+  if (!layer_bridge)
+    return false;
+  return layer_bridge->IsDeferralEnabled();
 }
 
 }  // namespace blink

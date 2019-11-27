@@ -17,6 +17,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/webauthn/authenticator_request_dialog_model.h"
 #include "content/public/browser/authenticator_request_client_delegate.h"
+#include "device/fido/cable/cable_discovery_data.h"
 #include "device/fido/fido_request_handler_base.h"
 #include "device/fido/fido_transport_protocol.h"
 
@@ -76,6 +77,12 @@ class ChromeAuthenticatorRequestDelegate
       const device::FidoAuthenticator* authenticator,
       base::OnceCallback<void(bool)> callback) override;
   bool SupportsResidentKeys() override;
+  bool ShouldPermitCableExtension(const url::Origin& origin) override;
+  bool SetCableTransportInfo(
+      bool cable_extension_provided,
+      bool has_paired_phones,
+      base::Optional<device::QRGeneratorKey> qr_generator_key) override;
+  std::vector<device::CableDiscoveryData> GetCablePairings() override;
   void SelectAccount(
       std::vector<device::AuthenticatorGetAssertionResponse> responses,
       base::OnceCallback<void(device::AuthenticatorGetAssertionResponse)>
@@ -85,7 +92,7 @@ class ChromeAuthenticatorRequestDelegate
       device::FidoTransportProtocol transport) override;
   void DisableUI() override;
   bool IsWebAuthnUIEnabled() override;
-  bool ShouldDisablePlatformAuthenticators() override;
+  bool IsUserVerifyingPlatformAuthenticatorAvailable() override;
 
   // device::FidoRequestHandlerBase::Observer:
   void OnTransportAvailabilityEnumerated(
@@ -97,8 +104,10 @@ class ChromeAuthenticatorRequestDelegate
   void FidoAuthenticatorRemoved(base::StringPiece authenticator_id) override;
   void FidoAuthenticatorIdChanged(base::StringPiece old_authenticator_id,
                                   std::string new_authenticator_id) override;
-  void FidoAuthenticatorPairingModeChanged(base::StringPiece authenticator_id,
-                                           bool is_in_pairing_mode) override;
+  void FidoAuthenticatorPairingModeChanged(
+      base::StringPiece authenticator_id,
+      bool is_in_pairing_mode,
+      base::string16 display_name) override;
   void BluetoothAdapterPowerChanged(bool is_powered_on) override;
   bool SupportsPIN() const override;
   void CollectPIN(
@@ -111,6 +120,10 @@ class ChromeAuthenticatorRequestDelegate
   void OnStartOver() override;
   void OnModelDestroyed() override;
   void OnCancelRequest() override;
+
+ protected:
+  void CustomizeDiscoveryFactory(
+      device::FidoDiscoveryFactory* discovery_factory) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromeAuthenticatorRequestDelegateTest,
@@ -126,6 +139,8 @@ class ChromeAuthenticatorRequestDelegate
   void AddFidoBleDeviceToPairedList(std::string ble_authenticator_id);
   base::Optional<device::FidoTransportProtocol> GetLastTransportUsed() const;
   const base::ListValue* GetPreviouslyPairedFidoBleDeviceIds() const;
+  void StoreNewCablePairingInPrefs(
+      std::unique_ptr<device::CableDiscoveryData> discovery_data);
 
   content::RenderFrameHost* const render_frame_host_;
   const std::string relying_party_id_;

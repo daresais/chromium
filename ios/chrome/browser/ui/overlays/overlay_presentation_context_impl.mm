@@ -4,6 +4,8 @@
 
 #import "ios/chrome/browser/ui/overlays/overlay_presentation_context_impl.h"
 
+#import <UIKit/UIKit.h>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #import "ios/chrome/browser/main/browser.h"
@@ -45,7 +47,7 @@ OverlayPresentationContextImpl::OverlayPresentationContextImpl(
     OverlayModality modality)
     : presenter_(OverlayPresenter::FromBrowser(browser, modality)),
       shutdown_helper_(browser, presenter_),
-      ui_dismissal_helper_(this),
+      coordinator_delegate_(this),
       coordinator_factory_([OverlayRequestCoordinatorFactory
           factoryForBrowser:browser
                    modality:modality]),
@@ -64,19 +66,14 @@ void OverlayPresentationContextImpl::SetCoordinator(
   if (coordinator_ == coordinator)
     return;
 
-  for (auto& observer : observers_) {
-    observer.OverlayPresentationContextWillChangeActivationState(this,
-                                                                 !!coordinator);
-  }
-
-  coordinator_ = coordinator;
+  UpdateForCoordinator(coordinator);
 
   // The new coordinator should be started before provided to the UI delegate.
   DCHECK(!coordinator_ || coordinator_.viewController);
+}
 
-  for (auto& observer : observers_) {
-    observer.OverlayPresentationContextDidChangeActivationState(this);
-  }
+void OverlayPresentationContextImpl::WindowDidChange() {
+  UpdateForCoordinator(coordinator_);
 }
 
 #pragma mark OverlayPresentationContext
@@ -91,13 +88,31 @@ void OverlayPresentationContextImpl::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-bool OverlayPresentationContextImpl::IsActive() const {
-  return !!coordinator_;
+OverlayPresentationContext::UIPresentationCapabilities
+OverlayPresentationContextImpl::GetPresentationCapabilities() const {
+  return presentation_capabilities_;
+}
+
+bool OverlayPresentationContextImpl::CanShowUIForRequest(
+    OverlayRequest* request,
+    UIPresentationCapabilities capabilities) const {
+  BOOL uses_child_view_controller = [coordinator_factory_
+      coordinatorForRequestUsesChildViewController:request];
+  UIPresentationCapabilities required_capability =
+      uses_child_view_controller ? UIPresentationCapabilities::kContained
+                                 : UIPresentationCapabilities::kPresented;
+  return !!(capabilities & required_capability);
+}
+
+bool OverlayPresentationContextImpl::CanShowUIForRequest(
+    OverlayRequest* request) const {
+  return CanShowUIForRequest(request, GetPresentationCapabilities());
 }
 
 void OverlayPresentationContextImpl::ShowOverlayUI(
     OverlayPresenter* presenter,
     OverlayRequest* request,
+    OverlayPresentationCallback presentation_callback,
     OverlayDismissalCallback dismissal_callback) {
   DCHECK_EQ(presenter_, presenter);
   // Create the UI state for |request| if necessary.
@@ -105,7 +120,7 @@ void OverlayPresentationContextImpl::ShowOverlayUI(
     states_[request] = std::make_unique<OverlayRequestUIState>(request);
   // Present the overlay UI and update the UI state.
   GetRequestUIState(request)->OverlayPresentionRequested(
-      std::move(dismissal_callback));
+      std::move(presentation_callback), std::move(dismissal_callback));
   SetRequest(request);
 }
 
@@ -132,10 +147,16 @@ void OverlayPresentationContextImpl::CancelOverlayUI(
     OverlayPresenter* presenter,
     OverlayRequest* request) {
   DCHECK_EQ(presenter_, presenter);
+
+  // No cleanup required if there is no UI state for |request|.  This can
+  // occur when cancelling an OverlayRequest whose UI has never been
+  // presented.
+  OverlayRequestUIState* state = GetRequestUIState(request);
+  if (!state)
+    return;
+
   // If the coordinator is not presenting the overlay UI for |state|, it can
   // be deleted immediately.
-  OverlayRequestUIState* state = GetRequestUIState(request);
-  DCHECK(state);
   if (!state->has_callback()) {
     states_.erase(request);
     return;
@@ -188,6 +209,40 @@ OverlayRequestUIState* OverlayPresentationContextImpl::GetRequestUIState(
   return request ? states_[request].get() : nullptr;
 }
 
+void OverlayPresentationContextImpl::UpdateForCoordinator(
+    OverlayContainerCoordinator* coordinator) {
+  UIPresentationCapabilities capabilities = UIPresentationCapabilities::kNone;
+  UIViewController* view_controller = coordinator.viewController;
+  // Any UIViewController can contain overlay UI as a child.
+  if (view_controller) {
+    capabilities = static_cast<UIPresentationCapabilities>(
+        capabilities | UIPresentationCapabilities::kContained);
+  }
+  // Only UIViewControllers attached to a window can present overlay UI.
+  if (view_controller.view.window) {
+    capabilities = static_cast<UIPresentationCapabilities>(
+        capabilities | UIPresentationCapabilities::kPresented);
+  }
+  bool capabilities_changed = presentation_capabilities_ != capabilities;
+
+  if (capabilities_changed) {
+    for (auto& observer : observers_) {
+      observer.OverlayPresentationContextWillChangePresentationCapabilities(
+          this, capabilities);
+    }
+  }
+
+  presentation_capabilities_ = capabilities;
+  coordinator_ = coordinator;
+
+  if (capabilities_changed) {
+    for (auto& observer : observers_) {
+      observer.OverlayPresentationContextDidChangePresentationCapabilities(
+          this);
+    }
+  }
+}
+
 #pragma mark Presentation and Dismissal helpers
 
 void OverlayPresentationContextImpl::ShowUIForPresentedRequest() {
@@ -202,13 +257,22 @@ void OverlayPresentationContextImpl::ShowUIForPresentedRequest() {
       overlay_coordinator.baseViewController != container_view_controller) {
     overlay_coordinator = [coordinator_factory_
         newCoordinatorForRequest:request_
-               dismissalDelegate:&ui_dismissal_helper_
+                        delegate:&coordinator_delegate_
               baseViewController:container_view_controller];
     state->OverlayUIWillBePresented(overlay_coordinator);
   }
 
   [overlay_coordinator startAnimated:!state->has_ui_been_presented()];
   state->OverlayUIWasPresented();
+}
+
+void OverlayPresentationContextImpl::OverlayUIWasPresented() {
+  OverlayRequestUIState* state = GetRequestUIState(request_);
+  DCHECK(state);
+  UIView* overlay_view = state->coordinator().viewController.view;
+  DCHECK(overlay_view);
+  UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,
+                                  overlay_view);
 }
 
 void OverlayPresentationContextImpl::DismissPresentedUI(
@@ -258,16 +322,24 @@ void OverlayPresentationContextImpl::BrowserShutdownHelper::BrowserDestroyed(
 
 #pragma mark OverlayDismissalHelper
 
-OverlayPresentationContextImpl::OverlayDismissalHelper::OverlayDismissalHelper(
-    OverlayPresentationContextImpl* presentation_context)
+OverlayPresentationContextImpl::OverlayRequestCoordinatorDelegateImpl::
+    OverlayRequestCoordinatorDelegateImpl(
+        OverlayPresentationContextImpl* presentation_context)
     : presentation_context_(presentation_context) {
   DCHECK(presentation_context_);
 }
 
-OverlayPresentationContextImpl::OverlayDismissalHelper::
-    ~OverlayDismissalHelper() = default;
+OverlayPresentationContextImpl::OverlayRequestCoordinatorDelegateImpl::
+    ~OverlayRequestCoordinatorDelegateImpl() = default;
 
-void OverlayPresentationContextImpl::OverlayDismissalHelper::
+void OverlayPresentationContextImpl::OverlayRequestCoordinatorDelegateImpl::
+    OverlayUIDidFinishPresentation(OverlayRequest* request) {
+  DCHECK(request);
+  DCHECK_EQ(presentation_context_->request_, request);
+  presentation_context_->OverlayUIWasPresented();
+}
+
+void OverlayPresentationContextImpl::OverlayRequestCoordinatorDelegateImpl::
     OverlayUIDidFinishDismissal(OverlayRequest* request) {
   DCHECK(request);
   DCHECK_EQ(presentation_context_->request_, request);

@@ -13,7 +13,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "extensions/common/message_bundle.h"
 #include "ipc/ipc_sender.h"
 #include "ipc/ipc_sync_message.h"
@@ -71,9 +71,9 @@ class MockRequestPeer : public content::RequestPeer {
   MOCK_METHOD2(OnUploadProgress, void(uint64_t position, uint64_t size));
   MOCK_METHOD2(OnReceivedRedirect,
                bool(const net::RedirectInfo& redirect_info,
-                    const network::ResourceResponseInfo& info));
+                    network::mojom::URLResponseHeadPtr head));
   MOCK_METHOD1(OnReceivedResponse,
-               void(const network::ResourceResponseInfo& info));
+               void(network::mojom::URLResponseHeadPtr head));
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override {
     body_handle_ = std::move(body);
@@ -177,7 +177,7 @@ class ExtensionLocalizationPeerTest : public testing::Test {
     return consumer;
   }
 
-  base::test::ScopedTaskEnvironment scoped_environment_;
+  base::test::TaskEnvironment scoped_environment_;
   std::unique_ptr<MockIpcMessageSender> sender_;
   MockRequestPeer* original_peer_;
   std::unique_ptr<ExtensionLocalizationPeer> filter_peer_;

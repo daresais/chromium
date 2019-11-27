@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/system/sys_info.h"
 #include "base/version.h"
 #include "components/metrics/metrics_service.h"
 #include "components/version_info/version_info.h"
@@ -24,11 +25,6 @@ using previous_session_info_constants::DeviceBatteryState;
 using previous_session_info_constants::DeviceThermalState;
 
 namespace {
-
-// Percentage of battery level which is assumed low enough to have possibly
-// been the reason for the previous session ending in an unclean shutdown.
-// Percent rpresented by a value between 0 and 1.
-const float kCriticallyLowBatteryLevel = 0.01;
 
 // Amount of storage, in kilobytes, considered to be critical enough to
 // negatively effect device operation.
@@ -69,8 +65,8 @@ void LogBatteryCharge(float battery_level) {
 
 // Logs the device's |available_storage| as a UTE stability metric.
 void LogAvailableStorage(NSInteger available_storage) {
-  UMA_STABILITY_HISTOGRAM_COUNTS_100("Stability.iOS.UTE.AvailableStorage",
-                                     available_storage);
+  UMA_STABILITY_HISTOGRAM_CUSTOM_COUNTS("Stability.iOS.UTE.AvailableStorage",
+                                        available_storage, 1, 200000, 100);
 }
 
 // Logs the OS version change between |os_version| and the current os version.
@@ -79,7 +75,7 @@ void LogAvailableStorage(NSInteger available_storage) {
 void LogOSVersionChange(std::string os_version) {
   base::Version previous_os_version = base::Version(os_version);
   base::Version current_os_version =
-      base::Version(version_info::GetVersionNumber());
+      base::Version(base::SysInfo::OperatingSystemVersion());
 
   VersionComparison difference = VersionComparison::kSameVersion;
   if (previous_os_version.CompareTo(current_os_version) != 0) {
@@ -113,6 +109,8 @@ void LogDeviceThermalState(DeviceThermalState thermal_state) {
                                       DeviceThermalState::kMaxValue);
 }
 }  // namespace
+
+const float kCriticallyLowBatteryLevel = 0.01;
 
 MobileSessionShutdownMetricsProvider::MobileSessionShutdownMetricsProvider(
     metrics::MetricsService* metrics_service)
@@ -160,26 +158,31 @@ void MobileSessionShutdownMetricsProvider::ProvidePreviousSessionData(
   if (session_info.deviceBatteryState == DeviceBatteryState::kUnplugged) {
     LogBatteryCharge(session_info.deviceBatteryLevel);
   }
-  LogAvailableStorage(session_info.availableDeviceStorage);
-  std::string previous_os_version_string =
-      base::SysNSStringToUTF8(session_info.OSVersion);
-  LogOSVersionChange(previous_os_version_string);
+  if (session_info.availableDeviceStorage >= 0) {
+    LogAvailableStorage(session_info.availableDeviceStorage);
+  }
+  if (session_info.OSVersion) {
+    LogOSVersionChange(base::SysNSStringToUTF8(session_info.OSVersion));
+  }
   LogLowPowerMode(session_info.deviceWasInLowPowerMode);
   LogDeviceThermalState(session_info.deviceThermalState);
+
+  UMA_STABILITY_HISTOGRAM_BOOLEAN(
+      "Stability.iOS.UTE.OSRestartedAfterPreviousSession",
+      session_info.OSRestartedAfterPreviousSession);
 
   bool possible_explanation =
       // Log any of the following cases as a possible explanation for the
       // crash:
-      // - battery is critically low
+      // - device restarted while the battery was critically low
       (session_info.deviceBatteryState == DeviceBatteryState::kUnplugged &&
-       session_info.deviceBatteryLevel <= kCriticallyLowBatteryLevel) ||
-      // - storage is extremely low
-      session_info.availableDeviceStorage <= kCriticallyLowDeviceStorage ||
+       session_info.deviceBatteryLevel <= kCriticallyLowBatteryLevel &&
+       session_info.OSRestartedAfterPreviousSession) ||
+      // - storage was critically low
+      (session_info.availableDeviceStorage >= 0 &&
+       session_info.availableDeviceStorage <= kCriticallyLowDeviceStorage) ||
       // - OS version changed
-      base::Version(version_info::GetVersionNumber())
-              .CompareTo(base::Version(previous_os_version_string)) != 0 ||
-      // - low power mode enabled
-      session_info.deviceWasInLowPowerMode ||
+      session_info.isFirstSessionAfterOSUpgrade ||
       // - device in abnormal thermal state
       session_info.deviceThermalState == DeviceThermalState::kCritical ||
       session_info.deviceThermalState == DeviceThermalState::kSerious;

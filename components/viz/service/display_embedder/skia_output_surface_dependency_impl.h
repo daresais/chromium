@@ -24,23 +24,25 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
                                   gpu::SurfaceHandle surface_handle);
   ~SkiaOutputSurfaceDependencyImpl() override;
 
-  void ScheduleGpuTask(base::OnceClosure task,
-                       std::vector<gpu::SyncToken> sync_tokens) override;
+  std::unique_ptr<gpu::SingleTaskSequence> CreateSequence() override;
   bool IsUsingVulkan() override;
+  bool IsUsingDawn() override;
   gpu::SharedImageManager* GetSharedImageManager() override;
   gpu::SyncPointManager* GetSyncPointManager() override;
   const gpu::GpuDriverBugWorkarounds& GetGpuDriverBugWorkarounds() override;
   scoped_refptr<gpu::SharedContextState> GetSharedContextState() override;
   gpu::raster::GrShaderCache* GetGrShaderCache() override;
   VulkanContextProvider* GetVulkanContextProvider() override;
+  DawnContextProvider* GetDawnContextProvider() override;
   const gpu::GpuPreferences& GetGpuPreferences() override;
-  gpu::SequenceId GetSequenceId() override;
   const gpu::GpuFeatureInfo& GetGpuFeatureInfo() override;
   gpu::MailboxManager* GetMailboxManager() override;
+  gpu::ImageFactory* GetGpuImageFactory() override;
   bool IsOffscreen() override;
   gpu::SurfaceHandle GetSurfaceHandle() override;
   scoped_refptr<gl::GLSurface> CreateGLSurface(
       base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub) override;
+  base::ScopedClosureRunner CacheGLSurface(gl::GLSurface* surface) override;
   void PostTaskToClientThread(base::OnceClosure closure) override;
   void ScheduleGrContextCleanup() override;
 
@@ -49,6 +51,14 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
       gpu::SurfaceHandle parent_window,
       gpu::SurfaceHandle child_window) override;
 #endif
+
+  void RegisterDisplayContext(gpu::DisplayContext* display_context) override;
+  void UnregisterDisplayContext(gpu::DisplayContext* display_context) override;
+  void DidLoseContext(bool offscreen,
+                      gpu::error::ContextLostReason reason,
+                      const GURL& active_url) override;
+
+  base::TimeDelta GetGpuBlockedTimeSinceLastSwap() override;
 
  private:
   GpuServiceImpl* const gpu_service_impl_;

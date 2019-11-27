@@ -14,6 +14,7 @@
 #include "chromeos/services/device_sync/proto/cryptauth_enrollment.pb.h"
 #include "chromeos/services/device_sync/proto/cryptauth_proto_to_query_parameters_util.h"
 #include "chromeos/services/device_sync/switches.h"
+#include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -64,6 +65,7 @@ const char kShareGroupPrivateKeyPath[] = "/v1:shareGroupPrivateKey";
 const char kBatchNotifyGroupDevicesPath[] = "/v1:batchNotifyGroupDevices";
 const char kBatchGetFeatureStatusesPath[] = "/v1:batchGetFeatureStatuses";
 const char kBatchSetFeatureStatusesPath[] = "/v1:batchSetFeatureStatuses";
+const char kGetDevicesActivityStatusPath[] = "/v1:getDevicesActivityStatus";
 
 const char kCryptAuthOAuth2Scope[] =
     "https://www.googleapis.com/auth/cryptauth";
@@ -107,15 +109,14 @@ GURL CreateV2DeviceSyncRequestUrl(const std::string& request_path) {
 
 CryptAuthClientImpl::CryptAuthClientImpl(
     std::unique_ptr<CryptAuthApiCallFlow> api_call_flow,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const cryptauth::DeviceClassifier& device_classifier)
     : api_call_flow_(std::move(api_call_flow)),
       identity_manager_(identity_manager),
       url_loader_factory_(std::move(url_loader_factory)),
       device_classifier_(device_classifier),
-      has_call_started_(false),
-      weak_ptr_factory_(this) {}
+      has_call_started_(false) {}
 
 CryptAuthClientImpl::~CryptAuthClientImpl() {}
 
@@ -577,6 +578,43 @@ void CryptAuthClientImpl::BatchSetFeatureStatuses(
               error_callback, partial_traffic_annotation);
 }
 
+// TODO(https://crbug.com/953087): Populate the "sender" and "trigger" fields
+// when method is used in codebase.
+void CryptAuthClientImpl::GetDevicesActivityStatus(
+    const cryptauthv2::GetDevicesActivityStatusRequest& request,
+    const GetDevicesActivityStatusCallback& callback,
+    const ErrorCallback& error_callback) {
+  net::PartialNetworkTrafficAnnotationTag partial_traffic_annotation =
+      net::DefinePartialNetworkTrafficAnnotation(
+          "cryptauth_v2_devicesync_get_devices_activity_status",
+          "oauth2_api_call_flow",
+          R"(
+      semantics {
+        sender: "TBD"
+        description:
+          "The client queries CryptAuth for the activity of status of the"
+          "user's devices."
+        trigger: "TBD"
+        data: "User device ID."
+        destination: GOOGLE_OWNED_SERVICE
+      }
+      policy {
+        setting:
+          "This feature cannot be disabled by settings. However, this request "
+          "is made only for signed-in users."
+        chrome_policy {
+          SigninAllowed {
+            SigninAllowed: false
+          }
+        }
+      })");
+  MakeApiCall(
+      CreateV2DeviceSyncRequestUrl(kGetDevicesActivityStatusPath),
+      RequestType::kGet, base::nullopt /* serialized_request */,
+      cryptauthv2::GetDevicesActivityStatusRequestToQueryParameters(request),
+      callback, error_callback, partial_traffic_annotation);
+}
+
 std::string CryptAuthClientImpl::GetAccessTokenUsed() {
   return access_token_used_;
 }
@@ -608,14 +646,14 @@ void CryptAuthClientImpl::MakeApiCall(
   OAuth2AccessTokenManager::ScopeSet scopes;
   scopes.insert(kCryptAuthOAuth2Scope);
 
-  access_token_fetcher_ = std::make_unique<
-      identity::PrimaryAccountAccessTokenFetcher>(
-      "cryptauth_client", identity_manager_, scopes,
-      base::BindOnce(&CryptAuthClientImpl::OnAccessTokenFetched<ResponseProto>,
-                     weak_ptr_factory_.GetWeakPtr(), request_type,
-                     serialized_request, request_as_query_parameters,
-                     response_callback),
-      identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+  access_token_fetcher_ =
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
+          "cryptauth_client", identity_manager_, scopes,
+          base::BindOnce(
+              &CryptAuthClientImpl::OnAccessTokenFetched<ResponseProto>,
+              weak_ptr_factory_.GetWeakPtr(), request_type, serialized_request,
+              request_as_query_parameters, response_callback),
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
 }
 
 template <class ResponseProto>
@@ -626,7 +664,7 @@ void CryptAuthClientImpl::OnAccessTokenFetched(
         request_as_query_parameters,
     const base::Callback<void(const ResponseProto&)>& response_callback,
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   access_token_fetcher_.reset();
 
   if (error.state() != GoogleServiceAuthError::NONE) {
@@ -686,7 +724,7 @@ RequestProto CryptAuthClientImpl::RequestWithDeviceClassifierSet(
 
 // CryptAuthClientFactoryImpl
 CryptAuthClientFactoryImpl::CryptAuthClientFactoryImpl(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const cryptauth::DeviceClassifier& device_classifier)
     : identity_manager_(identity_manager),

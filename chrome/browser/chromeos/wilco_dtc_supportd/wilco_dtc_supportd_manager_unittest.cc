@@ -7,13 +7,13 @@
 #include "base/barrier_closure.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/settings/scoped_testing_cros_settings.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/chromeos/wilco_dtc_supportd/testing_wilco_dtc_supportd_bridge_wrapper.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_client.h"
 #include "chrome/services/wilco_dtc_supportd/public/mojom/wilco_dtc_supportd.mojom.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart/fake_upstart_client.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/session_manager/session_manager_types.h"
@@ -96,11 +96,13 @@ class FakeWilcoDtcSupportdManagerDelegate final
 class WilcoDtcSupportdManagerTest : public testing::Test {
  protected:
   WilcoDtcSupportdManagerTest() {
-    DBusThreadManager::Initialize();
+    WilcoDtcSupportdClient::InitializeFake();
     upstart_client_ = std::make_unique<TestUpstartClient>();
   }
 
-  ~WilcoDtcSupportdManagerTest() override { DBusThreadManager::Shutdown(); }
+  ~WilcoDtcSupportdManagerTest() override {
+    WilcoDtcSupportdClient::Shutdown();
+  }
 
   std::unique_ptr<WilcoDtcSupportdManager::Delegate> CreateDelegate() {
     return std::make_unique<FakeWilcoDtcSupportdManagerDelegate>(
@@ -129,7 +131,7 @@ class WilcoDtcSupportdManagerTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ScopedTestingCrosSettings scoped_testing_cros_settings_;
   std::unique_ptr<TestUpstartClient> upstart_client_;
   FakeChromeUserManager* fake_user_manager_{new FakeChromeUserManager()};

@@ -4,10 +4,18 @@
 
 #include "ash/wm/toplevel_window_event_handler.h"
 
+#include "ash/app_list/app_list_controller_impl.h"
+#include "ash/home_screen/home_screen_controller.h"
+#include "ash/public/cpp/app_list/app_list_types.h"
 #include "ash/public/cpp/app_types.h"
+#include "ash/public/cpp/ash_features.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
+#include "ash/wm/back_gesture_affordance.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/tablet_mode/tablet_mode_window_manager.h"
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_observer.h"
@@ -48,7 +56,7 @@ bool CanStartTwoFingerMove(aura::Window* window,
   // the window type and the state type so that we do not steal touches from the
   // web contents.
   if (window->type() != aura::client::WINDOW_TYPE_NORMAL ||
-      !wm::GetWindowState(window)->IsNormalOrSnapped()) {
+      !WindowState::Get(window)->IsNormalOrSnapped()) {
     return false;
   }
   int component1_behavior =
@@ -94,6 +102,52 @@ void OnDragCompleted(
   run_loop->Quit();
 }
 
+// True if we can start swiping from left edge to go to previous page.
+bool CanStartGoingBack() {
+  if (!features::IsSwipingFromLeftEdgeToGoBackEnabled())
+    return false;
+
+  Shell* shell = Shell::Get();
+  if (!shell->tablet_mode_controller()->InTabletMode())
+    return false;
+
+  // Do not enable back gesture if it is not in an ACTIVE session. e.g, login
+  // screen, lock screen.
+  if (shell->session_controller()->GetSessionState() !=
+      session_manager::SessionState::ACTIVE) {
+    return false;
+  }
+
+  // Do not enable back gesture if home screen is visible but not in
+  // |kFullscreenSearch| state.
+  if (shell->home_screen_controller()->IsHomeScreenVisible() &&
+      shell->app_list_controller()->GetAppListViewState() !=
+          AppListViewState::kFullscreenSearch) {
+    return false;
+  }
+
+  return true;
+}
+
+// True if |event| is scrolling away from the restricted left area of the
+// display.
+bool StartedAwayFromLeftArea(ui::GestureEvent* event) {
+  if (event->details().scroll_x_hint() < 0)
+    return false;
+
+  const gfx::Point location_in_screen =
+      event->target()->GetScreenLocation(*event);
+  const gfx::Rect work_area_bounds =
+      display::Screen::GetScreen()
+          ->GetDisplayNearestWindow(static_cast<aura::Window*>(event->target()))
+          .work_area();
+
+  gfx::Rect hit_bounds_in_screen(work_area_bounds);
+  hit_bounds_in_screen.set_width(
+      ToplevelWindowEventHandler::kStartGoingBackLeftEdgeInset);
+  return hit_bounds_in_screen.Contains(location_in_screen);
+}
+
 }  // namespace
 
 // ScopedWindowResizer ---------------------------------------------------------
@@ -103,7 +157,7 @@ void OnDragCompleted(
 // ToplevelWindowEventHandler to clean up.
 class ToplevelWindowEventHandler::ScopedWindowResizer
     : public aura::WindowObserver,
-      public wm::WindowStateObserver {
+      public WindowStateObserver {
  public:
   ScopedWindowResizer(ToplevelWindowEventHandler* handler,
                       std::unique_ptr<WindowResizer> resizer);
@@ -121,7 +175,7 @@ class ToplevelWindowEventHandler::ScopedWindowResizer
   void OnWindowDestroying(aura::Window* window) override;
 
   // WindowStateObserver overrides:
-  void OnPreWindowStateTypeChange(wm::WindowState* window_state,
+  void OnPreWindowStateTypeChange(WindowState* window_state,
                                   WindowStateType type) override;
 
  private:
@@ -143,7 +197,7 @@ ToplevelWindowEventHandler::ScopedWindowResizer::ScopedWindowResizer(
     : handler_(handler), resizer_(std::move(resizer)), grabbed_capture_(false) {
   aura::Window* target = resizer_->GetTarget();
   target->AddObserver(this);
-  wm::GetWindowState(target)->AddObserver(this);
+  WindowState::Get(target)->AddObserver(this);
 
   if (IsResize())
     target->NotifyResizeLoopStarted();
@@ -157,7 +211,7 @@ ToplevelWindowEventHandler::ScopedWindowResizer::ScopedWindowResizer(
 ToplevelWindowEventHandler::ScopedWindowResizer::~ScopedWindowResizer() {
   aura::Window* target = resizer_->GetTarget();
   target->RemoveObserver(this);
-  wm::GetWindowState(target)->RemoveObserver(this);
+  WindowState::Get(target)->RemoveObserver(this);
   if (grabbed_capture_)
     target->ReleaseCapture();
   if (!window_destroying_ && IsResize())
@@ -175,8 +229,7 @@ bool ToplevelWindowEventHandler::ScopedWindowResizer::IsResize() const {
 }
 
 void ToplevelWindowEventHandler::ScopedWindowResizer::
-    OnPreWindowStateTypeChange(wm::WindowState* window_state,
-                               WindowStateType old) {
+    OnPreWindowStateTypeChange(WindowState* window_state, WindowStateType old) {
   handler_->CompleteDrag(DragResult::SUCCESS);
 }
 
@@ -204,6 +257,12 @@ ToplevelWindowEventHandler::~ToplevelWindowEventHandler() {
 void ToplevelWindowEventHandler::OnDisplayMetricsChanged(
     const display::Display& display,
     uint32_t metrics) {
+  // Cancel the left edge swipe back during screen rotation.
+  if (metrics & DISPLAY_METRIC_ROTATION) {
+    back_gesture_affordance_.reset();
+    going_back_started_ = false;
+  }
+
   if (!window_resizer_ || !(metrics & DISPLAY_METRIC_ROTATION))
     return;
 
@@ -265,8 +324,13 @@ void ToplevelWindowEventHandler::OnMouseEvent(ui::MouseEvent* event) {
 }
 
 void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
+  if (HandleGoingBackFromLeftEdge(event)) {
+    event->StopPropagation();
+    return;
+  }
+
   aura::Window* target = static_cast<aura::Window*>(event->target());
-  int component = wm::GetNonClientComponent(target, event->location());
+  int component = window_util::GetNonClientComponent(target, event->location());
   gfx::Point event_location = event->location();
 
   aura::Window* original_target = target;
@@ -448,6 +512,30 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   }
 }
 
+void ToplevelWindowEventHandler::OnTouchEvent(ui::TouchEvent* event) {
+  if (first_touch_id_ == ui::kPointerIdUnknown)
+    first_touch_id_ = event->pointer_details().id;
+
+  if (event->pointer_details().id != first_touch_id_)
+    return;
+
+  if (event->type() == ui::ET_TOUCH_RELEASED)
+    first_touch_id_ = ui::kPointerIdUnknown;
+
+  if (event->type() == ui::ET_TOUCH_PRESSED) {
+    x_drag_amount_ = y_drag_amount_ = 0;
+    during_reverse_dragging_ = false;
+  } else {
+    const gfx::Point current_location = event->location();
+    x_drag_amount_ += (current_location.x() - last_touch_point_.x());
+    y_drag_amount_ += (current_location.y() - last_touch_point_.y());
+    during_reverse_dragging_ =
+        current_location.x() < last_touch_point_.x() ? true : false;
+  }
+
+  last_touch_point_ = event->location();
+}
+
 bool ToplevelWindowEventHandler::AttemptToStartDrag(
     aura::Window* window,
     const gfx::Point& point_in_parent,
@@ -512,7 +600,7 @@ aura::Window* ToplevelWindowEventHandler::GetTargetForClientAreaGesture(
   if (!Shell::Get()->tablet_mode_controller()->InTabletMode()) {
     return nullptr;
   }
-  wm::WindowState* window_state = wm::GetWindowState(toplevel);
+  WindowState* window_state = WindowState::Get(toplevel);
   if (!window_state ||
       (!window_state->IsMaximized() && !window_state->IsFullscreen() &&
        !window_state->IsSnapped())) {
@@ -594,7 +682,7 @@ aura::Window* ToplevelWindowEventHandler::GetTargetForClientAreaGesture(
 
   // Disable window position auto management while dragging and restore it
   // aftrewards.
-  wm::WindowState* window_state = wm::GetWindowState(source);
+  WindowState* window_state = WindowState::Get(source);
   const bool window_position_managed = window_state->GetWindowPositionManaged();
   window_state->SetWindowPositionManaged(false);
   aura::WindowTracker tracker({source});
@@ -670,7 +758,7 @@ void ToplevelWindowEventHandler::HandleMousePressed(aura::Window* target,
   // We also update the current window component here because for the
   // mouse-drag-release-press case, where the mouse is released and
   // pressed without mouse move event.
-  int component = wm::GetNonClientComponent(target, event->location());
+  int component = window_util::GetNonClientComponent(target, event->location());
   if ((event->flags() & (ui::EF_IS_DOUBLE_CLICK | ui::EF_IS_TRIPLE_CLICK)) ==
           0 &&
       WindowResizer::GetBoundsChangeForWindowComponent(component)) {
@@ -728,7 +816,8 @@ void ToplevelWindowEventHandler::HandleMouseMoved(aura::Window* target,
   // TODO(jamescook): Move the resize cursor update code into here from
   // CompoundEventFilter?
   if (event->flags() & ui::EF_IS_NON_CLIENT) {
-    int component = wm::GetNonClientComponent(target, event->location());
+    int component =
+        window_util::GetNonClientComponent(target, event->location());
     ShowResizeShadow(target, component);
   } else {
     HideResizeShadow(target);
@@ -794,6 +883,66 @@ void ToplevelWindowEventHandler::UpdateGestureTarget(
   gesture_target_ = target;
   if (gesture_target_)
     gesture_target_->AddObserver(this);
+}
+
+bool ToplevelWindowEventHandler::HandleGoingBackFromLeftEdge(
+    ui::GestureEvent* event) {
+  aura::Window* target = static_cast<aura::Window*>(event->target());
+  if (!CanStartGoingBack())
+    return false;
+
+  gfx::Point screen_location = event->location();
+  ::wm::ConvertPointToScreen(target, &screen_location);
+  switch (event->type()) {
+    case ui::ET_GESTURE_SCROLL_BEGIN: {
+      going_back_started_ = StartedAwayFromLeftArea(event);
+      if (!going_back_started_)
+        break;
+      back_gesture_affordance_ =
+          std::make_unique<BackGestureAffordance>(screen_location);
+      return true;
+    }
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      if (!going_back_started_)
+        break;
+      DCHECK(back_gesture_affordance_);
+      back_gesture_affordance_->Update(x_drag_amount_, y_drag_amount_,
+                                       during_reverse_dragging_);
+      return true;
+    case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_SCROLL_FLING_START: {
+      if (!going_back_started_)
+        break;
+      DCHECK(back_gesture_affordance_);
+      if (back_gesture_affordance_->IsActivated() ||
+          (event->type() == ui::ET_SCROLL_FLING_START &&
+           event->details().velocity_x() >= kFlingVelocityForGoingBack)) {
+        if (TabletModeWindowManager::ShouldMinimizeTopWindowOnBack()) {
+          WindowState::Get(TabletModeWindowManager::GetTopWindow())->Minimize();
+        } else {
+          aura::Window* root_window =
+              window_util::GetRootWindowAt(screen_location);
+          ui::KeyEvent press_key_event(ui::ET_KEY_PRESSED,
+                                       ui::VKEY_BROWSER_BACK, ui::EF_NONE);
+          ignore_result(
+              root_window->GetHost()->SendEventToSink(&press_key_event));
+          ui::KeyEvent release_key_event(ui::ET_KEY_RELEASED,
+                                         ui::VKEY_BROWSER_BACK, ui::EF_NONE);
+          ignore_result(
+              root_window->GetHost()->SendEventToSink(&release_key_event));
+        }
+        back_gesture_affordance_->Complete();
+      } else {
+        back_gesture_affordance_->Abort();
+      }
+      going_back_started_ = false;
+      return true;
+    }
+    default:
+      break;
+  }
+
+  return false;
 }
 
 }  // namespace ash

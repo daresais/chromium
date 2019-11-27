@@ -48,7 +48,8 @@ class DeviceChooserContentViewTest : public ChromeViewsTestBase {
     extra_views_container_ = content_view().CreateExtraView();
 
     ASSERT_NE(nullptr, table_view());
-    ASSERT_NE(nullptr, adapter_off_help_link());
+    ASSERT_NE(nullptr, no_options_view());
+    ASSERT_NE(nullptr, adapter_off_view());
     ASSERT_NE(nullptr, re_scan_button());
     ASSERT_NE(nullptr, throbber());
     ASSERT_NE(nullptr, scanning_label());
@@ -61,21 +62,19 @@ class DeviceChooserContentViewTest : public ChromeViewsTestBase {
   MockTableViewObserver& table_observer() { return *table_observer_; }
   DeviceChooserContentView& content_view() { return *content_view_; }
 
-  views::TableView* table_view() { return content_view().table_view_; }
+  views::TableView* table_view() {
+    return content_view().table_view_for_testing();
+  }
   views::View* table_parent() { return content_view().table_parent_; }
   ui::TableModel* table_model() { return table_view()->model(); }
-  views::Label* no_options_label() { return content_view().no_options_help_; }
-  views::StyledLabel* adapter_off_help_link() {
-    return content_view().adapter_off_help_;
-  }
+  views::View* no_options_view() { return content_view().no_options_view_; }
+  views::View* adapter_off_view() { return content_view().adapter_off_view_; }
   views::LabelButton* re_scan_button() {
-    return content_view().bluetooth_status_container_->re_scan_button();
+    return content_view().ReScanButtonForTesting();
   }
-  views::Throbber* throbber() {
-    return content_view().bluetooth_status_container_->throbber();
-  }
+  views::Throbber* throbber() { return content_view().ThrobberForTesting(); }
   views::Label* scanning_label() {
-    return content_view().bluetooth_status_container_->scanning_label();
+    return content_view().ScanningLabelForTesting();
   }
 
   void AddUnpairedDevice() {
@@ -105,8 +104,8 @@ class DeviceChooserContentViewTest : public ChromeViewsTestBase {
   bool IsDeviceSelected() { return !table_view()->selection_model().empty(); }
 
   void ExpectNoDevices() {
-    EXPECT_TRUE(no_options_label()->GetVisible());
-    EXPECT_EQ(0, table_view()->RowCount());
+    EXPECT_TRUE(no_options_view()->GetVisible());
+    EXPECT_EQ(0, table_view()->GetRowCount());
     // The table should be disabled since there are no (real) options.
     EXPECT_FALSE(table_parent()->GetVisible());
     EXPECT_FALSE(table_view()->GetEnabled());
@@ -128,7 +127,7 @@ TEST_F(DeviceChooserContentViewTest, InitialState) {
   EXPECT_CALL(table_observer(), OnSelectionChanged()).Times(0);
 
   ExpectNoDevices();
-  EXPECT_FALSE(adapter_off_help_link()->GetVisible());
+  EXPECT_FALSE(adapter_off_view()->GetVisible());
   EXPECT_FALSE(throbber()->GetVisible());
   EXPECT_FALSE(scanning_label()->GetVisible());
   EXPECT_TRUE(re_scan_button()->GetVisible());
@@ -139,14 +138,14 @@ TEST_F(DeviceChooserContentViewTest, AddOption) {
   EXPECT_CALL(table_observer(), OnSelectionChanged()).Times(0);
   AddPairedDevice();
 
-  EXPECT_EQ(1, table_view()->RowCount());
+  EXPECT_EQ(1, table_view()->GetRowCount());
   EXPECT_EQ(GetPairedDeviceTextAtRow(0), table_model()->GetText(0, 0));
   // The table should be enabled now that there's an option.
   EXPECT_TRUE(table_view()->GetEnabled());
   EXPECT_FALSE(IsDeviceSelected());
 
   AddUnpairedDevice();
-  EXPECT_EQ(2, table_view()->RowCount());
+  EXPECT_EQ(2, table_view()->GetRowCount());
   EXPECT_EQ(GetUnpairedDeviceTextAtRow(1), table_model()->GetText(1, 0));
   EXPECT_TRUE(table_view()->GetEnabled());
   EXPECT_FALSE(IsDeviceSelected());
@@ -161,7 +160,7 @@ TEST_F(DeviceChooserContentViewTest, RemoveOption) {
 
   // Remove the paired device.
   controller()->RemoveDevice(0);
-  EXPECT_EQ(2, table_view()->RowCount());
+  EXPECT_EQ(2, table_view()->GetRowCount());
   EXPECT_EQ(GetUnpairedDeviceTextAtRow(0), table_model()->GetText(0, 0));
   EXPECT_EQ(GetUnpairedDeviceTextAtRow(1), table_model()->GetText(1, 0));
   EXPECT_TRUE(table_view()->GetEnabled());
@@ -185,7 +184,7 @@ TEST_F(DeviceChooserContentViewTest, UpdateOption) {
       1, {"Nice Device", FakeBluetoothChooserController::CONNECTED,
           FakeBluetoothChooserController::PAIRED,
           FakeBluetoothChooserController::kSignalStrengthUnknown});
-  EXPECT_EQ(3, table_view()->RowCount());
+  EXPECT_EQ(3, table_view()->GetRowCount());
   EXPECT_EQ(GetPairedDeviceTextAtRow(1), table_model()->GetText(1, 0));
   EXPECT_FALSE(IsDeviceSelected());
 }
@@ -197,11 +196,11 @@ TEST_F(DeviceChooserContentViewTest, SelectAndDeselectAnOption) {
 
   table_view()->Select(0);
   EXPECT_TRUE(IsDeviceSelected());
-  EXPECT_EQ(0, table_view()->FirstSelectedRow());
+  EXPECT_EQ(0, table_view()->GetFirstSelectedRow());
 
   table_view()->Select(-1);
   EXPECT_FALSE(IsDeviceSelected());
-  EXPECT_EQ(-1, table_view()->FirstSelectedRow());
+  EXPECT_EQ(-1, table_view()->GetFirstSelectedRow());
 }
 
 TEST_F(DeviceChooserContentViewTest, TurnBluetoothOffAndOn) {
@@ -210,8 +209,8 @@ TEST_F(DeviceChooserContentViewTest, TurnBluetoothOffAndOn) {
       FakeBluetoothChooserController::BluetoothStatus::UNAVAILABLE);
 
   EXPECT_FALSE(table_parent()->GetVisible());
-  EXPECT_FALSE(no_options_label()->GetVisible());
-  EXPECT_TRUE(adapter_off_help_link()->GetVisible());
+  EXPECT_FALSE(no_options_view()->GetVisible());
+  EXPECT_TRUE(adapter_off_view()->GetVisible());
   EXPECT_FALSE(throbber()->GetVisible());
   EXPECT_FALSE(scanning_label()->GetVisible());
   EXPECT_TRUE(re_scan_button()->GetVisible());
@@ -221,7 +220,7 @@ TEST_F(DeviceChooserContentViewTest, TurnBluetoothOffAndOn) {
   controller()->SetBluetoothStatus(
       FakeBluetoothChooserController::BluetoothStatus::IDLE);
   ExpectNoDevices();
-  EXPECT_FALSE(adapter_off_help_link()->GetVisible());
+  EXPECT_FALSE(adapter_off_view()->GetVisible());
   EXPECT_FALSE(throbber()->GetVisible());
   EXPECT_FALSE(scanning_label()->GetVisible());
   EXPECT_TRUE(re_scan_button()->GetVisible());
@@ -231,17 +230,17 @@ TEST_F(DeviceChooserContentViewTest, TurnBluetoothOffAndOn) {
 TEST_F(DeviceChooserContentViewTest, ScanForDevices) {
   controller()->SetBluetoothStatus(
       FakeBluetoothChooserController::BluetoothStatus::SCANNING);
-  EXPECT_EQ(0, table_view()->RowCount());
+  EXPECT_EQ(0, table_view()->GetRowCount());
   EXPECT_FALSE(table_view()->GetEnabled());
-  EXPECT_FALSE(adapter_off_help_link()->GetVisible());
+  EXPECT_FALSE(adapter_off_view()->GetVisible());
   EXPECT_TRUE(throbber()->GetVisible());
   EXPECT_TRUE(scanning_label()->GetVisible());
   EXPECT_FALSE(re_scan_button()->GetVisible());
 
   AddUnpairedDevice();
-  EXPECT_EQ(1, table_view()->RowCount());
+  EXPECT_EQ(1, table_view()->GetRowCount());
   EXPECT_TRUE(table_view()->GetEnabled());
-  EXPECT_FALSE(adapter_off_help_link()->GetVisible());
+  EXPECT_FALSE(adapter_off_view()->GetVisible());
   EXPECT_TRUE(throbber()->GetVisible());
   EXPECT_TRUE(scanning_label()->GetVisible());
   EXPECT_FALSE(IsDeviceSelected());
@@ -250,7 +249,8 @@ TEST_F(DeviceChooserContentViewTest, ScanForDevices) {
 
 TEST_F(DeviceChooserContentViewTest, ClickAdapterOffHelpLink) {
   EXPECT_CALL(*controller(), OpenAdapterOffHelpUrl()).Times(1);
-  adapter_off_help_link()->LinkClicked(nullptr, 0);
+  static_cast<views::StyledLabel*>(adapter_off_view()->children().front())
+      ->LinkClicked(nullptr, 0);
 }
 
 TEST_F(DeviceChooserContentViewTest, ClickRescanButton) {
@@ -279,7 +279,7 @@ TEST_F(DeviceChooserContentViewTest, SetTableViewAlwaysDisabled) {
   controller()->set_table_view_always_disabled(true);
   EXPECT_FALSE(table_view()->GetEnabled());
   AddUnpairedDevice();
-  EXPECT_EQ(1, table_view()->RowCount());
+  EXPECT_EQ(1, table_view()->GetRowCount());
   // The table should still be disabled even though there's an option.
   EXPECT_FALSE(table_view()->GetEnabled());
 }

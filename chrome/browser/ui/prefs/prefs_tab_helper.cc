@@ -25,6 +25,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/prefs/pref_watcher.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_names_util.h"
@@ -42,6 +43,7 @@
 #include "content/public/common/web_preferences.h"
 #include "extensions/buildflags/buildflags.h"
 #include "media/media_buildflags.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
@@ -351,7 +353,9 @@ void PrefsTabHelper::RegisterProfilePrefs(
                                 pref_defaults.tabs_to_links);
   registry->RegisterBooleanPref(prefs::kWebKitAllowRunningInsecureContent,
                                 false);
-  registry->RegisterBooleanPref(prefs::kEnableReferrers, true);
+  registry->RegisterBooleanPref(
+      prefs::kEnableReferrers,
+      !base::FeatureList::IsEnabled(features::kNoReferrers));
   registry->RegisterBooleanPref(prefs::kEnableEncryptedMedia, true);
 #if defined(OS_ANDROID)
   registry->RegisterDoublePref(prefs::kWebKitFontScaleFactor, 1.0);
@@ -359,14 +363,14 @@ void PrefsTabHelper::RegisterProfilePrefs(
                                 pref_defaults.force_enable_zoom);
   registry->RegisterBooleanPref(prefs::kWebKitPasswordEchoEnabled,
                                 pref_defaults.password_echo_enabled);
+#endif
 
   bool force_dark_mode_enabled =
-      base::FeatureList::IsEnabled(chrome::android::kAndroidWebContentsDarkMode)
+      base::FeatureList::IsEnabled(blink::features::kForceWebContentsDarkMode)
           ? true
           : pref_defaults.force_dark_mode_enabled;
   registry->RegisterBooleanPref(prefs::kWebKitForceDarkModeEnabled,
                                 force_dark_mode_enabled);
-#endif
   registry->RegisterStringPref(
       prefs::kDefaultCharset,
       l10n_util::GetStringUTF8(IDS_DEFAULT_ENCODING),
@@ -447,7 +451,7 @@ void PrefsTabHelper::UpdateRendererPreferences() {
   blink::mojom::RendererPreferences* prefs =
       web_contents_->GetMutableRendererPrefs();
   renderer_preferences_util::UpdateFromSystemSettings(prefs, profile_);
-  web_contents_->GetRenderViewHost()->SyncRendererPrefs();
+  web_contents_->SyncRendererPrefs();
 }
 
 void PrefsTabHelper::OnFontFamilyPrefChanged(const std::string& pref_name) {

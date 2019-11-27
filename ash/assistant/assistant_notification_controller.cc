@@ -12,11 +12,12 @@
 #include "ash/assistant/util/deep_link_util.h"
 #include "ash/public/cpp/notification_utils.h"
 #include "ash/public/cpp/vector_icons/vector_icons.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
-#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
+#include "ash/public/mojom/assistant_controller.mojom.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/strings/utf_string_conversions.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/public/cpp/notification.h"
@@ -81,7 +82,6 @@ bool IsValidActionUrl(const GURL& action_url) {
 AssistantNotificationController::AssistantNotificationController(
     AssistantController* assistant_controller)
     : assistant_controller_(assistant_controller),
-      binding_(this),
       expiry_monitor_(this),
       notifier_id_(GetNotifierId()) {
   AddModelObserver(this);
@@ -95,9 +95,9 @@ AssistantNotificationController::~AssistantNotificationController() {
   RemoveModelObserver(this);
 }
 
-void AssistantNotificationController::BindRequest(
-    mojom::AssistantNotificationControllerRequest request) {
-  binding_.Bind(std::move(request));
+void AssistantNotificationController::BindReceiver(
+    mojo::PendingReceiver<mojom::AssistantNotificationController> receiver) {
+  receiver_.Bind(std::move(receiver));
 }
 
 void AssistantNotificationController::AddModelObserver(
@@ -206,7 +206,7 @@ void AssistantNotificationController::SetQuietMode(bool enabled) {
 void AssistantNotificationController::OnNotificationAdded(
     const AssistantNotification* notification) {
   // Do not show system notifications if the setting is disabled.
-  if (!VoiceInteractionController::Get()->notification_enabled())
+  if (!AssistantState::Get()->notification_enabled().value_or(true))
     return;
 
   // We only show system notifications in the Message Center.
@@ -220,7 +220,7 @@ void AssistantNotificationController::OnNotificationAdded(
 void AssistantNotificationController::OnNotificationUpdated(
     const AssistantNotification* notification) {
   // Do not show system notifications if the setting is disabled.
-  if (!VoiceInteractionController::Get()->notification_enabled())
+  if (!AssistantState::Get()->notification_enabled().value_or(true))
     return;
 
   // If the notification that was updated is *not* a system notification, we

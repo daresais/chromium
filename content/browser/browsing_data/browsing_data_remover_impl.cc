@@ -20,7 +20,7 @@
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "content/browser/browsing_data/storage_partition_http_cache_data_remover.h"
+#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -36,6 +36,7 @@
 #include "storage/browser/quota/special_storage_policy.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+#include "url/url_util.h"
 
 using base::UserMetricsAction;
 
@@ -240,9 +241,9 @@ void BrowsingDataRemoverImpl::RunNextTask() {
   // after a delay.
   slow_pending_tasks_closure_.Reset(base::BindRepeating(
       &BrowsingDataRemoverImpl::RecordUnfinishedSubTasks, GetWeakPtr()));
-  base::PostDelayedTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                                  slow_pending_tasks_closure_.callback(),
-                                  kSlowTaskTimeout);
+  base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
+                        slow_pending_tasks_closure_.callback(),
+                        kSlowTaskTimeout);
 
   RemoveImpl(removal_task.delete_begin, removal_task.delete_end,
              removal_task.remove_mask, removal_task.filter_builder.get(),
@@ -360,7 +361,12 @@ void BrowsingDataRemoverImpl::RemoveImpl(
     storage_partition_remove_mask |=
         StoragePartition::REMOVE_DATA_MASK_BACKGROUND_FETCH;
   }
-
+  if (remove_mask & DATA_TYPE_CACHE) {
+    // Tell the shader disk cache to clear.
+    base::RecordAction(UserMetricsAction("ClearBrowsingData_ShaderCache"));
+    storage_partition_remove_mask |=
+        StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE;
+  }
   // Content Decryption Modules used by Encrypted Media store licenses in a
   // private filesystem. These are different than content licenses used by
   // Flash (which are deleted father down in this method).
@@ -427,19 +433,14 @@ void BrowsingDataRemoverImpl::RemoveImpl(
     // TODO(msramek): Clear the cache of all renderers.
 
     // TODO(crbug.com/813882): implement retry on network service.
-    if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
-      // The clearing of the HTTP cache happens in the network service process
-      // when enabled. Note that we've deprecated the concept of a media cache,
-      // and are now using a single cache for both purposes.
-      network_context->ClearHttpCache(
-          delete_begin, delete_end, filter_builder->BuildNetworkServiceFilter(),
-          CreateTaskCompletionClosureForMojo(TracingDataType::kHttpCache));
-    } else {
-      storage_partition->ClearHttpAndMediaCaches(
-          delete_begin, delete_end, nullable_filter,
-          CreateTaskCompletionClosureForMojo(
-              TracingDataType::kHttpAndMediaCaches));
-    }
+
+    // The clearing of the HTTP cache happens in the network service process
+    // when enabled. Note that we've deprecated the concept of a media cache,
+    // and are now using a single cache for both purposes.
+    network_context->ClearHttpCache(
+        delete_begin, delete_end, filter_builder->BuildNetworkServiceFilter(),
+        CreateTaskCompletionClosureForMojo(TracingDataType::kHttpCache));
+
     storage_partition->ClearCodeCaches(
         delete_begin, delete_end, nullable_filter,
         CreateTaskCompletionClosureForMojo(TracingDataType::kCodeCaches));
@@ -450,10 +451,8 @@ void BrowsingDataRemoverImpl::RemoveImpl(
         delete_begin,
         CreateTaskCompletionClosureForMojo(TracingDataType::kNetworkHistory));
 
-    // Tell the shader disk cache to clear.
-    base::RecordAction(UserMetricsAction("ClearBrowsingData_ShaderCache"));
-    storage_partition_remove_mask |=
-        StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE;
+    // Clears the PrefetchedSignedExchangeCache of all RenderFrameHostImpls.
+    RenderFrameHostImpl::ClearAllPrefetchedSignedExchangeCache();
   }
 
 #if BUILDFLAG(ENABLE_REPORTING)
@@ -502,8 +501,8 @@ void BrowsingDataRemoverImpl::RemoveObserver(Observer* observer) {
 }
 
 void BrowsingDataRemoverImpl::SetWouldCompleteCallbackForTesting(
-    const base::Callback<void(const base::Closure& continue_to_completion)>&
-        callback) {
+    const base::RepeatingCallback<
+        void(base::OnceClosure continue_to_completion)>& callback) {
   would_complete_callback_ = callback;
 }
 
@@ -591,7 +590,7 @@ void BrowsingDataRemoverImpl::Notify() {
   // Yield to the UI thread before executing the next removal task.
   // TODO(msramek): Consider also adding a backoff if too many tasks
   // are scheduled.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&BrowsingDataRemoverImpl::RunNextTask, GetWeakPtr()));
 }
@@ -614,7 +613,7 @@ void BrowsingDataRemoverImpl::OnTaskComplete(TracingDataType data_type) {
 
   if (!would_complete_callback_.is_null()) {
     would_complete_callback_.Run(
-        base::Bind(&BrowsingDataRemoverImpl::Notify, GetWeakPtr()));
+        base::BindOnce(&BrowsingDataRemoverImpl::Notify, GetWeakPtr()));
     return;
   }
 

@@ -30,7 +30,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/attestation/attestation_flow.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/dbus/auth_policy/auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/authpolicy_client.h"
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/policy/core/common/cloud/dm_auth.h"
@@ -48,10 +48,7 @@ namespace policy {
 
 DeviceAccountInitializer::DeviceAccountInitializer(CloudPolicyClient* client,
                                                    Delegate* delegate)
-    : client_(client),
-      delegate_(delegate),
-      handling_request_(false),
-      weak_ptr_factory_(this) {
+    : client_(client), delegate_(delegate), handling_request_(false) {
   client_->AddObserver(this);
 }
 

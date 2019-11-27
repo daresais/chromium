@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/views/extensions/pwa_confirmation_bubble_view.h"
 #include "chrome/browser/ui/web_applications/web_app_dialog_utils.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
-#include "chrome/browser/web_applications/components/web_app_tab_helper_base.h"
+#include "chrome/browser/web_applications/components/web_app_tab_helper.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/omnibox/browser/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -27,37 +27,23 @@ PwaInstallView::PwaInstallView(CommandUpdater* command_updater,
 
 PwaInstallView::~PwaInstallView() {}
 
-bool PwaInstallView::Update() {
+void PwaInstallView::UpdateImpl() {
   content::WebContents* web_contents = GetWebContents();
   if (!web_contents)
-    return false;
+    return;
 
   auto* manager = banners::AppBannerManager::FromWebContents(web_contents);
   // May not be present e.g. in incognito mode.
   if (!manager)
-    return false;
-
-  bool show_install_button = false;
+    return;
 
   bool is_probably_promotable = manager->IsProbablyPromotableWebApp();
   if (is_probably_promotable && manager->MaybeConsumeInstallAnimation())
     AnimateIn(base::nullopt);
   else
     ResetSlideAnimation(false);
-  if (is_probably_promotable)
-    show_install_button = true;
 
-  auto* web_app_tab_helper =
-      web_app::WebAppTabHelperBase::FromWebContents(web_contents);
-  if (web_app_tab_helper && web_app_tab_helper->HasAssociatedApp())
-    show_install_button = false;
-
-  if (PWAConfirmationBubbleView::IsShowing())
-    show_install_button = true;
-
-  bool was_visible = GetVisible();
-  SetVisible(show_install_button);
-  return GetVisible() != was_visible;
+  SetVisible(is_probably_promotable || PWAConfirmationBubbleView::IsShowing());
 }
 
 void PwaInstallView::OnExecuting(PageActionIconView::ExecuteSource source) {

@@ -9,10 +9,10 @@
 
 #include "base/ios/ios_util.h"
 #include "base/metrics/histogram_macros.h"
+#import "ios/chrome/browser/ui/elements/fade_truncating_label.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_constants.h"
 #import "ios/chrome/browser/ui/omnibox/popup/image_retriever.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_row.h"
-#import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_truncating_label.h"
 #import "ios/chrome/browser/ui/omnibox/popup/self_sizing_table_view.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
 #include "ios/chrome/browser/ui/util/animation_util.h"
@@ -40,6 +40,14 @@ const CGFloat kAnswerRowHeight = 64.0;
   // Array containing the OmniboxPopupRow objects displayed in the view.
   NSArray* _rows;
 }
+
+// A flag to track if since the last viewWillAppear, the view ever adopted a
+// non-zero size. This is a pretty sad workaround for the new iOS 13 behaviour
+// where the half-autolayout, half-manual layout code of this legacy class ends
+// up sizing cells to a zero width because -layoutRows is never called on the
+// first appearance. This should be removed, together with this class, when the
+// non-legacy OmniboxPopupViewController becomes the default.
+@property(nonatomic, assign) BOOL viewHadNonZeroWidth;
 
 @end
 
@@ -90,6 +98,26 @@ const CGFloat kAnswerRowHeight = 64.0;
         [self layoutRows];
       }
                       completion:nil];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+  [super viewWillAppear:animated];
+  if (self.view.bounds.size.width == 0) {
+    self.viewHadNonZeroWidth = NO;
+  }
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+
+  // This method will be called multiple times, including after the self-sizing
+  // table view will have taken its final (non-zero) size. Calling -layoutRows
+  // will result in another viewDidLayoutSubviews call, so a flag is necessary
+  // to avoid an infinite loop.
+  if (self.view.bounds.size.width > 0 && !self.viewHadNonZeroWidth) {
+    self.viewHadNonZeroWidth = YES;
+    [self layoutRows];
+  }
 }
 
 #pragma mark -
@@ -186,7 +214,7 @@ const CGFloat kAnswerRowHeight = 64.0;
 
   [detailTextLabel setNeedsDisplay];
 
-  OmniboxPopupTruncatingLabel* textLabel = row.textTruncatingLabel;
+  FadeTruncatingLabel* textLabel = row.textTruncatingLabel;
   [textLabel setTextAlignment:self.alignment];
   LayoutRect textLabelLayout =
       LayoutRectMake(kTextCellLeadingPadding, CGRectGetWidth(rowBounds), 0,

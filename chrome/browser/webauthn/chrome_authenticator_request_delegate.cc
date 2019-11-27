@@ -14,6 +14,8 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -28,14 +30,18 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "device/fido/features.h"
 #include "device/fido/fido_authenticator.h"
+#include "device/fido/fido_discovery_factory.h"
 
 #if defined(OS_MACOSX)
+#include "device/fido/mac/authenticator.h"
 #include "device/fido/mac/credential_metadata.h"
 #endif
 
 #if defined(OS_WIN)
 #include "device/fido/win/authenticator.h"
+#include "device/fido/win/webauthn_api.h"
 #endif
 
 namespace {
@@ -45,9 +51,6 @@ namespace {
 bool IsWebauthnRPIDListedInEnterprisePolicy(
     content::BrowserContext* browser_context,
     const std::string& relying_party_id) {
-#if defined(OS_ANDROID)
-  return false;
-#else
   const Profile* profile = Profile::FromBrowserContext(browser_context);
   const PrefService* prefs = profile->GetPrefs();
   const base::ListValue* permit_attestation =
@@ -56,21 +59,56 @@ bool IsWebauthnRPIDListedInEnterprisePolicy(
                      [&relying_party_id](const base::Value& v) {
                        return v.GetString() == relying_party_id;
                      });
-#endif
 }
 
-}  // namespace
+std::string Base64(base::span<const uint8_t> in) {
+  std::string ret;
+  base::Base64Encode(
+      base::StringPiece(reinterpret_cast<const char*>(in.data()), in.size()),
+      &ret);
+  return ret;
+}
+
+template <size_t N>
+bool CopyBytestring(std::array<uint8_t, N>* out,
+                    const base::Value& dict,
+                    const char* key) {
+  const base::Value* v = dict.FindKey(key);
+  if (!v || !v->is_string()) {
+    return false;
+  }
+
+  std::string bytes;
+  if (!base::Base64Decode(v->GetString(), &bytes) || bytes.size() != N) {
+    return false;
+  }
+
+  std::copy(bytes.begin(), bytes.end(), out->begin());
+  return true;
+}
 
 #if defined(OS_MACOSX)
-static const char kWebAuthnTouchIdMetadataSecretPrefName[] =
+const char kWebAuthnTouchIdMetadataSecretPrefName[] =
     "webauthn.touchid.metadata_secret";
 #endif
 
-static const char kWebAuthnLastTransportUsedPrefName[] =
+const char kWebAuthnLastTransportUsedPrefName[] =
     "webauthn.last_transport_used";
 
-static const char kWebAuthnBlePairedMacAddressesPrefName[] =
+const char kWebAuthnBlePairedMacAddressesPrefName[] =
     "webauthn.ble.paired_mac_addresses";
+
+const char kWebAuthnCablePairingsPrefName[] = "webauthn.cable_pairings";
+
+// The |kWebAuthnCablePairingsPrefName| preference contains a list of dicts,
+// where each dict has these keys:
+const char kPairingPrefIdentity[] = "identity";
+const char kPairingPrefName[] = "name";
+const char kPairingPrefTime[] = "time";
+const char kPairingPrefEIDGenKey[] = "eid_gen_key";
+const char kPairingPrefPSKGenKey[] = "psk_gen_key";
+
+}  // namespace
 
 // static
 void ChromeAuthenticatorRequestDelegate::RegisterProfilePrefs(
@@ -83,6 +121,7 @@ void ChromeAuthenticatorRequestDelegate::RegisterProfilePrefs(
   registry->RegisterStringPref(kWebAuthnLastTransportUsedPrefName,
                                std::string());
   registry->RegisterListPref(kWebAuthnBlePairedMacAddressesPrefName);
+  registry->RegisterListPref(kWebAuthnCablePairingsPrefName);
 }
 
 ChromeAuthenticatorRequestDelegate::ChromeAuthenticatorRequestDelegate(
@@ -202,11 +241,6 @@ void ChromeAuthenticatorRequestDelegate::ShouldReturnAttestation(
     const std::string& relying_party_id,
     const device::FidoAuthenticator* authenticator,
     base::OnceCallback<void(bool)> callback) {
-#if defined(OS_ANDROID)
-  // Android is expected to use platform APIs for webauthn which will take care
-  // of prompting.
-  std::move(callback).Run(true);
-#else
   if (IsWebauthnRPIDListedInEnterprisePolicy(browser_context(),
                                              relying_party_id)) {
     std::move(callback).Run(true);
@@ -230,14 +264,37 @@ void ChromeAuthenticatorRequestDelegate::ShouldReturnAttestation(
     std::move(callback).Run(true);
     return;
   }
-
 #endif  // defined(OS_WIN)
 
   weak_dialog_model_->RequestAttestationPermission(std::move(callback));
-#endif
 }
 
 bool ChromeAuthenticatorRequestDelegate::SupportsResidentKeys() {
+  return true;
+}
+
+bool ChromeAuthenticatorRequestDelegate::ShouldPermitCableExtension(
+    const url::Origin& origin) {
+  // Because the future of the caBLE extension might be that we transition
+  // everything to QR-code or sync-based pairing, we don't want use of the
+  // extension to spread without consideration. Therefore it's limited to
+  // origins that are already depending on it and test sites.
+  if (origin.DomainIs("google.com")) {
+    return true;
+  }
+
+  const GURL test_site("https://webauthndemo.appspot.com");
+  DCHECK(test_site.is_valid());
+  return origin.IsSameOriginWith(url::Origin::Create(test_site));
+}
+
+bool ChromeAuthenticatorRequestDelegate::SetCableTransportInfo(
+    bool cable_extension_provided,
+    bool have_paired_phones,
+    base::Optional<device::QRGeneratorKey> qr_generator_key) {
+  weak_dialog_model_->set_cable_transport_info(cable_extension_provided,
+                                               have_paired_phones,
+                                               std::move(qr_generator_key));
   return true;
 }
 
@@ -261,15 +318,10 @@ void ChromeAuthenticatorRequestDelegate::SelectAccount(
 }
 
 bool ChromeAuthenticatorRequestDelegate::IsFocused() {
-#if defined(OS_ANDROID)
-  // Android is expected to use platform APIs for webauthn.
-  return true;
-#else
   auto* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host());
   DCHECK(web_contents);
   return web_contents->GetVisibility() == content::Visibility::VISIBLE;
-#endif
 }
 
 #if defined(OS_MACOSX)
@@ -293,19 +345,11 @@ std::string TouchIdMetadataSecret(Profile* profile) {
 }  // namespace
 
 // static
-content::AuthenticatorRequestClientDelegate::TouchIdAuthenticatorConfig
+ChromeAuthenticatorRequestDelegate::TouchIdAuthenticatorConfig
 ChromeAuthenticatorRequestDelegate::TouchIdAuthenticatorConfigForProfile(
     Profile* profile) {
-  return content::AuthenticatorRequestClientDelegate::
-      TouchIdAuthenticatorConfig{kTouchIdKeychainAccessGroup,
-                                 TouchIdMetadataSecret(profile)};
-}
-
-base::Optional<
-    content::AuthenticatorRequestClientDelegate::TouchIdAuthenticatorConfig>
-ChromeAuthenticatorRequestDelegate::GetTouchIdAuthenticatorConfig() {
-  return TouchIdAuthenticatorConfigForProfile(
-      Profile::FromBrowserContext(browser_context()));
+  return TouchIdAuthenticatorConfig{kTouchIdKeychainAccessGroup,
+                                    TouchIdMetadataSecret(profile)};
 }
 #endif
 
@@ -318,6 +362,8 @@ void ChromeAuthenticatorRequestDelegate::UpdateLastTransportUsed(
 
   if (!weak_dialog_model_)
     return;
+
+  weak_dialog_model_->OnSuccess(transport);
 
   // We already invoke AddFidoBleDeviceToPairedList() on
   // AuthenticatorRequestDialogModel::OnPairingSuccess(). We invoke the function
@@ -346,18 +392,42 @@ bool ChromeAuthenticatorRequestDelegate::IsWebAuthnUIEnabled() {
   return !disable_ui_;
 }
 
-bool ChromeAuthenticatorRequestDelegate::ShouldDisablePlatformAuthenticators() {
+bool ChromeAuthenticatorRequestDelegate::
+    IsUserVerifyingPlatformAuthenticatorAvailable() {
 #if defined(OS_MACOSX)
   // Touch ID is available in Incognito, but not in Guest mode.
-  return Profile::FromBrowserContext(browser_context())->IsGuestSession();
-#else  // Windows, Android
-  return browser_context()->IsOffTheRecord();
-#endif
+  if (Profile::FromBrowserContext(browser_context())->IsGuestSession())
+    return false;
+
+  return device::fido::mac::TouchIdAuthenticator::IsAvailable(
+      TouchIdAuthenticatorConfigForProfile(
+          Profile::FromBrowserContext(browser_context())));
+#elif defined(OS_WIN)
+  if (browser_context()->IsOffTheRecord())
+    return false;
+
+  return base::FeatureList::IsEnabled(device::kWebAuthUseNativeWinApi) &&
+         device::WinWebAuthnApiAuthenticator::
+             IsUserVerifyingPlatformAuthenticatorAvailable(
+                 GetDiscoveryFactory()->win_webauthn_api());
+#else
+  return false;
+#endif  // defined(OS_MACOSX) || defined(OS_WIN)
 }
+
+#if defined(OS_MACOSX)
+base::Optional<ChromeAuthenticatorRequestDelegate::TouchIdAuthenticatorConfig>
+ChromeAuthenticatorRequestDelegate::GetTouchIdAuthenticatorConfig() {
+  if (!IsUserVerifyingPlatformAuthenticatorAvailable())
+    return base::nullopt;
+
+  return TouchIdAuthenticatorConfigForProfile(
+      Profile::FromBrowserContext(browser_context()));
+}
+#endif  // defined(OS_MACOSX)
 
 void ChromeAuthenticatorRequestDelegate::OnTransportAvailabilityEnumerated(
     device::FidoRequestHandlerBase::TransportAvailabilityInfo data) {
-#if !defined(OS_ANDROID)
   if (disable_ui_ || !transient_dialog_model_holder_) {
     return;
   }
@@ -372,7 +442,6 @@ void ChromeAuthenticatorRequestDelegate::OnTransportAvailabilityEnumerated(
   ShowAuthenticatorRequestDialog(
       content::WebContents::FromRenderFrameHost(render_frame_host()),
       std::move(transient_dialog_model_holder_));
-#endif  // !defined(OS_ANDROID)
 }
 
 bool ChromeAuthenticatorRequestDelegate::EmbedderControlsAuthenticatorDispatch(
@@ -422,12 +491,13 @@ void ChromeAuthenticatorRequestDelegate::FidoAuthenticatorIdChanged(
 
 void ChromeAuthenticatorRequestDelegate::FidoAuthenticatorPairingModeChanged(
     base::StringPiece authenticator_id,
-    bool is_in_pairing_mode) {
+    bool is_in_pairing_mode,
+    base::string16 display_name) {
   if (!weak_dialog_model_)
     return;
 
   weak_dialog_model_->UpdateAuthenticatorReferencePairingMode(
-      authenticator_id, is_in_pairing_mode);
+      authenticator_id, is_in_pairing_mode, display_name);
 }
 
 void ChromeAuthenticatorRequestDelegate::BluetoothAdapterPowerChanged(
@@ -481,6 +551,44 @@ void ChromeAuthenticatorRequestDelegate::OnCancelRequest() {
   std::move(cancel_callback_).Run();
 }
 
+std::vector<device::CableDiscoveryData>
+ChromeAuthenticatorRequestDelegate::GetCablePairings() {
+  std::vector<device::CableDiscoveryData> ret;
+  if (!base::FeatureList::IsEnabled(device::kWebAuthPhoneSupport)) {
+    NOTREACHED();
+    return ret;
+  }
+
+  PrefService* prefs =
+      Profile::FromBrowserContext(browser_context())->GetPrefs();
+  const base::ListValue* pref_pairings =
+      prefs->GetList(kWebAuthnCablePairingsPrefName);
+
+  for (const auto& pairing : *pref_pairings) {
+    if (!pairing.is_dict()) {
+      continue;
+    }
+
+    device::CableDiscoveryData discovery;
+    discovery.version = device::CableDiscoveryData::Version::V2;
+    discovery.v2.emplace();
+    discovery.v2->peer_identity.emplace();
+
+    if (!CopyBytestring(&discovery.v2->peer_identity.value(), pairing,
+                        kPairingPrefIdentity) ||
+        !CopyBytestring(&discovery.v2->eid_gen_key, pairing,
+                        kPairingPrefEIDGenKey) ||
+        !CopyBytestring(&discovery.v2->psk_gen_key, pairing,
+                        kPairingPrefPSKGenKey)) {
+      continue;
+    }
+
+    ret.push_back(discovery);
+  }
+
+  return ret;
+}
+
 void ChromeAuthenticatorRequestDelegate::AddFidoBleDeviceToPairedList(
     std::string ble_authenticator_id) {
   ListPrefUpdate update(
@@ -513,4 +621,66 @@ ChromeAuthenticatorRequestDelegate::GetPreviouslyPairedFidoBleDeviceIds()
   PrefService* prefs =
       Profile::FromBrowserContext(browser_context())->GetPrefs();
   return prefs->GetList(kWebAuthnBlePairedMacAddressesPrefName);
+}
+
+void ChromeAuthenticatorRequestDelegate::CustomizeDiscoveryFactory(
+    device::FidoDiscoveryFactory* discovery_factory) {
+  discovery_factory->set_cable_pairing_callback(base::BindRepeating(
+      &ChromeAuthenticatorRequestDelegate::StoreNewCablePairingInPrefs,
+      weak_ptr_factory_.GetWeakPtr()));
+}
+
+void ChromeAuthenticatorRequestDelegate::StoreNewCablePairingInPrefs(
+    std::unique_ptr<device::CableDiscoveryData> discovery_data) {
+  // This is called when doing a QR-code pairing with a phone and the phone
+  // sends long-term pairing information during the handshake. The pairing
+  // information is saved in preferences for future operations.
+  DCHECK_EQ(device::CableDiscoveryData::Version::V2, discovery_data->version);
+  DCHECK(discovery_data->v2->peer_identity.has_value());
+  DCHECK(discovery_data->v2->peer_name.has_value());
+  if (!base::FeatureList::IsEnabled(device::kWebAuthPhoneSupport)) {
+    NOTREACHED();
+    return;
+  }
+
+  // For Incognito/Guest profiles, pairings will only last for the duration of
+  // that session. While an argument could be made that it's safe to persist
+  // such pairing for longer, this seems like the safe option initially.
+  ListPrefUpdate update(
+      Profile::FromBrowserContext(browser_context())->GetPrefs(),
+      kWebAuthnCablePairingsPrefName);
+  const std::string identity_base64 =
+      Base64(*discovery_data->v2->peer_identity);
+  if (std::any_of(update->begin(), update->end(),
+                  [&identity_base64](const auto& value) {
+                    if (!value.is_dict()) {
+                      return false;
+                    }
+                    const base::Value* identity =
+                        value.FindKey(kPairingPrefIdentity);
+                    return identity && identity->is_string() &&
+                           identity->GetString() == identity_base64;
+                  })) {
+    // This phone is already known, don't add it again.
+    return;
+  }
+
+  auto dict = std::make_unique<base::Value>(base::Value::Type::DICTIONARY);
+  dict->SetKey(kPairingPrefIdentity, base::Value(std::move(identity_base64)));
+  dict->SetKey(kPairingPrefName,
+               base::Value(std::move(*discovery_data->v2->peer_name)));
+  dict->SetKey(kPairingPrefEIDGenKey,
+               base::Value(Base64(discovery_data->v2->eid_gen_key)));
+  dict->SetKey(kPairingPrefPSKGenKey,
+               base::Value(Base64(discovery_data->v2->psk_gen_key)));
+
+  base::Time::Exploded now;
+  base::Time::Now().UTCExplode(&now);
+  dict->SetKey(kPairingPrefTime,
+               // RFC 3339 time format.
+               base::Value(base::StringPrintf(
+                   "%04d-%02d-%02dT%02d:%02d:%02dZ", now.year, now.month,
+                   now.day_of_month, now.hour, now.minute, now.second)));
+
+  update->Append(std::move(dict));
 }

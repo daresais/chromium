@@ -90,6 +90,7 @@ const char kQuicHostWhitelist[] = "host_whitelist";
 const char kQuicEnableSocketRecvOptimization[] =
     "enable_socket_recv_optimization";
 const char kQuicVersion[] = "quic_version";
+const char kQuicFlags[] = "set_quic_flags";
 
 // AsyncDNS experiment dictionary name.
 const char kAsyncDnsFieldTrialName[] = "AsyncDNS";
@@ -152,6 +153,8 @@ const char kDisableIPv6OnWifi[] = "disable_ipv6_on_wifi";
 
 const char kSSLKeyLogFile[] = "ssl_key_log_file";
 
+const char kGoAwayOnPathDegrading[] = "go_away_on_path_degrading";
+
 // "goaway_sessions_on_ip_change" is default on for iOS unless overrided via
 // experimental options explicitly.
 #if defined(OS_IOS)
@@ -178,7 +181,7 @@ std::string SerializeJFVHeader(const base::Value& value) {
 
 std::vector<URLRequestContextConfig::PreloadedNelAndReportingHeader>
 ParseNetworkErrorLoggingHeaders(
-    const base::Value::ListStorage& preloaded_headers_config) {
+    base::span<const base::Value> preloaded_headers_config) {
   std::vector<URLRequestContextConfig::PreloadedNelAndReportingHeader> result;
   for (const auto& preloaded_header_config : preloaded_headers_config) {
     if (!preloaded_header_config.is_dict())
@@ -421,6 +424,13 @@ void URLRequestContextConfig::ParseAndSetExperimentalOptions(
             goaway_sessions_on_ip_change;
       }
 
+      bool go_away_on_path_degrading = false;
+      if (quic_args->GetBoolean(kGoAwayOnPathDegrading,
+                                &go_away_on_path_degrading)) {
+        session_params->quic_params.go_away_on_path_degrading =
+            go_away_on_path_degrading;
+      }
+
       bool quic_allow_server_migration = false;
       if (quic_args->GetBoolean(kQuicAllowServerMigration,
                                 &quic_allow_server_migration)) {
@@ -531,14 +541,27 @@ void URLRequestContextConfig::ParseAndSetExperimentalOptions(
             quic_race_cert_verification;
       }
 
-      std::string quic_host_whitelist;
-      if (quic_args->GetString(kQuicHostWhitelist, &quic_host_whitelist)) {
+      std::string quic_host_allowlist;
+      if (quic_args->GetString(kQuicHostWhitelist, &quic_host_allowlist)) {
         std::vector<std::string> host_vector =
-            base::SplitString(quic_host_whitelist, ",", base::TRIM_WHITESPACE,
+            base::SplitString(quic_host_allowlist, ",", base::TRIM_WHITESPACE,
                               base::SPLIT_WANT_ALL);
-        session_params->quic_host_whitelist.clear();
+        session_params->quic_host_allowlist.clear();
         for (const std::string& host : host_vector) {
-          session_params->quic_host_whitelist.insert(host);
+          session_params->quic_host_allowlist.insert(host);
+        }
+      }
+
+      std::string quic_flags;
+      if (quic_args->GetString(kQuicFlags, &quic_flags)) {
+        for (const auto& flag :
+             base::SplitString(quic_flags, ",", base::TRIM_WHITESPACE,
+                               base::SPLIT_WANT_ALL)) {
+          std::vector<std::string> tokens = base::SplitString(
+              flag, "=", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+          if (tokens.size() != 2)
+            continue;
+          SetQuicFlagByName(tokens[0], tokens[1]);
         }
       }
 
@@ -679,7 +702,8 @@ void URLRequestContextConfig::ParseAndSetExperimentalOptions(
     CHECK(net_log) << "All DNS-related experiments require NetLog.";
     std::unique_ptr<net::HostResolver> host_resolver;
     net::HostResolver::ManagerOptions host_resolver_manager_options;
-    host_resolver_manager_options.dns_client_enabled = async_dns_enable;
+    host_resolver_manager_options.insecure_dns_client_enabled =
+        async_dns_enable;
     host_resolver_manager_options.check_ipv6_on_wifi = !disable_ipv6_on_wifi;
     // TODO(crbug.com/934402): Consider using a shared HostResolverManager for
     // Cronet HostResolvers.

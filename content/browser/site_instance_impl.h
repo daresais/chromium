@@ -32,7 +32,8 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
     virtual void ActiveFrameCountIsZero(SiteInstanceImpl* site_instance) {}
 
     // Called when the renderer process of this SiteInstance has exited.
-    virtual void RenderProcessGone(SiteInstanceImpl* site_instance) = 0;
+    virtual void RenderProcessGone(SiteInstanceImpl* site_instance,
+                                   const ChildProcessTerminationInfo& info) = 0;
   };
 
   static scoped_refptr<SiteInstanceImpl> Create(
@@ -70,10 +71,10 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
   // without converting them to effective URLs first.  This is useful for
   // avoiding OOPIFs when otherwise same-site URLs may look cross-site via
   // their effective URLs.
-  static bool IsSameWebSite(const IsolationContext& isolation_context,
-                            const GURL& src_url,
-                            const GURL& dest_url,
-                            bool should_compare_effective_urls);
+  static bool IsSameSite(const IsolationContext& isolation_context,
+                         const GURL& src_url,
+                         const GURL& dest_url,
+                         bool should_compare_effective_urls);
 
   // SiteInstance interface overrides.
   int32_t GetId() override;
@@ -186,8 +187,17 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
   // Set the web site that this SiteInstance is rendering pages for.
   // This includes the scheme and registered domain, but not the port.  If the
   // URL does not have a valid registered domain, then the full hostname is
-  // stored.
+  // stored. This method does not convert this instance into a default
+  // SiteInstance, but the BrowsingInstance will call this method with |url|
+  // set to GetDefaultSiteURL(), when it is creating its default SiteInstance.
   void SetSite(const GURL& url);
+
+  // Similar to SetSite(), but first attempts to convert this object to a
+  // default SiteInstance if |url| can be placed inside a default SiteInstance.
+  // If conversion is not possible, then the normal SetSite() logic is run.
+  void ConvertToDefaultOrSetSite(const GURL& url);
+
+  // Returns whether SetSite() has been called.
   bool HasSite() const;
 
   // Returns whether there is currently a related SiteInstance (registered with
@@ -195,10 +205,10 @@ class CONTENT_EXPORT SiteInstanceImpl final : public SiteInstance,
   // avoid dedicating an unused SiteInstance to it (e.g., in a new tab).
   bool HasRelatedSiteInstance(const GURL& url);
 
-  // Returns whether this SiteInstance has a process that is the wrong type for
-  // the given URL.  If so, the browser should force a process swap when
-  // navigating to the URL.
-  bool HasWrongProcessForURL(const GURL& url);
+  // Returns whether this SiteInstance is compatible with and can host the given
+  // |url|. If not, the browser should force a SiteInstance swap when
+  // navigating to |url|.
+  bool IsSuitableForURL(const GURL& url);
 
   // Increase the number of active frames in this SiteInstance. This is
   // increased when a frame is created.

@@ -4,7 +4,11 @@
 
 package org.chromium.chrome.browser.gesturenav;
 
+import android.os.Handler;
+
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabAssociatedApp;
+import org.chromium.chrome.browser.tab.TabImpl;
 
 /**
  * Implementation of {@link NavigationHandler#ActionDelegate} that works with
@@ -13,6 +17,7 @@ import org.chromium.chrome.browser.tab.Tab;
  */
 public class TabbedActionDelegate implements NavigationHandler.ActionDelegate {
     private final Tab mTab;
+    private final Handler mHandler = new Handler();
 
     public TabbedActionDelegate(Tab tab) {
         mTab = tab;
@@ -28,12 +33,22 @@ public class TabbedActionDelegate implements NavigationHandler.ActionDelegate {
         if (forward) {
             mTab.goForward();
         } else {
-            mTab.getActivity().onBackPressed();
+            // Perform back action at the next UI thread execution. The back action can
+            // potentially close the tab we're running on, which causes use-after-destroy
+            // exception if the closing operation is performed synchronously.
+            mHandler.post(() -> ((TabImpl) mTab).getActivity().onBackPressed());
         }
     }
 
     @Override
+    public boolean willBackCloseTab() {
+        return !mTab.canGoBack() && ((TabImpl) mTab).getActivity().backShouldCloseTab(mTab);
+    }
+
+    @Override
     public boolean willBackExitApp() {
-        return !mTab.canGoBack() && !mTab.getActivity().backShouldCloseTab(mTab);
+        return !mTab.canGoBack()
+                && (!((TabImpl) mTab).getActivity().backShouldCloseTab(mTab)
+                        || TabAssociatedApp.isOpenedFromExternalApp(mTab));
     }
 }

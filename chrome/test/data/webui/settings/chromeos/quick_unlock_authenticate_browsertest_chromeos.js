@@ -188,7 +188,7 @@ cr.define('settings_people_page_quick_unlock', function() {
 
       test('ConfirmButtonDisabledWhenEmpty', function() {
         // Confirm button is diabled when there is nothing entered.
-        let confirmButton = passwordPromptDialog.$$('#confirmButton');
+        const confirmButton = passwordPromptDialog.$$('#confirmButton');
         assertTrue(!!confirmButton);
         assertTrue(confirmButton.disabled);
 
@@ -272,11 +272,6 @@ cr.define('settings_people_page_quick_unlock', function() {
             key: 'ash.message_center.lock_screen_mode',
             type: chrome.settingsPrivate.PrefType.STRING,
             value: 'hide'
-          },
-          {
-            key: 'ash.lock_screen_media_keys_enabled',
-            type: chrome.settingsPrivate.PrefType.BOOLEAN,
-            value: true
           }
         ];
         fakeSettings = new settings.FakeSettingsPrivate(fakePrefs);
@@ -308,7 +303,7 @@ cr.define('settings_people_page_quick_unlock', function() {
                     return true;
                   });
 
-              return test_util.waitForRender(testElement);
+              return test_util.waitBeforeNextRender(testElement);
             })
             .then(() => {
               passwordRadioButton =
@@ -329,8 +324,8 @@ cr.define('settings_people_page_quick_unlock', function() {
       // Toggling the lock screen preference calls setLockScreenEnabled.
       test('SetLockScreenEnabled', function() {
         testElement.authToken = quickUnlockPrivateApi.getFakeToken();
-        let toggle = getFromElement('#enableLockScreen');
-        let lockScreenEnabled = toggle.checked;
+        const toggle = getFromElement('#enableLockScreen');
+        const lockScreenEnabled = toggle.checked;
         quickUnlockPrivateApi.lockScreenEnabled = lockScreenEnabled;
 
         toggle.click();
@@ -420,6 +415,7 @@ cr.define('settings_people_page_quick_unlock', function() {
       let titleDiv = null;
       let problemDiv = null;
       let pinKeyboard = null;
+      let pinInput = null;
       let backButton = null;
       let continueButton = null;
 
@@ -434,7 +430,7 @@ cr.define('settings_people_page_quick_unlock', function() {
         testElement.quickUnlockPrivate = quickUnlockPrivateApi;
         document.body.appendChild(testElement);
 
-        let testPinKeyboard = testElement.$.pinKeyboard;
+        const testPinKeyboard = testElement.$.pinKeyboard;
         testPinKeyboard.setModes = (modes, credentials, onComplete) => {
           quickUnlockPrivateApi.setModes(
               quickUnlockPrivateApi.getFakeToken(), modes, credentials, () => {
@@ -448,11 +444,33 @@ cr.define('settings_people_page_quick_unlock', function() {
         titleDiv = getFromElement('div[slot=title]');
         problemDiv = getFromElement('#problemDiv');
         pinKeyboard = getFromElement('pin-keyboard');
+        pinInput = pinKeyboard.$.pinInput;
         backButton = getFromElement('cr-button[class="cancel-button"]');
         continueButton = getFromElement('cr-button[class="action-button"]');
 
         assertTrue(isVisible(backButton));
         assertTrue(isVisible(continueButton));
+      });
+
+      test('Text input blocked', () => {
+        const event = new KeyboardEvent(
+            'keydown', {cancelable: true, key: 'a', keyCode: 65});
+        pinInput.dispatchEvent(event);
+        assertTrue(event.defaultPrevented);
+      });
+
+      test('Numeric input not blocked', () => {
+        const event = new KeyboardEvent(
+            'keydown', {cancelable: true, key: '1', keyCode: 49});
+        pinInput.dispatchEvent(event);
+        assertFalse(event.defaultPrevented);
+      });
+
+      test('System keys not blocked', () => {
+        const event = new KeyboardEvent(
+            'keydown', {cancelable: true, key: 'BrightnessUp', keyCode: 217});
+        pinInput.dispatchEvent(event);
+        assertFalse(event.defaultPrevented);
       });
 
       // The continue button and title change text between the setup and confirm
@@ -632,7 +650,7 @@ cr.define('settings_people_page_quick_unlock', function() {
       // Verify that the backspace button is disabled when there is nothing
       // entered.
       test('BackspaceDisabledWhenNothingEntered', function() {
-        let backspaceButton = pinKeyboard.$$('#backspaceButton');
+        const backspaceButton = pinKeyboard.$$('#backspaceButton');
         assertTrue(!!backspaceButton);
         assertTrue(backspaceButton.disabled);
 

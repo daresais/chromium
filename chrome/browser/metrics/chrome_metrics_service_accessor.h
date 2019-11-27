@@ -26,10 +26,6 @@ class CrashesDOMHandler;
 class FlashDOMHandler;
 }
 
-namespace chrome {
-void AttemptRestart();
-}
-
 namespace domain_reliability {
 class DomainReliabilityServiceFactory;
 }
@@ -40,6 +36,10 @@ class ChromeMetricsPrivateDelegate;
 class FileManagerPrivateIsUMAEnabledFunction;
 }
 
+namespace first_run {
+class FirstRunMasterPrefsVariationsSeedTest;
+}
+
 namespace metrics {
 class UkmConsentParamBrowserTest;
 }
@@ -48,7 +48,7 @@ namespace heap_profiling {
 class BackgroundProfilingTriggers;
 }
 
-namespace nux {
+namespace welcome {
 void JoinOnboardingGroup(Profile* profile);
 }
 
@@ -56,10 +56,13 @@ namespace safe_browsing {
 class ChromeCleanerControllerDelegate;
 class DownloadUrlSBClient;
 class IncidentReportingService;
-class ReporterRunner;
 class SafeBrowsingService;
 class SafeBrowsingUIManager;
-}
+
+namespace internal {
+class ReporterRunner;
+}  // namespace internal
+}  // namespace safe_browsing
 
 namespace settings {
 class MetricsReportingHandler;
@@ -80,10 +83,7 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
  private:
   friend class ::CrashesDOMHandler;
   friend class ::FlashDOMHandler;
-  friend void chrome::AttemptRestart();
   friend class ChromeBrowserFieldTrials;
-  // For ChromeWinClang.
-  friend class ChromeBrowserMainExtraPartsMetrics;
   // For StackSamplingConfiguration.
   friend class ChromeBrowserMainParts;
   friend class ChromeMetricsServicesManagerClient;
@@ -103,15 +103,17 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class safe_browsing::ChromeCleanerControllerDelegate;
   friend class safe_browsing::DownloadUrlSBClient;
   friend class safe_browsing::IncidentReportingService;
-  friend class safe_browsing::ReporterRunner;
+  friend class safe_browsing::internal::ReporterRunner;
   friend class safe_browsing::SafeBrowsingService;
   friend class safe_browsing::SafeBrowsingUIManager;
   friend class ChromeMetricsServiceClient;
   friend class ChromePasswordManagerClient;
-  friend void nux::JoinOnboardingGroup(Profile* profile);
+  friend void welcome::JoinOnboardingGroup(Profile* profile);
   friend class NavigationMetricsRecorder;
+  friend class ChromeBrowserMainExtraPartsGpu;
 
   // Testing related friends.
+  friend class first_run::FirstRunMasterPrefsVariationsSeedTest;
   friend class ForceFieldTrialsBrowserTest;
   friend class MetricsReportingStateTest;
   friend class metrics::UkmConsentParamBrowserTest;

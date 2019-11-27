@@ -52,6 +52,8 @@ _MAIN_DEX_REGEX = re.compile(r'^\s*(?:@(?:\w+\.)*\w+\s+)*@MainDex\b',
 # doesn't require name to be prefixed with native, and does not
 # require a native qualifier.
 _EXTRACT_METHODS_REGEX = re.compile(
+    r'(@NativeClassQualifiedName'
+    r'\(\"(?P<native_class_name>.*?)\"\)\s*)?'
     r'(?P<qualifiers>'
     r'((public|private|static|final|abstract|protected|native)\s*)*)\s+'
     r'(?P<return_type>\S*)\s+'
@@ -59,7 +61,7 @@ _EXTRACT_METHODS_REGEX = re.compile(
     flags=re.DOTALL)
 
 _NATIVE_PROXY_EXTRACTION_REGEX = re.compile(
-    r'@NativeMethods\s*(public|private)*\s*interface\s*'
+    r'@NativeMethods[\S\s]+?interface\s*'
     r'(?P<interface_name>\w*)\s*(?P<interface_body>{(\s*.*)+?\s*})')
 
 # Use 100 columns rather than 80 because it makes many lines more readable.
@@ -137,25 +139,16 @@ class NativeMethod(object):
 
     self.proxy_name = kwargs.get('proxy_name', self.name)
 
-    has_jcaller = False
     if self.params:
       assert type(self.params) is list
       assert type(self.params[0]) is Param
 
-      for p in self.params[1:]:
-        assert '@JCaller' not in p.annotations, ('Only the first parameter can '
-                                                 'be annotated with @JCaller')
 
-      if '@JCaller' in self.params[0].annotations:
-        has_jcaller = True
-
-    ptr_index = 1 if has_jcaller else 0
-
-    if (self.params and len(self.params) > ptr_index
-        and self.params[ptr_index].datatype == kwargs.get('ptr_type', 'int')
-        and self.params[ptr_index].name.startswith('native')):
+    if (self.params
+        and self.params[0].datatype == kwargs.get('ptr_type', 'int')
+        and self.params[0].name.startswith('native')):
       self.type = 'method'
-      self.p0_type = self.params[ptr_index].name[len('native'):]
+      self.p0_type = self.params[0].name[len('native'):]
       if kwargs.get('native_class_name'):
         self.p0_type = kwargs['native_class_name']
     else:
@@ -204,19 +197,16 @@ def JavaDataTypeToC(java_type):
     return 'jobject'
 
 
-def JavaTypeToProxyCast(type):
+def JavaTypeToProxyCast(java_type):
   """Maps from a java type to the type used by the native proxy GEN_JNI class"""
-  if type in JAVA_POD_TYPE_MAP or type in JAVA_TYPE_MAP:
-    return type
-  # All the array types of JAVA_TYPE_MAP become jobjectArray across jni but
-  # they still need to be passed as the original type on the java side.
-  if type[:-2] in JAVA_POD_TYPE_MAP or type[:-2] in JAVA_TYPE_MAP:
-    return type
+  # All the types and array types of JAVA_TYPE_MAP become jobjectArray across
+  # jni but they still need to be passed as the original type on the java side.
+  raw_type = java_type.rstrip('[]')
+  if raw_type in JAVA_POD_TYPE_MAP or raw_type in JAVA_TYPE_MAP:
+    return java_type
 
-  # Otherwise we have a jobject type that should be an object.
-  if type[-2:] == '[]':
-    return 'Object[]'
-  return 'Object'
+  # All other types should just be passed as Objects or Object arrays.
+  return 'Object' + java_type[len(raw_type):]
 
 
 def WrapCTypeForDeclaration(c_type):
@@ -260,14 +250,9 @@ def JavaReturnValueToC(java_type):
   return java_pod_type_map.get(java_type, 'NULL')
 
 
-def _GetJNIFirstParamType(native):
-  if native.type == 'function' and native.static:
-    return 'jclass'
-  return 'jobject'
-
-
 def _GetJNIFirstParam(native, for_declaration):
-  c_type = _GetJNIFirstParamType(native)
+  c_type = 'jclass' if native.static else 'jobject'
+
   if for_declaration:
     c_type = WrapCTypeForDeclaration(c_type)
   return [c_type + ' jcaller']
@@ -933,7 +918,6 @@ class ProxyHelpers(object):
         name = method.group('name')
         params = JniParams.Parse(method.group('params'), use_proxy_types=True)
         return_type = JavaTypeToProxyCast(method.group('return_type'))
-
         unescaped_proxy_name = ProxyHelpers.CreateProxyMethodName(
             fully_qualified_class, name, use_hash)
         native = NativeMethod(
@@ -941,6 +925,7 @@ class ProxyHelpers(object):
             java_class_name=None,
             return_type=return_type,
             name=name,
+            native_class_name=method.group('native_class_name'),
             params=params,
             is_proxy=True,
             proxy_name=unescaped_proxy_name,
@@ -1226,10 +1211,6 @@ $METHOD_STUBS
             name,
         })
 
-  def GetJNIFirstParamForCall(self, native):
-    c_type = _GetJNIFirstParamType(native)
-    return [self.GetJavaParamRefForCall(c_type, 'jcaller')]
-
   def GetImplementationMethodName(self, native):
     class_name = self.class_name
     if native.java_class_name is not None:
@@ -1242,17 +1223,14 @@ $METHOD_STUBS
     is_method = native.type == 'method'
 
     if is_method:
-      if '@JCaller' in native.params[0].annotations:
-        # Native pointer is second param.
-        params = [native.params[0]] + native.params[2:]
-      else:
-        params = native.params[1:]
+      params = native.params[1:]
     else:
       params = native.params
 
     params_in_call = ['env']
-    if not native.static or is_method:
-      params_in_call.extend(self.GetJNIFirstParamForCall(native))
+    if not native.static:
+      # Add jcaller param.
+      params_in_call.append(self.GetJavaParamRefForCall('jobject', 'jcaller'))
 
     for p in params:
       c_type = JavaDataTypeToC(p.datatype)
@@ -1262,27 +1240,6 @@ $METHOD_STUBS
         params_in_call.append(p.name)
 
     params_in_declaration = _GetParamsInDeclaration(native)
-    native_ptr_index = 0
-    if native.static:
-      # If a param is annotation with @JCaller we bind it in the same way
-      # as we'd bind a non-static function (JavaParamRef<jobject> caller will
-      # be the first parameter).
-      # This allows for conversion of non-static to static functions without
-      # touching the native implementation and allows for the JNI annotation
-      # processor to generate bindings for methods that can behave like
-      # non-static methods.
-      if native.params:
-        if '@JCaller' in native.params[0].annotations:
-          if is_method:
-            # Since is_method we have an extra param that isn't in the call
-            # (long nativePtr).
-            native_ptr_index = 1
-            # Replace <jobject> jcaller with @JCaller.
-            params_in_call[1:2] = []
-          # Don't need to do anything for functions since the jobject
-          # will be passed first anyways since we exclude jclass from our
-          # impl signature.
-
     params_in_call = ', '.join(params_in_call)
 
     return_type = return_declaration = JavaDataTypeToC(native.return_type)
@@ -1316,7 +1273,7 @@ $METHOD_STUBS
         optional_error_return = ', ' + optional_error_return
       values.update({
           'OPTIONAL_ERROR_RETURN': optional_error_return,
-          'PARAM0_NAME': native.params[native_ptr_index].name,
+          'PARAM0_NAME': native.params[0].name,
           'P0_TYPE': native.p0_type,
       })
       if self.options.enable_tracing:
@@ -1546,13 +1503,22 @@ def GetScriptName():
   return os.sep.join(script_components[base_index:])
 
 
+def _RemoveExistingHeaders(path):
+  if os.path.exists(path) and os.path.isdir(path):
+    for root, _, files in os.walk(path):
+      for f in files:
+        file_path = os.path.join(root, f)
+        if os.path.isfile(file_path) and os.path.splitext(file_path)[1] == '.h':
+          os.remove(file_path)
+
+
 def main():
-  usage = """usage: %prog [OPTIONS]
+  description = """
 This script will parse the given java source code extracting the native
 declarations and print the header file to stdout (or a file).
 See SampleForTests.java for more details.
   """
-  parser = argparse.ArgumentParser(usage=usage)
+  parser = argparse.ArgumentParser(description=description)
 
   parser.add_argument(
       '-j',
@@ -1619,9 +1585,19 @@ See SampleForTests.java for more details.
   args = parser.parse_args()
   input_files = args.input_files
   output_files = args.output_files
-  if not output_files:
+  if output_files:
+    output_dirs = set(os.path.dirname(f) for f in output_files)
+    if len(output_dirs) != 1:
+      parser.error(
+          'jni_generator only supports a single output directory per target '
+          '(got {})'.format(output_dirs))
+    output_dir = output_dirs.pop()
+    # Remove existing headers so that moving .java source files but not updating
+    # the corresponding C++ include will be a compile failure (otherwise
+    # incremental builds will usually not catch this).
+    _RemoveExistingHeaders(output_dir)
+  else:
     output_files = [None] * len(input_files)
-
   temp_dir = tempfile.mkdtemp()
   try:
     if args.jar_file:

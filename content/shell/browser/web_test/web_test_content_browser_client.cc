@@ -18,10 +18,10 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/client_hints_controller_delegate.h"
 #include "content/public/browser/login_delegate.h"
 #include "content/public/browser/overlay_window.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
@@ -34,12 +34,15 @@
 #include "content/shell/browser/web_test/web_test_browser_context.h"
 #include "content/shell/browser/web_test/web_test_browser_main_parts.h"
 #include "content/shell/browser/web_test/web_test_message_filter.h"
+#include "content/shell/browser/web_test/web_test_tts_controller_delegate.h"
+#include "content/shell/browser/web_test/web_test_tts_platform.h"
 #include "content/shell/common/web_test/web_test_switches.h"
 #include "content/shell/renderer/web_test/blink_test_helpers.h"
 #include "content/test/mock_clipboard_host.h"
 #include "content/test/mock_platform_notification_service.h"
 #include "device/bluetooth/test/fake_bluetooth.h"
 #include "gpu/config/gpu_switches.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "url/origin.h"
 
@@ -48,9 +51,9 @@ namespace {
 
 WebTestContentBrowserClient* g_web_test_browser_client;
 
-void BindWebTestHelper(mojom::MojoWebTestHelperRequest request,
+void BindWebTestHelper(mojo::PendingReceiver<mojom::MojoWebTestHelper> receiver,
                        RenderFrameHost* render_frame_host) {
-  MojoWebTestHelper::Create(std::move(request));
+  MojoWebTestHelper::Create(std::move(receiver));
 }
 
 class TestOverlayWindow : public OverlayWindow {
@@ -75,7 +78,6 @@ class TestOverlayWindow : public OverlayWindow {
   }
   void SetPlaybackState(PlaybackState playback_state) override {}
   void SetAlwaysHidePlayPauseButton(bool is_visible) override {}
-  void SetMutedState(MutedState muted_state) override {}
   void SetSkipAdButtonVisibility(bool is_visible) override {}
   void SetNextTrackButtonVisibility(bool is_visible) override {}
   void SetPreviousTrackButtonVisibility(bool is_visible) override {}
@@ -125,9 +127,8 @@ WebTestContentBrowserClient::GetNextFakeBluetoothChooser() {
 }
 
 void WebTestContentBrowserClient::RenderProcessWillLaunch(
-    RenderProcessHost* host,
-    service_manager::mojom::ServiceRequest* service_request) {
-  ShellContentBrowserClient::RenderProcessWillLaunch(host, service_request);
+    RenderProcessHost* host) {
+  ShellContentBrowserClient::RenderProcessWillLaunch(host);
 
   StoragePartition* partition =
       BrowserContext::GetDefaultStoragePartition(browser_context());
@@ -141,8 +142,7 @@ void WebTestContentBrowserClient::ExposeInterfacesToRenderer(
     blink::AssociatedInterfaceRegistry* associated_registry,
     RenderProcessHost* render_process_host) {
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI});
+      base::CreateSingleThreadTaskRunner({content::BrowserThread::UI});
   registry->AddInterface(
       base::BindRepeating(&WebTestBluetoothFakeAdapterSetterImpl::Create),
       ui_task_runner);
@@ -160,16 +160,38 @@ void WebTestContentBrowserClient::ExposeInterfacesToRenderer(
       ui_task_runner);
   registry->AddInterface(base::BindRepeating(&MojoWebTestHelper::Create));
   registry->AddInterface(
-      base::BindRepeating(&WebTestContentBrowserClient::BindClipboardHost,
-                          base::Unretained(this)),
+      base::BindRepeating(
+          &WebTestContentBrowserClient::BindClipboardHostForRequest,
+          base::Unretained(this)),
+      ui_task_runner);
+
+  registry->AddInterface(
+      base::BindRepeating(
+          &WebTestContentBrowserClient::BindClientHintsControllerDelegate,
+          base::Unretained(this)),
       ui_task_runner);
 }
 
-void WebTestContentBrowserClient::BindClipboardHost(
+void WebTestContentBrowserClient::BindClipboardHostForRequest(
     blink::mojom::ClipboardHostRequest request) {
+  // Implicit conversion from ClipboardHostRequest to
+  // mojo::PendingReceiver<blink::mojom::ClipboardHost>.
+  BindClipboardHost(std::move(request));
+}
+
+void WebTestContentBrowserClient::BindClipboardHost(
+    mojo::PendingReceiver<blink::mojom::ClipboardHost> receiver) {
   if (!mock_clipboard_host_)
     mock_clipboard_host_ = std::make_unique<MockClipboardHost>();
-  mock_clipboard_host_->Bind(std::move(request));
+  mock_clipboard_host_->Bind(std::move(receiver));
+}
+
+void WebTestContentBrowserClient::BindClientHintsControllerDelegate(
+    mojo::PendingReceiver<client_hints::mojom::ClientHints> receiver) {
+  ClientHintsControllerDelegate* delegate =
+      browser_context()->GetClientHintsControllerDelegate();
+  DCHECK(delegate);
+  delegate->Bind(std::move(receiver));
 }
 
 void WebTestContentBrowserClient::OverrideWebkitPrefs(
@@ -315,9 +337,18 @@ bool WebTestContentBrowserClient::CanCreateWindow(
   return !block_popups_ || user_gesture;
 }
 
-bool WebTestContentBrowserClient::CanIgnoreCertificateErrorIfNeeded() {
+bool WebTestContentBrowserClient::CanAcceptUntrustedExchangesIfNeeded() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kRunWebTests);
+}
+
+content::TtsControllerDelegate*
+WebTestContentBrowserClient::GetTtsControllerDelegate() {
+  return WebTestTtsControllerDelegate::GetInstance();
+}
+
+content::TtsPlatform* WebTestContentBrowserClient::GetTtsPlatform() {
+  return WebTestTtsPlatform::GetInstance();
 }
 
 void WebTestContentBrowserClient::ExposeInterfacesToFrame(
@@ -340,10 +371,10 @@ std::unique_ptr<LoginDelegate> WebTestContentBrowserClient::CreateLoginDelegate(
 
 // private
 void WebTestContentBrowserClient::CreateFakeBluetoothChooserFactory(
-    mojom::FakeBluetoothChooserFactoryRequest request) {
+    mojo::PendingReceiver<mojom::FakeBluetoothChooserFactory> receiver) {
   DCHECK(!fake_bluetooth_chooser_factory_);
   fake_bluetooth_chooser_factory_ =
-      FakeBluetoothChooserFactory::Create(std::move(request));
+      FakeBluetoothChooserFactory::Create(std::move(receiver));
 }
 
 }  // namespace content

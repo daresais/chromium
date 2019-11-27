@@ -44,7 +44,7 @@ public class PaymentRequestDebitTest implements MainActivityStartCallback {
             new PaymentRequestTestRule("payment_request_debit_test.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
         String billingAddressId = helper.setProfile(new AutofillProfile("", "https://example.com",
                 true, "Jon Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "",
@@ -52,7 +52,7 @@ public class PaymentRequestDebitTest implements MainActivityStartCallback {
 
         // Should be pre-selected:
         helper.addServerCreditCard(new CreditCard("", "https://example.com", false, true, "Jon Doe",
-                "4111111111111111", "1111", "12", "2050", "visa", R.drawable.visa_card,
+                "4111111111111111", "1111", "12", "2050", "amex", R.drawable.amex_card,
                 CardType.DEBIT, billingAddressId, "server-id-1"));
 
         // Should be available, but never pre-selected:
@@ -62,7 +62,7 @@ public class PaymentRequestDebitTest implements MainActivityStartCallback {
 
         // Should not be available:
         helper.addServerCreditCard(new CreditCard("", "https://example.com", false, true, "Jon Doe",
-                "378282246310005", "0005", "12", "2050", "amex", R.drawable.amex_card,
+                "378282246310005", "0005", "12", "2050", "jcb", R.drawable.jcb_card,
                 CardType.CREDIT, billingAddressId, "server-id-3"));
         helper.addServerCreditCard(new CreditCard("", "https://example.com", false, true, "Jon Doe",
                 "5555555555554444", "4444", "12", "2050", "mastercard", R.drawable.mc_card,
@@ -73,7 +73,7 @@ public class PaymentRequestDebitTest implements MainActivityStartCallback {
     @MediumTest
     @Feature({"Payments"})
     public void testDebitCardTypeIsPreselectedAndUnknownCardTypeIsAvailable()
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
 
         Assert.assertTrue(mPaymentRequestTestRule.getPaymentInstrumentLabel(0).contains("Visa"));
@@ -93,7 +93,7 @@ public class PaymentRequestDebitTest implements MainActivityStartCallback {
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCanMakePaymentWithDebitCard() throws InterruptedException, TimeoutException {
+    public void testCanMakePaymentWithDebitCard() throws TimeoutException {
         mPaymentRequestTestRule.openPageAndClickNodeAndWait(
                 "canMakePayment", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
         mPaymentRequestTestRule.expectResultContains(new String[] {"true"});

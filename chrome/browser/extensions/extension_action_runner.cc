@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/extensions/tab_helper.h"
@@ -35,7 +36,8 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/api/declarative_net_request/action_tracker.h"
+#include "extensions/browser/api/declarative_net_request/rules_monitor_service.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
@@ -70,8 +72,7 @@ ExtensionActionRunner::ExtensionActionRunner(content::WebContents* web_contents)
       browser_context_(web_contents->GetBrowserContext()),
       was_used_on_page_(false),
       ignore_active_tab_granted_(false),
-      test_observer_(nullptr),
-      extension_registry_observer_(this) {
+      test_observer_(nullptr) {
   CHECK(web_contents);
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
 }
@@ -521,11 +522,35 @@ void ExtensionActionRunner::DidFinishNavigation(
   // run".
   ExtensionActionAPI::Get(browser_context_)
       ->ClearAllValuesForTab(web_contents());
+
+  declarative_net_request::RulesMonitorService* rules_monitor_service =
+      declarative_net_request::RulesMonitorService::Get(browser_context_);
+
+  // |rules_monitor_service| can be null for some unit tests.
+  if (rules_monitor_service) {
+    declarative_net_request::ActionTracker& action_tracker =
+        rules_monitor_service->action_tracker();
+
+    int tab_id = ExtensionTabUtil::GetTabId(web_contents());
+    action_tracker.ResetActionCountForTab(tab_id);
+  }
 }
 
 void ExtensionActionRunner::WebContentsDestroyed() {
   ExtensionActionAPI::Get(browser_context_)
       ->ClearAllValuesForTab(web_contents());
+
+  declarative_net_request::RulesMonitorService* rules_monitor_service =
+      declarative_net_request::RulesMonitorService::Get(browser_context_);
+
+  // |rules_monitor_service| can be null for some unit tests.
+  if (rules_monitor_service) {
+    declarative_net_request::ActionTracker& action_tracker =
+        rules_monitor_service->action_tracker();
+
+    int tab_id = ExtensionTabUtil::GetTabId(web_contents());
+    action_tracker.ClearTabData(tab_id);
+  }
 }
 
 void ExtensionActionRunner::OnExtensionUnloaded(

@@ -15,6 +15,7 @@
 
 #include "base/bind.h"
 #include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/strings/strcat.h"
@@ -150,8 +151,17 @@ void PerUserTopicRegistrationManager::RegisterPrefs(
   registry->RegisterDictionaryPref(kActiveRegistrationTokens);
 }
 
+// State of the instance ID token when registration is requested.
+// Used by UMA histogram, so entries shouldn't be reordered or removed.
+enum class PerUserTopicRegistrationManager::TokenStateOnRegistrationRequest {
+  kTokenWasEmpty = 0,
+  kUnchangedToken = 1,
+  kTokenChanged = 2,
+  kMaxValue = kTokenChanged,
+};
+
 struct PerUserTopicRegistrationManager::RegistrationEntry {
-  RegistrationEntry(const Topic& id,
+  RegistrationEntry(const Topic& topic,
                     SubscriptionFinishedCallback completion_callback,
                     PerUserTopicRegistrationRequest::RequestType type,
                     bool topic_is_public = false);
@@ -204,18 +214,29 @@ PerUserTopicRegistrationManager::PerUserTopicRegistrationManager(
     invalidation::IdentityProvider* identity_provider,
     PrefService* local_state,
     network::mojom::URLLoaderFactory* url_loader_factory,
-    const ParseJSONCallback& parse_json,
     const std::string& project_id,
     bool migrate_prefs)
     : local_state_(local_state),
       identity_provider_(identity_provider),
       request_access_token_backoff_(&kBackoffPolicy),
-      parse_json_(parse_json),
       url_loader_factory_(url_loader_factory),
       project_id_(project_id),
       migrate_prefs_(migrate_prefs) {}
 
 PerUserTopicRegistrationManager::~PerUserTopicRegistrationManager() {}
+
+// static
+std::unique_ptr<PerUserTopicRegistrationManager>
+PerUserTopicRegistrationManager::Create(
+    invalidation::IdentityProvider* identity_provider,
+    PrefService* local_state,
+    network::mojom::URLLoaderFactory* url_loader_factory,
+    const std::string& project_id,
+    bool migrate_prefs) {
+  return std::make_unique<PerUserTopicRegistrationManager>(
+      identity_provider, local_state, url_loader_factory, project_id,
+      migrate_prefs);
+}
 
 void PerUserTopicRegistrationManager::Init() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -252,10 +273,12 @@ void PerUserTopicRegistrationManager::UpdateRegisteredTopics(
     const Topics& topics,
     const std::string& instance_id_token) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  token_ = instance_id_token;
-  DropAllSavedRegistrationsOnTokenChange(instance_id_token);
+  instance_id_token_ = instance_id_token;
+  UMA_HISTOGRAM_ENUMERATION("FCMInvalidations.TokenStateOnRegistrationRequest",
+                            DropAllSavedRegistrationsOnTokenChange());
+
   for (const auto& topic : topics) {
-    // If id isn't registered, schedule the registration.
+    // If the topic isn't registered yet, schedule the registration.
     if (topic_to_private_topic_.find(topic.first) ==
         topic_to_private_topic_.end()) {
       auto it = registration_statuses_.find(topic.first);
@@ -270,12 +293,12 @@ void PerUserTopicRegistrationManager::UpdateRegisteredTopics(
     }
   }
 
-  // There is registered topic, which need to be unregistered.
+  // There may be registered topics which need to be unregistered.
   // Schedule unregistration and immediately remove from
-  // |topic_to_private_topic_|
+  // |topic_to_private_topic_| and |private_topic_to_topic_|.
   for (auto it = topic_to_private_topic_.begin();
        it != topic_to_private_topic_.end();) {
-    auto topic = it->first;
+    Topic topic = it->first;
     if (topics.find(topic) == topics.end()) {
       registration_statuses_[topic] = std::make_unique<RegistrationEntry>(
           topic,
@@ -285,14 +308,18 @@ void PerUserTopicRegistrationManager::UpdateRegisteredTopics(
           PerUserTopicRegistrationRequest::UNSUBSCRIBE);
       private_topic_to_topic_.erase(it->second);
       it = topic_to_private_topic_.erase(it);
-      // The descision to unregister from the invalidations for the |topic| was
-      // made, the preferences should be cleaned up immediatelly.
+      // The decision to unregister from the invalidations for the |topic| was
+      // made, the preferences should be cleaned up immediately.
       PerProjectDictionaryPrefUpdate update(local_state_, project_id_);
       update->RemoveKey(topic);
     } else {
+      // Topic is still wanted, nothing to do.
       ++it;
     }
   }
+
+  // Kick off the process of actually processing the (un)registrations we just
+  // scheduled.
   RequestAccessToken();
 }
 
@@ -312,7 +339,7 @@ void PerUserTopicRegistrationManager::StartRegistrationRequest(
   }
   PerUserTopicRegistrationRequest::Builder builder;
   it->second->request.reset();  // Resetting request in case it's running.
-  it->second->request = builder.SetToken(token_)
+  it->second->request = builder.SetInstanceIdToken(instance_id_token_)
                             .SetScope(kInvalidationRegistrationScope)
                             .SetPublicTopicName(topic)
                             .SetAuthenticationHeader(base::StringPrintf(
@@ -325,7 +352,7 @@ void PerUserTopicRegistrationManager::StartRegistrationRequest(
       base::BindOnce(&PerUserTopicRegistrationManager::RegistrationEntry::
                          RegistrationFinished,
                      base::Unretained(it->second.get())),
-      parse_json_, url_loader_factory_);
+      url_loader_factory_);
 }
 
 void PerUserTopicRegistrationManager::ActOnSuccesfullRegistration(
@@ -336,10 +363,12 @@ void PerUserTopicRegistrationManager::ActOnSuccesfullRegistration(
   it->second->request_backoff_.InformOfRequest(true);
   registration_statuses_.erase(it);
   if (type == PerUserTopicRegistrationRequest::SUBSCRIBE) {
-    PerProjectDictionaryPrefUpdate update(local_state_, project_id_);
-    update->SetKey(topic, base::Value(private_topic_name));
-    topic_to_private_topic_[topic] = private_topic_name;
-    private_topic_to_topic_[private_topic_name] = topic;
+    {
+      PerProjectDictionaryPrefUpdate update(local_state_, project_id_);
+      update->SetKey(topic, base::Value(private_topic_name));
+      topic_to_private_topic_[topic] = private_topic_name;
+      private_topic_to_topic_[private_topic_name] = topic;
+    }
     local_state_->CommitPendingWrite();
   }
   bool all_subscription_completed = true;
@@ -358,11 +387,11 @@ void PerUserTopicRegistrationManager::ActOnSuccesfullRegistration(
 
 void PerUserTopicRegistrationManager::ScheduleRequestForRepetition(
     const Topic& topic) {
-  auto completition_callback = base::BindOnce(
+  registration_statuses_[topic]->completion_callback = base::BindOnce(
       &PerUserTopicRegistrationManager::RegistrationFinishedForTopic,
       base::Unretained(this));
-  registration_statuses_[topic]->completion_callback =
-      std::move(completition_callback);
+  // TODO(treib): We already called InformOfRequest(false) before in
+  // RegistrationFinishedForTopic(), should probably not call it again here?
   registration_statuses_[topic]->request_backoff_.InformOfRequest(false);
   registration_statuses_[topic]->request_retry_timer_.Start(
       FROM_HERE,
@@ -473,26 +502,28 @@ void PerUserTopicRegistrationManager::OnAccessTokenRequestFailed(
                           base::Unretained(this)));
 }
 
-void PerUserTopicRegistrationManager::DropAllSavedRegistrationsOnTokenChange(
-    const std::string& instance_id_token) {
+PerUserTopicRegistrationManager::TokenStateOnRegistrationRequest
+PerUserTopicRegistrationManager::DropAllSavedRegistrationsOnTokenChange() {
   {
     DictionaryPrefUpdate token_update(local_state_, kActiveRegistrationTokens);
     std::string current_token;
     token_update->GetString(project_id_, &current_token);
     if (current_token.empty()) {
-      token_update->SetString(project_id_, instance_id_token);
-      return;
+      token_update->SetString(project_id_, instance_id_token_);
+      return TokenStateOnRegistrationRequest::kTokenWasEmpty;
     }
-    if (current_token == instance_id_token) {
-      return;
+    if (current_token == instance_id_token_) {
+      return TokenStateOnRegistrationRequest::kUnchangedToken;
     }
-    token_update->SetString(project_id_, instance_id_token);
+
+    token_update->SetString(project_id_, instance_id_token_);
   }
 
   PerProjectDictionaryPrefUpdate update(local_state_, project_id_);
   *update = base::Value(base::Value::Type::DICTIONARY);
   topic_to_private_topic_.clear();
   private_topic_to_topic_.clear();
+  return TokenStateOnRegistrationRequest::kTokenChanged;
   // TODO(melandory): Figure out if the unsubscribe request should be
   // sent with the old token.
 }
@@ -520,7 +551,7 @@ base::DictionaryValue PerUserTopicRegistrationManager::CollectDebugData()
     status.SetString(topic_to_private_topic.first,
                      topic_to_private_topic.second);
   }
-  status.SetString("Instance id token", token_);
+  status.SetString("Instance id token", instance_id_token_);
   return status;
 }
 

@@ -17,11 +17,15 @@
 #include "ash/public/cpp/window_animation_types.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/chromeos/crostini/crostini_features.h"
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
 #include "chrome/browser/extensions/chrome_app_icon_loader.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -30,13 +34,16 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/app_list/app_list_client_impl.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
+#include "chrome/browser/ui/app_list/app_service/app_service_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/crostini/crostini_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/internal_app/internal_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/md_icon_normalizer.h"
+#include "chrome/browser/ui/apps/app_info_dialog.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client.h"
+#include "chrome/browser/ui/ash/launcher/app_service_app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/app_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_item_controller.h"
@@ -46,6 +53,7 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
 #include "chrome/browser/ui/ash/launcher/crostini_app_window_shelf_controller.h"
 #include "chrome/browser/ui/ash/launcher/internal_app_window_shelf_controller.h"
+#include "chrome/browser/ui/ash/launcher/launcher_app_service_app_updater.h"
 #include "chrome/browser/ui/ash/launcher/launcher_arc_app_updater.h"
 #include "chrome/browser/ui/ash/launcher/launcher_controller_helper.h"
 #include "chrome/browser/ui/ash/launcher/launcher_crostini_app_updater.h"
@@ -56,14 +64,17 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
 #include "chrome/browser/ui/ash/session_controller_client_impl.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/settings/chromeos/app_management/app_management_uma.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "chrome/grit/chromium_strings.h"
@@ -79,6 +90,9 @@
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/service_manager_connection.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
+#include "extensions/browser/management_policy.h"
 #include "extensions/common/extension.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/aura/client/aura_constants.h"
@@ -117,6 +131,13 @@ std::string GetCrostiniAppIdFromContents(content::WebContents* web_contents) {
   base::Optional<std::string> app_id_opt =
       crostini::CrostiniAppIdFromAppName(browser->app_name());
   return app_id_opt.value_or("");
+}
+
+const extensions::Extension* GetExtension(Profile* profile,
+                                          const std::string& extension_id) {
+  const extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(profile);
+  return registry->GetInstalledExtension(extension_id);
 }
 
 }  // namespace
@@ -197,7 +218,7 @@ ChromeLauncherController* ChromeLauncherController::instance_ = nullptr;
 
 ChromeLauncherController::ChromeLauncherController(Profile* profile,
                                                    ash::ShelfModel* model)
-    : model_(model), weak_ptr_factory_(this) {
+    : model_(model) {
   DCHECK(!instance_);
   instance_ = this;
 
@@ -224,7 +245,7 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
   DCHECK_EQ(profile, profile_);
   model_->AddObserver(this);
 
-  shelf_spinner_controller_.reset(new ShelfSpinnerController(this));
+  shelf_spinner_controller_ = std::make_unique<ShelfSpinnerController>(this);
 
   // Create either the real window manager or a stub.
   MultiUserWindowManagerHelper::CreateInstance();
@@ -236,20 +257,29 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
         new ChromeLauncherControllerUserSwitchObserver(this));
   }
 
+  if (base::FeatureList::IsEnabled(features::kAppServiceInstanceRegistry)) {
+    browser_status_monitor_ = std::make_unique<BrowserStatusMonitor>(this);
+    browser_status_monitor_->Initialize();
+    app_window_controllers_.push_back(
+        std::make_unique<AppServiceAppWindowLauncherController>(this));
+    return;
+  }
+
   std::unique_ptr<AppWindowLauncherController> extension_app_window_controller;
   // Create our v1/v2 application / browser monitors which will inform the
   // launcher of status changes.
   if (SessionControllerClientImpl::IsMultiProfileAvailable()) {
     // If running in separated destkop mode, we create the multi profile version
     // of status monitor.
-    browser_status_monitor_.reset(new MultiProfileBrowserStatusMonitor(this));
+    browser_status_monitor_ =
+        std::make_unique<MultiProfileBrowserStatusMonitor>(this);
     browser_status_monitor_->Initialize();
     extension_app_window_controller.reset(
         new MultiProfileAppWindowLauncherController(this));
   } else {
     // Create our v1/v2 application / browser monitors which will inform the
     // launcher of status changes.
-    browser_status_monitor_.reset(new BrowserStatusMonitor(this));
+    browser_status_monitor_ = std::make_unique<BrowserStatusMonitor>(this);
     browser_status_monitor_->Initialize();
     extension_app_window_controller.reset(
         new ExtensionAppWindowLauncherController(this));
@@ -261,7 +291,7 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
   arc_app_window_controller_ = arc_app_window_controller.get();
   app_window_controllers_.push_back(std::move(arc_app_window_controller));
 
-  if (crostini::IsCrostiniUIAllowedForProfile(profile)) {
+  if (crostini::CrostiniFeatures::Get()->IsUIAllowed(profile)) {
     std::unique_ptr<CrostiniAppWindowShelfController> crostini_controller =
         std::make_unique<CrostiniAppWindowShelfController>(this);
     crostini_app_window_shelf_controller_ = crostini_controller.get();
@@ -415,6 +445,16 @@ bool ChromeLauncherController::IsPlatformApp(const ash::ShelfID& id) {
   return extension ? extension->is_platform_app() : false;
 }
 
+bool ChromeLauncherController::UninstallAllowed(const std::string& app_id) {
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(profile())->GetInstalledExtension(
+          app_id);
+  const extensions::ManagementPolicy* policy =
+      extensions::ExtensionSystem::Get(profile())->management_policy();
+  return extension && policy->UserMayModifySettings(extension, nullptr) &&
+         !policy->MustRemainInstalled(extension, nullptr);
+}
+
 void ChromeLauncherController::LaunchApp(const ash::ShelfID& id,
                                          ash::ShelfLaunchSource source,
                                          int event_flags,
@@ -489,7 +529,7 @@ void ChromeLauncherController::UpdateAppState(content::WebContents* contents,
 
 void ChromeLauncherController::UpdateV1AppState(const std::string& app_id) {
   for (Browser* browser : *BrowserList::GetInstance()) {
-    if (browser->is_app() || !browser->is_type_tabbed() ||
+    if (browser->deprecated_is_app() || !browser->is_type_normal() ||
         !multi_user_util::IsProfileFromActiveUser(browser->profile())) {
       continue;
     }
@@ -507,16 +547,29 @@ void ChromeLauncherController::UpdateV1AppState(const std::string& app_id) {
   }
 }
 
-ash::ShelfID ChromeLauncherController::GetShelfIDForWebContents(
+std::string ChromeLauncherController::GetAppIDForWebContents(
     content::WebContents* contents) {
   std::string app_id = launcher_controller_helper_->GetAppID(contents);
-  if (app_id.empty() && crostini::IsCrostiniEnabled(profile()))
-    app_id = GetCrostiniAppIdFromContents(contents);
-  if (app_id.empty() && ContentCanBeHandledByGmailApp(contents))
-    app_id = kGmailAppId;
+  if (!app_id.empty())
+    return app_id;
 
+  if (crostini::CrostiniFeatures::Get()->IsEnabled(profile()))
+    app_id = GetCrostiniAppIdFromContents(contents);
+
+  if (!app_id.empty())
+    return app_id;
+
+  if (ContentCanBeHandledByGmailApp(contents))
+    return kGmailAppId;
+
+  return kChromeAppId;
+}
+
+ash::ShelfID ChromeLauncherController::GetShelfIDForAppId(
+    const std::string& app_id) {
   // If there is no dedicated app item, use the browser shortcut item.
-  const ash::ShelfItem* item = GetItem(ash::ShelfID(app_id));
+  const ash::ShelfItem* item =
+      !app_id.empty() ? GetItem(ash::ShelfID(app_id)) : nullptr;
   return item ? item->id : ash::ShelfID(kChromeAppId);
 }
 
@@ -555,13 +608,6 @@ ash::ShelfAction ChromeLauncherController::ActivateWindowOrMinimizeIfActive(
       !(app_list_client && app_list_client->app_list_target_visibility())) {
     window->Minimize();
     return ash::SHELF_ACTION_WINDOW_MINIMIZED;
-  }
-
-  if (TabletModeClient::Get() &&
-      TabletModeClient::Get()->tablet_mode_enabled()) {
-    // Run slide down animation to show the window.
-    wm::SetWindowVisibilityAnimationType(
-        native_window, ash::wm::WINDOW_VISIBILITY_ANIMATION_TYPE_SLIDE_DOWN);
   }
 
   window->Show();
@@ -761,6 +807,45 @@ void ChromeLauncherController::UnpinAppWithID(const std::string& app_id) {
   model_->UnpinAppWithID(app_id);
 }
 
+void ChromeLauncherController::ReplacePinnedItem(
+    const std::string& old_app_id,
+    const std::string& new_app_id) {
+  if (!model_->IsAppPinned(old_app_id) || model_->IsAppPinned(new_app_id))
+    return;
+  const int index = model_->ItemIndexByAppID(old_app_id);
+
+  const ash::ShelfID new_shelf_id(new_app_id);
+  ash::ShelfItem item;
+  item.type = ash::TYPE_PINNED_APP;
+  item.id = new_shelf_id;
+
+  // Remove old_app at index and replace with new app.
+  model_->RemoveItemAt(index);
+  model_->AddAt(index, item);
+}
+
+void ChromeLauncherController::PinAppAtIndex(const std::string& app_id,
+                                             int target_index) {
+  if (target_index < 0 || model_->IsAppPinned(app_id))
+    return;
+
+  const ash::ShelfID new_shelf_id(app_id);
+  ash::ShelfItem item;
+  item.type = ash::TYPE_PINNED_APP;
+  item.id = new_shelf_id;
+
+  model_->AddAt(target_index, item);
+}
+
+int ChromeLauncherController::PinnedItemIndexByAppID(
+    const std::string& app_id) {
+  if (model_->IsAppPinned(app_id)) {
+    ash::ShelfID shelf_id(app_id);
+    return model_->ItemIndexByID(shelf_id);
+  }
+  return kInvalidIndex;
+}
+
 AppIconLoader* ChromeLauncherController::GetAppIconLoaderForApp(
     const std::string& app_id) {
   for (const auto& app_icon_loader : app_icon_loaders_) {
@@ -769,6 +854,47 @@ AppIconLoader* ChromeLauncherController::GetAppIconLoaderForApp(
   }
 
   return nullptr;
+}
+
+bool ChromeLauncherController::CanDoShowAppInfoFlow() {
+  return CanShowAppInfoDialog();
+}
+
+void ChromeLauncherController::DoShowAppInfoFlow(
+    Profile* profile,
+    const std::string& extension_id) {
+  DCHECK(CanDoShowAppInfoFlow());
+
+  const extensions::Extension* extension = GetExtension(profile, extension_id);
+  if (!extension)
+    return;
+
+  if (base::FeatureList::IsEnabled(features::kAppManagement)) {
+    chrome::ShowAppManagementPage(profile, extension_id);
+
+    if (extension->is_hosted_app() && extension->from_bookmark()) {
+      base::UmaHistogramEnumeration(
+          kAppManagementEntryPointsHistogramName,
+          AppManagementEntryPoint::kLauncherContextMenuAppInfoWebApp);
+    } else {
+      base::UmaHistogramEnumeration(
+          kAppManagementEntryPointsHistogramName,
+          AppManagementEntryPoint::kLauncherContextMenuAppInfoChromeApp);
+    }
+    return;
+  }
+
+  if (extension->is_hosted_app() && extension->from_bookmark()) {
+    chrome::ShowSiteSettings(
+        profile, extensions::AppLaunchInfo::GetFullLaunchURL(extension));
+    return;
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialog.Launches",
+                            AppInfoLaunchSource::FROM_SHELF,
+                            AppInfoLaunchSource::NUM_LAUNCH_SOURCES);
+
+  ShowAppInfo(profile, extension, base::Closure());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -783,6 +909,19 @@ void ChromeLauncherController::OnAppInstalled(
     if (app_icon_loader) {
       app_icon_loader->ClearImage(app_id);
       app_icon_loader->FetchImage(app_id);
+    }
+  }
+
+  // When the app is pinned to the shelf, or added to the shelf, the app
+  // probably isn't ready in AppService, so set the title again on
+  // callback when the app is ready in AppService.
+  int index = model_->ItemIndexByAppID(app_id);
+  if (index != kInvalidIndex) {
+    ash::ShelfItem item = model_->items()[index];
+    if ((item.type == ash::TYPE_APP || item.type == ash::TYPE_PINNED_APP) &&
+        item.title.empty()) {
+      item.title = LauncherControllerHelper::GetAppTitle(profile(), app_id);
+      model_->Set(index, item);
     }
   }
 
@@ -1095,8 +1234,7 @@ void ChromeLauncherController::CloseWindowedAppsFromRemovedExtension(
            browser_list->begin_last_active();
        it != browser_list->end_last_active(); ++it) {
     Browser* browser = *it;
-    if (!browser->is_type_tabbed() && browser->is_type_popup() &&
-        browser->is_app() &&
+    if (browser->deprecated_is_app() &&
         app_id == web_app::GetAppIdFromApplicationName(browser->app_name()) &&
         profile == browser->profile()) {
       browser_to_close.push_back(browser);
@@ -1121,34 +1259,44 @@ void ChromeLauncherController::AttachProfile(Profile* profile_to_attach) {
     launcher_controller_helper_->set_profile(profile_);
   }
 
-  // TODO(skuhne): The AppIconLoaderImpl has the same problem. Each loaded
-  // image is associated with a profile (its loader requires the profile).
-  // Since icon size changes are possible, the icon could be requested to be
-  // reloaded. However - having it not multi profile aware would cause problems
-  // if the icon cache gets deleted upon user switch.
-  std::unique_ptr<AppIconLoader> chrome_app_icon_loader =
-      std::make_unique<extensions::ChromeAppIconLoader>(
-          profile_, extension_misc::EXTENSION_ICON_MEDIUM,
-          base::BindRepeating(&app_list::MaybeResizeAndPadIconForMd), this);
-  app_icon_loaders_.push_back(std::move(chrome_app_icon_loader));
+  bool app_service_enabled =
+      base::FeatureList::IsEnabled(features::kAppServiceShelf);
 
-  if (arc::IsArcAllowedForProfile(profile_)) {
-    std::unique_ptr<AppIconLoader> arc_app_icon_loader =
-        std::make_unique<ArcAppIconLoader>(
+  if (app_service_enabled) {
+    std::unique_ptr<AppIconLoader> app_service_app_icon_loader =
+        std::make_unique<AppServiceAppIconLoader>(
             profile_, extension_misc::EXTENSION_ICON_MEDIUM, this);
-    app_icon_loaders_.push_back(std::move(arc_app_icon_loader));
-  }
+    app_icon_loaders_.push_back(std::move(app_service_app_icon_loader));
+  } else {
+    // TODO(skuhne): The AppIconLoaderImpl has the same problem. Each loaded
+    // image is associated with a profile (its loader requires the profile).
+    // Since icon size changes are possible, the icon could be requested to be
+    // reloaded. However - having it not multi profile aware would cause
+    // problems if the icon cache gets deleted upon user switch.
+    std::unique_ptr<AppIconLoader> chrome_app_icon_loader =
+        std::make_unique<extensions::ChromeAppIconLoader>(
+            profile_, extension_misc::EXTENSION_ICON_MEDIUM,
+            base::BindRepeating(&app_list::MaybeResizeAndPadIconForMd), this);
+    app_icon_loaders_.push_back(std::move(chrome_app_icon_loader));
 
-  std::unique_ptr<AppIconLoader> internal_app_icon_loader =
-      std::make_unique<InternalAppIconLoader>(
-          profile_, extension_misc::EXTENSION_ICON_MEDIUM, this);
-  app_icon_loaders_.push_back(std::move(internal_app_icon_loader));
+    if (arc::IsArcAllowedForProfile(profile_)) {
+      std::unique_ptr<AppIconLoader> arc_app_icon_loader =
+          std::make_unique<ArcAppIconLoader>(
+              profile_, extension_misc::EXTENSION_ICON_MEDIUM, this);
+      app_icon_loaders_.push_back(std::move(arc_app_icon_loader));
+    }
 
-  if (crostini::IsCrostiniUIAllowedForProfile(profile_)) {
-    std::unique_ptr<AppIconLoader> crostini_app_icon_loader =
-        std::make_unique<CrostiniAppIconLoader>(
+    std::unique_ptr<AppIconLoader> internal_app_icon_loader =
+        std::make_unique<InternalAppIconLoader>(
             profile_, extension_misc::EXTENSION_ICON_MEDIUM, this);
-    app_icon_loaders_.push_back(std::move(crostini_app_icon_loader));
+    app_icon_loaders_.push_back(std::move(internal_app_icon_loader));
+
+    if (crostini::CrostiniFeatures::Get()->IsUIAllowed(profile_)) {
+      std::unique_ptr<AppIconLoader> crostini_app_icon_loader =
+          std::make_unique<CrostiniAppIconLoader>(
+              profile_, extension_misc::EXTENSION_ICON_MEDIUM, this);
+      app_icon_loaders_.push_back(std::move(crostini_app_icon_loader));
+    }
   }
 
   pref_change_registrar_.Init(profile()->GetPrefs());
@@ -1164,20 +1312,26 @@ void ChromeLauncherController::AttachProfile(Profile* profile_to_attach) {
       base::Bind(&ChromeLauncherController::ScheduleUpdateAppLaunchersFromSync,
                  base::Unretained(this)));
 
-  std::unique_ptr<LauncherAppUpdater> extension_app_updater(
-      new LauncherExtensionAppUpdater(this, profile()));
-  app_updaters_.push_back(std::move(extension_app_updater));
+  if (app_service_enabled) {
+    std::unique_ptr<LauncherAppUpdater> app_service_app_updater(
+        new LauncherAppServiceAppUpdater(this, profile()));
+    app_updaters_.push_back(std::move(app_service_app_updater));
+  } else {
+    std::unique_ptr<LauncherAppUpdater> extension_app_updater(
+        new LauncherExtensionAppUpdater(this, profile()));
+    app_updaters_.push_back(std::move(extension_app_updater));
 
-  if (arc::IsArcAllowedForProfile(profile())) {
-    std::unique_ptr<LauncherAppUpdater> arc_app_updater(
-        new LauncherArcAppUpdater(this, profile()));
-    app_updaters_.push_back(std::move(arc_app_updater));
-  }
+    if (arc::IsArcAllowedForProfile(profile())) {
+      std::unique_ptr<LauncherAppUpdater> arc_app_updater(
+          new LauncherArcAppUpdater(this, profile()));
+      app_updaters_.push_back(std::move(arc_app_updater));
+    }
 
-  if (crostini::IsCrostiniUIAllowedForProfile(profile())) {
-    std::unique_ptr<LauncherAppUpdater> crostini_app_updater(
-        new LauncherCrostiniAppUpdater(this, profile()));
-    app_updaters_.push_back(std::move(crostini_app_updater));
+    if (crostini::CrostiniFeatures::Get()->IsUIAllowed(profile())) {
+      std::unique_ptr<LauncherAppUpdater> crostini_app_updater(
+          new LauncherCrostiniAppUpdater(this, profile()));
+      app_updaters_.push_back(std::move(crostini_app_updater));
+    }
   }
 
   app_list::AppListSyncableService* app_list_syncable_service =
@@ -1190,6 +1344,7 @@ void ChromeLauncherController::AttachProfile(Profile* profile_to_attach) {
 
 void ChromeLauncherController::ReleaseProfile() {
   app_updaters_.clear();
+  app_icon_loaders_.clear();
 
   pref_change_registrar_.RemoveAll();
 

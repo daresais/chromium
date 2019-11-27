@@ -14,8 +14,8 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "components/autofill/content/common/autofill_agent.mojom.h"
-#include "components/autofill/content/common/autofill_driver.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_agent.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/content/renderer/form_tracker.h"
 #include "content/public/renderer/render_frame_observer.h"
@@ -27,6 +27,7 @@
 #include "third_party/blink/public/web/web_form_control_element.h"
 #include "third_party/blink/public/web/web_form_element.h"
 #include "third_party/blink/public/web/web_input_element.h"
+#include "ui/accessibility/ax_mode.h"
 
 namespace blink {
 class WebNode;
@@ -39,8 +40,6 @@ class WebVector;
 namespace autofill {
 
 struct FormData;
-struct FormFieldData;
-struct PasswordFormFillData;
 class PasswordAutofillAgent;
 class PasswordGenerationAgent;
 
@@ -82,14 +81,12 @@ class AutofillAgent : public content::RenderFrameObserver,
   void ClearPreviewedForm() override;
   void FillFieldWithValue(const base::string16& value) override;
   void PreviewFieldWithValue(const base::string16& value) override;
-  void SetSuggestionAvailability(bool available) override;
+  void SetSuggestionAvailability(const mojom::AutofillState state) override;
   void AcceptDataListSuggestion(const base::string16& value) override;
   void FillPasswordSuggestion(const base::string16& username,
                               const base::string16& password) override;
   void PreviewPasswordSuggestion(const base::string16& username,
                                  const base::string16& password) override;
-  void ShowInitialPasswordAccountSuggestions(
-      const PasswordFormFillData& form_data) override;
   void SetUserGestureRequired(bool required) override;
   void SetSecureContextRequired(bool required) override;
   void SetFocusRequiresScroll(bool require) override;
@@ -171,6 +168,7 @@ class AutofillAgent : public content::RenderFrameObserver,
   void DidFinishDocumentLoad() override;
   void DidChangeScrollOffset() override;
   void FocusedElementChanged(const blink::WebElement& element) override;
+  void AccessibilityModeChanged(const ui::AXMode& mode) override;
   void OnDestruct() override;
 
   // Fires Mojo messages for a given form submission.
@@ -202,7 +200,8 @@ class AutofillAgent : public content::RenderFrameObserver,
       const blink::WebFormControlElement& element) override;
   void SelectControlDidChange(
       const blink::WebFormControlElement& element) override;
-  bool HasFillData(const blink::WebFormControlElement& element) const override;
+  bool ShouldSuppressKeyboard(
+      const blink::WebFormControlElement& element) override;
 
   void HandleFocusChangeComplete();
 
@@ -229,12 +228,6 @@ class AutofillAgent : public content::RenderFrameObserver,
   // Sets the element value to reflect the selected |suggested_value|.
   void DoAcceptDataListSuggestion(const base::string16& suggested_value);
 
-  // Fills |form| and |field| with the FormData and FormField corresponding to
-  // |node|. Returns true if the data was found; and false otherwise.
-  bool FindFormAndFieldForNode(const blink::WebNode& node,
-                               FormData* form,
-                               FormFieldData* field) WARN_UNUSED_RESULT;
-
   // Set |node| to display the given |value|.
   void DoFillFieldWithValue(const base::string16& value,
                             blink::WebInputElement* node);
@@ -248,23 +241,8 @@ class AutofillAgent : public content::RenderFrameObserver,
   // Notifies browser of new fillable forms in |render_frame|.
   void ProcessForms();
 
-  // Sends a message to the browser that the form is about to be submitted,
-  // only if the particular message has not been previously submitted for the
-  // form in the current frame.
-  // Additionally, depending on |send_submitted_event| a message is sent to the
-  // browser that the form was submitted.
-  void SendFormEvents(const blink::WebFormElement& form,
-                      bool send_submitted_event);
-
   // Hides any currently showing Autofill popup.
   void HidePopup();
-
-  // TODO(crbug.com/785524): Investigate why this method need to be mocked in
-  // chrome_render_view_test.cc, this isn't called now, but this is no test
-  // failed.
-  // Returns true if the text field change is due to a user gesture. Can be
-  // overriden in tests.
-  virtual bool IsUserGesture() const;
 
   // Attempt to get submitted FormData from last_interacted_form_ or
   // provisionally_saved_form_, return true if |form| is set.
@@ -391,6 +369,10 @@ class AutofillAgent : public content::RenderFrameObserver,
   bool was_last_action_fill_ = false;
 
   base::OneShotTimer on_select_update_timer_;
+
+  // Will be set when accessibility mode changes, depending on what the new mode
+  // is.
+  bool is_screen_reader_enabled_ = false;
 
   base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_{this};
 

@@ -51,8 +51,8 @@ class WebViewSyncClient : public browser_sync::BrowserSyncClient {
   base::RepeatingClosure GetPasswordStateChangedCallback() override;
   syncer::DataTypeController::TypeVector CreateDataTypeControllers(
       syncer::SyncService* sync_service) override;
-  autofill::PersonalDataManager* GetPersonalDataManager() override;
   invalidation::InvalidationService* GetInvalidationService() override;
+  syncer::TrustedVaultClient* GetTrustedVaultClient() override;
   BookmarkUndoService* GetBookmarkUndoService() override;
   scoped_refptr<syncer::ExtensionsActivity> GetExtensionsActivity() override;
   base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(

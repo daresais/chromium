@@ -18,7 +18,6 @@ namespace switches {
 // TODO(sky): fix order!
 ASH_PUBLIC_EXPORT extern const char kAshColorMode[];
 ASH_PUBLIC_EXPORT extern const char kAshColorModeDark[];
-ASH_PUBLIC_EXPORT extern const char kAshColorModeDefault[];
 ASH_PUBLIC_EXPORT extern const char kAshColorModeLight[];
 ASH_PUBLIC_EXPORT extern const char kAshConstrainPointerToRoot[];
 ASH_PUBLIC_EXPORT extern const char kAshDebugShortcuts[];
@@ -31,6 +30,7 @@ ASH_PUBLIC_EXPORT extern const char kAshEnablePaletteOnAllDisplays[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableTabletMode[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableWaylandServer[];
 ASH_PUBLIC_EXPORT extern const char kAshForceEnableStylusTools[];
+ASH_PUBLIC_EXPORT extern const char kAshForceStatusAreaCollapsible[];
 ASH_PUBLIC_EXPORT extern const char kAshPowerButtonPosition[];
 ASH_PUBLIC_EXPORT extern const char kAshUiMode[];
 ASH_PUBLIC_EXPORT extern const char kAshUiModeClamshell[];
@@ -49,6 +49,7 @@ ASH_PUBLIC_EXPORT extern const char kAshShelfColorSchemeDarkVibrant[];
 ASH_PUBLIC_EXPORT extern const char kAshSideVolumeButtonPosition[];
 ASH_PUBLIC_EXPORT extern const char kAshTouchHud[];
 ASH_PUBLIC_EXPORT extern const char kAuraLegacyPowerButton[];
+ASH_PUBLIC_EXPORT extern const char kEnableDimShelf[];
 ASH_PUBLIC_EXPORT extern const char kForceTabletPowerButton[];
 ASH_PUBLIC_EXPORT extern const char kHasInternalStylus[];
 ASH_PUBLIC_EXPORT extern const char kShowTaps[];
@@ -58,6 +59,7 @@ ASH_PUBLIC_EXPORT extern const char kSuppressMessageCenterPopups[];
 ASH_PUBLIC_EXPORT extern const char kTouchscreenUsableWhileScreenOff[];
 
 ASH_PUBLIC_EXPORT bool IsUsingViewsLock();
+ASH_PUBLIC_EXPORT bool IsUsingShelfAutoDim();
 
 }  // namespace switches
 }  // namespace ash

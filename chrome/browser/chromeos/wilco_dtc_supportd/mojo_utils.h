@@ -22,6 +22,10 @@ namespace chromeos {
 // memory.
 //
 // Returns an empty string and an invalid |shared_memory| if error.
+//
+// TODO(crbug.com/989503): Use mojo::ScopedSharedBufferHandle or
+// base::ReadOnlySharedMemoryRegion instead of mojo::ScopedHandle
+// once ChromeOS updates to the required version of mojo library.
 base::StringPiece GetStringPieceFromMojoHandle(
     mojo::ScopedHandle handle,
     base::ReadOnlySharedMemoryMapping* shared_memory);
@@ -30,6 +34,11 @@ base::StringPiece GetStringPieceFromMojoHandle(
 // converts shared buffer handle into |mojo::ScopedHandle|.
 //
 // Allocated shared memory is read only for another process.
+//
+// Returns invalid |mojo::ScopedHandle| if |content| is empty or error happened.
+//
+// TODO(crbug.com/989503): Remove mojo::ScopedHandle wrapping once
+// ChromeOS updates to the required version of mojo library.
 mojo::ScopedHandle CreateReadOnlySharedMemoryMojoHandle(
     const std::string& content);
 

@@ -46,13 +46,12 @@ class NativeFileSystemPermissionView : public views::DialogDelegateView {
 
   // views::DialogDelegateView:
   base::string16 GetWindowTitle() const override;
-  int GetDefaultDialogButton() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool ShouldShowCloseButton() const override;
   bool Accept() override;
   bool Cancel() override;
   gfx::Size CalculatePreferredSize() const override;
   ui::ModalType GetModalType() const override;
+  views::View* GetInitiallyFocusedView() override;
 
  private:
   NativeFileSystemPermissionView(
@@ -62,7 +61,6 @@ class NativeFileSystemPermissionView : public views::DialogDelegateView {
       base::OnceCallback<void(PermissionAction result)> callback);
 
   const base::FilePath path_;
-  const bool is_directory_;
   base::OnceCallback<void(PermissionAction result)> callback_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeFileSystemPermissionView);

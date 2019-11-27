@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/input/gesture_manager.h"
 
 #include "build/build_config.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
@@ -25,7 +26,7 @@
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 
 #if BUILDFLAG(ENABLE_UNHANDLED_TAP)
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/unhandled_tap_notifier/unhandled_tap_notifier.mojom-blink.h"
 #include "third_party/blink/public/web/web_node.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -137,6 +138,10 @@ WebInputEventResult GestureManager::HandleGestureEventInFrame(
   }
 
   return WebInputEventResult::kNotHandled;
+}
+
+bool GestureManager::LongTapShouldInvokeContextMenu() const {
+  return long_tap_should_invoke_context_menu_;
 }
 
 WebInputEventResult GestureManager::HandleGestureTapDown(
@@ -371,12 +376,10 @@ WebInputEventResult GestureManager::HandleGestureLongPress(
 
 WebInputEventResult GestureManager::HandleGestureLongTap(
     const GestureEventWithHitTestResults& targeted_event) {
-#if !defined(OS_ANDROID)
-  if (long_tap_should_invoke_context_menu_) {
+  if (LongTapShouldInvokeContextMenu()) {
     long_tap_should_invoke_context_menu_ = false;
     return SendContextMenuEventForGesture(targeted_event);
   }
-#endif
   return WebInputEventResult::kNotHandled;
 }
 
@@ -468,9 +471,9 @@ void GestureManager::ShowUnhandledTapUIIfNeeded(
   // The Browser may do additional trigger-filtering.
   if (should_trigger) {
     // Start setting up the Mojo interface connection.
-    mojom::blink::UnhandledTapNotifierPtr provider;
-    frame_->Client()->GetInterfaceProvider()->GetInterface(
-        mojo::MakeRequest(&provider));
+    mojo::Remote<mojom::blink::UnhandledTapNotifier> provider;
+    frame_->GetBrowserInterfaceBroker().GetInterface(
+        provider.BindNewPipeAndPassReceiver());
 
     // Extract text run-length.
     int text_run_length = 0;

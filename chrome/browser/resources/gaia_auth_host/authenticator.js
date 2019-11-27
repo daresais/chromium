@@ -6,7 +6,7 @@
 // Note: webview_event_manager.js is already included by saml_handler.js.
 
 /**
- * @fileoverview An UI component to authenciate to Chrome. The component hosts
+ * @fileoverview An UI component to authenticate to Chrome. The component hosts
  * IdP web pages in a webview. A client who is interested in monitoring
  * authentication events should subscribe itself via addEventListener(). After
  * initialization, call {@code load} to start the authentication flow.
@@ -87,6 +87,9 @@ cr.define('cr.login', function() {
     'obfuscatedOwnerId',         // Obfuscated device owner ID, if needed.
     'extractSamlPasswordAttributes',  // If enabled attempts to extract password
                                       // attributes from the SAML response.
+    'ignoreCrOSIdpSetting',  // If set to true, causes Gaia to ignore 3P
+                             // SAML IdP SSO redirection policies (and
+                             // redirect to SAML IdPs by default).
 
     // The email fields allow for the following possibilities:
     //
@@ -106,6 +109,12 @@ cr.define('cr.login', function() {
     'email',
     'readOnlyEmail',
     'realm',
+    // If the authentication is done via external IdP, 'startsOnSamlPage'
+    // indicates whether the flow should start on the IdP page.
+    'startsOnSamlPage',
+    // SAML assertion consumer URL, used to detect when Gaia-less SAML flows end
+    // (e.g. for SAML managed guest sessions).
+    'samlAclUrl',
   ];
 
 
@@ -194,6 +203,16 @@ cr.define('cr.login', function() {
   };
 
   /**
+   * Old or not supported on Chrome OS messages.
+   * @type {!Array<string>}
+   * @const
+   */
+  const IGNORED_MESSAGES_FROM_GAIA = [
+    'clearOldAttempts',
+    'showConfirmCancel',
+  ];
+
+  /**
    * Initializes the authenticator component.
    */
   class Authenticator extends cr.EventTarget {
@@ -232,6 +251,7 @@ cr.define('cr.login', function() {
 
       this.confirmPasswordCallback = null;
       this.noPasswordCallback = null;
+      this.onePasswordCallback = null;
       this.insecureContentBlockedCallback = null;
       this.samlApiUsedCallback = null;
       this.missingGaiaInfoCallback = null;
@@ -252,6 +272,7 @@ cr.define('cr.login', function() {
        * @private
        */
       this.isSamlUserPasswordless_ = null;
+      this.samlAclUrl_ = null;
 
       window.addEventListener(
           'message', this.onMessageFromWebview_.bind(this), false);
@@ -333,6 +354,9 @@ cr.define('cr.login', function() {
       this.webviewEventManager_.addEventListener(
           this.samlHandler_, 'apiPasswordAdded',
           this.onSamlApiPasswordAdded_.bind(this));
+      this.webviewEventManager_.addEventListener(
+          this.samlHandler_, 'challengeMachineKeyRequired',
+          this.onChallengeMachineKeyRequired_.bind(this));
 
       this.webviewEventManager_.addEventListener(
           this.webview_, 'droplink', this.onDropLink_.bind(this));
@@ -452,12 +476,23 @@ cr.define('cr.login', function() {
 
       this.initialFrameUrl_ = this.constructInitialFrameUrl_(data);
       this.reloadUrl_ = data.frameUrl || this.initialFrameUrl_;
+      this.samlAclUrl_ = data.samlAclUrl;
+      // The email field is repurposed as public session email in SAML guest
+      // mode, ie when frameUrl is not empty.
+      if (data.samlAclUrl) {
+        this.email_ = data.email;
+      }
+
+      if (data.startsOnSamlPage) {
+        this.samlHandler_.startsOnSamlPage = true;
+      }
       // Don't block insecure content for desktop flow because it lands on
       // http. Otherwise, block insecure content as long as gaia is https.
       this.samlHandler_.blockInsecureContent = authMode != AuthMode.DESKTOP &&
           this.idpOrigin_.startsWith('https://');
       this.samlHandler_.extractSamlPasswordAttributes =
           data.extractSamlPasswordAttributes;
+
       this.needPassword = !('needPassword' in data) || data.needPassword;
 
       this.webview_.contextMenus.onShow.addListener(function(e) {
@@ -571,6 +606,12 @@ cr.define('cr.login', function() {
         // ChromeOS embedded signin page uses 'hd' (hosted domain) as the query
         // argument to show an email domain.
         url = appendParam(url, 'hd', data.emailDomain);
+      }
+      if (data.ignoreCrOSIdpSetting === true) {
+        url = appendParam(url, 'ignoreCrOSIdpSetting', 'true');
+      }
+      if (data.enableGaiaActionButtons) {
+        url = appendParam(url, 'use_native_navigation', 1);
       }
       return url;
     }
@@ -734,7 +775,7 @@ cr.define('cr.login', function() {
       const msg = e.data;
       if (msg.method in messageHandlers) {
         messageHandlers[msg.method].call(this, msg);
-      } else {
+      } else if (!IGNORED_MESSAGES_FROM_GAIA.includes(msg.method)) {
         console.warn('Unrecognized message from GAIA: ' + msg.method);
       }
     }
@@ -821,7 +862,9 @@ cr.define('cr.login', function() {
 
       if (this.samlHandler_.samlApiUsed) {
         if (this.samlApiUsedCallback) {
-          this.samlApiUsedCallback();
+          // Makes distinction between Gaia and Chrome Credentials Passing API
+          // login to properly fill ChromeOS.SAML.ApiLogin metrics.
+          this.samlApiUsedCallback(this.authFlow == AuthFlow.SAML);
         }
         this.password_ = this.samlHandler_.apiPasswordBytes;
         this.onAuthCompleted_();
@@ -843,6 +886,9 @@ cr.define('cr.login', function() {
           // If we scraped exactly one password, we complete the
           // authentication right away.
           this.password_ = this.samlHandler_.firstScrapedPassword;
+          if (this.onePasswordCallback) {
+            this.onePasswordCallback();
+          }
           this.onAuthCompleted_();
           return;
         }
@@ -861,8 +907,8 @@ cr.define('cr.login', function() {
 
     /**
      * Invoked to complete the authentication using the password the user
-     * enters manually for non-principals API SAML IdPs that we couldn't
-     * scrape their password input.
+     * enters manually for SAML IdPs that do not use Chrome Credentials Passing
+     * API and we couldn't scrape their password input.
      */
     completeAuthWithManualPassword(password) {
       this.password_ = password;
@@ -954,6 +1000,7 @@ cr.define('cr.login', function() {
               gaiaId: this.gaiaId_ || '',
               password: this.password_ || '',
               usingSAML: this.authFlow == AuthFlow.SAML,
+              publicSAML: this.samlAclUrl_ || false,
               chooseWhatToSync: this.chooseWhatToSync_,
               skipForNow: this.skipForNow_,
               sessionIndex: this.sessionIndex_ || '',
@@ -1023,6 +1070,16 @@ cr.define('cr.login', function() {
     }
 
     /**
+     * Invoked when |samlHandler_| fires 'challengeMachineKeyRequired' event.
+     * @private
+     */
+    onChallengeMachineKeyRequired_(e) {
+      cr.sendWithPromise(
+            'samlChallengeMachineKey', e.detail.url, e.detail.challenge)
+          .then(e.detail.callback);
+    }
+
+    /**
      * Invoked when a link is dropped on the webview.
      * @private
      */
@@ -1079,6 +1136,9 @@ cr.define('cr.login', function() {
         this.webview_.focus();
       } else if (currentUrl == BLANK_PAGE_URL) {
         this.fireReadyEvent_();
+      } else if (currentUrl == this.samlAclUrl_) {
+        this.skipForNow_ = true;
+        this.onAuthCompleted_();
       }
     }
 
@@ -1087,8 +1147,12 @@ cr.define('cr.login', function() {
      * @private
      */
     onLoadAbort_(e) {
+      if (this.samlHandler_.isIntentionalAbort()) {
+        return;
+      }
+
       this.dispatchEvent(new CustomEvent(
-          'loadAbort', {detail: {error: e.reason, src: e.url}}));
+          'loadAbort', {detail: {error_code: e.code, src: e.url}}));
     }
 
     /**

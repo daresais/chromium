@@ -41,8 +41,7 @@ class ReadableStreamBytesConsumer::OnFulfilled final : public ScriptFunction {
       return ScriptValue();
     }
     v8::Local<v8::Value> value;
-    if (!V8UnpackIteratorResult(v.GetScriptState(), item.As<v8::Object>(),
-                                &done)
+    if (!V8UnpackIteratorResult(GetScriptState(), item.As<v8::Object>(), &done)
              .ToLocal(&value)) {
       consumer_->OnRejected();
       return ScriptValue();
@@ -114,10 +113,10 @@ BytesConsumer::Result ReadableStreamBytesConsumer::BeginRead(
     return Result::kDone;
 
   if (pending_buffer_) {
-    DCHECK_LE(pending_offset_, pending_buffer_->length());
+    DCHECK_LE(pending_offset_, pending_buffer_->lengthAsSizeT());
     *buffer = reinterpret_cast<const char*>(pending_buffer_->Data()) +
               pending_offset_;
-    *available = pending_buffer_->length() - pending_offset_;
+    *available = pending_buffer_->lengthAsSizeT() - pending_offset_;
     return Result::kOk;
   }
   if (!is_reading_) {
@@ -134,9 +133,9 @@ BytesConsumer::Result ReadableStreamBytesConsumer::BeginRead(
 
 BytesConsumer::Result ReadableStreamBytesConsumer::EndRead(size_t read_size) {
   DCHECK(pending_buffer_);
-  DCHECK_LE(pending_offset_ + read_size, pending_buffer_->length());
+  DCHECK_LE(pending_offset_ + read_size, pending_buffer_->lengthAsSizeT());
   pending_offset_ += read_size;
-  if (pending_offset_ >= pending_buffer_->length()) {
+  if (pending_offset_ >= pending_buffer_->lengthAsSizeT()) {
     pending_buffer_ = nullptr;
     pending_offset_ = 0;
   }

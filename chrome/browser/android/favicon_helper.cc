@@ -88,13 +88,12 @@ FaviconHelper::FaviconHelper() {
   cancelable_task_tracker_.reset(new base::CancelableTaskTracker());
 }
 
-void FaviconHelper::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+void FaviconHelper::Destroy(JNIEnv* env) {
   delete this;
 }
 
 jboolean FaviconHelper::GetLocalFaviconImageForURL(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& j_profile,
     const JavaParamRef<jstring>& j_page_url,
     jint j_desired_size_in_pixel,
@@ -136,7 +135,6 @@ jboolean FaviconHelper::GetLocalFaviconImageForURL(
 
 jboolean FaviconHelper::GetForeignFaviconImageForURL(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& jprofile,
     const JavaParamRef<jstring>& j_page_url,
     jint j_desired_size_in_pixel,
@@ -161,8 +159,8 @@ jboolean FaviconHelper::GetForeignFaviconImageForURL(
       page_url, static_cast<int>(j_desired_size_in_pixel),
       base::BindOnce(&OnFaviconBitmapResultAvailable,
                      ScopedJavaGlobalRef<jobject>(j_favicon_image_callback)),
-      favicon::HistoryUiFaviconRequestOrigin::RECENTLY_CLOSED_TABS,
       favicon::FaviconRequestPlatform::kMobile,
+      favicon::HistoryUiFaviconRequestOrigin::kRecentTabs,
       /*icon_url_for_uma=*/
       open_tabs ? open_tabs->GetIconUrlForPageUrl(page_url) : GURL(),
       cancelable_task_tracker_.get());
@@ -171,7 +169,6 @@ jboolean FaviconHelper::GetForeignFaviconImageForURL(
 
 void FaviconHelper::EnsureIconIsAvailable(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& j_profile,
     const JavaParamRef<jobject>& j_web_contents,
     const JavaParamRef<jstring>& j_page_url,
@@ -204,7 +201,6 @@ void FaviconHelper::EnsureIconIsAvailable(
 
 void FaviconHelper::TouchOnDemandFavicon(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& j_profile,
     const JavaParamRef<jstring>& j_icon_url) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
@@ -289,7 +285,7 @@ void FaviconHelper::OnFaviconImageResultAvailable(
   }
 
   web_contents->DownloadImage(
-      icon_url, true, 0, false,
-      base::Bind(&FaviconHelper::OnFaviconDownloaded, j_availability_callback,
-                 profile, page_url, icon_type));
+      icon_url, true, 0, 0, false,
+      base::BindOnce(&FaviconHelper::OnFaviconDownloaded,
+                     j_availability_callback, profile, page_url, icon_type));
 }

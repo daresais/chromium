@@ -279,18 +279,9 @@ void WebViewPermissionHelper::CancelGeolocationPermissionRequest(
 void WebViewPermissionHelper::RequestFileSystemPermission(
     const GURL& url,
     bool allowed_by_default,
-    const base::Callback<void(bool)>& callback) {
+    base::OnceCallback<void(bool)> callback) {
   web_view_permission_helper_delegate_->RequestFileSystemPermission(
-      url, allowed_by_default, callback);
-}
-
-void WebViewPermissionHelper::FileSystemAccessedAsync(int render_process_id,
-                                                      int render_frame_id,
-                                                      int request_id,
-                                                      const GURL& url,
-                                                      bool blocked_by_policy) {
-  web_view_permission_helper_delegate_->FileSystemAccessedAsync(
-      render_process_id, render_frame_id, request_id, url, blocked_by_policy);
+      url, allowed_by_default, std::move(callback));
 }
 
 int WebViewPermissionHelper::RequestPermission(

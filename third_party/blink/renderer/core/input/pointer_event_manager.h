@@ -24,8 +24,8 @@ class MouseEventManager;
 
 // This class takes care of dispatching all pointer events and keeps track of
 // properties of active pointer events.
-class CORE_EXPORT PointerEventManager
-    : public GarbageCollectedFinalized<PointerEventManager> {
+class CORE_EXPORT PointerEventManager final
+    : public GarbageCollected<PointerEventManager> {
  public:
   PointerEventManager(LocalFrame&, MouseEventManager&);
   void Trace(blink::Visitor*);
@@ -97,9 +97,6 @@ class CORE_EXPORT PointerEventManager
   bool PrimaryPointerdownCanceled(uint32_t unique_touch_event_id);
 
   void RemoveLastMousePosition();
-
-  void SetLastMousePositionForPointerUnlock(
-      FloatPoint mouse_lock_position_in_screen);
 
   Element* GetMouseCaptureTarget();
 

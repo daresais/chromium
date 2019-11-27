@@ -26,8 +26,11 @@ class PpdProvider;
 class PrinterConfigurer;
 class PrinterDetector;
 class PrinterEventTracker;
+class ServerPrintersProvider;
 class SyncedPrintersManager;
 class UsbPrinterNotificationController;
+
+enum class PrinterSetupSource;
 
 // Top level manager of available CUPS printers in ChromeOS.  All functions
 // in this class must be called from a sequenced context.
@@ -61,6 +64,7 @@ class CupsPrintersManager : public PrinterInstallationManager,
       std::unique_ptr<PrinterConfigurer> printer_configurer,
       std::unique_ptr<UsbPrinterNotificationController>
           usb_notification_controller,
+      std::unique_ptr<ServerPrintersProvider> server_printers_provider,
       PrinterEventTracker* event_tracker,
       PrefService* pref_service);
 
@@ -91,7 +95,9 @@ class CupsPrintersManager : public PrinterInstallationManager,
   // Parameter |is_automatic| should be set to true if the printer was
   // saved automatically (without requesting additional information
   // from the user).
-  void PrinterInstalled(const Printer& printer, bool is_automatic) override = 0;
+  void PrinterInstalled(const Printer& printer,
+                        bool is_automatic,
+                        PrinterSetupSource source) override = 0;
 
   // Returns true if |printer| is currently installed in CUPS with this
   // configuration.

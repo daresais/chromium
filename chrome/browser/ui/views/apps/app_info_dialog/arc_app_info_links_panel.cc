@@ -10,8 +10,8 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/arc/common/app.mojom.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
+#include "components/arc/mojom/app.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -34,6 +34,7 @@ ArcAppInfoLinksPanel::ArcAppInfoLinksPanel(Profile* profile,
       l10n_util::GetStringUTF16(IDS_ARC_APPLICATION_INFO_MANAGE_LINK));
   manage_link->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   manage_link->set_listener(this);
+  manage_link->SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
   manage_link_ = AddChildView(std::move(manage_link));
 
   ArcAppListPrefs* const arc_prefs = ArcAppListPrefs::Get(profile_);

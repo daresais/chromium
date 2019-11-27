@@ -9,17 +9,20 @@
 #include "base/one_shot_event.h"
 #include "chrome/browser/extensions/convert_web_app.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/components/app_registrar_observer.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
 #include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
+#include "chrome/common/extensions/manifest_handlers/app_display_mode_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_theme_color_info.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "url/gurl.h"
+
+using web_app::DisplayMode;
 
 namespace extensions {
 
@@ -30,72 +33,46 @@ BookmarkAppRegistrar::BookmarkAppRegistrar(Profile* profile)
 
 BookmarkAppRegistrar::~BookmarkAppRegistrar() = default;
 
-void BookmarkAppRegistrar::Init(base::OnceClosure callback) {
-  ExtensionSystem::Get(profile())->ready().Post(FROM_HERE, std::move(callback));
-}
-
-bool BookmarkAppRegistrar::IsInstalled(const GURL& start_url) const {
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
-  const ExtensionSet& extensions = registry->enabled_extensions();
-
-  // Iterate through the extensions and extract the LaunchWebUrl (bookmark apps)
-  // or check the web extent (hosted apps).
-  for (const scoped_refptr<const Extension>& extension : extensions) {
-    if (!extension->from_bookmark())
-      continue;
-
-    if (!BookmarkAppIsLocallyInstalled(profile(), extension.get()))
-      continue;
-
-    DCHECK(extension->web_extent().is_empty());
-    if (AppLaunchInfo::GetLaunchWebURL(extension.get()) == start_url)
-      return true;
-  }
-  return false;
-}
-
 bool BookmarkAppRegistrar::IsInstalled(const web_app::AppId& app_id) const {
   return GetExtension(app_id) != nullptr;
 }
 
-bool BookmarkAppRegistrar::WasExternalAppUninstalledByUser(
+bool BookmarkAppRegistrar::IsLocallyInstalled(
     const web_app::AppId& app_id) const {
-  return ExtensionPrefs::Get(profile())->IsExternalExtensionUninstalled(app_id);
+  const Extension* extension = GetExtension(app_id);
+  return extension && BookmarkAppIsLocallyInstalled(profile(), extension);
 }
 
-base::Optional<web_app::AppId> BookmarkAppRegistrar::FindAppWithUrlInScope(
-    const GURL& url) const {
-  const Extension* extension = util::GetInstalledPwaForUrl(profile(), url);
-
-  if (!extension)
-    extension = GetInstalledShortcutForUrl(profile(), url);
-
-  if (extension)
-    return extension->id();
-
-  return base::nullopt;
+bool BookmarkAppRegistrar::WasInstalledByUser(
+    const web_app::AppId& app_id) const {
+  const Extension* extension = GetExtension(app_id);
+  return extension && !extension->was_installed_by_default();
 }
 
 int BookmarkAppRegistrar::CountUserInstalledApps() const {
   return CountUserInstalledBookmarkApps(profile());
 }
 
-void BookmarkAppRegistrar::OnExtensionInstalled(
-    content::BrowserContext* browser_context,
-    const extensions::Extension* extension,
-    bool is_update) {
-  DCHECK_EQ(browser_context, profile());
-  if (extension->from_bookmark())
-    NotifyWebAppInstalled(extension->id());
-}
-
 void BookmarkAppRegistrar::OnExtensionUninstalled(
     content::BrowserContext* browser_context,
-    const extensions::Extension* extension,
-    extensions::UninstallReason reason) {
+    const Extension* extension,
+    UninstallReason reason) {
   DCHECK_EQ(browser_context, profile());
   if (extension->from_bookmark())
     NotifyWebAppUninstalled(extension->id());
+}
+
+void BookmarkAppRegistrar::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    UnloadedExtensionReason reason) {
+  DCHECK_EQ(browser_context, profile());
+  if (!extension->from_bookmark())
+    return;
+  // If a profile is removed, notify the web app that it is uninstalled, so it
+  // can cleanup any state outside the profile dir (e.g., registry settings).
+  if (reason == UnloadedExtensionReason::PROFILE_SHUTDOWN)
+    NotifyWebAppProfileWillBeDeleted(extension->id());
 }
 
 void BookmarkAppRegistrar::OnShutdown(ExtensionRegistry* registry) {
@@ -105,8 +82,10 @@ void BookmarkAppRegistrar::OnShutdown(ExtensionRegistry* registry) {
 
 const Extension* BookmarkAppRegistrar::GetExtension(
     const web_app::AppId& app_id) const {
-  return ExtensionRegistry::Get(profile())->enabled_extensions().GetByID(
-      app_id);
+  const Extension* extension =
+      ExtensionRegistry::Get(profile())->enabled_extensions().GetByID(app_id);
+  DCHECK(!extension || extension->from_bookmark());
+  return extension;
 }
 
 std::string BookmarkAppRegistrar::GetAppShortName(
@@ -153,6 +132,45 @@ base::Optional<GURL> BookmarkAppRegistrar::GetAppScope(
     return scope_url;
 
   return base::nullopt;
+}
+
+DisplayMode BookmarkAppRegistrar::GetAppDisplayMode(
+    const web_app::AppId& app_id) const {
+  const Extension* extension = GetExtension(app_id);
+  if (!extension)
+    return DisplayMode::kUndefined;
+
+  return AppDisplayModeInfo::GetDisplayMode(extension);
+}
+
+DisplayMode BookmarkAppRegistrar::GetAppUserDisplayMode(
+    const web_app::AppId& app_id) const {
+  const Extension* extension = GetExtension(app_id);
+  if (!extension)
+    return DisplayMode::kStandalone;
+
+  switch (extensions::GetLaunchContainer(
+      extensions::ExtensionPrefs::Get(profile()), extension)) {
+    case LaunchContainer::kLaunchContainerWindow:
+    case LaunchContainer::kLaunchContainerPanelDeprecated:
+      return DisplayMode::kStandalone;
+    case LaunchContainer::kLaunchContainerTab:
+      return DisplayMode::kBrowser;
+    case LaunchContainer::kLaunchContainerNone:
+      NOTREACHED();
+      return DisplayMode::kUndefined;
+  }
+}
+
+std::vector<web_app::AppId> BookmarkAppRegistrar::GetAppIds() const {
+  std::vector<web_app::AppId> app_ids;
+  for (scoped_refptr<const Extension> app :
+       ExtensionRegistry::Get(profile())->enabled_extensions()) {
+    if (app->from_bookmark()) {
+      app_ids.push_back(app->id());
+    }
+  }
+  return app_ids;
 }
 
 }  // namespace extensions

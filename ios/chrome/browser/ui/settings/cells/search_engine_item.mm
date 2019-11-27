@@ -12,6 +12,7 @@
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -33,6 +34,7 @@
   self = [super initWithType:type];
   if (self) {
       self.cellClass = TableViewURLCell.class;
+      _enabled = YES;
   }
   return self;
 }
@@ -49,12 +51,19 @@
   cell.URLLabel.text = self.detailText;
   cell.cellUniqueIdentifier = self.uniqueIdentifier;
   cell.accessibilityTraits |= UIAccessibilityTraitButton;
+  if (self.enabled) {
+    cell.contentView.alpha = 1.0;
+    cell.userInteractionEnabled = YES;
+  } else {
+    cell.contentView.alpha = 0.4;
+    cell.userInteractionEnabled = NO;
+  }
 
   if (styler.cellTitleColor) {
     cell.titleLabel.textColor = styler.cellTitleColor;
   }
 
-  cell.URLLabel.textColor = UIColorFromRGB(kSettingsCellsURLTextColor);
+  cell.URLLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
 
   [cell configureUILayout];
 }

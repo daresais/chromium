@@ -6,13 +6,14 @@ package org.chromium.chrome.browser.browserservices.permissiondelegation;
 
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.support.annotation.Nullable;
-import android.support.annotation.UiThread;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.UiThread;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.browserservices.Origin;
 import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
@@ -58,7 +59,11 @@ public class TrustedWebActivityPermissionManager {
     InstalledWebappBridge.Permission[] getNotificationPermissions() {
         List<InstalledWebappBridge.Permission> permissions = new ArrayList<>();
         for (String originAsString : mStore.getStoredOrigins()) {
-            Origin origin = new Origin(originAsString);
+            Origin origin = Origin.create(originAsString);
+            assert origin != null
+                    : "Found unparsable Origins in the Permission Store : " + originAsString;
+            if (origin == null) continue;
+
             Boolean enabled = mStore.areNotificationsEnabled(origin);
 
             if (enabled == null) {

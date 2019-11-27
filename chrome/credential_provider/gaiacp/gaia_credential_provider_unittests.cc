@@ -6,6 +6,7 @@
 #include <atlcom.h>
 #include <atlcomcli.h>
 #include <credentialprovider.h>
+#include <wrl/client.h>
 
 #include <tuple>
 
@@ -29,10 +30,10 @@ namespace testing {
 class GcpCredentialProviderTest : public GlsRunnerTestBase {};
 
 TEST_F(GcpCredentialProviderTest, Basic) {
-  CComPtr<IGaiaCredentialProvider> provider;
+  Microsoft::WRL::ComPtr<IGaiaCredentialProvider> provider;
   ASSERT_EQ(S_OK,
             CComCreator<CComObject<CGaiaCredentialProvider>>::CreateInstance(
-                nullptr, IID_IGaiaCredentialProvider, (void**)&provider));
+                nullptr, IID_PPV_ARGS(&provider)));
 }
 
 TEST_F(GcpCredentialProviderTest, SetUserArray_NoGaiaUsers) {
@@ -41,7 +42,7 @@ TEST_F(GcpCredentialProviderTest, SetUserArray_NoGaiaUsers) {
                       L"username", L"password", L"full name", L"comment", L"",
                       L"", &sid));
 
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   DWORD count = 0;
   ASSERT_EQ(S_OK, InitializeProviderWithCredentials(&count, &provider));
 
@@ -49,14 +50,14 @@ TEST_F(GcpCredentialProviderTest, SetUserArray_NoGaiaUsers) {
   // requisite registry entry will be counted.
   EXPECT_EQ(1u, count);
 
-  CComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &cred));
 
-  CComPtr<ICredentialProviderCredential2> cred2;
-  ASSERT_NE(S_OK, cred.QueryInterface(&cred2));
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential2> cred2;
+  ASSERT_NE(S_OK, cred.As(&cred2));
 
-  CComPtr<IReauthCredential> reauth_cred;
-  ASSERT_NE(S_OK, cred.QueryInterface(&reauth_cred));
+  Microsoft::WRL::ComPtr<IReauthCredential> reauth_cred;
+  ASSERT_NE(S_OK, cred.As(&reauth_cred));
 }
 
 TEST_F(GcpCredentialProviderTest, CpusLogon) {
@@ -65,7 +66,7 @@ TEST_F(GcpCredentialProviderTest, CpusLogon) {
                       L"username", L"password", L"full name", L"comment", L"",
                       L"", &sid));
 
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   DWORD count = 0;
   ASSERT_EQ(S_OK, InitializeProviderWithCredentials(&count, &provider));
 
@@ -73,14 +74,14 @@ TEST_F(GcpCredentialProviderTest, CpusLogon) {
   // requisite registry entry will be counted.
   EXPECT_EQ(1u, count);
 
-  CComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &cred));
 
-  CComPtr<ICredentialProviderCredential2> cred2;
-  ASSERT_NE(S_OK, cred.QueryInterface(&cred2));
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential2> cred2;
+  ASSERT_NE(S_OK, cred.As(&cred2));
 
-  CComPtr<IReauthCredential> reauth_cred;
-  ASSERT_NE(S_OK, cred.QueryInterface(&reauth_cred));
+  Microsoft::WRL::ComPtr<IReauthCredential> reauth_cred;
+  ASSERT_NE(S_OK, cred.As(&reauth_cred));
 }
 
 TEST_F(GcpCredentialProviderTest, CpusUnlock) {
@@ -89,7 +90,7 @@ TEST_F(GcpCredentialProviderTest, CpusUnlock) {
                       L"username", L"password", L"full name", L"comment", L"",
                       L"", &sid));
 
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   DWORD count = 0;
   SetUsageScenario(CPUS_UNLOCK_WORKSTATION);
   ASSERT_EQ(S_OK, InitializeProviderWithCredentials(&count, &provider));
@@ -106,17 +107,17 @@ TEST_F(GcpCredentialProviderTest, AutoLogonAfterUserRefresh) {
                       L"username", L"password", L"full name", L"comment", L"",
                       L"", &sid));
 
-  CComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
   ASSERT_EQ(S_OK, InitializeProviderAndGetCredential(0, &cred));
 
-  CComPtr<ICredentialProvider> provider = created_provider();
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider = created_provider();
 
-  CComPtr<IGaiaCredentialProvider> gaia_provider;
-  ASSERT_EQ(S_OK, provider.QueryInterface(&gaia_provider));
+  Microsoft::WRL::ComPtr<IGaiaCredentialProvider> gaia_provider;
+  ASSERT_EQ(S_OK, provider.As(&gaia_provider));
 
   // Notify that user access is denied to fake a forced recreation of the users.
-  CComPtr<ICredentialUpdateEventsHandler> update_handler;
-  ASSERT_EQ(S_OK, provider.QueryInterface(&update_handler));
+  Microsoft::WRL::ComPtr<ICredentialUpdateEventsHandler> update_handler;
+  ASSERT_EQ(S_OK, provider.As(&update_handler));
   update_handler->UpdateCredentialsIfNeeded(true);
 
   // Credential changed event should have been received.
@@ -130,8 +131,8 @@ TEST_F(GcpCredentialProviderTest, AutoLogonAfterUserRefresh) {
     AssociatedUserValidator::ScopedBlockDenyAccessUpdate deny_update_locker(
         AssociatedUserValidator::Get());
     ASSERT_EQ(S_OK, gaia_provider->OnUserAuthenticated(
-                        cred, CComBSTR(L"username"), CComBSTR(L"password"), sid,
-                        true));
+                        cred.Get(), CComBSTR(L"username"),
+                        CComBSTR(L"password"), sid, true));
   }
 
   // No credential changed should have been signalled here.
@@ -149,9 +150,9 @@ TEST_F(GcpCredentialProviderTest, AutoLogonAfterUserRefresh) {
   EXPECT_EQ(0u, default_index);
   EXPECT_TRUE(autologon);
 
-  CComPtr<ICredentialProviderCredential> auto_logon_cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> auto_logon_cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &auto_logon_cred));
-  EXPECT_TRUE(auto_logon_cred.IsEqualObject(cred));
+  EXPECT_EQ(auto_logon_cred, cred);
 
   // The next call to GetCredentialCount should return re-created credentials.
 
@@ -169,9 +170,9 @@ TEST_F(GcpCredentialProviderTest, AutoLogonAfterUserRefresh) {
   EXPECT_EQ(CREDENTIAL_PROVIDER_NO_DEFAULT, default_index);
   EXPECT_FALSE(autologon);
 
-  CComPtr<ICredentialProviderCredential> new_cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> new_cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &new_cred));
-  EXPECT_FALSE(new_cred.IsEqualObject(cred));
+  EXPECT_NE(new_cred, cred);
 
   // Another request to refresh the credentials should yield no credential
   // changed event or refresh of credentials.
@@ -189,9 +190,9 @@ TEST_F(GcpCredentialProviderTest, AutoLogonAfterUserRefresh) {
   EXPECT_EQ(CREDENTIAL_PROVIDER_NO_DEFAULT, default_index);
   EXPECT_FALSE(autologon);
 
-  CComPtr<ICredentialProviderCredential> unchanged_cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> unchanged_cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &unchanged_cred));
-  EXPECT_TRUE(new_cred.IsEqualObject(unchanged_cred));
+  EXPECT_EQ(new_cred, unchanged_cred);
 }
 
 TEST_F(GcpCredentialProviderTest, AutoLogonBeforeUserRefresh) {
@@ -201,15 +202,15 @@ TEST_F(GcpCredentialProviderTest, AutoLogonBeforeUserRefresh) {
                       L"username", L"password", L"full name", L"comment", L"",
                       L"", &sid));
 
-  CComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
   ASSERT_EQ(S_OK, InitializeProviderAndGetCredential(0, &cred));
 
-  CComPtr<ICredentialProvider> provider = created_provider();
-  CComPtr<IGaiaCredentialProvider> gaia_provider;
-  ASSERT_EQ(S_OK, provider.QueryInterface(&gaia_provider));
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider = created_provider();
+  Microsoft::WRL::ComPtr<IGaiaCredentialProvider> gaia_provider;
+  ASSERT_EQ(S_OK, provider.As(&gaia_provider));
 
-  CComPtr<ICredentialUpdateEventsHandler> update_handler;
-  ASSERT_EQ(S_OK, provider.QueryInterface(&update_handler));
+  Microsoft::WRL::ComPtr<ICredentialUpdateEventsHandler> update_handler;
+  ASSERT_EQ(S_OK, provider.As(&update_handler));
 
   // Notify user auto logon first and then notify user access denied to ensure
   // that auto logon always has precedence over user access denied.
@@ -218,8 +219,8 @@ TEST_F(GcpCredentialProviderTest, AutoLogonBeforeUserRefresh) {
     AssociatedUserValidator::ScopedBlockDenyAccessUpdate deny_update_locker(
         AssociatedUserValidator::Get());
     ASSERT_EQ(S_OK, gaia_provider->OnUserAuthenticated(
-                        cred, CComBSTR(L"username"), CComBSTR(L"password"), sid,
-                        true));
+                        cred.Get(), CComBSTR(L"username"),
+                        CComBSTR(L"password"), sid, true));
   }
 
   // Credential changed event should have been received.
@@ -245,9 +246,9 @@ TEST_F(GcpCredentialProviderTest, AutoLogonBeforeUserRefresh) {
   EXPECT_EQ(0u, default_index);
   EXPECT_TRUE(autologon);
 
-  CComPtr<ICredentialProviderCredential> auto_logon_cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> auto_logon_cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &auto_logon_cred));
-  EXPECT_TRUE(auto_logon_cred.IsEqualObject(cred));
+  EXPECT_EQ(auto_logon_cred, cred);
 
   // The next call to GetCredentialCount should return re-created credentials.
 
@@ -265,20 +266,18 @@ TEST_F(GcpCredentialProviderTest, AutoLogonBeforeUserRefresh) {
   EXPECT_EQ(CREDENTIAL_PROVIDER_NO_DEFAULT, default_index);
   EXPECT_FALSE(autologon);
 
-  CComPtr<ICredentialProviderCredential> new_cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> new_cred;
   ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &new_cred));
-  EXPECT_FALSE(new_cred.IsEqualObject(cred));
+  EXPECT_NE(new_cred, cred);
 
   // Deactivate the CP.
   ASSERT_EQ(S_OK, provider->UnAdvise());
 }
 
 TEST_F(GcpCredentialProviderTest, AddPersonAfterUserRemove) {
-  // Set up such that MDM is enabled, mulit-users is not, and a user already
+  // Set up such that multi-users is not enabled, and a user already
   // exists.
-  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
   ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmSupportsMultiUser, 0));
-  GoogleMdmEnrolledStatusForTesting forced_status(true);
 
   const wchar_t kDummyUsername[] = L"username";
   const wchar_t kDummyPassword[] = L"password";
@@ -288,8 +287,8 @@ TEST_F(GcpCredentialProviderTest, AddPersonAfterUserRemove) {
                       L"gaia-id", L"foo@gmail.com", &sid));
 
   {
-    CComPtr<ICredentialProviderCredential> cred;
-    CComPtr<ICredentialProvider> provider;
+    Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
+    Microsoft::WRL::ComPtr<ICredentialProvider> provider;
     DWORD count = 0;
     ASSERT_EQ(S_OK, InitializeProviderWithCredentials(&count, &provider));
 
@@ -307,7 +306,7 @@ TEST_F(GcpCredentialProviderTest, AddPersonAfterUserRemove) {
             fake_os_user_manager()->RemoveUser(kDummyUsername, kDummyPassword));
 
   {
-    CComPtr<ICredentialProvider> provider;
+    Microsoft::WRL::ComPtr<ICredentialProvider> provider;
     DWORD count = 0;
     ASSERT_EQ(S_OK, InitializeProviderWithCredentials(&count, &provider));
 
@@ -315,14 +314,14 @@ TEST_F(GcpCredentialProviderTest, AddPersonAfterUserRemove) {
     ASSERT_EQ(1u, count);
 
     // And this credential should be the anonymous one.
-    CComPtr<ICredentialProviderCredential> cred;
+    Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
     ASSERT_EQ(S_OK, provider->GetCredentialAt(0, &cred));
 
-    CComPtr<ICredentialProviderCredential2> cred2;
-    ASSERT_NE(S_OK, cred.QueryInterface(&cred2));
+    Microsoft::WRL::ComPtr<ICredentialProviderCredential2> cred2;
+    ASSERT_NE(S_OK, cred.As(&cred2));
 
-    CComPtr<IReauthCredential> reauth_cred;
-    ASSERT_NE(S_OK, cred.QueryInterface(&reauth_cred));
+    Microsoft::WRL::ComPtr<IReauthCredential> reauth_cred;
+    ASSERT_NE(S_OK, cred.As(&reauth_cred));
 
     // Release the CP.
     ASSERT_EQ(S_OK, provider->UnAdvise());
@@ -334,11 +333,11 @@ class GcpCredentialProviderExecutionTest : public GlsRunnerTestBase {};
 TEST_F(GcpCredentialProviderExecutionTest, UnAdviseDuringGls) {
   USES_CONVERSION;
 
-  CComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
   ASSERT_EQ(S_OK, InitializeProviderAndGetCredential(0, &cred));
 
-  CComPtr<ITestCredential> test;
-  ASSERT_EQ(S_OK, cred.QueryInterface(&test));
+  Microsoft::WRL::ComPtr<ITestCredential> test;
+  ASSERT_EQ(S_OK, cred.As(&test));
 
   // This event is merely used to keep the gls running while it is killed by
   // Terminate().
@@ -369,8 +368,7 @@ TEST_P(GcpCredentialProviderSetSerializationTest, CheckAutoLogon) {
   const bool valid_token_handles = std::get<0>(GetParam());
   const CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus = std::get<1>(GetParam());
 
-  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
-  GoogleMdmEnrolledStatusForTesting forced_status(true);
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmSupportsMultiUser, 0));
 
   CComBSTR first_sid;
   constexpr wchar_t first_username[] = L"username";
@@ -404,8 +402,8 @@ TEST_P(GcpCredentialProviderSetSerializationTest, CheckAutoLogon) {
   GetAuthenticationPackageId(&cpcs.ulAuthenticationPackage);
   cpcs.clsidCredentialProvider = CLSID_GaiaCredentialProvider;
 
-  CComPtr<ICredentialProviderCredential> cred;
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   SetDefaultTokenHandleResponse(valid_token_handles
                                     ? kDefaultValidTokenHandleResponse
                                     : kDefaultInvalidTokenHandleResponse);
@@ -429,66 +427,10 @@ TEST_P(GcpCredentialProviderSetSerializationTest, CheckAutoLogon) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     GcpCredentialProviderSetSerializationTest,
     ::testing::Combine(::testing::Bool(),
                        ::testing::Values(CPUS_UNLOCK_WORKSTATION, CPUS_LOGON)));
-
-// Tests the effect of the MDM settings on the credential provider.
-// Parameters:
-//    bool: whether the MDM URL is configured.
-//    int: whether multi-users is supported:
-//        0: set registry to 0
-//        1: set registry to 1
-//        2: don't set at all
-//    bool: whether an existing user exists.
-class GcpCredentialProviderMdmTest
-    : public GcpCredentialProviderTest,
-      public ::testing::WithParamInterface<std::tuple<bool, int, bool>> {};
-
-TEST_P(GcpCredentialProviderMdmTest, Basic) {
-  const bool config_mdm_url = std::get<0>(GetParam());
-  const int supports_multi_users = std::get<1>(GetParam());
-  const bool user_exists = std::get<2>(GetParam());
-  const DWORD expected_credential_count =
-      config_mdm_url && supports_multi_users != 1 && user_exists ? 0 : 1;
-
-  bool mdm_enrolled = false;
-  if (config_mdm_url) {
-    ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
-    mdm_enrolled = true;
-  }
-
-  GoogleMdmEnrolledStatusForTesting forced_status(mdm_enrolled);
-
-  if (supports_multi_users != 2) {
-    ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmSupportsMultiUser,
-                                            supports_multi_users));
-  }
-
-  if (user_exists) {
-    CComBSTR sid;
-    ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
-                        L"username", L"password", L"full name", L"comment",
-                        L"gaia-id", L"foo@gmail.com", &sid));
-  }
-
-  CComPtr<ICredentialProviderCredential> cred;
-  CComPtr<ICredentialProvider> provider;
-  DWORD count = 0;
-  ASSERT_EQ(S_OK, InitializeProviderWithCredentials(&count, &provider));
-
-  ASSERT_EQ(expected_credential_count, count);
-
-  // Deactivate the CP.
-  ASSERT_EQ(S_OK, provider->UnAdvise());
-}
-
-INSTANTIATE_TEST_SUITE_P(GcpCredentialProviderMdmTest,
-                         GcpCredentialProviderMdmTest,
-                         ::testing::Combine(::testing::Bool(),
-                                            ::testing::Range(0, 3),
-                                            ::testing::Bool()));
 
 // Check that reauth credentials only exist when the token handle for the
 // associated user is no longer valid and internet is available.
@@ -538,8 +480,8 @@ TEST_P(GcpCredentialProviderWithGaiaUsersTest, ReauthCredentialTest) {
   if (!has_token_handle)
     ASSERT_EQ(S_OK, SetUserProperty((BSTR)sid, kUserTokenHandle, L""));
 
-  CComPtr<ICredentialProviderCredential> cred;
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   DWORD count = 0;
   SetDefaultTokenHandleResponse(valid_token_handle
                                     ? kDefaultValidTokenHandleResponse
@@ -554,14 +496,14 @@ TEST_P(GcpCredentialProviderWithGaiaUsersTest, ReauthCredentialTest) {
   ASSERT_EQ(should_reauth_user ? 2u : 1u, count);
 
   if (should_reauth_user) {
-    CComPtr<ICredentialProviderCredential> cred;
+    Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
     ASSERT_EQ(S_OK, provider->GetCredentialAt(1, &cred));
-    CComPtr<IReauthCredential> reauth;
-    EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
+    Microsoft::WRL::ComPtr<IReauthCredential> reauth;
+    EXPECT_EQ(S_OK, cred.As(&reauth));
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          GcpCredentialProviderWithGaiaUsersTest,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::Bool(),
@@ -635,8 +577,8 @@ TEST_P(GcpCredentialProviderWithADUsersTest, ReauthCredentialTest) {
                                     L"non-empty-token-handle"));
   }
 
-  CComPtr<ICredentialProviderCredential> cred;
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   DWORD count = 0;
   SetDefaultTokenHandleResponse(valid_token_handle
                                     ? kDefaultValidTokenHandleResponse
@@ -658,23 +600,23 @@ TEST_P(GcpCredentialProviderWithADUsersTest, ReauthCredentialTest) {
   }
 
   if (should_reauth_user) {
-    CComPtr<ICredentialProviderCredential> cred;
+    Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
     ASSERT_EQ(S_OK, provider->GetCredentialAt(1, &cred));
-    CComPtr<IReauthCredential> reauth;
-    EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
+    Microsoft::WRL::ComPtr<IReauthCredential> reauth;
+    EXPECT_EQ(S_OK, cred.As(&reauth));
   }
 
   // When there are two reauth credentials, validate that the second one
   // is also a reauth credential.
   if (should_reauth_user && !valid_token_handle) {
-    CComPtr<ICredentialProviderCredential> cred;
+    Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
     ASSERT_EQ(S_OK, provider->GetCredentialAt(2, &cred));
-    CComPtr<IReauthCredential> reauth;
-    EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
+    Microsoft::WRL::ComPtr<IReauthCredential> reauth;
+    EXPECT_EQ(S_OK, cred.As(&reauth));
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          GcpCredentialProviderWithADUsersTest,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::Bool(),
@@ -737,7 +679,7 @@ TEST_P(GcpCredentialProviderAvailableCredentialsTest, AvailableCredentials) {
   SetSidLockingWorkstation(second_user_locking_system ? OLE2CW(second_sid)
                                                       : OLE2CW(first_sid));
 
-  CComPtr<ICredentialProvider> provider;
+  Microsoft::WRL::ComPtr<ICredentialProvider> provider;
   DWORD count = 0;
   SetUsageScenario(cpus);
   SetDefaultTokenHandleResponse(valid_token_handles
@@ -765,9 +707,9 @@ TEST_P(GcpCredentialProviderAvailableCredentialsTest, AvailableCredentials) {
   if (expected_credentials == 0)
     return;
 
-  CComPtr<ICredentialProviderCredential> cred;
-  CComPtr<ICredentialProviderCredential2> cred2;
-  CComPtr<IReauthCredential> reauth;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential> cred;
+  Microsoft::WRL::ComPtr<ICredentialProviderCredential2> cred2;
+  Microsoft::WRL::ComPtr<IReauthCredential> reauth;
 
   DWORD first_non_anonymous_cred_index = 0;
 
@@ -777,7 +719,7 @@ TEST_P(GcpCredentialProviderAvailableCredentialsTest, AvailableCredentials) {
   if (other_user_tile_available) {
     EXPECT_EQ(S_OK, provider->GetCredentialAt(first_non_anonymous_cred_index++,
                                               &cred));
-    EXPECT_EQ(S_OK, cred.QueryInterface(&cred2));
+    EXPECT_EQ(S_OK, cred.As(&cred2));
   }
 
   // Not unlocking workstation: if there are more credentials then they should
@@ -789,21 +731,21 @@ TEST_P(GcpCredentialProviderAvailableCredentialsTest, AvailableCredentials) {
     if (first_non_anonymous_cred_index < expected_credentials) {
       EXPECT_EQ(S_OK, provider->GetCredentialAt(
                           first_non_anonymous_cred_index++, &cred));
-      EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
-      EXPECT_EQ(S_OK, cred.QueryInterface(&cred2));
+      EXPECT_EQ(S_OK, cred.As(&reauth));
+      EXPECT_EQ(S_OK, cred.As(&cred2));
 
       EXPECT_EQ(S_OK, provider->GetCredentialAt(
                           first_non_anonymous_cred_index++, &cred));
-      EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
-      EXPECT_EQ(S_OK, cred.QueryInterface(&cred2));
+      EXPECT_EQ(S_OK, cred.As(&reauth));
+      EXPECT_EQ(S_OK, cred.As(&cred2));
     }
   } else if (!other_user_tile_available) {
     // Only the user who locked the computer should be returned as a credential
     // and it should be a ICredentialProviderCredential2 with the correct sid.
     EXPECT_EQ(S_OK, provider->GetCredentialAt(first_non_anonymous_cred_index++,
                                               &cred));
-    EXPECT_EQ(S_OK, cred.QueryInterface(&reauth));
-    EXPECT_EQ(S_OK, cred.QueryInterface(&cred2));
+    EXPECT_EQ(S_OK, cred.As(&reauth));
+    EXPECT_EQ(S_OK, cred.As(&cred2));
 
     wchar_t* sid;
     EXPECT_EQ(S_OK, cred2->GetUserSid(&sid));
@@ -825,7 +767,7 @@ TEST_P(GcpCredentialProviderAvailableCredentialsTest, AvailableCredentials) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     GcpCredentialProviderAvailableCredentialsTest,
     ::testing::Combine(::testing::Bool(),
                        ::testing::Values(CPUS_UNLOCK_WORKSTATION, CPUS_LOGON),

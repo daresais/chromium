@@ -16,7 +16,7 @@
 #include "components/password_manager/ios/account_select_fill_data.h"
 #include "components/password_manager/ios/js_password_manager.h"
 #import "ios/web/public/js_messaging/web_frame.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -99,6 +99,9 @@ constexpr char kCommandPrefix[] = "passwordForm";
   // Bridge to observe form activity in |_webState|.
   std::unique_ptr<autofill::FormActivityObserverBridge>
       _formActivityObserverBridge;
+
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
 }
 
 #pragma mark - Properties
@@ -137,7 +140,8 @@ constexpr char kCommandPrefix[] = "passwordForm";
             [weakSelf handleScriptCommand:JSON];
           }
         });
-    _webState->AddScriptCommandCallback(callback, kCommandPrefix);
+    subscription_ =
+        _webState->AddScriptCommandCallback(callback, kCommandPrefix);
   }
   return self;
 }
@@ -146,7 +150,6 @@ constexpr char kCommandPrefix[] = "passwordForm";
 
 - (void)dealloc {
   if (_webState) {
-    _webState->RemoveScriptCommandCallback(kCommandPrefix);
     _webState->RemoveObserver(_webStateObserverBridge.get());
   }
 }
@@ -156,7 +159,6 @@ constexpr char kCommandPrefix[] = "passwordForm";
 - (void)webStateDestroyed:(web::WebState*)webState {
   DCHECK_EQ(_webState, webState);
   if (_webState) {
-    _webState->RemoveScriptCommandCallback(kCommandPrefix);
     _webState->RemoveObserver(_webStateObserverBridge.get());
     _webState = nullptr;
   }
@@ -387,7 +389,7 @@ constexpr char kCommandPrefix[] = "passwordForm";
             const std::vector<FormData>& forms) {
     PasswordFormHelper* strongSelf = weakSelf;
     for (const auto& form : forms) {
-      std::map<base::string16, const PasswordForm*> matches;
+      std::vector<const PasswordForm*> matches;
       FormDataParser parser;
       std::unique_ptr<PasswordForm> passwordForm =
           parser.Parse(form, FormDataParser::Mode::kFilling);

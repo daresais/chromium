@@ -22,8 +22,8 @@ import org.chromium.base.PathUtils;
 import org.chromium.base.StrictModeContext;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.BackgroundOnlyAsyncTask;
-import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.metrics.WebApkUma;
+import org.chromium.chrome.browser.util.AndroidTaskUtils;
 import org.chromium.webapk.lib.common.WebApkConstants;
 
 import java.io.File;
@@ -229,7 +229,7 @@ public class WebappDirectoryManager {
         ActivityManager manager =
                 (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         for (AppTask task : manager.getAppTasks()) {
-            Intent intent = DocumentUtils.getBaseIntentFromTask(task);
+            Intent intent = AndroidTaskUtils.getBaseIntentFromTask(task);
             if (intent != null) baseIntents.add(intent);
         }
 

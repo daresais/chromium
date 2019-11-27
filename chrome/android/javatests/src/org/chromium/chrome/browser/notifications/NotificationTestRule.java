@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.notifications;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import org.junit.Assert;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
@@ -29,29 +27,29 @@ import java.util.concurrent.TimeoutException;
  */
 public class NotificationTestRule extends ChromeTabbedActivityTestRule {
     /** The maximum time to wait for a criteria to become valid. */
-    private static final long MAX_TIME_TO_POLL_MS = scaleTimeout(6000);
+    private static final long MAX_TIME_TO_POLL_MS = 6000L;
 
     /** The polling interval to wait between checking for a satisfied criteria. */
     private static final long POLLING_INTERVAL_MS = 50;
 
     private MockNotificationManagerProxy mMockNotificationManager;
 
-    private void setUp() throws Exception {
+    private void setUp() {
         // The NotificationPlatformBridge must be overriden prior to the browser process starting.
         mMockNotificationManager = new MockNotificationManagerProxy();
         NotificationPlatformBridge.overrideNotificationManagerForTesting(mMockNotificationManager);
         startMainActivityFromLauncher();
     }
 
-    private void tearDown() throws Exception {
+    private void tearDown() {
         NotificationPlatformBridge.overrideNotificationManagerForTesting(null);
     }
 
     /**
      * Sets the permission to use Web Notifications for the test HTTP server's origin to |setting|.
      */
-    public void setNotificationContentSettingForOrigin(final @ContentSettingValues int setting,
-            String origin) throws InterruptedException, TimeoutException {
+    public void setNotificationContentSettingForOrigin(
+            final @ContentSettingValues int setting, String origin) throws TimeoutException {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             // The notification content setting does not consider the embedder origin.
             PermissionInfo notificationInfo =

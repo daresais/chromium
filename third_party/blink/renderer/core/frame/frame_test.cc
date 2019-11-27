@@ -4,11 +4,11 @@
 
 #include "third_party/blink/renderer/core/frame/frame.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-#include "third_party/blink/renderer/core/testing/document_interface_broker_test_helpers.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -74,8 +74,7 @@ TEST_F(FrameTest, PossiblyExisting) {
 TEST_F(FrameTest, NewGesture) {
   // UserGestureToken::Status doesn't impact Document gesture state.
   std::unique_ptr<UserGestureIndicator> holder =
-      LocalFrame::NotifyUserActivation(GetDocument().GetFrame(),
-                                       UserGestureToken::kNewGesture);
+      LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
   EXPECT_TRUE(GetDocument().GetFrame()->HasBeenActivated());
 }
 
@@ -164,8 +163,6 @@ TEST_F(FrameTest, NavigateSameDomainNoGesture) {
 }
 
 TEST_F(FrameTest, UserActivationInterfaceTest) {
-  ScopedUserActivationV2ForTest scoped_feature(true);
-
   // Initially both sticky and transient bits are false.
   EXPECT_FALSE(GetDocument().GetFrame()->HasBeenActivated());
   EXPECT_FALSE(
@@ -185,25 +182,6 @@ TEST_F(FrameTest, UserActivationInterfaceTest) {
       LocalFrame::HasTransientUserActivation(GetDocument().GetFrame()));
   EXPECT_FALSE(
       LocalFrame::ConsumeTransientUserActivation(GetDocument().GetFrame()));
-}
-
-TEST_F(FrameTest, TestDocumentInterfaceBrokerOverride) {
-  mojom::blink::DocumentInterfaceBrokerPtr doc;
-  FrameHostTestDocumentInterfaceBroker frame_interface_broker(
-      &GetDocument().GetFrame()->GetDocumentInterfaceBroker(),
-      mojo::MakeRequest(&doc));
-  GetDocument().GetFrame()->SetDocumentInterfaceBrokerForTesting(
-      doc.PassInterface().PassHandle());
-
-  mojo::Remote<mojom::blink::FrameHostTestInterface> frame_test;
-  GetDocument()
-      .GetFrame()
-      ->GetDocumentInterfaceBroker()
-      .GetFrameHostTestInterface(frame_test.BindNewPipeAndPassReceiver());
-  frame_test->GetName(base::BindOnce([](const WTF::String& result) {
-    EXPECT_EQ(result, kGetNameTestResponse);
-  }));
-  frame_interface_broker.Flush();
 }
 
 }  // namespace blink

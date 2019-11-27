@@ -7,6 +7,7 @@
 
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/ipc/common/surface_handle.h"
+#include "gpu/ipc/service/display_context.h"
 
 class GURL;
 
@@ -16,6 +17,14 @@ namespace gpu {
 // functionality to multiple classes in src/gpu/ so delegate is inaccurate.
 class GpuChannelManagerDelegate {
  public:
+  // Registers/unregistered display compositor contexts that don't have a GPU
+  // channel and aren't tracked by GpuChannelManager.
+  virtual void RegisterDisplayContext(DisplayContext* display_context) = 0;
+  virtual void UnregisterDisplayContext(DisplayContext* display_context) = 0;
+
+  // Force the loss of all GL contexts.
+  virtual void LoseAllContexts() = 0;
+
   // Called on any successful context creation.
   virtual void DidCreateContextSuccessfully() = 0;
 
@@ -50,6 +59,9 @@ class GpuChannelManagerDelegate {
   // Returns true if the GPU process is exiting. This can be called from any
   // thread.
   virtual bool IsExiting() const = 0;
+
+  // Returns GPU Scheduler
+  virtual gpu::Scheduler* GetGpuScheduler() = 0;
 
 #if defined(OS_WIN)
   // Tells the delegate that |child_window| was created in the GPU process and

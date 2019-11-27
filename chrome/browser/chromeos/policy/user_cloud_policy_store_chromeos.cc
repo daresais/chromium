@@ -52,8 +52,7 @@ UserCloudPolicyStoreChromeOS::UserCloudPolicyStoreChromeOS(
           cryptohome_client,
           background_task_runner,
           account_id,
-          user_policy_key_dir)),
-      weak_factory_(this) {}
+          user_policy_key_dir)) {}
 
 UserCloudPolicyStoreChromeOS::~UserCloudPolicyStoreChromeOS() {}
 
@@ -160,8 +159,8 @@ void UserCloudPolicyStoreChromeOS::ValidatePolicyForStore(
   // Start validation.
   UserCloudPolicyValidator::StartValidation(
       std::move(validator),
-      base::Bind(&UserCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&UserCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void UserCloudPolicyStoreChromeOS::OnPolicyToStoreValidated(
@@ -255,8 +254,8 @@ void UserCloudPolicyStoreChromeOS::ValidateRetrievedPolicy(
     std::unique_ptr<em::PolicyFetchResponse> policy) {
   UserCloudPolicyValidator::StartValidation(
       CreateValidatorForLoad(std::move(policy)),
-      base::Bind(&UserCloudPolicyStoreChromeOS::OnRetrievedPolicyValidated,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&UserCloudPolicyStoreChromeOS::OnRetrievedPolicyValidated,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void UserCloudPolicyStoreChromeOS::OnRetrievedPolicyValidated(

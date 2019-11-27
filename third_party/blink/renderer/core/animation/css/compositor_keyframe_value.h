@@ -12,7 +12,7 @@
 namespace blink {
 
 class CORE_EXPORT CompositorKeyframeValue
-    : public GarbageCollectedFinalized<CompositorKeyframeValue> {
+    : public GarbageCollected<CompositorKeyframeValue> {
  public:
   virtual ~CompositorKeyframeValue() = default;
 
@@ -25,7 +25,6 @@ class CORE_EXPORT CompositorKeyframeValue
 
   virtual void Trace(Visitor*) {}
 
- protected:
   enum class Type {
     kDouble,
     kFilterOperations,
@@ -33,7 +32,6 @@ class CORE_EXPORT CompositorKeyframeValue
     kColor,
   };
 
- private:
   virtual Type GetType() const = 0;
 };
 

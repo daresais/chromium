@@ -74,6 +74,8 @@ chrome.automation.EventType = {
   STATE_CHANGED: 'stateChanged',
   TEXT_CHANGED: 'textChanged',
   TEXT_SELECTION_CHANGED: 'textSelectionChanged',
+  TOOLTIP_CLOSED: 'tooltipClosed',
+  TOOLTIP_OPENED: 'tooltipOpened',
   WINDOW_ACTIVATED: 'windowActivated',
   WINDOW_DEACTIVATED: 'windowDeactivated',
   WINDOW_VISIBILITY_CHANGED: 'windowVisibilityChanged',
@@ -90,7 +92,6 @@ chrome.automation.RoleType = {
   ALERT: 'alert',
   ALERT_DIALOG: 'alertDialog',
   ANCHOR: 'anchor',
-  ANNOTATION: 'annotation',
   APPLICATION: 'application',
   ARTICLE: 'article',
   AUDIO: 'audio',
@@ -103,11 +104,14 @@ chrome.automation.RoleType = {
   CELL: 'cell',
   CHECK_BOX: 'checkBox',
   CLIENT: 'client',
+  CODE: 'code',
   COLOR_WELL: 'colorWell',
   COLUMN: 'column',
   COLUMN_HEADER: 'columnHeader',
   COMBO_BOX_GROUPING: 'comboBoxGrouping',
   COMBO_BOX_MENU_BUTTON: 'comboBoxMenuButton',
+  COMMENT: 'comment',
+  COMMENT_SECTION: 'commentSection',
   COMPLEMENTARY: 'complementary',
   CONTENT_DELETION: 'contentDeletion',
   CONTENT_INSERTION: 'contentInsertion',
@@ -164,10 +168,12 @@ chrome.automation.RoleType = {
   DOC_TOC: 'docToc',
   DOCUMENT: 'document',
   EMBEDDED_OBJECT: 'embeddedObject',
+  EMPHASIS: 'emphasis',
   FEED: 'feed',
   FIGCAPTION: 'figcaption',
   FIGURE: 'figure',
   FOOTER: 'footer',
+  FOOTER_AS_NON_LANDMARK: 'footerAsNonLandmark',
   FORM: 'form',
   GENERIC_CONTAINER: 'genericContainer',
   GRAPHICS_DOCUMENT: 'graphicsDocument',
@@ -175,6 +181,8 @@ chrome.automation.RoleType = {
   GRAPHICS_SYMBOL: 'graphicsSymbol',
   GRID: 'grid',
   GROUP: 'group',
+  HEADER: 'header',
+  HEADER_AS_NON_LANDMARK: 'headerAsNonLandmark',
   HEADING: 'heading',
   IFRAME: 'iframe',
   IFRAME_PRESENTATIONAL: 'iframePresentational',
@@ -223,20 +231,25 @@ chrome.automation.RoleType = {
   RADIO_BUTTON: 'radioButton',
   RADIO_GROUP: 'radioGroup',
   REGION: 'region',
+  REVISION: 'revision',
   ROOT_WEB_AREA: 'rootWebArea',
   ROW: 'row',
   ROW_HEADER: 'rowHeader',
   RUBY: 'ruby',
+  RUBY_ANNOTATION: 'rubyAnnotation',
   SCROLL_BAR: 'scrollBar',
   SCROLL_VIEW: 'scrollView',
   SEARCH: 'search',
   SEARCH_BOX: 'searchBox',
+  SECTION: 'section',
   SLIDER: 'slider',
   SLIDER_THUMB: 'sliderThumb',
   SPIN_BUTTON: 'spinButton',
   SPLITTER: 'splitter',
   STATIC_TEXT: 'staticText',
   STATUS: 'status',
+  STRONG: 'strong',
+  SUGGESTION: 'suggestion',
   SVG_ROOT: 'svgRoot',
   SWITCH: 'switch',
   TAB: 'tab',
@@ -355,6 +368,18 @@ chrome.automation.NameFromType = {
   RELATED_ELEMENT: 'relatedElement',
   TITLE: 'title',
   VALUE: 'value',
+};
+
+/**
+ * @enum {string}
+ * @see https://developer.chrome.com/extensions/automation#type-DescriptionFromType
+ */
+chrome.automation.DescriptionFromType = {
+  UNINITIALIZED: 'uninitialized',
+  ATTRIBUTE: 'attribute',
+  CONTENTS: 'contents',
+  RELATED_ELEMENT: 'relatedElement',
+  TITLE: 'title',
 };
 
 /**
@@ -598,11 +623,18 @@ chrome.automation.AutomationNode.prototype.placeholder;
 chrome.automation.AutomationNode.prototype.roleDescription;
 
 /**
- * The accessible name for this node, via the <a href="http://www.w3.org/TR/wai-aria/roles#namecalculation"> Accessible Name Calculation</a> process.
+ * The accessible name for this node, via the <a href="http://www.w3.org/TR/wai-aria/#namecalculation"> Accessible Name Calculation</a> process.
  * @type {(string|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-name
  */
 chrome.automation.AutomationNode.prototype.name;
+
+/**
+ * The tooltip of the node, if any.
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-tooltip
+ */
+chrome.automation.AutomationNode.prototype.tooltip;
 
 /**
  * The source of the name.
@@ -667,7 +699,7 @@ chrome.automation.AutomationNode.prototype.nonInlineTextWordStarts;
 chrome.automation.AutomationNode.prototype.nonInlineTextWordEnds;
 
 /**
- * The nodes, if any, which this node is specified to control via <a href="http://www.w3.org/TR/wai-aria/states_and_properties#aria-controls"> <code>aria-controls</code></a>.
+ * The nodes, if any, which this node is specified to control via <a href="http://www.w3.org/TR/wai-aria/#aria-controls"> <code>aria-controls</code></a>.
  * @type {(!Array<!chrome.automation.AutomationNode>|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-controls
  */
@@ -681,7 +713,7 @@ chrome.automation.AutomationNode.prototype.controls;
 chrome.automation.AutomationNode.prototype.describedBy;
 
 /**
- * The nodes, if any, which may optionally be navigated to after this one. See <a href="http://www.w3.org/TR/wai-aria/states_and_properties#aria-flowto"> <code>aria-flowto</code></a>.
+ * The nodes, if any, which may optionally be navigated to after this one. See <a href="http://www.w3.org/TR/wai-aria/#aria-flowto"> <code>aria-flowto</code></a>.
  * @type {(!Array<!chrome.automation.AutomationNode>|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-flowTo
  */
@@ -1091,9 +1123,9 @@ chrome.automation.AutomationNode.prototype.tableCellColumnIndex;
 /**
  * The ARIA column index as specified by the page author.
  * @type {(number|undefined)}
- * @see https://developer.chrome.com/extensions/automation#type-ariaCellColumnIndex
+ * @see https://developer.chrome.com/extensions/automation#type-tableCellAriaColumnIndex
  */
-chrome.automation.AutomationNode.prototype.ariaCellColumnIndex;
+chrome.automation.AutomationNode.prototype.tableCellAriaColumnIndex;
 
 /**
  * The number of columns that this cell spans (default is 1).
@@ -1112,9 +1144,9 @@ chrome.automation.AutomationNode.prototype.tableCellRowIndex;
 /**
  * The ARIA row index as specified by the page author.
  * @type {(number|undefined)}
- * @see https://developer.chrome.com/extensions/automation#type-ariaCellRowIndex
+ * @see https://developer.chrome.com/extensions/automation#type-tableCellAriaRowIndex
  */
-chrome.automation.AutomationNode.prototype.ariaCellRowIndex;
+chrome.automation.AutomationNode.prototype.tableCellAriaRowIndex;
 
 /**
  * The number of rows that this cell spans (default is 1).
@@ -1708,6 +1740,19 @@ chrome.automation.AutomationNode.prototype.matches = function(params) {};
  */
 chrome.automation.AutomationNode.prototype.getNextTextMatch = function(searchStr, backward) {};
 
+/**
+ * Returns the detected languages for the provided string attribute as an array
+ * of LanguageSpan objects. There are several guarantees about the format of the
+ * LanguageSpan array: 1. Is either empty or contains LanguageSpans that cover
+ * all indices in the associated string attribute value. 2. Is sorted by
+ * increasing startIndex (those with smaller startIndex appear first). 3.
+ * LanguageSpans are non-overlapping and contain exactly one language.
+ * @param {string} attribute
+ * @return {!Array<!chrome.automation.LanguageSpan>}
+ * @see https://developer.chrome.com/extensions/automation#method-languageAnnotationForStringAttribute
+ */
+chrome.automation.AutomationNode.prototype.languageAnnotationForStringAttribute = function(attribute) {};
+
 
 /**
  * Get the automation tree for the tab with the given tabId, or the current tab
@@ -1773,16 +1818,3 @@ chrome.automation.removeTreeChangeObserver = function(observer) {};
  * @see https://developer.chrome.com/extensions/automation#method-setDocumentSelection
  */
 chrome.automation.setDocumentSelection = function(params) {};
-
-/**
- * Returns the detected languages for the provided string attribute as an array
- * of LanguageSpan objects. There are several guarantees about the format of the
- * LanguageSpan array: 1. Is either empty or contains LanguageSpans that cover
- * all indices in the associated string attribute value. 2. Is sorted by
- * increasing startIndex (those with smaller startIndex appear first). 3.
- * LanguageSpans are non-overlapping and contain exactly one language.
- * @param {string} attribute
- * @return {!Array<!chrome.automation.LanguageSpan>}
- * @see https://developer.chrome.com/extensions/automation#method-languageAnnotationForStringAttribute
- */
-chrome.automation.languageAnnotationForStringAttribute = function(attribute) {};

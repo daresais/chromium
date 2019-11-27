@@ -18,7 +18,8 @@
 #include "components/viz/test/test_gpu_memory_buffer_manager.h"
 #include "components/viz/test/test_image_factory.h"
 #include "content/browser/compositor/image_transport_factory.h"
-#include "services/viz/privileged/interfaces/compositing/vsync_parameter_observer.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/viz/privileged/mojom/compositing/vsync_parameter_observer.mojom.h"
 #include "ui/compositor/compositor.h"
 
 namespace viz {
@@ -76,16 +77,21 @@ class TestImageTransportFactory : public ui::ContextFactory,
   void SetDisplayVSyncParameters(ui::Compositor* compositor,
                                  base::TimeTicks timebase,
                                  base::TimeDelta interval) override {}
-  void IssueExternalBeginFrame(ui::Compositor* compositor,
-                               const viz::BeginFrameArgs& args) override {}
+  void IssueExternalBeginFrame(
+      ui::Compositor* compositor,
+      const viz::BeginFrameArgs& args,
+      bool force,
+      base::OnceCallback<void(const viz::BeginFrameAck&)> callback) override {}
   void SetOutputIsSecure(ui::Compositor* compositor, bool secure) override {}
   void AddVSyncParameterObserver(
       ui::Compositor* compositor,
-      viz::mojom::VSyncParameterObserverPtr observer) override {}
+      mojo::PendingRemote<viz::mojom::VSyncParameterObserver> observer)
+      override {}
+  void SetDisplayTransformHint(ui::Compositor* compositor,
+                               gfx::OverlayTransform transform) override {}
 
   // ImageTransportFactory implementation.
   void DisableGpuCompositing() override;
-  bool IsGpuCompositingDisabled() override;
   ui::ContextFactory* GetContextFactory() override;
   ui::ContextFactoryPrivate* GetContextFactoryPrivate() override;
 

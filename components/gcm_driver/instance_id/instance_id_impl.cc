@@ -12,7 +12,6 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -54,7 +53,7 @@ InstanceID::Result GCMClientResultToInstanceIDResult(
 std::unique_ptr<InstanceID> InstanceID::CreateInternal(
     const std::string& app_id,
     gcm::GCMDriver* gcm_driver) {
-  return base::WrapUnique(new InstanceIDImpl(app_id, gcm_driver));
+  return std::make_unique<InstanceIDImpl>(app_id, gcm_driver);
 }
 
 InstanceIDImpl::InstanceIDImpl(const std::string& app_id,
@@ -91,7 +90,7 @@ void InstanceIDImpl::DoGetCreationTime(
 void InstanceIDImpl::GetToken(const std::string& authorized_entity,
                               const std::string& scope,
                               const std::map<std::string, std::string>& options,
-                              bool is_lazy,
+                              std::set<Flags> flags,
                               GetTokenCallback callback) {
   DCHECK(!authorized_entity.empty());
   DCHECK(!scope.empty());
@@ -229,6 +228,7 @@ void InstanceIDImpl::GetInstanceIDDataCompleted(
 void InstanceIDImpl::EnsureIDGenerated() {
   if (!id_.empty())
     return;
+  UMA_HISTOGRAM_BOOLEAN("InstanceID.GeneratedNewID", true);
 
   // Now produce the ID in the following steps:
 

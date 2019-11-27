@@ -16,7 +16,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/containers/flat_map.h"
 #include "base/feature_list.h"
 #include "base/i18n/number_formatting.h"
 #include "base/json/json_reader.h"
@@ -71,7 +70,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "google_apis/gaia/oauth2_token_service.h"
 #include "net/base/url_util.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/print_backend_consts.h"
@@ -80,9 +78,11 @@
 #include "third_party/icu/source/i18n/unicode/ulocdata.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/account_manager/account_manager_util.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/signin/inline_login_handler_dialog_chromeos.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "services/identity/public/cpp/scope_set.h"
 #endif
@@ -146,6 +146,7 @@ enum PrintSettingsBuckets {
   DEFAULT_DPI,
   NON_DEFAULT_DPI,
   PIN,
+  FIT_TO_PAPER,
   PRINT_SETTINGS_BUCKET_BOUNDARY
 };
 
@@ -222,12 +223,12 @@ const char kIsInKioskAutoPrintMode[] = "isInKioskAutoPrintMode";
 const char kIsInAppKioskMode[] = "isInAppKioskMode";
 // Name of a dictionary field holding the UI locale.
 const char kUiLocale[] = "uiLocale";
-// Name of a dictionary field holding the thousands delimeter according to the
+// Name of a dictionary field holding the thousands delimiter according to the
 // locale.
-const char kThousandsDelimeter[] = "thousandsDelimeter";
-// Name of a dictionary field holding the decimal delimeter according to the
+const char kThousandsDelimiter[] = "thousandsDelimiter";
+// Name of a dictionary field holding the decimal delimiter according to the
 // locale.
-const char kDecimalDelimeter[] = "decimalDelimeter";
+const char kDecimalDelimiter[] = "decimalDelimiter";
 // Name of a dictionary field holding the measurement system according to the
 // locale.
 const char kUnitType[] = "unitType";
@@ -246,6 +247,12 @@ const char kHeaderFooter[] = "headerFooter";
 // Name of a dictionary field telling us whether the kPrintHeaderFooter pref is
 // managed by an enterprise policy.
 const char kIsHeaderFooterManaged[] = "isHeaderFooterManaged";
+// Name of a dictionary field indicating whether the 'Save to PDF' destination
+// is disabled.
+const char kPdfPrinterDisabled[] = "pdfPrinterDisabled";
+// Name of a dictionary field indicating whether the destinations are managed by
+// the PrinterTypeDenyList enterprise policy.
+const char kDestinationsManaged[] = "destinationsManaged";
 // Name of a dictionary field holding the cloud print URL.
 const char kCloudPrintURL[] = "cloudPrintURL";
 // Name of a dictionary field holding the signed in user accounts.
@@ -314,9 +321,6 @@ void ReportPrintSettingsStats(const base::Value& print_settings,
   if (print_settings.FindIntKey(kSettingCopies).value_or(1) > 1)
     ReportPrintSettingHistogram(COPIES);
 
-  if (preview_settings.FindIntKey(kSettingScaleFactor).value_or(100) != 100)
-    ReportPrintSettingHistogram(SCALING);
-
   if (preview_settings.FindIntKey(kSettingPagesPerSheet).value_or(1) != 1)
     ReportPrintSettingHistogram(PAGES_PER_SHEET);
 
@@ -329,9 +333,10 @@ void ReportPrintSettingsStats(const base::Value& print_settings,
     ReportPrintSettingHistogram(duplex_mode_opt.value() ? DUPLEX : SIMPLEX);
 
   base::Optional<int> color_mode_opt = print_settings.FindIntKey(kSettingColor);
-  if (color_mode_opt) {
-    ReportPrintSettingHistogram(
-        IsColorModelSelected(color_mode_opt.value()) ? COLOR : BLACK_AND_WHITE);
+  if (color_mode_opt.has_value()) {
+    base::Optional<bool> is_color =
+        IsColorModelSelected(color_mode_opt.value());
+    ReportPrintSettingHistogram(is_color.value() ? COLOR : BLACK_AND_WHITE);
   }
 
   if (preview_settings.FindIntKey(kSettingMarginsType).value_or(0) != 0)
@@ -353,9 +358,18 @@ void ReportPrintSettingsStats(const base::Value& print_settings,
   if (preview_settings.FindBoolKey(kSettingRasterizePdf).value_or(false))
     ReportPrintSettingHistogram(PRINT_AS_IMAGE);
 
-  if (is_pdf &&
-      preview_settings.FindBoolKey(kSettingFitToPageEnabled).value_or(false)) {
-    ReportPrintSettingHistogram(FIT_TO_PAGE);
+  ScalingType scaling_type =
+      static_cast<ScalingType>(preview_settings.FindIntKey(kSettingScalingType)
+                                   .value_or(ScalingType::DEFAULT));
+  if (scaling_type == ScalingType::CUSTOM) {
+    ReportPrintSettingHistogram(SCALING);
+  }
+
+  if (is_pdf) {
+    if (scaling_type == ScalingType::FIT_TO_PAGE)
+      ReportPrintSettingHistogram(FIT_TO_PAGE);
+    else if (scaling_type == ScalingType::FIT_TO_PAPER)
+      ReportPrintSettingHistogram(FIT_TO_PAPER);
   }
 
   if (print_settings.FindIntKey(kSettingDpiHorizontal).value_or(0) > 0 &&
@@ -376,21 +390,32 @@ void ReportPrintSettingsStats(const base::Value& print_settings,
 
 UserActionBuckets DetermineUserAction(const base::Value& settings) {
 #if defined(OS_MACOSX)
-  if (settings.FindKey(kSettingOpenPDFInPreview) != nullptr)
+  if (settings.FindKey(kSettingOpenPDFInPreview))
     return OPEN_IN_MAC_PREVIEW;
 #endif
   // This needs to be checked before checking for a cloud print ID, since a
   // print ticket for printing to Drive will also contain a cloud print ID.
   if (settings.FindBoolKey(kSettingPrintToGoogleDrive).value_or(false))
     return PRINT_TO_GOOGLE_DRIVE;
-  if (settings.FindKey(kSettingCloudPrintId) != nullptr)
+  if (settings.FindKey(kSettingCloudPrintId))
     return PRINT_WITH_CLOUD_PRINT;
-  if (settings.FindBoolKey(kSettingPrintWithPrivet).value_or(false))
-    return PRINT_WITH_PRIVET;
-  if (settings.FindBoolKey(kSettingPrintWithExtension).value_or(false))
-    return PRINT_WITH_EXTENSION;
-  if (settings.FindBoolKey(kSettingPrintToPDF).value_or(false))
-    return PRINT_TO_PDF;
+
+  PrinterType type = static_cast<PrinterType>(
+      settings.FindIntKey(kSettingPrinterType).value());
+  switch (type) {
+    case kPrivetPrinter:
+      return PRINT_WITH_PRIVET;
+    case kExtensionPrinter:
+      return PRINT_WITH_EXTENSION;
+    case kPdfPrinter:
+      return PRINT_TO_PDF;
+    case kLocalPrinter:
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+
   if (settings.FindBoolKey(kSettingShowSystemDialog).value_or(false))
     return FALLBACK_TO_ADVANCED_SETTINGS_DIALOG;
   return PRINT_TO_PRINTER;
@@ -419,7 +444,7 @@ class PrintPreviewHandler::AccessTokenService
 
     chromeos::DeviceOAuth2TokenService* token_service =
         chromeos::DeviceOAuth2TokenServiceFactory::Get();
-    std::string account_id = token_service->GetRobotAccountId();
+    CoreAccountId account_id = token_service->GetRobotAccountId();
 
     device_request_ =
         token_service->StartAccessTokenRequest(account_id, scopes, this);
@@ -538,6 +563,7 @@ void PrintPreviewHandler::OnJavascriptAllowed() {
   print_preview_ui()->SetPreviewUIId();
   // Now that the UI is initialized, any future account changes will require
   // a printer list refresh.
+  ReadPrinterTypeDenyListFromPrefs();
   RegisterForGaiaCookieChanges();
 }
 
@@ -548,6 +574,7 @@ void PrintPreviewHandler::OnJavascriptDisallowed() {
   print_preview_ui()->ClearPreviewUIId();
   preview_callbacks_.clear();
   preview_failures_.clear();
+  printer_type_deny_list_.clear();
   UnregisterForGaiaCookieChanges();
 }
 
@@ -559,6 +586,35 @@ PrefService* PrintPreviewHandler::GetPrefs() const {
   auto* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   DCHECK(prefs);
   return prefs;
+}
+
+void PrintPreviewHandler::ReadPrinterTypeDenyListFromPrefs() {
+  PrefService* prefs = GetPrefs();
+  if (!prefs->HasPrefPath(prefs::kPrinterTypeDenyList))
+    return;
+
+  const base::Value* deny_list_types = prefs->Get(prefs::kPrinterTypeDenyList);
+  if (!deny_list_types || !deny_list_types->is_list())
+    return;
+
+  for (const base::Value& deny_list_type : deny_list_types->GetList()) {
+    if (!deny_list_type.is_string())
+      continue;
+
+    // The expected printer type strings are enumerated in
+    // components/policy/resources/policy_templates.json
+    const std::string& deny_list_str = deny_list_type.GetString();
+    if (deny_list_str == "privet")
+      printer_type_deny_list_.insert(kPrivetPrinter);
+    else if (deny_list_str == "extension")
+      printer_type_deny_list_.insert(kExtensionPrinter);
+    else if (deny_list_str == "pdf")
+      printer_type_deny_list_.insert(kPdfPrinter);
+    else if (deny_list_str == "local")
+      printer_type_deny_list_.insert(kLocalPrinter);
+    else if (deny_list_str == "cloud")
+      printer_type_deny_list_.insert(kCloudPrinter);
+  }
 }
 
 PrintPreviewUI* PrintPreviewHandler::print_preview_ui() const {
@@ -604,6 +660,13 @@ void PrintPreviewHandler::HandleGetPrinters(const base::ListValue* args) {
   CHECK(args->GetInteger(1, &type));
   PrinterType printer_type = static_cast<PrinterType>(type);
 
+  // Immediately resolve the callback without fetching printers if the printer
+  // type is on the deny list.
+  if (base::Contains(printer_type_deny_list_, printer_type)) {
+    ResolveJavascriptCallback(base::Value(callback_id), base::Value());
+    return;
+  }
+
   PrinterHandler* handler = GetPrinterHandler(printer_type);
   if (!handler) {
     RejectJavascriptCallback(base::Value(callback_id), base::Value());
@@ -646,6 +709,12 @@ void PrintPreviewHandler::HandleGetPrinterCapabilities(
     return;
   }
   PrinterType printer_type = static_cast<PrinterType>(type);
+
+  // Reject the callback if the printer type is on the deny list.
+  if (base::Contains(printer_type_deny_list_, printer_type)) {
+    RejectJavascriptCallback(base::Value(callback_id), base::Value());
+    return;
+  }
 
   PrinterHandler* handler = GetPrinterHandler(printer_type);
   if (!handler) {
@@ -831,7 +900,25 @@ void PrintPreviewHandler::HandleSignin(const base::ListValue* args) {
   bool add_account = false;
   CHECK(args->GetBoolean(0, &add_account));
 
-  chrome::ScopedTabbedBrowserDisplayer displayer(Profile::FromWebUI(web_ui()));
+  Profile* profile = Profile::FromWebUI(web_ui());
+  DCHECK(profile);
+
+#if defined(OS_CHROMEOS)
+  if (chromeos::IsAccountManagerAvailable(profile)) {
+    // Chrome OS Account Manager is enabled on this Profile and hence, all
+    // account management flows will go through native UIs and not through a
+    // tabbed browser window.
+    if (add_account) {
+      chromeos::InlineLoginHandlerDialogChromeOS::Show();
+    } else {
+      chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+          profile, chrome::kAccountManagerSubPage);
+    }
+    return;
+  }
+#endif
+
+  chrome::ScopedTabbedBrowserDisplayer displayer(profile);
   print_dialog_cloud::CreateCloudPrintSigninTab(
       displayer.browser(), add_account,
       base::BindOnce(&PrintPreviewHandler::OnSignInTabClosed,
@@ -895,7 +982,7 @@ void PrintPreviewHandler::HandleClosePreviewDialog(
 void PrintPreviewHandler::HandleOpenPrinterSettings(
     const base::ListValue* args) {
   chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-      Profile::FromWebUI(web_ui()), chrome::kPrintingSettingsSubPage);
+      Profile::FromWebUI(web_ui()), chrome::kNativePrintingSettingsSubPage);
 }
 #endif
 
@@ -914,8 +1001,15 @@ void PrintPreviewHandler::GetLocaleInformation(base::Value* settings) {
   // Getting the number formatting based on the locale and writing to
   // dictionary.
   base::string16 number_format = base::FormatDouble(123456.78, 2);
-  settings->SetStringKey(kDecimalDelimeter, number_format.substr(7, 1));
-  settings->SetStringKey(kThousandsDelimeter, number_format.substr(3, 1));
+  size_t thousands_pos = number_format.find('3') + 1;
+  base::string16 thousands_delimiter = number_format.substr(thousands_pos, 1);
+  if (number_format[thousands_pos] == '4')
+    thousands_delimiter.clear();
+  size_t decimal_pos = number_format.find('6') + 1;
+  DCHECK_NE(number_format[decimal_pos], '7');
+  base::string16 decimal_delimiter = number_format.substr(decimal_pos, 1);
+  settings->SetStringKey(kDecimalDelimiter, decimal_delimiter);
+  settings->SetStringKey(kThousandsDelimiter, thousands_delimiter);
   settings->SetIntKey(kUnitType, system);
 }
 
@@ -939,7 +1033,7 @@ void PrintPreviewHandler::GetUserAccountList(base::Value* settings) {
     const std::vector<gaia::ListedAccount>& accounts =
         identity_manager_->GetAccountsInCookieJar().signed_in_accounts;
     for (const gaia::ListedAccount& account : accounts) {
-      account_list.GetList().emplace_back(account.email);
+      account_list.Append(account.email);
     }
     settings->SetKey(kSyncAvailable, base::Value(true));
   } else {
@@ -956,6 +1050,10 @@ void PrintPreviewHandler::SendInitialSettings(
                                 print_preview_ui()->initiator_title());
   initial_settings.SetBoolKey(kSettingPreviewModifiable,
                               print_preview_ui()->source_is_modifiable());
+  initial_settings.SetBoolKey(kSettingPreviewIsFromArc,
+                              print_preview_ui()->source_is_arc());
+  initial_settings.SetBoolKey(kSettingPreviewIsPdf,
+                              print_preview_ui()->source_is_pdf());
   initial_settings.SetStringKey(kSettingPrinterName, default_printer);
   initial_settings.SetBoolKey(kDocumentHasSelection,
                               print_preview_ui()->source_has_selection());
@@ -985,6 +1083,15 @@ void PrintPreviewHandler::SendInitialSettings(
   initial_settings.SetBoolKey(
       kIsHeaderFooterManaged,
       prefs->IsManagedPreference(prefs::kPrintHeaderFooter));
+
+  initial_settings.SetBoolKey(
+      kPdfPrinterDisabled,
+      base::Contains(printer_type_deny_list_, kPdfPrinter));
+
+  const bool destinations_managed =
+      !printer_type_deny_list_.empty() &&
+      prefs->IsManagedPreference(prefs::kPrinterTypeDenyList);
+  initial_settings.SetBoolKey(kDestinationsManaged, destinations_managed);
 
   base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
   initial_settings.SetBoolKey(kIsInKioskAutoPrintMode,
@@ -1090,13 +1197,13 @@ WebContents* PrintPreviewHandler::GetInitiator() const {
 }
 
 void PrintPreviewHandler::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   base::Value account_list(base::Value::Type::LIST);
   const std::vector<gaia::ListedAccount>& accounts =
       accounts_in_cookie_jar_info.signed_in_accounts;
   for (const auto account : accounts) {
-    account_list.GetList().emplace_back(account.email);
+    account_list.Append(account.email);
   }
   FireWebUIListener("user-accounts-updated", std::move(account_list));
 }
@@ -1110,6 +1217,10 @@ void PrintPreviewHandler::OnPrintPreviewReady(int preview_uid, int request_id) {
 }
 
 void PrintPreviewHandler::OnPrintPreviewFailed(int request_id) {
+  WebContents* initiator = GetInitiator();
+  if (!initiator || initiator->IsBeingDestroyed())
+    return;  // Drop notification if fired during destruction sequence.
+
   std::string callback_id = GetCallbackId(request_id);
   if (callback_id.empty())
     return;
@@ -1311,6 +1422,7 @@ void PrintPreviewHandler::OnPrintResult(const std::string& callback_id,
 void PrintPreviewHandler::RegisterForGaiaCookieChanges() {
   DCHECK(!identity_manager_);
   cloud_print_enabled_ =
+      !base::Contains(printer_type_deny_list_, kCloudPrinter) &&
       GetPrefs()->GetBoolean(prefs::kCloudPrintSubmitEnabled);
 
   if (!cloud_print_enabled_)

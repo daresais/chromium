@@ -363,9 +363,6 @@ class NetworkingPrivateChromeOSApiTest : public extensions::ExtensionApiTest {
     // Sends a notification about the added profile.
     profile_test_->AddProfile(kUser1ProfilePath, userhash_);
 
-    // Enable technologies.
-    manager_test_->AddTechnology("wimax", true);
-
     // Add IPConfigs
     base::DictionaryValue ipconfig;
     ipconfig.SetKey(shill::kAddressProperty, base::Value("0.0.0.0"));
@@ -441,15 +438,6 @@ class NetworkingPrivateChromeOSApiTest : public extensions::ExtensionApiTest {
     service_test_->SetServiceProperty(
         kWifi2ServicePath, shill::kTetheringProperty,
         base::Value(shill::kTetheringNotDetectedState));
-
-    AddService("stub_wimax", "wimax", shill::kTypeWimax, shill::kStateOnline);
-    service_test_->SetServiceProperty(
-        "stub_wimax", shill::kSignalStrengthProperty, base::Value(40));
-    service_test_->SetServiceProperty("stub_wimax", shill::kProfileProperty,
-                                      base::Value(kUser1ProfilePath));
-    service_test_->SetServiceProperty("stub_wimax", shill::kConnectableProperty,
-                                      base::Value(true));
-    profile_test_->AddService(kUser1ProfilePath, "stub_wimax");
 
     base::ListValue frequencies2;
     frequencies2.AppendInteger(2400);
@@ -562,10 +550,9 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
   EXPECT_TRUE(RunNetworkingSubtest("getVisibleNetworksWifi")) << message_;
 }
 
-// TODO(crbug.com/928778): Flaky on CrOS.
-IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
-                       DISABLED_EnabledNetworkTypes) {
-  EXPECT_TRUE(RunNetworkingSubtest("enabledNetworkTypes")) << message_;
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, EnabledNetworkTypes) {
+  EXPECT_TRUE(RunNetworkingSubtest("enabledNetworkTypesDisable")) << message_;
+  EXPECT_TRUE(RunNetworkingSubtest("enabledNetworkTypesEnable")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetDeviceStates) {
@@ -573,8 +560,6 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetDeviceStates) {
   manager_test_->RemoveTechnology("cellular");
   manager_test_->AddTechnology("cellular", false /* disabled */);
   manager_test_->SetTechnologyInitializing("cellular", true);
-  manager_test_->RemoveTechnology("wimax");
-  manager_test_->AddTechnology("wimax", false /* disabled */);
   EXPECT_TRUE(RunNetworkingSubtest("getDeviceStates")) << message_;
 }
 

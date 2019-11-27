@@ -67,6 +67,7 @@
 #include "gpu/ipc/host/gpu_memory_buffer_support.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
 #include "gpu/ipc/service/image_transport_surface.h"
+#include "gpu/ipc/single_task_sequence.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_fence.h"
 #include "ui/gfx/gpu_fence_handle.h"
@@ -226,7 +227,6 @@ class InProcessCommandBuffer::SharedImageInterface
     return mailbox;
   }
 
-#if defined(OS_WIN)
   SwapChainMailboxes CreateSwapChain(viz::ResourceFormat format,
                                      const gfx::Size& size,
                                      const gfx::ColorSpace& color_space,
@@ -239,7 +239,17 @@ class InProcessCommandBuffer::SharedImageInterface
                         const Mailbox& mailbox) override {
     NOTREACHED();
   }
-#endif  // OS_WIN
+
+#if defined(OS_FUCHSIA)
+  void RegisterSysmemBufferCollection(gfx::SysmemBufferCollectionId id,
+                                      zx::channel token) override {
+    NOTREACHED();
+  }
+  void ReleaseSysmemBufferCollection(
+      gfx::SysmemBufferCollectionId id) override {
+    NOTREACHED();
+  }
+#endif  // defined(OS_FUCHSIA)
 
   void UpdateSharedImage(const SyncToken& sync_token,
                          const Mailbox& mailbox) override {
@@ -479,9 +489,8 @@ gpu::ContextResult InProcessCommandBuffer::InitializeOnGpuThread(
         base::trace_event::MemoryDumpManager::GetInstance()
             ->GetTracingProcessId();
     memory_tracker = std::make_unique<GpuCommandBufferMemoryTracker>(
-        kInProcessCommandBufferClientId, client_tracing_id,
-        command_buffer_id_.GetUnsafeValue(), params.attribs.context_type,
-        base::ThreadTaskRunnerHandle::Get());
+        command_buffer_id_, client_tracing_id, params.attribs.context_type,
+        base::ThreadTaskRunnerHandle::Get(), /* obserer=*/nullptr);
   }
 
   auto feature_info = base::MakeRefCounted<gles2::FeatureInfo>(
@@ -671,7 +680,8 @@ gpu::ContextResult InProcessCommandBuffer::InitializeOnGpuThread(
       if (!context_state_) {
         context_state_ = base::MakeRefCounted<SharedContextState>(
             gl_share_group_, surface_, real_context,
-            use_virtualized_gl_context_, base::DoNothing());
+            use_virtualized_gl_context_, base::DoNothing(),
+            task_executor_->gpu_preferences().gr_context_type);
         context_state_->InitializeGL(task_executor_->gpu_preferences(),
                                      context_group_->feature_info());
         context_state_->InitializeGrContext(workarounds, params.gr_shader_cache,
@@ -770,8 +780,10 @@ gpu::ContextResult InProcessCommandBuffer::InitializeOnGpuThread(
 
   image_factory_ = params.image_factory;
 
-  if (gpu_channel_manager_delegate_)
+  if (gpu_channel_manager_delegate_) {
     gpu_channel_manager_delegate_->DidCreateContextSuccessfully();
+    gpu_channel_manager_delegate_->RegisterDisplayContext(this);
+  }
 
   return gpu::ContextResult::kSuccess;
 }
@@ -801,6 +813,9 @@ bool InProcessCommandBuffer::DestroyOnGpuThread() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(gpu_sequence_checker_);
   TRACE_EVENT0("gpu", "InProcessCommandBuffer::DestroyOnGpuThread");
   UpdateActiveUrl();
+
+  if (gpu_channel_manager_delegate_)
+    gpu_channel_manager_delegate_->UnregisterDisplayContext(this);
 
   // TODO(sunnyps): Should this use ScopedCrashKey instead?
   crash_keys::gpu_gl_context_is_virtual.Set(use_virtualized_gl_context_ ? "1"
@@ -860,37 +875,52 @@ void InProcessCommandBuffer::OnParseError() {
 
   CommandBuffer::State state = command_buffer_->GetState();
 
-  // Tell the browser about this context loss so it can determine whether client
-  // APIs like WebGL need to be blocked from automatically running.
   if (gpu_channel_manager_delegate_) {
+    // Tell the browser about this context loss so it can determine whether
+    // client APIs like WebGL need to be blocked from automatically running.
     gpu_channel_manager_delegate_->DidLoseContext(
         is_offscreen_, state.context_lost_reason, active_url_.url());
-  }
 
-  // Check the error reason and robustness extension to get a better idea if the
-  // GL context was lost. We might try restarting the GPU process to recover
-  // from actual GL context loss but it's unnecessary for other types of parse
-  // errors.
-  if (state.error == error::kLostContext) {
-    bool was_lost_by_robustness =
-        decoder_ && decoder_->WasContextLostByRobustnessExtension();
+    // Check the error reason and robustness extension to get a better idea if
+    // the GL context was lost. We might try restarting the GPU process to
+    // recover from actual GL context loss but it's unnecessary for other types
+    // of parse errors.
+    if (state.error == error::kLostContext) {
+      bool was_lost_by_robustness =
+          decoder_ && decoder_->WasContextLostByRobustnessExtension();
 
-    if (was_lost_by_robustness) {
-      GpuDriverBugWorkarounds workarounds(
-          GetGpuFeatureInfo().enabled_gpu_driver_bug_workarounds);
+      if (was_lost_by_robustness) {
+        GpuDriverBugWorkarounds workarounds(
+            GetGpuFeatureInfo().enabled_gpu_driver_bug_workarounds);
 
-      // Work around issues with recovery by allowing a new GPU process to
-      // launch.
-      if (workarounds.exit_on_context_lost && gpu_channel_manager_delegate_)
-        gpu_channel_manager_delegate_->MaybeExitOnContextLost();
+        // Lose all other contexts.
+        if (gl::GLContext::LosesAllContextsOnContextLost() ||
+            (context_state_ && context_state_->use_virtualized_gl_contexts())) {
+          gpu_channel_manager_delegate_->LoseAllContexts();
+        }
 
-      // TODO(crbug.com/924148): Check if we should force lose all contexts
-      // too.
+        // Work around issues with recovery by allowing a new GPU process to
+        // launch.
+        if (workarounds.exit_on_context_lost)
+          gpu_channel_manager_delegate_->MaybeExitOnContextLost();
+      }
     }
   }
 
   PostOrRunClientCallback(base::BindOnce(&InProcessCommandBuffer::OnContextLost,
                                          client_thread_weak_ptr_));
+}
+
+void InProcessCommandBuffer::MarkContextLost() {
+  if (!command_buffer_ ||
+      command_buffer_->GetState().error == error::kLostContext) {
+    return;
+  }
+
+  command_buffer_->SetContextLostReason(error::kUnknown);
+  if (decoder_)
+    decoder_->MarkContextLost(error::kUnknown);
+  command_buffer_->SetParseError(error::kLostContext);
 }
 
 void InProcessCommandBuffer::OnContextLost() {
@@ -1740,6 +1770,16 @@ viz::GpuVSyncCallback InProcessCommandBuffer::GetGpuVSyncCallback() {
   return base::BindRepeating(forward_callback,
                              base::RetainedRef(origin_task_runner_),
                              std::move(handle_gpu_vsync_callback));
+}
+
+base::TimeDelta InProcessCommandBuffer::GetGpuBlockedTimeSinceLastSwap() {
+  // Some examples and tests create InProcessCommandBuffer without
+  // GpuChannelManagerDelegate.
+  if (!gpu_channel_manager_delegate_)
+    return base::TimeDelta::Min();
+
+  return gpu_channel_manager_delegate_->GetGpuScheduler()
+      ->TakeTotalBlockingTime();
 }
 
 void InProcessCommandBuffer::HandleGpuVSyncOnOriginThread(

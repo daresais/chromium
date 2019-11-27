@@ -6,18 +6,21 @@ package org.chromium.chrome.browser.toolbar.top;
 
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.Nullable;
-import android.support.annotation.StringRes;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.View.OnLongClickListener;
 import android.widget.ImageButton;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ThemeColorProvider;
-import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.compositor.Invalidator;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
+import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
+import org.chromium.chrome.browser.findinpage.FindToolbar;
 import org.chromium.chrome.browser.fullscreen.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
@@ -26,16 +29,14 @@ import org.chromium.chrome.browser.toolbar.IncognitoStateProvider;
 import org.chromium.chrome.browser.toolbar.MenuButton;
 import org.chromium.chrome.browser.toolbar.TabCountProvider;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
+import org.chromium.chrome.browser.toolbar.ToolbarProgressBar;
 import org.chromium.chrome.browser.toolbar.ToolbarTabController;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.widget.ToolbarProgressBar;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuButtonHelper;
 
 /**
  * A coordinator for the top toolbar component.
  */
 public class TopToolbarCoordinator implements Toolbar {
-    static final int TAB_SWITCHER_MODE_NORMAL_ANIMATION_DURATION_MS = 200;
-    static final int TAB_SWITCHER_MODE_GTS_ANIMATION_DURATION_MS = 150;
 
     /**
      * Observes toolbar URL expansion percentage change.
@@ -62,8 +63,7 @@ public class TopToolbarCoordinator implements Toolbar {
             new HomepageManager.HomepageStateListener() {
                 @Override
                 public void onHomepageStateUpdated() {
-                    mToolbarLayout.onHomeButtonUpdate(HomepageManager.isHomepageEnabled()
-                            || FeatureUtilities.isNewTabPageButtonEnabled());
+                    mToolbarLayout.onHomeButtonUpdate(HomepageManager.isHomepageEnabled());
                 }
             };
 
@@ -112,6 +112,7 @@ public class TopToolbarCoordinator implements Toolbar {
      * @param controlsVisibilityDelegate The delegate to handle visibility of browser controls.
      * @param layoutManager A {@link LayoutManager} instance used to watch for scene changes.
      * @param tabSwitcherClickHandler The click handler for the tab switcher button.
+     * @param tabSwitcherLongClickHandler The long click handler for the tab switcher button.
      * @param newTabClickHandler The click handler for the new tab button.
      * @param bookmarkClickHandler The click handler for the bookmarks button.
      * @param customTabsBackClickHandler The click handler for the custom tabs back button.
@@ -119,8 +120,9 @@ public class TopToolbarCoordinator implements Toolbar {
     public void initializeWithNative(TabModelSelector tabModelSelector,
             BrowserStateBrowserControlsVisibilityDelegate controlsVisibilityDelegate,
             LayoutManager layoutManager, OnClickListener tabSwitcherClickHandler,
-            OnClickListener newTabClickHandler, OnClickListener bookmarkClickHandler,
-            OnClickListener customTabsBackClickHandler) {
+            OnLongClickListener tabSwitcherLongClickHandler, OnClickListener newTabClickHandler,
+            OnClickListener bookmarkClickHandler, OnClickListener customTabsBackClickHandler,
+            OverviewModeBehavior overviewModeBehavior) {
         if (mTabSwitcherModeCoordinatorPhone != null) {
             mTabSwitcherModeCoordinatorPhone.setOnTabSwitcherClickHandler(tabSwitcherClickHandler);
             mTabSwitcherModeCoordinatorPhone.setOnNewTabClickHandler(newTabClickHandler);
@@ -132,9 +134,11 @@ public class TopToolbarCoordinator implements Toolbar {
         getLocationBar().setUrlToPageUrl();
         mToolbarLayout.setBrowserControlsVisibilityDelegate(controlsVisibilityDelegate);
         mToolbarLayout.setOnTabSwitcherClickHandler(tabSwitcherClickHandler);
+        mToolbarLayout.setOnTabSwitcherLongClickHandler(tabSwitcherLongClickHandler);
         mToolbarLayout.setBookmarkClickHandler(bookmarkClickHandler);
         mToolbarLayout.setCustomTabCloseClickHandler(customTabsBackClickHandler);
         mToolbarLayout.setLayoutUpdateHost(layoutManager);
+        mToolbarLayout.setOverviewModeBehavior(overviewModeBehavior);
 
         mToolbarLayout.onNativeLibraryReady();
     }
@@ -208,6 +212,17 @@ public class TopToolbarCoordinator implements Toolbar {
     }
 
     @Override
+    public void updateTabSwitcherToolbarState(boolean requestToShow) {
+        if (mTabSwitcherModeCoordinatorPhone == null
+                || mToolbarLayout.getToolbarDataProvider() == null
+                || !mToolbarLayout.getToolbarDataProvider().isInOverviewAndShowingOmnibox()) {
+            return;
+        }
+
+        mTabSwitcherModeCoordinatorPhone.setTabSwitcherToolbarVisibility(requestToShow);
+    }
+
+    @Override
     public void getPositionRelativeToContainer(View containerView, int[] position) {
         mToolbarLayout.getPositionRelativeToContainer(containerView, position);
     }
@@ -224,7 +239,7 @@ public class TopToolbarCoordinator implements Toolbar {
 
     /**
      * Gives inheriting classes the chance to respond to
-     * {@link org.chromium.chrome.browser.widget.findinpage.FindToolbar} state changes.
+     * {@link FindToolbar} state changes.
      * @param showing Whether or not the {@code FindToolbar} will be showing.
      */
     public void handleFindLocationBarStateChange(boolean showing) {
@@ -479,12 +494,6 @@ public class TopToolbarCoordinator implements Toolbar {
      */
     public void onUrlFocusChange(boolean hasFocus) {
         mToolbarLayout.onUrlFocusChange(hasFocus);
-
-        if (mToolbarLayout.getToolbarDataProvider() != null
-                && mToolbarLayout.getToolbarDataProvider().isInOverviewAndShowingOmnibox()
-                && mTabSwitcherModeCoordinatorPhone != null) {
-            mTabSwitcherModeCoordinatorPhone.setTabSwitcherToolbarVisibility(!hasFocus);
-        }
     }
 
     /**

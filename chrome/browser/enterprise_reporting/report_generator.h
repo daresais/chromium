@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_ENTERPRISE_REPORTING_REPORT_GENERATOR_H_
 
 #include <memory>
+#include <queue>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/enterprise_reporting/profile_report_generator.h"
+#include "chrome/browser/enterprise_reporting/browser_report_generator.h"
+#include "chrome/browser/enterprise_reporting/report_request_queue_generator.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 
 namespace em = enterprise_management;
@@ -19,13 +21,18 @@ namespace enterprise_reporting {
 
 class ReportGenerator {
  public:
-  using ReportCallback = base::OnceCallback<void(
-      std::vector<std::unique_ptr<em::ChromeDesktopReportRequest>>)>;
+#if defined(OS_CHROMEOS)
+  using Request = em::ChromeOsUserReportRequest;
+#else
+  using Request = em::ChromeDesktopReportRequest;
+#endif
+  using Requests = std::queue<std::unique_ptr<Request>>;
+  using ReportCallback = base::OnceCallback<void(Requests)>;
 
   ReportGenerator();
-  ~ReportGenerator();
+  virtual ~ReportGenerator();
 
-  void Generate(ReportCallback callback);
+  virtual void Generate(ReportCallback callback);
 
   void SetMaximumReportSizeForTesting(size_t size);
 
@@ -47,33 +54,16 @@ class ReportGenerator {
   // on other platforms.
   virtual std::string GetSerialNumber();
 
-  // Returns a browser report contains browser related information includes
-  // browser version, channel and executable path.
-  virtual std::unique_ptr<em::BrowserReport> GetBrowserReport();
-
-  // Returns the list of Profiles that is owned by current Browser instance. It
-  // only contains Profile's path and name.
-  std::vector<std::unique_ptr<em::ChromeUserProfileInfo>> GetProfiles();
-
  private:
-  void GetNextProfileReport(int profile_index);
-  void OnProfileReportReady(
-      int profile_index,
-      std::unique_ptr<em::ChromeUserProfileInfo> profile_report);
+  void OnBrowserReportReady(std::unique_ptr<em::BrowserReport> browser_report);
 
-  ProfileReportGenerator profile_report_generator_;
-
+  ReportRequestQueueGenerator report_request_queue_generator_;
+  BrowserReportGenerator browser_report_generator_;
   ReportCallback callback_;
-
-  std::vector<std::unique_ptr<em::ChromeDesktopReportRequest>> requests_;
-
   // Basic information that is shared among requests.
-  em::ChromeDesktopReportRequest basic_request_;
-  size_t basic_request_size_;
+  Request basic_request_;
 
-  size_t maximum_report_size_;
-
-  base::WeakPtrFactory<ReportGenerator> weak_ptr_factory_;
+  base::WeakPtrFactory<ReportGenerator> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ReportGenerator);
 };

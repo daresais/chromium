@@ -23,6 +23,7 @@ settings.StoredAccount;
  *            disabled: (boolean|undefined),
  *            domain: (string|undefined),
  *            hasError: (boolean|undefined),
+ *            hasPasswordsOnlyError: (boolean|undefined),
  *            hasUnrecoverableError: (boolean|undefined),
  *            managed: (boolean|undefined),
  *            firstSetupInProgress: (boolean|undefined),
@@ -51,6 +52,8 @@ settings.StatusAction = {
       'signOutAndSignIn',               // User needs to sign out and sign in.
   UPGRADE_CLIENT: 'upgradeClient',      // User needs to upgrade the client.
   ENTER_PASSPHRASE: 'enterPassphrase',  // User needs to enter passphrase.
+  // User needs to go through key retrieval.
+  RETRIEVE_TRUSTED_VAULT_KEYS: 'retrieveTrustedVaultKeys',
   CONFIRM_SYNC_SETTINGS:
       'confirmSyncSettings',  // User needs to confirm sync settings.
 };
@@ -93,9 +96,13 @@ settings.StatusAction = {
  *   themesEnforced: boolean,
  *   themesRegistered: boolean,
  *   themesSynced: boolean,
+ *   trustedVaultKeysRequired: boolean,
  *   typedUrlsEnforced: boolean,
  *   typedUrlsRegistered: boolean,
  *   typedUrlsSynced: boolean,
+ *   wifiConfigurationsEnforced: boolean,
+ *   wifiConfigurationsRegistered: boolean,
+ *   wifiConfigurationsSynced: boolean,
  * }}
  */
 settings.SyncPrefs;
@@ -159,6 +166,11 @@ cr.define('settings', function() {
     // </if>
 
     /**
+     * Starts the key retrieval process.
+     */
+    startKeyRetrieval() {}
+
+    /**
      * Gets the current sync status.
      * @return {!Promise<!settings.SyncStatus>}
      */
@@ -211,6 +223,13 @@ cr.define('settings', function() {
      * Opens the Google Activity Controls url in a new tab.
      */
     openActivityControlsUrl() {}
+
+    /**
+     * Function to dispatch event sync-prefs-changed even without a change.
+     * This is used to decide whether we should show the link to password
+     * manager in passwords section on page load.
+     */
+    sendSyncPrefsChanged() {}
   }
 
   /**
@@ -256,6 +275,11 @@ cr.define('settings', function() {
     // </if>
 
     /** @override */
+    startKeyRetrieval() {
+      chrome.send('SyncStartKeyRetrieval');
+    }
+
+    /** @override */
     getSyncStatus() {
       return cr.sendWithPromise('SyncSetupGetSyncStatus');
     }
@@ -297,6 +321,11 @@ cr.define('settings', function() {
     openActivityControlsUrl() {
       chrome.metricsPrivate.recordUserAction(
           'Signin_AccountSettings_GoogleActivityControlsClicked');
+    }
+
+    /** @override */
+    sendSyncPrefsChanged() {
+      chrome.send('SyncPrefsDispatch');
     }
   }
 

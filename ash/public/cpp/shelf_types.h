@@ -22,6 +22,16 @@ enum ShelfAlignment {
   SHELF_ALIGNMENT_BOTTOM_LOCKED,
 };
 
+enum class HotseatState {
+  // Hotseat is shown off screen.
+  kHidden,
+  // Hotseat is shown within the shelf. This will always be the case
+  // in clamshell mode.
+  kShown,
+  // Hotseat is shown above the shelf.
+  kExtended,
+};
+
 enum ShelfAutoHideBehavior {
   // Always auto-hide.
   SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
@@ -57,8 +67,16 @@ enum ShelfBackgroundType {
   // for a split view.
   SHELF_BACKGROUND_MAXIMIZED,
 
-  // The background when fullscreen app list is visible.
+  // The background when the app list is visible in clamshell mode.
   SHELF_BACKGROUND_APP_LIST,
+
+  // The background when the app list is visible in tablet mode.
+  SHELF_BACKGROUND_HOME_LAUNCHER,
+
+  // The background when a maximized window exists or two windows are maximized
+  // for a split view, and the app list is visible. If the app list were not
+  // visible, the shelf would be in SHELF_BACKGROUND_MAXIMIZED state.
+  SHELF_BACKGROUND_MAXIMIZED_WITH_APP_LIST,
 
   // The background when OOBE is active.
   SHELF_BACKGROUND_OOBE,
@@ -72,6 +90,9 @@ enum ShelfBackgroundType {
 
   // The background when overview is active.
   SHELF_BACKGROUND_OVERVIEW,
+
+  // The background for the in-app shelf in tablet mode.
+  SHELF_BACKGROUND_IN_APP,
 };
 
 // Source of the launch or activation request, for tracking.
@@ -108,6 +129,9 @@ enum ShelfAction {
 
   // The app list launcher menu was dismissed.
   SHELF_ACTION_APP_LIST_DISMISSED,
+
+  // The back action was performed on the app list.
+  SHELF_ACTION_APP_LIST_BACK,
 };
 
 // The type of a shelf item.

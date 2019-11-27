@@ -9,6 +9,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -104,6 +105,12 @@ void BrowserWithTestWindowTest::TearDown() {
 
   profile_manager_->DeleteAllTestingProfiles();
   profile_ = nullptr;
+
+  // Depends on LocalState owned by |profile_manager_|.
+  if (SystemNetworkContextManager::GetInstance()) {
+    SystemNetworkContextManager::DeleteInstance();
+  }
+
   profile_manager_.reset();
 
 #if defined(OS_CHROMEOS)
@@ -205,10 +212,22 @@ std::unique_ptr<Browser> BrowserWithTestWindowTest::CreateBrowser(
   return std::make_unique<Browser>(params);
 }
 
+#if defined(OS_CHROMEOS)
+chromeos::ScopedCrosSettingsTestHelper*
+BrowserWithTestWindowTest::GetCrosSettingsHelper() {
+  return &cros_settings_test_helper_;
+}
+
+chromeos::StubInstallAttributes*
+BrowserWithTestWindowTest::GetInstallAttributes() {
+  return GetCrosSettingsHelper()->InstallAttributes();
+}
+#endif  // defined(OS_CHROMEOS)
+
 BrowserWithTestWindowTest::BrowserWithTestWindowTest(
-    std::unique_ptr<content::TestBrowserThreadBundle> thread_bundle,
+    std::unique_ptr<content::BrowserTaskEnvironment> task_environment,
     Browser::Type browser_type,
     bool hosted_app)
-    : thread_bundle_(std::move(thread_bundle)),
+    : task_environment_(std::move(task_environment)),
       browser_type_(browser_type),
       hosted_app_(hosted_app) {}

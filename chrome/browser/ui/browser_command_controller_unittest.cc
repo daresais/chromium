@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/stl_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -113,10 +114,16 @@ TEST_F(BrowserCommandControllerTest, IsReservedCommandOrKey) {
 }
 
 TEST_F(BrowserCommandControllerTest, IsReservedCommandOrKeyIsApp) {
-  browser()->app_name_ = "app";
-  ASSERT_TRUE(browser()->is_app());
+  Browser::CreateParams params = Browser::CreateParams::CreateForApp(
+      "app",
+      /*trusted_source=*/true, browser()->window()->GetBounds(), profile(),
+      /*user_gesture=*/true);
+  params.window = browser()->window();
+  set_browser(new Browser(params));
 
-  // When is_app(), no keys are reserved.
+  ASSERT_TRUE(browser()->is_type_app());
+
+  // When is_type_app(), no keys are reserved.
 #if defined(OS_CHROMEOS)
   EXPECT_FALSE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_BACK, content::NativeWebKeyboardEvent(ui::KeyEvent(
@@ -181,8 +188,13 @@ TEST_F(BrowserCommandControllerTest, AppFullScreen) {
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_FULLSCREEN));
 
   // Enabled for app windows.
-  browser()->app_name_ = "app";
-  ASSERT_TRUE(browser()->is_app());
+  Browser::CreateParams params = Browser::CreateParams::CreateForApp(
+      "app",
+      /*trusted_source=*/true, browser()->window()->GetBounds(), profile(),
+      /*user_gesture=*/true);
+  params.window = browser()->window();
+  set_browser(new Browser(params));
+  ASSERT_TRUE(browser()->is_type_app());
   browser()->command_controller()->FullscreenStateChanged();
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_FULLSCREEN));
 }
@@ -343,7 +355,7 @@ TEST_F(BrowserCommandControllerFullscreenTest,
     { IDC_FOCUS_PREVIOUS_PANE,     true,     false,     false,     false    },
     { IDC_FOCUS_BOOKMARKS,         true,     false,     false,     false    },
     { IDC_DEVELOPER_MENU,          true,     false,     false,     false    },
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     { IDC_FEEDBACK,                true,     false,     false,     false    },
 #endif
     { IDC_OPTIONS,                 true,     false,     false,     false    },

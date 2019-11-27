@@ -34,6 +34,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "cc/layers/texture_layer.h"
 #include "components/viz/common/resources/transferable_resource.h"
+#include "gpu/command_buffer/client/raster_interface.h"
 
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -45,8 +46,9 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_provider_wrapper.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/skia/include/core/SkData.h"
@@ -124,8 +126,6 @@ void Canvas2DLayerBridge::StartRecording() {
 
   if (resource_host_)
     resource_host_->RestoreCanvasMatrixClipStack(canvas);
-
-  recording_pixel_count_ = 0;
 }
 
 void Canvas2DLayerBridge::ResetResourceProvider() {
@@ -152,7 +152,7 @@ bool Canvas2DLayerBridge::ShouldAccelerate(AccelerationHint hint) const {
       SharedGpuContext::ContextProviderWrapper();
   if (accelerate && (!context_provider_wrapper ||
                      context_provider_wrapper->ContextProvider()
-                             ->ContextGL()
+                             ->RasterInterface()
                              ->GetGraphicsResetStatusKHR() != GL_NO_ERROR)) {
     accelerate = false;
   }
@@ -240,6 +240,10 @@ void Canvas2DLayerBridge::Hibernate() {
   copy_paint.setBlendMode(SkBlendMode::kSrc);
   scoped_refptr<StaticBitmapImage> snapshot =
       resource_host_->ResourceProvider()->Snapshot();
+  if (!snapshot) {
+    logger_->ReportHibernationEvent(kHibernationAbortedDueSnapshotFailure);
+    return;
+  }
   temp_hibernation_surface->getCanvas()->drawImage(
       snapshot->PaintImageForCurrentFrame().GetSkImage(), 0, 0, &copy_paint);
   hibernation_image_ = temp_hibernation_surface->makeImageSnapshot();
@@ -338,6 +342,8 @@ CanvasResourceProvider* Canvas2DLayerBridge::GetOrCreateResourceProvider(
   hibernation_image_.reset();
 
   if (resource_host_) {
+    // If deferral is enabled the recorder will play back the transform, so we
+    // should not do it here or else it will be applied twice
     if (!is_deferral_enabled_)
       resource_host_->RestoreCanvasMatrixClipStack(resource_provider->Canvas());
 
@@ -347,7 +353,7 @@ CanvasResourceProvider* Canvas2DLayerBridge::GetOrCreateResourceProvider(
   return resource_provider;
 }
 
-cc::PaintCanvas* Canvas2DLayerBridge::Canvas() {
+cc::PaintCanvas* Canvas2DLayerBridge::DrawingCanvas() {
   DCHECK(resource_host_);
   if (is_deferral_enabled_)
     return recorder_->getRecordingCanvas();
@@ -419,7 +425,7 @@ void Canvas2DLayerBridge::SetIsHidden(bool hidden) {
 }
 
 void Canvas2DLayerBridge::DrawFullImage(const cc::PaintImage& image) {
-  Canvas()->drawImage(image, 0, 0);
+  DrawingCanvas()->drawImage(image, 0, 0);
 }
 
 bool Canvas2DLayerBridge::WritePixels(const SkImageInfo& orig_info,
@@ -439,6 +445,21 @@ bool Canvas2DLayerBridge::WritePixels(const SkImageInfo& orig_info,
       return false;
   }
 
+  if (is_deferral_enabled_) {
+    // WritePixels is not supported by deferral. Since we are directly
+    // rendering, we can't do deferral on top of the canvas. Disable deferral
+    // completely.
+    last_recording_ = nullptr;
+    is_deferral_enabled_ = false;
+    have_recorded_draw_commands_ = false;
+    recorder_.reset();
+    // install the current matrix/clip stack onto the immediate canvas
+    if (GetOrCreateResourceProvider()) {
+      resource_host_->RestoreCanvasMatrixClipStack(
+          ResourceProvider()->Canvas());
+    }
+  }
+
   ResourceProvider()->WritePixels(orig_info, pixels, row_bytes, x, y);
   DidDraw(FloatRect(x, y, orig_info.width(), orig_info.height()));
   return true;
@@ -456,18 +477,18 @@ void Canvas2DLayerBridge::SkipQueuedDrawCommands() {
 }
 
 void Canvas2DLayerBridge::ClearPendingRasterTimers() {
-  gpu::gles2::GLES2Interface* gl_interface = nullptr;
+  gpu::raster::RasterInterface* raster_interface = nullptr;
   if (IsAccelerated() && SharedGpuContext::ContextProviderWrapper() &&
       SharedGpuContext::ContextProviderWrapper()->ContextProvider()) {
-    gl_interface = SharedGpuContext::ContextProviderWrapper()
-                       ->ContextProvider()
-                       ->ContextGL();
+    raster_interface = SharedGpuContext::ContextProviderWrapper()
+                           ->ContextProvider()
+                           ->RasterInterface();
   }
 
-  if (gl_interface) {
+  if (raster_interface) {
     while (!pending_raster_timers_.IsEmpty()) {
       RasterTimer rt = pending_raster_timers_.TakeFirst();
-      gl_interface->DeleteQueriesEXT(1, &rt.gl_query_id);
+      raster_interface->DeleteQueriesEXT(1, &rt.gl_query_id);
     }
   } else {
     pending_raster_timers_.clear();
@@ -475,7 +496,7 @@ void Canvas2DLayerBridge::ClearPendingRasterTimers() {
 }
 
 void Canvas2DLayerBridge::FinishRasterTimers(
-    gpu::gles2::GLES2Interface* gl_interface) {
+    gpu::raster::RasterInterface* raster_interface) {
   // If the context was lost, then the old queries are not valid anymore
   if (!CheckResourceProviderValid()) {
     ClearPendingRasterTimers();
@@ -486,7 +507,7 @@ void Canvas2DLayerBridge::FinishRasterTimers(
   while (!pending_raster_timers_.IsEmpty()) {
     auto it = pending_raster_timers_.begin();
     GLuint complete = 1;
-    gl_interface->GetQueryObjectuivEXT(
+    raster_interface->GetQueryObjectuivEXT(
         it->gl_query_id, GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT,
         &complete);
     if (!complete) {
@@ -494,8 +515,8 @@ void Canvas2DLayerBridge::FinishRasterTimers(
     }
 
     GLuint raw_gpu_duration = 0u;
-    gl_interface->GetQueryObjectuivEXT(it->gl_query_id, GL_QUERY_RESULT_EXT,
-                                       &raw_gpu_duration);
+    raster_interface->GetQueryObjectuivEXT(it->gl_query_id, GL_QUERY_RESULT_EXT,
+                                           &raw_gpu_duration);
     base::TimeDelta gpu_duration_microseconds =
         base::TimeDelta::FromMicroseconds(raw_gpu_duration);
     base::TimeDelta total_time =
@@ -514,7 +535,7 @@ void Canvas2DLayerBridge::FinishRasterTimers(
         "Blink.Canvas.RasterDuration.Accelerated.Total", total_time, min, max,
         num_buckets);
 
-    gl_interface->DeleteQueriesEXT(1, &it->gl_query_id);
+    raster_interface->DeleteQueriesEXT(1, &it->gl_query_id);
 
     pending_raster_timers_.erase(it);
   }
@@ -526,19 +547,19 @@ void Canvas2DLayerBridge::FlushRecording() {
 
   TRACE_EVENT0("cc", "Canvas2DLayerBridge::flushRecording");
 
-  gpu::gles2::GLES2Interface* gl_interface = nullptr;
+  gpu::raster::RasterInterface* raster_interface = nullptr;
   if (IsAccelerated() && SharedGpuContext::ContextProviderWrapper() &&
       SharedGpuContext::ContextProviderWrapper()->ContextProvider()) {
-    gl_interface = SharedGpuContext::ContextProviderWrapper()
-                       ->ContextProvider()
-                       ->ContextGL();
-    FinishRasterTimers(gl_interface);
+    raster_interface = SharedGpuContext::ContextProviderWrapper()
+                           ->ContextProvider()
+                           ->RasterInterface();
+    FinishRasterTimers(raster_interface);
   }
 
   // Sample one out of every kRasterMetricProbability frames to time
   // This measurement only makes sense if deferral is enabled
   // If the canvas is accelerated, we also need access to the gl_interface
-  bool measure_raster_metric = (gl_interface || !IsAccelerated()) &&
+  bool measure_raster_metric = (raster_interface || !IsAccelerated()) &&
                                is_deferral_enabled_ &&
                                bernoulli_distribution_(random_generator_);
   RasterTimer rasterTimer;
@@ -547,8 +568,8 @@ void Canvas2DLayerBridge::FlushRecording() {
   if (measure_raster_metric) {
     if (IsAccelerated()) {
       GLuint gl_id = 0u;
-      gl_interface->GenQueriesEXT(1, &gl_id);
-      gl_interface->BeginQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM, gl_id);
+      raster_interface->GenQueriesEXT(1, &gl_id);
+      raster_interface->BeginQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM, gl_id);
       rasterTimer.gl_query_id = gl_id;
     }
     timer.emplace();
@@ -558,8 +579,10 @@ void Canvas2DLayerBridge::FlushRecording() {
     cc::PaintCanvas* canvas = ResourceProvider()->Canvas();
     last_recording_ = recorder_->finishRecordingAsPicture();
     canvas->drawPicture(last_recording_);
-    if (!resource_host_ || !resource_host_->IsPrinting()) {
+    if (!clear_frame_ || !resource_host_ || !resource_host_->IsPrinting() ||
+        !is_deferral_enabled_) {
       last_recording_ = nullptr;
+      clear_frame_ = false;
     }
     ResourceProvider()->FlushSkia();
   }
@@ -568,7 +591,7 @@ void Canvas2DLayerBridge::FlushRecording() {
   if (measure_raster_metric) {
     if (IsAccelerated()) {
       rasterTimer.cpu_raster_duration = timer->Elapsed();
-      gl_interface->EndQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM);
+      raster_interface->EndQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM);
       pending_raster_timers_.push_back(rasterTimer);
     } else {
       UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
@@ -619,14 +642,17 @@ bool Canvas2DLayerBridge::Restore() {
     return false;
   DCHECK(!ResourceProvider());
 
-  gpu::gles2::GLES2Interface* shared_gl = nullptr;
+  gpu::raster::RasterInterface* shared_raster_interface = nullptr;
   layer_->ClearTexture();
   base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider_wrapper =
       SharedGpuContext::ContextProviderWrapper();
-  if (context_provider_wrapper)
-    shared_gl = context_provider_wrapper->ContextProvider()->ContextGL();
+  if (context_provider_wrapper) {
+    shared_raster_interface =
+        context_provider_wrapper->ContextProvider()->RasterInterface();
+  }
 
-  if (shared_gl && shared_gl->GetGraphicsResetStatusKHR() == GL_NO_ERROR) {
+  if (shared_raster_interface &&
+      shared_raster_interface->GetGraphicsResetStatusKHR() == GL_NO_ERROR) {
     CanvasResourceProvider* resource_provider =
         resource_host_->GetOrCreateCanvasResourceProviderImpl(
             kPreferAcceleration);
@@ -713,9 +739,9 @@ void Canvas2DLayerBridge::FinalizeFrame() {
   if (!GetOrCreateResourceProvider(kPreferAcceleration))
     return;
 
+  FlushRecording();
   ++frames_since_last_commit_;
   if (frames_since_last_commit_ >= 2) {
-    ResourceProvider()->FlushSkia();
     if (IsAccelerated() && !rate_limiter_) {
       // Make sure the GPU is never more than two animation frames behind.
       constexpr unsigned kMaxCanvasAnimationBacklog = 2;
@@ -738,7 +764,7 @@ scoped_refptr<StaticBitmapImage> Canvas2DLayerBridge::NewImageSnapshot(
   if (snapshot_state_ == kInitialSnapshotState)
     snapshot_state_ = kDidAcquireSnapshot;
   if (IsHibernating())
-    return StaticBitmapImage::Create(hibernation_image_);
+    return UnacceleratedStaticBitmapImage::Create(hibernation_image_);
   if (!IsValid())
     return nullptr;
   // GetOrCreateResourceProvider needs to be called before FlushRecording, to

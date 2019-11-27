@@ -41,10 +41,8 @@ TEST_F(HTMLObjectElementTest, FallbackRecalcForReattach) {
 
   object->RenderFallbackContent(nullptr);
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
-  StyleRecalcChange change;
-  change = change.ForceRecalcDescendants();
-  GetDocument().GetStyleEngine().RecalcStyle(change);
-  EXPECT_TRUE(IsHTMLSlotElement(slot));
+  GetDocument().GetStyleEngine().RecalcStyle();
+  EXPECT_TRUE(IsA<HTMLSlotElement>(slot));
   EXPECT_TRUE(object->UseFallbackContent());
   EXPECT_TRUE(object->GetComputedStyle());
   EXPECT_TRUE(slot->GetComputedStyle());

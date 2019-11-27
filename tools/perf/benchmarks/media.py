@@ -39,19 +39,21 @@ class _MediaBenchmark(perf_benchmark.PerfBenchmark):
     options.config.chrome_trace_config.SetMemoryDumpConfig(
         chrome_trace_config.MemoryDumpConfig())
 
-    options.SetTimelineBasedMetrics(['mediaMetric', 'cpuTimeMetric',
-                                     'memoryMetric'])
+    # Note that memoryMetric is added using GetExtraTracingMetrics() for
+    # certain stories.
+    options.SetTimelineBasedMetrics(['mediaMetric', 'cpuTimeMetric'])
     return options
 
 
 @benchmark.Info(emails=['dalecurtis@chromium.org'],
-                component='Internals>Media')
+                component='Internals>Media',
+                documentation_url='https://chromium.googlesource.com/chromium/src/+/master/docs/speed/benchmark/harnesses/media.md')  # pylint: disable=line-too-long
 class MediaDesktop(_MediaBenchmark):
   """Obtains media performance for key user scenarios on desktop."""
   SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
 
   def CreateStorySet(self, options):
-    return page_sets.MediaCasesDesktopStorySet(measure_memory=True)
+    return page_sets.MediaCasesDesktopStorySet()
 
   @classmethod
   def Name(cls):
@@ -60,14 +62,15 @@ class MediaDesktop(_MediaBenchmark):
 
 # If any story is failing on svelte, please only disable on svelte.
 @benchmark.Info(emails=['dalecurtis@chromium.org'],
-                component='Internals>Media')
+                component='Internals>Media',
+                documentation_url='https://chromium.googlesource.com/chromium/src/+/master/docs/speed/benchmark/harnesses/media.md')  # pylint: disable=line-too-long
 class MediaMobile(_MediaBenchmark):
   """Obtains media performance for key user scenarios on mobile devices."""
 
   SUPPORTED_PLATFORMS = [story.expectations.ANDROID_NOT_WEBVIEW]
 
   def CreateStorySet(self, options):
-    return page_sets.MediaCasesMobileStorySet(measure_memory=True)
+    return page_sets.MediaCasesMobileStorySet()
 
   @classmethod
   def Name(cls):

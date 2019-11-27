@@ -61,8 +61,7 @@ DeviceOAuth2TokenService::DeviceOAuth2TokenService(
               kServiceAccountIdentity,
               base::Bind(
                   &DeviceOAuth2TokenService::OnServiceAccountIdentityChanged,
-                  base::Unretained(this)))),
-      weak_ptr_factory_(this) {
+                  base::Unretained(this)))) {
   token_manager_ = std::make_unique<OAuth2AccessTokenManager>(
       this /* OAuth2AccessTokenManager::Delegate* */);
   // Pull in the system salt.
@@ -111,9 +110,9 @@ CoreAccountId DeviceOAuth2TokenService::GetRobotAccountId() const {
     return robot_account_id_for_testing_;
   }
 
-  std::string account_id;
-  CrosSettings::Get()->GetString(kServiceAccountIdentity, &account_id);
-  return CoreAccountId(account_id);
+  std::string email;
+  CrosSettings::Get()->GetString(kServiceAccountIdentity, &email);
+  return CoreAccountId::FromEmail(email);
 }
 
 void DeviceOAuth2TokenService::set_robot_account_id_for_testing(
@@ -171,7 +170,7 @@ void DeviceOAuth2TokenService::OnGetTokenInfoResponse(
   token_info->GetString("email", &gaia_robot_id);
   gaia_oauth_client_.reset();
 
-  CheckRobotAccountId(CoreAccountId(gaia_robot_id));
+  CheckRobotAccountId(CoreAccountId::FromEmail(gaia_robot_id));
 }
 
 void DeviceOAuth2TokenService::OnOAuthError() {
@@ -366,7 +365,8 @@ std::string DeviceOAuth2TokenService::GetRefreshToken() const {
       // This shouldn't happen: GetRefreshToken() is only called for actual
       // token minting operations. In above states, requests are either queued
       // or short-circuited to signal error immediately, so no actual token
-      // minting via OAuth2TokenService::FetchOAuth2Token should be triggered.
+      // minting via OAuth2AccessTokenManager::FetchOAuth2Token should be
+      // triggered.
       NOTREACHED();
       return std::string();
     case STATE_VALIDATION_PENDING:

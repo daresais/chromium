@@ -5,18 +5,17 @@
 package org.chromium.chrome.browser.ntp;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.chrome.browser.history.HistoryManagerUtils;
-import org.chromium.chrome.browser.invalidation.InvalidationController;
 import org.chromium.chrome.browser.invalidation.SessionsInvalidationManager;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSession;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSessionTab;
@@ -24,15 +23,16 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.signin.ProfileDataCache;
-import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.signin.SigninPromoController;
 import org.chromium.chrome.browser.signin.SigninPromoUtil;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountsChangeObserver;
 import org.chromium.components.signin.ChromeSigninController;
+import org.chromium.components.signin.metrics.SigninAccessPoint;
 import org.chromium.components.sync.AndroidSyncSettings;
 import org.chromium.components.sync.AndroidSyncSettings.AndroidSyncSettingsObserver;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
@@ -119,12 +119,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mForeignSessionHelper.triggerSessionSync();
         registerObservers();
 
-        if (ChromeFeatureList.isInitialized()
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.FCM_INVALIDATIONS)) {
-            SessionsInvalidationManager.get(mProfile).onRecentTabsPageOpened();
-        } else {
-            InvalidationController.get().onRecentTabsPageOpened();
-        }
+        SessionsInvalidationManager.get(mProfile).onRecentTabsPageOpened();
     }
 
     /**
@@ -152,12 +147,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mPrefs.destroy();
         mPrefs = null;
 
-        if (ChromeFeatureList.isInitialized()
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.FCM_INVALIDATIONS)) {
-            SessionsInvalidationManager.get(mProfile).onRecentTabsPageClosed();
-        } else {
-            InvalidationController.get().onRecentTabsPageClosed();
-        }
+        SessionsInvalidationManager.get(mProfile).onRecentTabsPageClosed();
 
         mForeignSessionHelper.destroy();
         mForeignSessionHelper = null;
@@ -236,7 +226,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      */
     public void openHistoryPage() {
         if (mIsDestroyed) return;
-        HistoryManagerUtils.showHistoryManager(mTab.getActivity(), mTab);
+        HistoryManagerUtils.showHistoryManager(((TabImpl) mTab).getActivity(), mTab);
     }
 
     /**

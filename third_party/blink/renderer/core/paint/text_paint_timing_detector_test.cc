@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_test_helper.h"
 #include "third_party/blink/renderer/core/svg/svg_text_content_element.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -16,13 +17,10 @@
 
 namespace blink {
 
-class TextPaintTimingDetectorTest
-    : public testing::Test,
-      private ScopedFirstContentfulPaintPlusPlusForTest {
+class TextPaintTimingDetectorTest : public testing::Test {
  public:
   TextPaintTimingDetectorTest()
-      : ScopedFirstContentfulPaintPlusPlusForTest(true),
-        test_task_runner_(
+      : test_task_runner_(
             base::MakeRefCounted<base::TestMockTimeTaskRunner>()) {}
 
   void SetUp() override {
@@ -69,9 +67,14 @@ class TextPaintTimingDetectorTest
     return GetPaintTimingDetector().GetTextPaintTimingDetector();
   }
 
+  TextPaintTimingDetector* GetChildFrameTextPaintTimingDetector() {
+    return GetChildFrameView()
+        .GetPaintTimingDetector()
+        .GetTextPaintTimingDetector();
+  }
+
   base::Optional<LargestTextPaintManager>& GetLargestTextPaintManager() {
-    return GetTextPaintTimingDetector()
-        ->records_manager_.GetLargestTextPaintManager();
+    return GetTextPaintTimingDetector()->records_manager_.ltp_manager_;
   }
 
   wtf_size_t CountVisibleTexts() {
@@ -82,9 +85,7 @@ class TextPaintTimingDetectorTest
 
   wtf_size_t CountRankingSetSize() {
     DCHECK(GetTextPaintTimingDetector());
-    return GetTextPaintTimingDetector()
-        ->records_manager_.GetLargestTextPaintManager()
-        ->size_ordered_set_.size();
+    return GetLargestTextPaintManager()->size_ordered_set_.size();
   }
 
   wtf_size_t CountInvisibleTexts() {
@@ -106,11 +107,26 @@ class TextPaintTimingDetectorTest
     GetPaintTimingDetector().NotifyInputEvent(WebInputEvent::Type::kMouseDown);
   }
 
+  void SimulateScroll() {
+    GetPaintTimingDetector().NotifyScroll(ScrollType::kUserScroll);
+  }
+
   void InvokeCallback() {
-    TextPaintTimingDetector* detector =
-        GetPaintTimingDetector().GetTextPaintTimingDetector();
-    detector->ReportSwapTime(WebWidgetClient::SwapResult::kDidSwap,
-                             test_task_runner_->NowTicks());
+    DCHECK_GT(mock_callback_manager_->CountCallbacks(), 0u);
+    InvokeSwapTimeCallback(mock_callback_manager_);
+  }
+
+  void ChildFrameSwapTimeCallBack() {
+    DCHECK_GT(child_frame_mock_callback_manager_->CountCallbacks(), 0u);
+    InvokeSwapTimeCallback(child_frame_mock_callback_manager_);
+  }
+
+  void InvokeSwapTimeCallback(
+      MockPaintTimingCallbackManager* callback_manager) {
+    callback_manager->InvokeSwapTimeCallback(test_task_runner_->NowTicks());
+    // Outside the tests, this is invoked by
+    // |PaintTimingCallbackManagerImpl::ReportPaintTime|.
+    GetLargestTextPaintManager()->UpdateCandidate();
   }
 
   base::TimeTicks LargestPaintStoredResult() {
@@ -121,6 +137,9 @@ class TextPaintTimingDetectorTest
     frame_test_helpers::LoadHTMLString(
         web_view_helper_.GetWebView()->MainFrameImpl(), content,
         KURL("http://test.com"));
+    mock_callback_manager_ =
+        MakeGarbageCollected<MockPaintTimingCallbackManager>();
+    GetTextPaintTimingDetector()->ResetCallbackManager(mock_callback_manager_);
     UpdateAllLifecyclePhases();
   }
 
@@ -128,6 +147,10 @@ class TextPaintTimingDetectorTest
     GetChildDocument()->SetBaseURLOverride(KURL("http://test.com"));
     GetChildDocument()->body()->SetInnerHTMLFromString(content,
                                                        ASSERT_NO_EXCEPTION);
+    child_frame_mock_callback_manager_ =
+        MakeGarbageCollected<MockPaintTimingCallbackManager>();
+    GetChildFrameTextPaintTimingDetector()->ResetCallbackManager(
+        child_frame_mock_callback_manager_);
     UpdateAllLifecyclePhases();
   }
 
@@ -139,27 +162,14 @@ class TextPaintTimingDetectorTest
   // This only triggers ReportSwapTime in main frame.
   void UpdateAllLifecyclePhasesAndSimulateSwapTime() {
     UpdateAllLifecyclePhases();
-    TextPaintTimingDetector* detector =
-        GetPaintTimingDetector().GetTextPaintTimingDetector();
-    if (detector &&
-        !detector->records_manager_.texts_queued_for_paint_time_.empty()) {
-      detector->ReportSwapTime(WebWidgetClient::SwapResult::kDidSwap,
-                               test_task_runner_->NowTicks());
-    }
+    while (mock_callback_manager_->CountCallbacks() > 0)
+      InvokeCallback();
   }
 
   size_t CountPendingSwapTime(LocalFrameView& frame_view) {
     TextPaintTimingDetector* detector =
         frame_view.GetPaintTimingDetector().GetTextPaintTimingDetector();
     return detector->records_manager_.texts_queued_for_paint_time_.size();
-  }
-
-  void ChildFrameSwapTimeCallBack() {
-    GetChildFrameView()
-        .GetPaintTimingDetector()
-        .GetTextPaintTimingDetector()
-        ->ReportSwapTime(WebWidgetClient::SwapResult::kDidSwap,
-                         test_task_runner_->NowTicks());
   }
 
   Element* AppendFontBlockToBody(String content) {
@@ -183,19 +193,14 @@ class TextPaintTimingDetectorTest
   }
 
   base::WeakPtr<TextRecord> TextRecordOfLargestTextPaint() {
-    return GetFrameView()
-        .GetPaintTimingDetector()
-        .GetTextPaintTimingDetector()
-        ->records_manager_.GetLargestTextPaintManager()
-        ->FindLargestPaintCandidate();
+    return GetLargestTextPaintManager()->FindLargestPaintCandidate();
   }
 
   base::WeakPtr<TextRecord> ChildFrameTextRecordOfLargestTextPaint() {
     return GetChildFrameView()
         .GetPaintTimingDetector()
         .GetTextPaintTimingDetector()
-        ->records_manager_.GetLargestTextPaintManager()
-        ->FindLargestPaintCandidate();
+        ->records_manager_.ltp_manager_->FindLargestPaintCandidate();
   }
 
   void SetFontSize(Element* font_element, uint16_t font_size) {
@@ -227,6 +232,8 @@ class TextPaintTimingDetectorTest
 
   frame_test_helpers::WebViewHelper web_view_helper_;
   scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner_;
+  Persistent<MockPaintTimingCallbackManager> mock_callback_manager_;
+  Persistent<MockPaintTimingCallbackManager> child_frame_mock_callback_manager_;
 };
 
 TEST_F(TextPaintTimingDetectorTest, LargestTextPaint_NoText) {
@@ -600,18 +607,18 @@ TEST_F(TextPaintTimingDetectorTest, CaptureFileUploadController) {
             DOMNodeIds::ExistingIdForNode(element));
 }
 
-TEST_F(TextPaintTimingDetectorTest, NotCapturingListMarkers) {
+TEST_F(TextPaintTimingDetectorTest, CapturingListMarkers) {
   SetBodyInnerHTML(R"HTML(
     <ul>
-      <li></li>
+      <li>List item</li>
     </ul>
     <ol>
-      <li></li>
+      <li>Another list item</li>
     </ol>
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
-  EXPECT_EQ(CountVisibleTexts(), 0u);
+  EXPECT_EQ(CountVisibleTexts(), 2u);
 }
 
 TEST_F(TextPaintTimingDetectorTest, CaptureSVGText) {
@@ -621,8 +628,7 @@ TEST_F(TextPaintTimingDetectorTest, CaptureSVGText) {
     </svg>
   )HTML");
 
-  SVGTextContentElement* elem =
-      ToSVGTextContentElement(GetDocument().QuerySelector("text"));
+  auto* elem = To<SVGTextContentElement>(GetDocument().QuerySelector("text"));
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
 
   EXPECT_EQ(CountVisibleTexts(), 1u);
@@ -735,6 +741,32 @@ TEST_F(TextPaintTimingDetectorTest, SameSizeShouldNotBeIgnored) {
   )HTML");
   UpdateAllLifecyclePhasesAndSimulateSwapTime();
   EXPECT_EQ(CountRankingSetSize(), 4u);
+}
+
+TEST_F(TextPaintTimingDetectorTest, VisibleTextAfterUserInput) {
+  SetBodyInnerHTML(R"HTML(
+  )HTML");
+  AppendDivElementToBody("text");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 1u);
+  EXPECT_TRUE(GetLargestTextPaintManager());
+
+  SimulateInputEvent();
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 1u);
+}
+
+TEST_F(TextPaintTimingDetectorTest, VisibleTextAfterUserScroll) {
+  SetBodyInnerHTML(R"HTML(
+  )HTML");
+  AppendDivElementToBody("text");
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 1u);
+  EXPECT_TRUE(GetLargestTextPaintManager());
+
+  SimulateScroll();
+  UpdateAllLifecyclePhasesAndSimulateSwapTime();
+  EXPECT_EQ(CountVisibleTexts(), 1u);
 }
 
 }  // namespace blink

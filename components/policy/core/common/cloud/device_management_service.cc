@@ -185,6 +185,10 @@ std::string DeviceManagementService::JobConfiguration::GetJobTypeAsString(
     case DeviceManagementService::JobConfiguration::
         TYPE_UPLOAD_REAL_TIME_REPORT:
       return "UploadrealtimeReport";
+    case DeviceManagementService::JobConfiguration::TYPE_REQUEST_SAML_URL:
+      return "PublicSamlUserRequest";
+    case DeviceManagementService::JobConfiguration::TYPE_CHROME_OS_USER_REPORT:
+      return "ChromeOsUserReport";
   }
   NOTREACHED() << "Invalid job type " << type;
   return "";
@@ -278,7 +282,7 @@ JobConfigurationBase::GetResourceRequest(bool bypass_proxy, int last_error) {
   rr->method = "POST";
   rr->load_flags =
       net::LOAD_DISABLE_CACHE | (bypass_proxy ? net::LOAD_BYPASS_PROXY : 0);
-  rr->allow_credentials = false;
+  rr->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   // If auth data is specified, use it to build the request.
   if (auth_data_) {

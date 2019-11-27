@@ -27,8 +27,8 @@
 #include "extensions/browser/extension_util.h"
 #include "extensions/common/extension_set.h"
 #include "storage/browser/blob/scoped_file.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
@@ -346,10 +346,8 @@ LocalFileSyncService::LocalFileSyncService(Profile* profile,
       sync_context_(new LocalFileSyncContext(
           profile_->GetPath(),
           env_override,
-          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI})
-              .get(),
-          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO})
-              .get())),
+          base::CreateSingleThreadTaskRunner({BrowserThread::UI}).get(),
+          base::CreateSingleThreadTaskRunner({BrowserThread::IO}).get())),
       local_change_processor_(nullptr) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   sync_context_->AddOriginChangeObserver(this);

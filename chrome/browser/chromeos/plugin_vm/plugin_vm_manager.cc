@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/chromeos/guest_os/guest_os_share_path.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_engagement_metrics_service.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_files.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_pref_names.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
@@ -19,7 +20,7 @@
 #include "chrome/browser/ui/ash/launcher/shelf_spinner_item_controller.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon_client.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/prefs/pref_service.h"
@@ -101,8 +102,7 @@ PluginVmManager* PluginVmManager::GetForProfile(Profile* profile) {
 
 PluginVmManager::PluginVmManager(Profile* profile)
     : profile_(profile),
-      owner_id_(chromeos::ProfileHelper::GetUserIdHashFromProfile(profile)),
-      weak_ptr_factory_(this) {
+      owner_id_(chromeos::ProfileHelper::GetUserIdHashFromProfile(profile)) {
   chromeos::DBusThreadManager::Get()
       ->GetVmPluginDispatcherClient()
       ->AddObserver(this);
@@ -121,18 +121,19 @@ void PluginVmManager::LaunchPluginVm() {
     return;
   }
 
+  for (auto& observer : vm_starting_observers_) {
+    observer.OnVmStarting();
+  }
+
   // Show a spinner for the first launch (state UNKNOWN) or if we will have to
   // wait before starting the VM.
   if (vm_state_ == vm_tools::plugin_dispatcher::VmState::VM_STATE_UNKNOWN ||
       VmIsStopping(vm_state_)) {
-    ChromeLauncherController* chrome_controller =
-        ChromeLauncherController::instance();
-    // Can be null in tests.
-    if (chrome_controller) {
-      chrome_controller->GetShelfSpinnerController()->AddSpinnerToShelf(
-          kPluginVmAppId,
-          std::make_unique<ShelfSpinnerItemController>(kPluginVmAppId));
-    }
+    ChromeLauncherController::instance()
+        ->GetShelfSpinnerController()
+        ->AddSpinnerToShelf(
+            kPluginVmAppId,
+            std::make_unique<ShelfSpinnerItemController>(kPluginVmAppId));
   }
 
   // Launching Plugin Vm goes through the following steps:
@@ -143,14 +144,23 @@ void PluginVmManager::LaunchPluginVm() {
   chromeos::DBusThreadManager::Get()
       ->GetDebugDaemonClient()
       ->StartPluginVmDispatcher(
-          base::BindOnce(&PluginVmManager::OnStartPluginVmDispatcher,
-                         weak_ptr_factory_.GetWeakPtr()));
+          owner_id_, base::BindOnce(&PluginVmManager::OnStartPluginVmDispatcher,
+                                    weak_ptr_factory_.GetWeakPtr()));
 }
 
-void PluginVmManager::StopPluginVm() {
+void PluginVmManager::AddVmStartingObserver(
+    chromeos::VmStartingObserver* observer) {
+  vm_starting_observers_.AddObserver(observer);
+}
+void PluginVmManager::RemoveVmStartingObserver(
+    chromeos::VmStartingObserver* observer) {
+  vm_starting_observers_.RemoveObserver(observer);
+}
+
+void PluginVmManager::StopPluginVm(const std::string& name) {
   vm_tools::plugin_dispatcher::StopVmRequest request;
   request.set_owner_id(owner_id_);
-  request.set_vm_name_uuid(kPluginVmName);
+  request.set_vm_name_uuid(name);
 
   chromeos::DBusThreadManager::Get()->GetVmPluginDispatcherClient()->StopVm(
       std::move(request), base::DoNothing());
@@ -182,9 +192,18 @@ void PluginVmManager::OnVmStateChanged(
                  vm_tools::plugin_dispatcher::VmState::VM_STATE_STOPPED ||
              vm_state_ ==
                  vm_tools::plugin_dispatcher::VmState::VM_STATE_SUSPENDED) {
-    // When the VM_STATE_STOPPED or VM_STATE_SUSPENDED signal is received, reset
-    // seneschal handle to indicate that it is no longer valid.
+    // The previous seneschal handle is no longer valid.
     seneschal_server_handle_ = 0;
+
+    ChromeLauncherController::instance()->Close(ash::ShelfID(kPluginVmAppId));
+  }
+
+  auto* engagement_metrics_service =
+      PluginVmEngagementMetricsService::Factory::GetForProfile(profile_);
+  // This is null in unit tests.
+  if (engagement_metrics_service) {
+    engagement_metrics_service->SetBackgroundActive(
+        vm_state_ == vm_tools::plugin_dispatcher::VmState::VM_STATE_RUNNING);
   }
 }
 
@@ -332,7 +351,7 @@ void PluginVmManager::OnDefaultSharedDirExists(const base::FilePath& dir,
     guest_os::GuestOsSharePath::GetForProfile(profile_)->SharePath(
         kPluginVmName, dir, false,
         base::BindOnce([](const base::FilePath& dir, bool success,
-                          std::string failure_reason) {
+                          const std::string& failure_reason) {
           if (!success) {
             LOG(ERROR) << "Error sharing PluginVm default dir " << dir.value()
                        << ": " << failure_reason;
@@ -344,12 +363,9 @@ void PluginVmManager::OnDefaultSharedDirExists(const base::FilePath& dir,
 void PluginVmManager::LaunchFailed(PluginVmLaunchResult result) {
   RecordPluginVmLaunchResultHistogram(result);
 
-  ChromeLauncherController* chrome_controller =
-      ChromeLauncherController::instance();
-  if (chrome_controller) {
-    chrome_controller->GetShelfSpinnerController()->CloseSpinner(
-        kPluginVmAppId);
-  }
+  ChromeLauncherController::instance()
+      ->GetShelfSpinnerController()
+      ->CloseSpinner(kPluginVmAppId);
 }
 
 }  // namespace plugin_vm

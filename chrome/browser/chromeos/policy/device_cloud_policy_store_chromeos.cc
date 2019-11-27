@@ -34,8 +34,7 @@ DeviceCloudPolicyStoreChromeOS::DeviceCloudPolicyStoreChromeOS(
     scoped_refptr<base::SequencedTaskRunner> background_task_runner)
     : device_settings_service_(device_settings_service),
       install_attributes_(install_attributes),
-      background_task_runner_(background_task_runner),
-      weak_factory_(this) {
+      background_task_runner_(background_task_runner) {
   device_settings_service_->AddObserver(this);
   device_settings_service_->SetDeviceMode(install_attributes_->GetMode());
 }
@@ -81,8 +80,8 @@ void DeviceCloudPolicyStoreChromeOS::Store(
       CloudPolicyValidatorBase::DEVICE_ID_REQUIRED);
   DeviceCloudPolicyValidator::StartValidation(
       std::move(validator),
-      base::Bind(&DeviceCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&DeviceCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void DeviceCloudPolicyStoreChromeOS::Load() {
@@ -108,8 +107,8 @@ void DeviceCloudPolicyStoreChromeOS::InstallInitialPolicy(
   validator->ValidateInitialKey(install_attributes_->GetDomain());
   DeviceCloudPolicyValidator::StartValidation(
       std::move(validator),
-      base::Bind(&DeviceCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&DeviceCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void DeviceCloudPolicyStoreChromeOS::DeviceSettingsUpdated() {

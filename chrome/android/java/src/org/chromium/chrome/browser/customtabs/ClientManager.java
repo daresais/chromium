@@ -13,19 +13,20 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
-import android.support.annotation.NonNull;
-import android.support.customtabs.CustomTabsCallback;
-import android.support.customtabs.CustomTabsService;
-import android.support.customtabs.CustomTabsService.Relation;
-import android.support.customtabs.CustomTabsSessionToken;
-import android.support.customtabs.PostMessageServiceConnection;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.util.SparseBooleanArray;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsService;
+import androidx.browser.customtabs.CustomTabsService.Relation;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.customtabs.PostMessageServiceConnection;
+
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.IntentHandler;
@@ -476,7 +477,8 @@ class ClientManager {
             }
         };
 
-        params.originVerifier = new OriginVerifier(params.getPackageName(), relation);
+        params.originVerifier =
+                new OriginVerifier(params.getPackageName(), relation, /* webContents= */ null);
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
                 () -> { params.originVerifier.start(listener, origin); });
         if (relation == CustomTabsService.RELATION_HANDLE_ALL_URLS

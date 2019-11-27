@@ -57,8 +57,7 @@ class ASH_EXPORT DeskMiniView
   // Gesture tapping may affect the visibility of the close button. There's only
   // one mini_view that shows the close button on long press at any time.
   // This is useful for touch-only UIs.
-  void OnWidgetGestureTap(const gfx::Point& screen_location,
-                          bool is_long_gesture);
+  void OnWidgetGestureTap(const gfx::Rect& screen_rect, bool is_long_gesture);
 
   // Updates the border color of the DeskPreviewView based on the activation
   // state of the corresponding desk.
@@ -68,6 +67,7 @@ class ASH_EXPORT DeskMiniView
   const char* GetClassName() const override;
   void Layout() override;
   gfx::Size CalculatePreferredSize() const override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -78,11 +78,28 @@ class ASH_EXPORT DeskMiniView
 
   // OverviewHighlightController::OverviewHighlightableView:
   views::View* GetView() override;
-  gfx::Rect GetHighlightBounds() override;
+  gfx::Rect GetHighlightBoundsInScreen() override;
+  void MaybeActivateHighlightedView() override;
+  void MaybeCloseHighlightedView() override;
+  bool OnViewHighlighted() override;
+  void OnViewUnhighlighted() override;
 
   bool IsPointOnMiniView(const gfx::Point& screen_location) const;
 
+  // Gets the minimum width of this view to properly lay out all its contents in
+  // default layout.
+  // The view containing this object can use the width returned from this
+  // function to decide its own proper size or layout.
+  int GetMinWidthForDefaultLayout() const;
+
+  bool IsLabelVisibleForTesting() const { return label_->GetVisible(); }
+  const DeskPreviewView* GetDeskPreviewForTesting() const {
+    return desk_preview_.get();
+  }
+
  private:
+  void OnCloseButtonPressed();
+
   DesksBarView* const owner_bar_;
 
   // The root window on which this mini_view is created.

@@ -8,7 +8,8 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.BuildInfo;
 import org.chromium.base.Callback;
@@ -108,19 +109,22 @@ public class AutofillAssistantFacade {
         // Have an "attempted starts" baseline for the drop out histogram.
         AutofillAssistantMetrics.recordDropOut(DropOutReason.AA_START);
         waitForTabWithWebContents(activity, tab -> {
-            AutofillAssistantModuleEntryProvider.getModuleEntry(activity, tab, (moduleEntry) -> {
-                if (moduleEntry == null) {
-                    AutofillAssistantMetrics.recordDropOut(DropOutReason.DFM_INSTALL_FAILED);
-                    return;
-                }
+            AutofillAssistantModuleEntryProvider.INSTANCE.getModuleEntry(
+                    tab, (moduleEntry) -> {
+                        if (moduleEntry == null) {
+                            AutofillAssistantMetrics.recordDropOut(
+                                    DropOutReason.DFM_INSTALL_FAILED);
+                            return;
+                        }
 
-                Bundle bundleExtras = activity.getInitialIntent().getExtras();
-                Map<String, String> parameters = extractParameters(bundleExtras);
-                parameters.remove(PARAMETER_ENABLED);
-                String initialUrl = activity.getInitialIntent().getDataString();
-                moduleEntry.start(tab, tab.getWebContents(), canStartWithoutOnboarding, initialUrl,
-                        parameters, experimentIds, activity.getInitialIntent().getExtras());
-            });
+                        Bundle bundleExtras = activity.getInitialIntent().getExtras();
+                        Map<String, String> parameters = extractParameters(bundleExtras);
+                        parameters.remove(PARAMETER_ENABLED);
+                        String initialUrl = activity.getInitialIntent().getDataString();
+                        moduleEntry.start(tab, tab.getWebContents(), canStartWithoutOnboarding,
+                                initialUrl, parameters, experimentIds,
+                                activity.getInitialIntent().getExtras());
+                    });
         });
     }
 
@@ -131,7 +135,6 @@ public class AutofillAssistantFacade {
     public static boolean areDirectActionsAvailable(@ActivityType int activityType) {
         return BuildInfo.isAtLeastQ()
                 && (activityType == ActivityType.CUSTOM_TAB || activityType == ActivityType.TABBED)
-                && AutofillAssistantPreferencesUtil.isAutofillAssistantSwitchOn()
                 && ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_ASSISTANT_DIRECT_ACTIONS)
                 && ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_ASSISTANT);
     }
@@ -145,8 +148,10 @@ public class AutofillAssistantFacade {
     public static DirectActionHandler createDirectActionHandler(Context context,
             BottomSheetController bottomSheetController, ScrimView scrimView,
             TabModelSelector tabModelSelector) {
-        // TODO(crbug.com/959841): Implement AutofillAssistant support for direct actions.
-        return null;
+        // TODO(b/134740534): Consider restricting signature of createDirectActionHandler() to get
+        // only getCurrentTab instead of a TabModelSelector.
+        return new AutofillAssistantDirectActionHandler(context, bottomSheetController, scrimView,
+                tabModelSelector::getCurrentTab, AutofillAssistantModuleEntryProvider.INSTANCE);
     }
 
     /**

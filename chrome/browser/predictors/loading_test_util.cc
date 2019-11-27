@@ -8,7 +8,6 @@
 #include <memory>
 #include <utility>
 
-#include "content/public/browser/resource_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
@@ -31,11 +30,17 @@ MockResourcePrefetchPredictor::MockResourcePrefetchPredictor(
 MockResourcePrefetchPredictor::~MockResourcePrefetchPredictor() = default;
 
 void InitializeRedirectStat(RedirectStat* redirect,
-                            const std::string& url,
+                            const GURL& url,
                             int number_of_hits,
                             int number_of_misses,
-                            int consecutive_misses) {
-  redirect->set_url(url);
+                            int consecutive_misses,
+                            bool include_scheme,
+                            bool include_port) {
+  redirect->set_url(url.host());
+  if (include_scheme)
+    redirect->set_url_scheme(url.scheme());
+  if (include_port)
+    redirect->set_url_port(url.EffectiveIntPort());
   redirect->set_number_of_hits(number_of_hits);
   redirect->set_number_of_misses(number_of_misses);
   redirect->set_consecutive_misses(consecutive_misses);
@@ -67,6 +72,9 @@ RedirectData CreateRedirectData(const std::string& primary_key,
 }
 
 OriginData CreateOriginData(const std::string& host, uint64_t last_visit_time) {
+  // |host| should not contain the scheme.
+  EXPECT_EQ(std::string::npos, host.find("https://"));
+  EXPECT_EQ(std::string::npos, host.find("http://"));
   OriginData data;
   data.set_host(host);
   data.set_last_visit_time(last_visit_time);
@@ -168,7 +176,8 @@ std::ostream& operator<<(std::ostream& os, const RedirectData& data) {
 }
 
 std::ostream& operator<<(std::ostream& os, const RedirectStat& redirect) {
-  return os << "[" << redirect.url() << "," << redirect.number_of_hits() << ","
+  return os << "[" << redirect.url() << "," << redirect.url_scheme() << ","
+            << redirect.url_port() << "," << redirect.number_of_hits() << ","
             << redirect.number_of_misses() << ","
             << redirect.consecutive_misses() << "]";
 }
@@ -209,7 +218,8 @@ std::ostream& operator<<(std::ostream& os, const NavigationID& navigation_id) {
 
 std::ostream& operator<<(std::ostream& os, const PreconnectRequest& request) {
   return os << "[" << request.origin << "," << request.num_sockets << ","
-            << request.allow_credentials << "]";
+            << request.allow_credentials << ","
+            << request.network_isolation_key.ToDebugString() << "]";
 }
 
 std::ostream& operator<<(std::ostream& os,
@@ -237,7 +247,8 @@ bool operator==(const RedirectData& lhs, const RedirectData& rhs) {
 }
 
 bool operator==(const RedirectStat& lhs, const RedirectStat& rhs) {
-  return lhs.url() == rhs.url() &&
+  return lhs.url() == rhs.url() && lhs.url_scheme() == rhs.url_scheme() &&
+         lhs.url_port() == rhs.url_port() &&
          lhs.number_of_hits() == rhs.number_of_hits() &&
          lhs.number_of_misses() == rhs.number_of_misses() &&
          lhs.consecutive_misses() == rhs.consecutive_misses();
@@ -281,7 +292,8 @@ bool operator==(const OriginStat& lhs, const OriginStat& rhs) {
 
 bool operator==(const PreconnectRequest& lhs, const PreconnectRequest& rhs) {
   return lhs.origin == rhs.origin && lhs.num_sockets == rhs.num_sockets &&
-         lhs.allow_credentials == rhs.allow_credentials;
+         lhs.allow_credentials == rhs.allow_credentials &&
+         lhs.network_isolation_key == rhs.network_isolation_key;
 }
 
 bool operator==(const PreconnectPrediction& lhs,

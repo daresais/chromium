@@ -94,6 +94,9 @@ class ErrorScreen : public BaseScreen,
   // Toggles the connection pending indicator.
   void ShowConnectingIndicator(bool show);
 
+  // Makes error persistent (e.g. non-closable).
+  void SetIsPersistentError(bool is_persistent);
+
   // Register a callback to be invoked when the user indicates that an attempt
   // to connect to the network should be made.
   ConnectRequestCallbackSubscription RegisterConnectRequestCallback(
@@ -172,7 +175,7 @@ class ErrorScreen : public BaseScreen,
   // Callbacks to be invoked when a connection attempt is requested.
   base::CallbackList<void()> connect_request_callbacks_;
 
-  base::WeakPtrFactory<ErrorScreen> weak_factory_;
+  base::WeakPtrFactory<ErrorScreen> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ErrorScreen);
 };

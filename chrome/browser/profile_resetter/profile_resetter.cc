@@ -68,11 +68,7 @@ void ResetShortcutsOnBlockingThread() {
        location < ShellUtil::NUM_SHORTCUT_LOCATIONS; ++location) {
     ShellUtil::ShortcutListMaybeRemoveUnknownArgs(
         static_cast<ShellUtil::ShortcutLocation>(location),
-        ShellUtil::CURRENT_USER,
-        chrome_exe,
-        true,
-        NULL,
-        NULL);
+        ShellUtil::CURRENT_USER, chrome_exe, true, nullptr, nullptr);
   }
 }
 
@@ -109,7 +105,7 @@ void ProfileResetter::Reset(
   CHECK_EQ(static_cast<ResettableFlags>(0), pending_reset_flags_);
 
   if (!resettable_flags) {
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, callback);
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI}, callback);
     return;
   }
 
@@ -160,8 +156,7 @@ void ProfileResetter::MarkAsDone(Resettable resettable) {
   pending_reset_flags_ &= ~resettable;
 
   if (!pending_reset_flags_) {
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             callback_);
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI}, callback_);
     callback_.Reset();
     master_settings_.reset();
     template_url_service_sub_.reset();
@@ -313,7 +308,7 @@ void ProfileResetter::ResetStartupPages() {
 void ProfileResetter::ResetPinnedTabs() {
   // Unpin all the tabs.
   for (auto* browser : *BrowserList::GetInstance()) {
-    if (browser->is_type_tabbed() && browser->profile() == profile_) {
+    if (browser->is_type_normal() && browser->profile() == profile_) {
       TabStripModel* tab_model = browser->tab_strip_model();
       // Here we assume that indexof(any mini tab) < indexof(any normal tab).
       // If we unpin the tab, it can be moved to the right. Thus traversing in
@@ -329,8 +324,8 @@ void ProfileResetter::ResetPinnedTabs() {
 
 void ProfileResetter::ResetShortcuts() {
 #if defined(OS_WIN)
-  base::CreateCOMSTATaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::USER_VISIBLE})
+  base::CreateCOMSTATaskRunner(
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::USER_VISIBLE})
       ->PostTaskAndReply(FROM_HERE, base::Bind(&ResetShortcutsOnBlockingThread),
                          base::Bind(&ProfileResetter::MarkAsDone,
                                     weak_ptr_factory_.GetWeakPtr(), SHORTCUTS));

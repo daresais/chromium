@@ -18,12 +18,14 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/task/post_task.h"
 #include "base/test/test_timeouts.h"
 #include "base/thread_annotations.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/component_loader.h"
@@ -46,6 +48,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/download/public/common/download_item.h"
+#include "components/guest_view/browser/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager_delegate.h"
+#include "components/guest_view/browser/test_guest_view_manager.h"
 #include "components/viz/common/features.h"
 #include "components/zoom/page_zoom.h"
 #include "components/zoom/test/zoom_test_utils.h"
@@ -67,11 +72,13 @@
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/mime_handler_view_mode.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/accessibility_notification_waiter.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/dump_accessibility_test_helper.h"
 #include "content/public/test/hit_test_region_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/url_loader_interceptor.h"
+#include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/manifest_handlers/mime_types_handler.h"
 #include "extensions/test/result_catcher.h"
@@ -79,9 +86,12 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "pdf/pdf_features.h"
 #include "services/network/public/cpp/features.h"
+#include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enum_util.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_tree.h"
+#include "ui/accessibility/platform/ax_platform_node_delegate_base.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/test/test_clipboard.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -93,6 +103,10 @@
 #endif
 
 using content::WebContents;
+using extensions::ExtensionsAPIClient;
+using guest_view::GuestViewManager;
+using guest_view::TestGuestViewManager;
+using guest_view::TestGuestViewManagerFactory;
 
 const int kNumberLoadTestParts = 10;
 
@@ -152,6 +166,13 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
     extensions::ExtensionApiTest::TearDownOnMainThread();
   }
 
+  // Serve paths prefixed with _test_resources/ from chrome/test/data/pdf.
+  base::FilePath GetTestResourcesParentDir() override {
+    base::FilePath test_root_path;
+    base::PathService::Get(chrome::DIR_TEST_DATA, &test_root_path);
+    return test_root_path.AppendASCII("pdf");
+  }
+
   bool PdfIsExpectedToLoad(const std::string& pdf_file) {
     const char* const kFailingPdfs[] = {
         "pdf_private/accessibility_crash_1.pdf",
@@ -168,9 +189,10 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
   }
 
   // Runs the extensions test at chrome/test/data/pdf/<filename> on the PDF file
-  // at chrome/test/data/pdf/<pdf_filename>.
-  void RunTestsInFile(const std::string& filename,
-                      const std::string& pdf_filename) {
+  // at chrome/test/data/pdf/<pdf_filename>, where |filename| is loaded as a JS
+  // module.
+  void RunTestsInJsModule(const std::string& filename,
+                          const std::string& pdf_filename) {
     extensions::ResultCatcher catcher;
 
     GURL url(embedded_test_server()->GetURL("/pdf/" + pdf_filename));
@@ -182,44 +204,26 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
     // loaded before continuing.
     WebContents* guest_contents = LoadPdfGetGuestContents(url);
     ASSERT_TRUE(guest_contents);
-    std::string test_util_js;
-    std::string mock_interactions_js;
 
-    {
-      base::ScopedAllowBlockingForTesting allow_blocking;
-      base::FilePath test_data_dir;
-      base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
-      test_data_dir = test_data_dir.Append(FILE_PATH_LITERAL("pdf"));
-      base::FilePath test_util_path = test_data_dir.AppendASCII("test_util.js");
-      ASSERT_TRUE(base::ReadFileToString(test_util_path, &test_util_js));
+    constexpr char kModuleLoaderTemplate[] =
+        R"(var s = document.createElement('script');
+           s.type = 'module';
+           s.src = '_test_resources/%s';
+           document.body.appendChild(s);)";
 
-      base::FilePath source_root_dir;
-      base::PathService::Get(base::DIR_SOURCE_ROOT, &source_root_dir);
-      base::FilePath mock_interactions_path = source_root_dir.Append(
-          FILE_PATH_LITERAL("third_party/polymer/v1_0/components-chromium/"
-                            "iron-test-helpers/mock-interactions.js"));
-      ASSERT_TRUE(base::ReadFileToString(mock_interactions_path,
-                                         &mock_interactions_js));
-      test_util_js.append(mock_interactions_js);
-
-      base::FilePath test_file_path = test_data_dir.AppendASCII(filename);
-      std::string test_js;
-      ASSERT_TRUE(base::ReadFileToString(test_file_path, &test_js));
-
-      test_util_js.append(test_js);
-    }
-
-    ASSERT_TRUE(content::ExecuteScript(guest_contents, test_util_js));
+    ASSERT_TRUE(content::ExecuteScript(
+        guest_contents,
+        base::StringPrintf(kModuleLoaderTemplate, filename.c_str())));
 
     if (!catcher.GetNextResult())
       FAIL() << catcher.message();
   }
 
-  // Load the PDF at the given URL and use the PDFScriptingAPI to ensure it has
-  // finished loading. Return true if it loads successfully or false if it
-  // fails. If it doesn't finish loading the test will hang. This is done from
-  // outside of the BrowserPlugin guest to ensure the PDFScriptingAPI works
-  // correctly from there.
+  // Load the PDF at the given URL and ensure it has finished loading. Return
+  // true if it loads successfully or false if it fails. If it doesn't finish
+  // loading the test will hang. This is done from outside of the BrowserPlugin
+  // guest to ensure sending messages to/from the plugin works correctly from
+  // there, since the PDFScriptingAPI relies on doing this as well.
   bool LoadPdf(const GURL& url) {
     ui_test_utils::NavigateToURL(browser(), url);
     WebContents* web_contents = GetActiveWebContents();
@@ -249,8 +253,9 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
   }
 
   // Load all the PDFs contained in chrome/test/data/<dir_name>. This only runs
-  // the test if base::Hash(filename) mod kNumberLoadTestParts == k in order
-  // to shard the files evenly across values of k in [0, kNumberLoadTestParts).
+  // the test if base::PersistentHash(filename) mod kNumberLoadTestParts == k in
+  // order to shard the files evenly across values of k in [0,
+  // kNumberLoadTestParts).
   void LoadAllPdfsTest(const std::string& dir_name, int k) {
     base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath test_data_dir;
@@ -267,7 +272,8 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
 
       std::string pdf_file = dir_name + "/" + filename;
       SCOPED_TRACE(pdf_file);
-      if (static_cast<int>(base::Hash(filename) % kNumberLoadTestParts) == k) {
+      if (static_cast<int>(base::PersistentHash(filename) %
+                           kNumberLoadTestParts) == k) {
         LOG(INFO) << "Loading: " << pdf_file;
         bool success = LoadPdf(embedded_test_server()->GetURL("/" + pdf_file));
         if (pdf_file == "pdf_private/cfuzz5.pdf")
@@ -298,9 +304,12 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
         "var oldSendScriptingMessage = "
         "    PDFViewer.prototype.sendScriptingMessage_;"
         "PDFViewer.prototype.sendScriptingMessage_ = function(message) {"
-        "  oldSendScriptingMessage.bind(this)(message);"
-        "  if (message.type == 'getSelectedTextReply')"
-        "    this.parentWindow_.postMessage('flush', '*');"
+        "  try {"
+        "    oldSendScriptingMessage.bind(this)(message);"
+        "  } finally {"
+        "    if (message.type == 'getSelectedTextReply')"
+        "      this.parentWindow_.postMessage('flush', '*');"
+        "  }"
         "}"));
 
     // Add an event listener for flush messages and request the selected text.
@@ -363,7 +372,7 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
   int CountPDFProcesses() {
     int result = -1;
     base::RunLoop run_loop;
-    base::PostTaskWithTraitsAndReply(
+    base::PostTaskAndReply(
         FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&PDFExtensionTest::CountPDFProcessesOnIOThread,
                        base::Unretained(this), base::Unretained(&result)),
@@ -391,11 +400,109 @@ class PDFExtensionTest : public extensions::ExtensionApiTest {
                      "register('" + worker_path + "', '/pdf');"));
 
     // Navigate to a PDF in the service worker's scope. It should load.
-    RunTestsInFile("basic_test.js", "test.pdf");
+    RunTestsInJsModule("basic_test.js", "test.pdf");
     // Ensure it loaded in a PPAPI process.
     EXPECT_EQ(1, CountPDFProcesses());
   }
 };
+
+class PDFExtensionTestWithTestGuestViewManager : public PDFExtensionTest {
+ public:
+  PDFExtensionTestWithTestGuestViewManager() {
+    GuestViewManager::set_factory_for_testing(&factory_);
+  }
+
+ protected:
+  TestGuestViewManager* GetGuestViewManager() {
+    // TODO(wjmaclean): Re-implement FromBrowserContext in the
+    // TestGuestViewManager class to avoid all callers needing this cast.
+    auto* manager = static_cast<TestGuestViewManager*>(
+        TestGuestViewManager::FromBrowserContext(browser()->profile()));
+    // TestGuestViewManager::WaitForSingleGuestCreated can and will get called
+    // before a guest is created. Since GuestViewManager is usually not created
+    // until the first guest is created, this means that |manager| will be
+    // nullptr if trying to use the manager to wait for the first guest. Because
+    // of this, the manager must be created here if it does not already exist.
+    if (!manager) {
+      manager = static_cast<TestGuestViewManager*>(
+          GuestViewManager::CreateWithDelegate(
+              browser()->profile(),
+              ExtensionsAPIClient::Get()->CreateGuestViewManagerDelegate(
+                  browser()->profile())));
+    }
+    return manager;
+  }
+
+ private:
+  TestGuestViewManagerFactory factory_;
+};
+
+// This test is a re-implementation of
+// WebPluginContainerTest.PluginDocumentPluginIsFocused, which was introduced
+// for https://crbug.com/536637. The original implementation checked that the
+// BrowserPlugin hosting the pdf extension was focused; in this re-write, we
+// make sure the guest view's WebContents has focus.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTestWithTestGuestViewManager,
+                       PdfInMainFrameHasFocus) {
+  // Load test HTML, and verify the text area has focus.
+  GURL main_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  auto* embedder_web_contents = GetActiveWebContents();
+
+  // Verify the pdf has loaded.
+  auto* guest_web_contents = GetGuestViewManager()->WaitForSingleGuestCreated();
+  ASSERT_TRUE(guest_web_contents);
+  EXPECT_NE(embedder_web_contents, guest_web_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(guest_web_contents));
+
+  // Make sure the guest WebContents has focus.
+  EXPECT_EQ(guest_web_contents,
+            content::GetFocusedWebContents(embedder_web_contents));
+}
+
+// This test verifies that when a PDF is loaded, that (i) the embedder
+// WebContents' html consists of a single <embed> tag with appropriate
+// properties, and (ii) that the guest WebContents finishes loading and
+// has the correct URL for the PDF extension.
+// TODO(wjmaclean): Are there any attributes we can/should test with respect to
+// the extension's loaded html?
+IN_PROC_BROWSER_TEST_F(PDFExtensionTestWithTestGuestViewManager,
+                       PdfExtensionLoadedInGuest) {
+  // Load test HTML, and verify the text area has focus.
+  GURL main_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  auto* embedder_web_contents = GetActiveWebContents();
+
+  // Verify the pdf has loaded.
+  auto* guest_web_contents = GetGuestViewManager()->WaitForSingleGuestCreated();
+  ASSERT_TRUE(guest_web_contents);
+  EXPECT_NE(embedder_web_contents, guest_web_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(guest_web_contents));
+
+  // Verify we loaded the extension.
+  const GURL extension_url(
+      "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html");
+  EXPECT_EQ(extension_url, guest_web_contents->GetURL());
+  EXPECT_EQ(main_url, embedder_web_contents->GetURL());
+
+  // Make sure the embedder has the correct html boilerplate.
+  EXPECT_EQ(1, content::EvalJs(embedder_web_contents,
+                               "document.body.children.length;")
+                   .ExtractInt());
+  EXPECT_EQ("EMBED", content::EvalJs(embedder_web_contents,
+                                     "document.body.firstChild.tagName;")
+                         .ExtractString());
+  EXPECT_EQ("application/pdf", content::EvalJs(embedder_web_contents,
+                                               "document.body.firstChild.type;")
+                                   .ExtractString());
+  EXPECT_EQ("about:blank", content::EvalJs(embedder_web_contents,
+                                           "document.body.firstChild.src;")
+                               .ExtractString());
+  EXPECT_TRUE(
+      content::EvalJs(embedder_web_contents,
+                      "document.body.firstChild.hasAttribute('internalid');")
+          .ExtractBool());
+}
 
 class PDFExtensionLoadTest : public PDFExtensionTest,
                              public testing::WithParamInterface<int> {
@@ -427,7 +534,7 @@ class PDFAnnotationsTest : public PDFExtensionTest {
 #define MAYBE_Load Load
 #endif
 IN_PROC_BROWSER_TEST_P(PDFExtensionLoadTest, MAYBE_Load) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Load private PDFs.
   LoadAllPdfsTest("pdf_private", GetParam());
 #endif
@@ -607,64 +714,72 @@ INSTANTIATE_TEST_SUITE_P(PDFTestFiles,
                          testing::Range(0, kNumberLoadTestParts));
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Basic) {
-  RunTestsInFile("basic_test.js", "test.pdf");
+  RunTestsInJsModule("basic_test.js", "test.pdf");
 
   // Ensure it loaded in a PPAPI process.
   EXPECT_EQ(1, CountPDFProcesses());
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, BasicPlugin) {
-  RunTestsInFile("basic_plugin_test.js", "test.pdf");
+  RunTestsInJsModule("basic_plugin_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Viewport) {
-  RunTestsInFile("viewport_test.js", "test.pdf");
+  RunTestsInJsModule("viewport_test.js", "test.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Layout3) {
+  RunTestsInJsModule("layout_test.js", "test-layout3.pdf");
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Layout4) {
+  RunTestsInJsModule("layout_test.js", "test-layout4.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Bookmark) {
-  RunTestsInFile("bookmarks_test.js", "test-bookmarks.pdf");
+  RunTestsInJsModule("bookmarks_test.js", "test-bookmarks-with-zoom.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Navigator) {
-  RunTestsInFile("navigator_test.js", "test.pdf");
+  RunTestsInJsModule("navigator_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ParamsParser) {
-  RunTestsInFile("params_parser_test.js", "test.pdf");
+  RunTestsInJsModule("params_parser_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ZoomManager) {
-  RunTestsInFile("zoom_manager_test.js", "test.pdf");
+  RunTestsInJsModule("zoom_manager_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, GestureDetector) {
-  RunTestsInFile("gesture_detector_test.js", "test.pdf");
+  RunTestsInJsModule("gesture_detector_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, TouchHandling) {
-  RunTestsInFile("touch_handling_test.js", "test.pdf");
+  RunTestsInJsModule("touch_handling_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Elements) {
   // Although this test file does not require a PDF to be loaded, loading the
   // elements without loading a PDF is difficult.
-  RunTestsInFile("material_elements_test.js", "test.pdf");
+  RunTestsInJsModule("material_elements_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, ToolbarManager) {
-  RunTestsInFile("toolbar_manager_test.js", "test.pdf");
+  RunTestsInJsModule("toolbar_manager_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Title) {
-  RunTestsInFile("title_test.js", "test-title.pdf");
+  RunTestsInJsModule("title_test.js", "test-title.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, WhitespaceTitle) {
-  RunTestsInFile("whitespace_title_test.js", "test-whitespace-title.pdf");
+  RunTestsInJsModule("whitespace_title_test.js", "test-whitespace-title.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Beep) {
-  RunTestsInFile("beep_test.js", "test-beep.pdf");
+  RunTestsInJsModule("beep_test.js", "test-beep.pdf");
 }
 
 #if defined(OS_CHROMEOS)
@@ -676,15 +791,15 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Beep) {
 #define MAYBE_AnnotationsFeatureEnabled AnnotationsFeatureEnabled
 #endif
 IN_PROC_BROWSER_TEST_F(PDFAnnotationsTest, MAYBE_AnnotationsFeatureEnabled) {
-  RunTestsInFile("annotations_feature_enabled_test.js", "test.pdf");
+  RunTestsInJsModule("annotations_feature_enabled_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, AnnotationsFeatureDisabled) {
-  RunTestsInFile("annotations_feature_disabled_test.js", "test.pdf");
+  RunTestsInJsModule("annotations_feature_disabled_test.js", "test.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Printing) {
-  RunTestsInFile("printing_icon_test.js", "test.pdf");
+  RunTestsInJsModule("printing_icon_test.js", "test.pdf");
 }
 #endif
 
@@ -699,17 +814,17 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, DISABLED_NoBeep) {
       ContentSettingsPattern::Wildcard(),
       ContentSettingsPattern::FromString(
           "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai"),
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(), CONTENT_SETTING_BLOCK);
+      ContentSettingsType::JAVASCRIPT, std::string(), CONTENT_SETTING_BLOCK);
 
-  RunTestsInFile("nobeep_test.js", "test-beep.pdf");
+  RunTestsInJsModule("nobeep_test.js", "test-beep.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PageChange) {
-  RunTestsInFile("page_change_test.js", "test-bookmarks.pdf");
+  RunTestsInJsModule("page_change_test.js", "test-bookmarks.pdf");
 }
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Metrics) {
-  RunTestsInFile("metrics_test.js", "test.pdf");
+  RunTestsInJsModule("metrics_test.js", "test.pdf");
 }
 
 // Ensure that the internal PDF plugin application/x-google-chrome-pdf won't be
@@ -752,6 +867,12 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureCrossOriginRepliesBlocked) {
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureSameOriginRepliesAllowed) {
   TestGetSelectedTextReply(embedded_test_server()->GetURL("/pdf/test.pdf"),
                            true);
+}
+
+// TODO(crbug.com/1004425): Should be allowed?
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsureOpaqueOriginRepliesBlocked) {
+  TestGetSelectedTextReply(
+      embedded_test_server()->GetURL("/pdf/data_url_rectangles.html"), false);
 }
 
 // Ensure that the PDF component extension cannot be loaded directly.
@@ -949,15 +1070,17 @@ static std::string DumpPdfAccessibilityTree(const ui::AXTreeUpdate& ax_tree) {
 
 static const char kExpectedPDFAXTreePattern[] =
     "embeddedObject\n"
-    "  group\n"
+    "  document 'PDF document containing 3 pages'\n"
     "    region 'Page 1'\n"
     "      paragraph\n"
     "        staticText '1 First Section'\n"
     "          inlineTextBox '1 '\n"
     "          inlineTextBox 'First Section'\n"
     "      paragraph\n"
-    "        staticText 'This is the *rst section.1'\n"
+    "        staticText 'This is the *rst section.'\n"
     "          inlineTextBox 'This is the *rst section.'\n"
+    "      paragraph\n"
+    "        staticText '1'\n"
     "          inlineTextBox '1'\n"
     "    region 'Page 2'\n"
     "      paragraph\n"
@@ -965,8 +1088,10 @@ static const char kExpectedPDFAXTreePattern[] =
     "          inlineTextBox '1.1 '\n"
     "          inlineTextBox 'First Subsection'\n"
     "      paragraph\n"
-    "        staticText 'This is the *rst subsection.2'\n"
+    "        staticText 'This is the *rst subsection.'\n"
     "          inlineTextBox 'This is the *rst subsection.'\n"
+    "      paragraph\n"
+    "        staticText '2'\n"
     "          inlineTextBox '2'\n"
     "    region 'Page 3'\n"
     "      paragraph\n"
@@ -1096,10 +1221,10 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilitySelection) {
   ASSERT_TRUE(guest_contents);
 
   WebContents* web_contents = GetActiveWebContents();
-  CHECK(content::ExecuteScript(web_contents,
-                               "var scriptingAPI = new PDFScriptingAPI(window, "
-                               "    document.getElementsByTagName('embed')[0]);"
-                               "scriptingAPI.selectAll();"));
+  CHECK(content::ExecuteScript(
+      web_contents,
+      "document.getElementsByTagName('embed')[0].postMessage("
+      "{type: 'selectAll'});"));
 
   EnableAccessibilityForWebContents(guest_contents);
   WaitForAccessibilityTreeToContainNodeWithName(guest_contents,
@@ -1137,7 +1262,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilitySelection) {
   EXPECT_EQ(ax::mojom::Role::kRegion, region->data().role);
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // Test a particular PDF encountered in the wild that triggered a crash
 // when accessibility is enabled.  (http://crbug.com/668724)
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilityTextRunCrash) {
@@ -1156,7 +1281,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfAccessibilityTextRunCrash) {
 // to load. This is to avoid the source origin of the document changing during
 // the redirect, which can have security implications. https://crbug.com/653749.
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, RedirectsFailInPlugin) {
-  RunTestsInFile("redirects_fail_test.js", "test.pdf");
+  RunTestsInJsModule("redirects_fail_test.js", "test.pdf");
 }
 
 // Test that even if a different tab is selected when a navigation occurs,
@@ -1180,7 +1305,8 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, NavigationOnCorrectTab) {
   ASSERT_TRUE(content::ExecuteScript(
       guest_contents,
       "viewer.navigator_.navigate("
-      "    'www.example.com', Navigator.WindowOpenDisposition.CURRENT_TAB);"));
+      "    'www.example.com',"
+      "    PdfNavigator.WindowOpenDisposition.CURRENT_TAB);"));
   navigation_observer.Wait();
 
   EXPECT_FALSE(navigation_observer.last_navigation_url().is_empty());
@@ -1604,7 +1730,7 @@ class PDFExtensionClipboardTest : public PDFExtensionTest {
   // Checks the Linux selection clipboard by polling.
   void CheckSelectionClipboard(const std::string& expected) {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-    CheckClipboard(ui::ClipboardType::kSelection, expected);
+    CheckClipboard(ui::ClipboardBuffer::kSelection, expected);
 #endif
   }
 
@@ -1614,7 +1740,7 @@ class PDFExtensionClipboardTest : public PDFExtensionTest {
   void SendCopyCommandAndCheckCopyPasteClipboard(const std::string& expected) {
     content::RunAllPendingInMessageLoop();
     GetWebContentsForInputRouting()->Copy();
-    CheckClipboard(ui::ClipboardType::kCopyPaste, expected);
+    CheckClipboard(ui::ClipboardBuffer::kCopyPaste, expected);
   }
 
   content::WebContents* GetWebContentsForInputRouting() {
@@ -1624,26 +1750,26 @@ class PDFExtensionClipboardTest : public PDFExtensionTest {
   }
 
  private:
-  // Waits and polls the clipboard of a given |clipboard_type| until its
+  // Waits and polls the clipboard of a given |clipboard_buffer| until its
   // contents reaches the length of |expected|. Then checks and see if the
   // clipboard contents matches |expected|.
   // TODO(thestig): Change this to avoid polling after https://crbug.com/755826
   // has been fixed.
-  void CheckClipboard(ui::ClipboardType clipboard_type,
+  void CheckClipboard(ui::ClipboardBuffer clipboard_buffer,
                       const std::string& expected) {
     auto* clipboard = ui::Clipboard::GetForCurrentThread();
     std::string clipboard_data;
-    const std::string& last_data = last_clipboard_data_[clipboard_type];
+    const std::string& last_data = last_clipboard_data_[clipboard_buffer];
     if (last_data.size() == expected.size()) {
       DCHECK_EQ(last_data, expected);
-      clipboard->ReadAsciiText(clipboard_type, &clipboard_data);
+      clipboard->ReadAsciiText(clipboard_buffer, &clipboard_data);
       EXPECT_EQ(expected, clipboard_data);
       return;
     }
 
     const bool expect_increase = last_data.size() < expected.size();
     while (true) {
-      clipboard->ReadAsciiText(clipboard_type, &clipboard_data);
+      clipboard->ReadAsciiText(clipboard_buffer, &clipboard_data);
       if (expect_increase) {
         if (clipboard_data.size() >= expected.size())
           break;
@@ -1656,10 +1782,10 @@ class PDFExtensionClipboardTest : public PDFExtensionTest {
     }
     EXPECT_EQ(expected, clipboard_data);
 
-    last_clipboard_data_[clipboard_type] = clipboard_data;
+    last_clipboard_data_[clipboard_buffer] = clipboard_data;
   }
 
-  std::map<ui::ClipboardType, std::string> last_clipboard_data_;
+  std::map<ui::ClipboardBuffer, std::string> last_clipboard_data_;
   WebContents* guest_contents_;
 };
 
@@ -1934,7 +2060,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionHitTestTest, DISABLED_MouseLeave) {
   ASSERT_NO_FATAL_FAILURE(guest_manager->ForEachGuest(
       embedder_contents, base::Bind(&GetGuestCallback, &guest_contents)));
   ASSERT_NE(nullptr, guest_contents);
-  content::WaitForHitTestDataOrGuestSurfaceReady(guest_contents);
+  content::WaitForHitTestData(guest_contents);
 
   gfx::Point point_in_parent(250, 25);
   gfx::Point point_in_pdf(250, 250);
@@ -1985,7 +2111,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionHitTestTest, ContextMenuCoordinates) {
   ASSERT_NO_FATAL_FAILURE(guest_manager->ForEachGuest(
       embedder_contents, base::Bind(&GetGuestCallback, &guest_contents)));
   ASSERT_NE(nullptr, guest_contents);
-  content::WaitForHitTestDataOrGuestSurfaceReady(guest_contents);
+  content::WaitForHitTestData(guest_contents);
 
   content::RenderProcessHost* guest_process_host =
       guest_contents->GetMainFrame()->GetProcess();
@@ -2103,7 +2229,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, MAYBE_EmbeddedPdfGetsFocus) {
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
   }
-  WaitForHitTestDataOrGuestSurfaceReady(guest_contents);
+  WaitForHitTestData(guest_contents);
 
   // Verify it's not focused.
   EXPECT_FALSE(IsWebContentsBrowserPluginFocused(guest_contents));
@@ -2218,6 +2344,183 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, DidStopLoading) {
   content::WaitForLoadStop(web_contents);
 }
 
+// This test suite does a simple text-extraction based on the accessibility
+// internals, breaking lines & paragraphs where appropriate.  Unlike
+// TreeDumpTests, this allows us to verify the kNextOnLine and kPreviousOnLine
+// relationships.
+class PDFExtensionAccessibilityTextExtractionTest : public PDFExtensionTest {
+ public:
+  PDFExtensionAccessibilityTextExtractionTest() = default;
+  ~PDFExtensionAccessibilityTextExtractionTest() override = default;
+
+  void RunTextExtractionTest(const base::FilePath::CharType* pdf_file) {
+    base::FilePath test_path = ui_test_utils::GetTestFilePath(
+        base::FilePath(FILE_PATH_LITERAL("pdf")),
+        base::FilePath(FILE_PATH_LITERAL("accessibility")));
+    {
+      base::ScopedAllowBlockingForTesting allow_blocking;
+      ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
+    }
+    base::FilePath pdf_path = test_path.Append(pdf_file);
+
+    RunTest(pdf_path, "pdf/accessibility");
+  }
+
+ private:
+  class TestExpectationsLocator
+      : public content::AccessibilityTestExpectationsLocator {
+   public:
+    TestExpectationsLocator() = default;
+    ~TestExpectationsLocator() override = default;
+
+    base::FilePath::StringType GetExpectedFileSuffix() override {
+      return FILE_PATH_LITERAL("-expected.txt");
+    }
+    base::FilePath::StringType GetVersionSpecificExpectedFileSuffix() override {
+      return FILE_PATH_LITERAL("");
+    }
+  };
+
+  void RunTest(const base::FilePath& test_file_path, const char* file_dir) {
+    // Load the expectation file.
+    TestExpectationsLocator locator;
+    content::DumpAccessibilityTestHelper test_helper(&locator);
+    base::Optional<base::FilePath> expected_file_path =
+        test_helper.GetExpectationFilePath(test_file_path);
+    ASSERT_TRUE(expected_file_path) << "No expectation file present.";
+
+    base::Optional<std::vector<std::string>> expected_lines =
+        test_helper.LoadExpectationFile(*expected_file_path);
+    ASSERT_TRUE(expected_lines) << "Couldn't load expectation file.";
+
+    // Enable accessibility and load the test file.
+    content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
+    GURL test_pdf_url(embedded_test_server()->GetURL(
+        "/" + std::string(file_dir) + "/" +
+        test_file_path.BaseName().MaybeAsASCII()));
+    WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+    ASSERT_TRUE(guest_contents);
+    WaitForAccessibilityTreeToContainNodeWithName(guest_contents, "Page 1");
+
+    // Extract the text content.
+    ui::AXTreeUpdate ax_tree = GetAccessibilityTreeSnapshot(guest_contents);
+    auto actual_lines = CollectLines(ax_tree);
+
+    // Validate the dump against the expectation file.
+    EXPECT_TRUE(test_helper.ValidateAgainstExpectation(
+        test_file_path, *expected_file_path, actual_lines, *expected_lines));
+  }
+
+ private:
+  std::vector<std::string> CollectLines(ui::AXTreeUpdate ax_tree) {
+    std::vector<std::string> lines;
+
+    int previous_node_id = 0;
+    int previous_node_next_id = 0;
+    std::string line;
+    bool found_embedded_object = false;
+    for (const auto& node : ax_tree.nodes) {
+      // Ignore everything before the embedded object (the root of the PDF).
+      if (node.role == ax::mojom::Role::kEmbeddedObject)
+        found_embedded_object = true;
+      if (!found_embedded_object)
+        continue;
+
+      // StaticText begins a new paragraph.
+      if (node.role == ax::mojom::Role::kStaticText && !line.empty()) {
+        lines.push_back(line);
+        lines.push_back("\u00b6");  // pilcrow/paragraph mark, Alt+0182
+        line.clear();
+      }
+
+      // We collect all inline text boxes within the paragraph.
+      if (node.role != ax::mojom::Role::kInlineTextBox)
+        continue;
+
+      std::string name =
+          node.GetStringAttribute(ax::mojom::StringAttribute::kName);
+      base::StringPiece trimmed_name =
+          base::TrimString(name, "\r\n", base::TRIM_TRAILING);
+      int prev_id =
+          node.GetIntAttribute(ax::mojom::IntAttribute::kPreviousOnLineId);
+      if (previous_node_next_id == node.id) {
+        // Previous node pointed to us, so we are part of the same line.
+        EXPECT_EQ(previous_node_id, prev_id)
+            << "Expect this node to point to previous node.";
+        trimmed_name.AppendToString(&line);
+      } else {
+        // Not linked with the previous node; this is a new line.
+        EXPECT_EQ(previous_node_next_id, 0)
+            << "Previous node pointed to something unexpected.";
+        EXPECT_EQ(prev_id, 0)
+            << "Our back pointer points to something unexpected.";
+        if (!line.empty())
+          lines.push_back(line);
+        line = trimmed_name.as_string();
+      }
+
+      previous_node_id = node.id;
+      previous_node_next_id =
+          node.GetIntAttribute(ax::mojom::IntAttribute::kNextOnLineId);
+    }
+    if (!line.empty())
+      lines.push_back(line);
+    return lines;
+  }
+};
+
+// Test that Previous/NextOnLineId attributes are present and properly linked on
+// InlineTextBoxes within a line.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest,
+                       NextOnLine) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("next-on-line.pdf"));
+}
+
+// Test that a drop-cap is grouped with the correct line.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest, DropCap) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("drop-cap.pdf"));
+}
+
+// Test that simulated superscripts and subscripts don't cause a line break.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest,
+                       SuperscriptSubscript) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("superscript-subscript.pdf"));
+}
+
+// Test that simple font and font-size changes in the middle of a line don't
+// cause line breaks.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest,
+                       FontChange) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("font-change.pdf"));
+}
+
+// Test one property of pdf_private/accessibility_crash_2.pdf, where a page has
+// only whitespace characters.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest,
+                       OnlyWhitespaceText) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("whitespace.pdf"));
+}
+
+// Test data of inline text boxes for PDF with weblinks.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest, WebLinks) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("weblinks.pdf"));
+}
+
+// Test data of inline text boxes for PDF with multi-line and various font-sized
+// text.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest,
+                       ParagraphsAndHeadingUntagged) {
+  RunTextExtractionTest(
+      FILE_PATH_LITERAL("paragraphs-and-heading-untagged.pdf"));
+}
+
+// Test data of inline text boxes for PDF with text, weblinks, images and
+// annotation links.
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityTextExtractionTest,
+                       LinksImagesAndText) {
+  RunTextExtractionTest(FILE_PATH_LITERAL("text-image-link.pdf"));
+}
+
 class PDFExtensionAccessibilityTreeDumpTest
     : public PDFExtensionTest,
       public ::testing::WithParamInterface<size_t> {
@@ -2252,29 +2555,60 @@ class PDFExtensionAccessibilityTreeDumpTest
  private:
   using PropertyFilter = content::AccessibilityTreeFormatter::PropertyFilter;
 
+  //  See chrome/test/data/pdf/accessibility/readme.md for more info.
+  void ParsePdfForExtraDirectives(
+      const std::string& pdf_contents,
+      content::AccessibilityTreeFormatter* formatter,
+      std::vector<PropertyFilter>* property_filters) {
+    const char kCommentMark = '%';
+    for (const std::string& line : base::SplitString(
+             pdf_contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+      if (line.size() > 1 && line[0] == kCommentMark) {
+        // Remove first character since it's the comment mark.
+        std::string trimmed_line = line.substr(1);
+        const std::string& allow_str = formatter->GetAllowString();
+        if (base::StartsWith(trimmed_line, allow_str,
+                             base::CompareCase::SENSITIVE)) {
+          property_filters->push_back(PropertyFilter(
+              base::UTF8ToUTF16(trimmed_line.substr(allow_str.size())),
+              PropertyFilter::ALLOW));
+        }
+      }
+    }
+  }
+
   void RunTest(const base::FilePath& test_file_path, const char* file_dir) {
-    // Set up the tree formatter.
+    std::string pdf_contents;
+    {
+      base::ScopedAllowBlockingForTesting allow_blocking;
+      ASSERT_TRUE(base::ReadFileToString(test_file_path, &pdf_contents));
+    }
+
+    // Set up the tree formatter. Parse filters and other directives in the test
+    // file.
     std::unique_ptr<content::AccessibilityTreeFormatter> formatter =
         test_pass_.create_formatter();
     std::vector<PropertyFilter> property_filters;
     formatter->AddDefaultFilters(&property_filters);
     AddDefaultFilters(&property_filters);
+    ParsePdfForExtraDirectives(pdf_contents, formatter.get(),
+                               &property_filters);
     formatter->SetPropertyFilters(property_filters);
 
     // Exit without running the test if we can't find an expectation file or if
     // the expectation file contains a skip marker.
     // This is used to skip certain tests on certain platforms.
     content::DumpAccessibilityTestHelper test_helper(formatter.get());
-    base::Optional<base::FilePath> expected_file_path =
+    base::FilePath expected_file_path =
         test_helper.GetExpectationFilePath(test_file_path);
-    if (!expected_file_path) {
+    if (expected_file_path.empty()) {
       LOG(INFO) << "No expectation file present, ignoring test on this "
                    "platform.";
       return;
     }
 
     base::Optional<std::vector<std::string>> expected_lines =
-        test_helper.LoadExpectationFile(*expected_file_path);
+        test_helper.LoadExpectationFile(expected_file_path);
     if (!expected_lines) {
       LOG(INFO) << "Skipping this test on this platform.";
       return;
@@ -2292,12 +2626,13 @@ class PDFExtensionAccessibilityTreeDumpTest
     // Find the embedded PDF and dump the accessibility tree.
     content::FindAccessibilityNodeCriteria find_criteria;
     find_criteria.role = ax::mojom::Role::kEmbeddedObject;
-    content::BrowserAccessibility* pdf_root =
+    ui::AXPlatformNodeDelegate* pdf_root =
         content::FindAccessibilityNode(guest_contents, find_criteria);
     CHECK(pdf_root);
 
     base::string16 actual_contents_utf16;
-    formatter->FormatAccessibilityTree(pdf_root, &actual_contents_utf16);
+    formatter->FormatAccessibilityTreeForTesting(pdf_root,
+                                                 &actual_contents_utf16);
     std::string actual_contents = base::UTF16ToUTF8(actual_contents_utf16);
 
     std::vector<std::string> actual_lines =
@@ -2306,14 +2641,18 @@ class PDFExtensionAccessibilityTreeDumpTest
 
     // Validate the dump against the expectation file.
     EXPECT_TRUE(test_helper.ValidateAgainstExpectation(
-        test_file_path, *expected_file_path, actual_lines, *expected_lines));
+        test_file_path, expected_file_path, actual_lines, *expected_lines));
   }
 
   void AddDefaultFilters(std::vector<PropertyFilter>* property_filters) {
     AddPropertyFilter(property_filters, "value='*'");
     // The value attribute on the document object contains the URL of the
     // current page which will not be the same every time the test is run.
+    // The PDF plugin uses the 'chrome-extension' protocol, so block that as
+    // well.
     AddPropertyFilter(property_filters, "value='http*'", PropertyFilter::DENY);
+    AddPropertyFilter(property_filters, "value='chrome-extension*'",
+                      PropertyFilter::DENY);
     // Object attributes.value
     AddPropertyFilter(property_filters, "layout-guess:*",
                       PropertyFilter::ALLOW);
@@ -2323,6 +2662,7 @@ class PDFExtensionAccessibilityTreeDumpTest
     AddPropertyFilter(property_filters, "check*");
     AddPropertyFilter(property_filters, "horizontal");
     AddPropertyFilter(property_filters, "multiselectable");
+    AddPropertyFilter(property_filters, "isPageBreakingObject*");
 
     // Deny most empty values
     AddPropertyFilter(property_filters, "*=''", PropertyFilter::DENY);
@@ -2348,7 +2688,7 @@ struct DumpAccessibilityTreeTestPassToString {
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     PDFExtensionAccessibilityTreeDumpTest,
     ::testing::Range(
         size_t{0},
@@ -2357,4 +2697,84 @@ INSTANTIATE_TEST_SUITE_P(
 
 IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest, HelloWorld) {
   RunPDFTest(FILE_PATH_LITERAL("hello-world.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest,
+                       ParagraphsAndHeadingUntagged) {
+  RunPDFTest(FILE_PATH_LITERAL("paragraphs-and-heading-untagged.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest, MultiPage) {
+  RunPDFTest(FILE_PATH_LITERAL("multi-page.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest,
+                       DirectionalTextRuns) {
+  RunPDFTest(FILE_PATH_LITERAL("directional-text-runs.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest, TextDirection) {
+  RunPDFTest(FILE_PATH_LITERAL("text-direction.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest, WebLinks) {
+  RunPDFTest(FILE_PATH_LITERAL("weblinks.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest,
+                       OverlappingLinks) {
+  RunPDFTest(FILE_PATH_LITERAL("overlapping-links.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest, Images) {
+  RunPDFTest(FILE_PATH_LITERAL("image_alt_text.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest,
+                       LinksImagesAndText) {
+  RunPDFTest(FILE_PATH_LITERAL("text-image-link.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest,
+                       TextRunStyleHeuristic) {
+  RunPDFTest(FILE_PATH_LITERAL("text-run-style-heuristic.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_P(PDFExtensionAccessibilityTreeDumpTest, TextStyle) {
+  RunPDFTest(FILE_PATH_LITERAL("text-style.pdf"));
+}
+
+// This test suite validates the navigation done using the accessibility client.
+using PDFExtensionAccessibilityNavigationTest = PDFExtensionTest;
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionAccessibilityNavigationTest,
+                       LinkNavigation) {
+  // Enable accessibility and load the test file.
+  content::BrowserAccessibilityState::GetInstance()->EnableAccessibility();
+  GURL url(embedded_test_server()->GetURL("/pdf/accessibility/weblinks.pdf"));
+  WebContents* guest_contents = LoadPdfGetGuestContents(url);
+  ASSERT_TRUE(guest_contents);
+  WaitForAccessibilityTreeToContainNodeWithName(guest_contents, "Page 1");
+
+  // Find the specific link node.
+  content::FindAccessibilityNodeCriteria find_criteria;
+  find_criteria.role = ax::mojom::Role::kLink;
+  find_criteria.name = "http://bing.com";
+  ui::AXPlatformNodeDelegate* link_node =
+      content::FindAccessibilityNode(guest_contents, find_criteria);
+  ASSERT_TRUE(link_node);
+
+  // Invoke action on a link and wait for navigation to complete.
+  content::AccessibilityNotificationWaiter event_waiter(
+      GetActiveWebContents(), ui::kAXModeComplete,
+      ax::mojom::Event::kLoadComplete);
+  ui::AXActionData action_data;
+  action_data.action = ax::mojom::Action::kDoDefault;
+  action_data.target_node_id = link_node->GetData().id;
+  link_node->AccessibilityPerformAction(action_data);
+  event_waiter.WaitForNotification();
+
+  // Test that navigation occurred correctly.
+  const GURL& expected_url = GetActiveWebContents()->GetURL();
+  EXPECT_EQ("https://bing.com/", expected_url.spec());
 }

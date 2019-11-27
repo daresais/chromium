@@ -24,7 +24,6 @@
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "components/suggestions/blacklist_store.h"
 #include "components/suggestions/suggestions_store.h"
-#include "components/sync/driver/sync_service.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "net/base/escape.h"
@@ -107,7 +106,7 @@ const int64_t kDefaultExpiryUsec = 168 * base::Time::kMicrosecondsPerHour;
 }  // namespace
 
 SuggestionsServiceImpl::SuggestionsServiceImpl(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     syncer::SyncService* sync_service,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     std::unique_ptr<SuggestionsStore> suggestions_store,
@@ -115,7 +114,6 @@ SuggestionsServiceImpl::SuggestionsServiceImpl(
     const base::TickClock* tick_clock)
     : identity_manager_(identity_manager),
       sync_service_(sync_service),
-      sync_service_observer_(this),
       history_sync_state_(syncer::UploadState::INITIALIZING),
       url_loader_factory_(url_loader_factory),
       suggestions_store_(std::move(suggestions_store)),
@@ -342,17 +340,17 @@ void SuggestionsServiceImpl::IssueRequestIfNoneOngoing(const GURL& url) {
     return;
 
   identity::ScopeSet scopes{GaiaConstants::kChromeSyncOAuth2Scope};
-  token_fetcher_ = std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+  token_fetcher_ = std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
       "suggestions_service", identity_manager_, scopes,
       base::BindOnce(&SuggestionsServiceImpl::AccessTokenAvailable,
                      base::Unretained(this), url),
-      identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+      signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
 }
 
 void SuggestionsServiceImpl::AccessTokenAvailable(
     const GURL& url,
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   DCHECK(token_fetcher_);
   token_fetcher_.reset();
 
@@ -420,7 +418,7 @@ SuggestionsServiceImpl::CreateSuggestionsRequest(
   resource_request->url = url;
   resource_request->method = "GET";
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   // Add Chrome experiment state to the request headers.
   // TODO: We should call AppendVariationHeaders with explicit
   // variations::SignedIn::kNo If the access_token is empty

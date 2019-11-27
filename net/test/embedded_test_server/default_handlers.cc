@@ -102,6 +102,7 @@ std::unique_ptr<HttpResponse> HandleEchoHeader(const std::string& url,
   http_response->AddCustomHeader("Vary", vary);
   http_response->set_content(content);
   http_response->set_content_type("text/plain");
+  http_response->AddCustomHeader("Access-Control-Allow-Origin", "*");
   http_response->AddCustomHeader("Cache-Control", cache_control);
   return http_response;
 }
@@ -163,7 +164,7 @@ std::unique_ptr<HttpResponse> HandleEchoAll(const HttpRequest& request) {
 
   body +=
       "</pre>"
-      "<h1>Request Headers:</h1><pre>" +
+      "<h1>Request Headers:</h1><pre id='request-headers'>" +
       request.all_headers + "</pre>" +
       "<h1>Response nonce:</h1><pre id='response-nonce'>" +
       base::UnguessableToken::Create().ToString() + "</pre></body></html>";
@@ -203,6 +204,22 @@ std::unique_ptr<HttpResponse> HandleSetCookie(const HttpRequest& request) {
   }
 
   http_response->set_content(content);
+  return http_response;
+}
+
+// /set-invalid-cookie
+// Sets invalid response cookies "\x01" (chosen via fuzzer to not be a parsable
+// cookie).
+std::unique_ptr<HttpResponse> HandleSetInvalidCookie(
+    const HttpRequest& request) {
+  auto http_response = std::make_unique<BasicHttpResponse>();
+  http_response->set_content_type("text/html");
+  std::string content;
+  GURL request_url = request.GetURL();
+
+  http_response->AddCustomHeader("Set-Cookie", "\x01");
+
+  http_response->set_content("TEST");
   return http_response;
 }
 
@@ -299,6 +316,25 @@ std::unique_ptr<HttpResponse> HandleSetHeader(const HttpRequest& request) {
   return http_response;
 }
 
+// /iframe?URL
+// Returns a page that iframes the specified URL.
+std::unique_ptr<HttpResponse> HandleIframe(const HttpRequest& request) {
+  GURL request_url = request.GetURL();
+
+  auto http_response = std::make_unique<BasicHttpResponse>();
+  http_response->set_content_type("text/html");
+
+  GURL iframe_url("about:blank");
+  if (request_url.has_query()) {
+    iframe_url = GURL(UnescapeBinaryURLComponent(request_url.query()));
+  }
+
+  http_response->set_content(
+      base::StringPrintf("<html><body><iframe src=\"%s\"></body></html>",
+                         iframe_url.spec().c_str()));
+  return http_response;
+}
+
 // /nocontent
 // Returns a NO_CONTENT response.
 std::unique_ptr<HttpResponse> HandleNoContent(const HttpRequest& request) {
@@ -365,6 +401,9 @@ std::unique_ptr<HttpResponse> HandleAuthBasic(const HttpRequest& request) {
                                    "Basic realm=\"" + realm + "\"");
     if (query.find("set-cookie-if-challenged") != query.end())
       http_response->AddCustomHeader("Set-Cookie", "got_challenged=true");
+    if (query.find("set-secure-cookie-if-challenged") != query.end())
+      http_response->AddCustomHeader("Set-Cookie",
+                                     "got_challenged=true;Secure");
     http_response->set_content(base::StringPrintf(
         "<html><head><title>Denied: %s</title></head>"
         "<body>auth=%s<p>b64str=%s<p>username: %s<p>userpass: %s<p>"
@@ -542,6 +581,27 @@ std::unique_ptr<HttpResponse> HandleServerRedirectWithCookie(
   return http_response;
 }
 
+// /server-redirect-with-secure-cookie?URL
+// Returns a server redirect to URL, and sets the cookie
+// server-redirect=true;Secure.
+std::unique_ptr<HttpResponse> HandleServerRedirectWithSecureCookie(
+    HttpStatusCode redirect_code,
+    const HttpRequest& request) {
+  GURL request_url = request.GetURL();
+  std::string dest = UnescapeBinaryURLComponent(request_url.query_piece());
+  RequestQuery query = ParseQuery(request_url);
+
+  auto http_response = std::make_unique<BasicHttpResponse>();
+  http_response->set_code(redirect_code);
+  http_response->AddCustomHeader("Location", dest);
+  http_response->AddCustomHeader("Set-Cookie", "server-redirect=true;Secure");
+  http_response->set_content_type("text/html");
+  http_response->set_content(base::StringPrintf(
+      "<html><head></head><body>Redirecting to %s</body></html>",
+      dest.c_str()));
+  return http_response;
+}
+
 // /cross-site?URL
 // Returns a cross-site redirect to URL.
 std::unique_ptr<HttpResponse> HandleCrossSiteRedirect(
@@ -673,10 +733,9 @@ class ExabyteResponse : public net::test_server::BasicHttpResponse {
   // for the purpose of testing.
   static void SendExabyte(const net::test_server::SendBytesCallback& send) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindRepeating(
-            send, "echo",
-            base::BindRepeating(&ExabyteResponse::SendExabyte, send)));
+        FROM_HERE, base::BindOnce(send, "echo",
+                                  base::BindRepeating(
+                                      &ExabyteResponse::SendExabyte, send)));
   }
 
   DISALLOW_COPY_AND_ASSIGN(ExabyteResponse);
@@ -753,11 +812,14 @@ void RegisterDefaultHandlers(EmbeddedTestServer* server) {
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/set-cookie", &HandleSetCookie));
   server->RegisterDefaultHandler(
+      PREFIXED_HANDLER("/set-invalid-cookie", &HandleSetInvalidCookie));
+  server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/set-many-cookies", &HandleSetManyCookies));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/expect-and-set-cookie", &HandleExpectAndSetCookie));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/set-header", &HandleSetHeader));
+  server->RegisterDefaultHandler(PREFIXED_HANDLER("/iframe", &HandleIframe));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/nocontent", &HandleNoContent));
   server->RegisterDefaultHandler(
@@ -783,6 +845,9 @@ void RegisterDefaultHandlers(EmbeddedTestServer* server) {
   server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
       "/server-redirect-with-cookie", &HandleServerRedirectWithCookie,
       HTTP_MOVED_PERMANENTLY));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-with-secure-cookie",
+      &HandleServerRedirectWithSecureCookie, HTTP_MOVED_PERMANENTLY));
 
   server->RegisterDefaultHandler(
       base::BindRepeating(&HandleCrossSiteRedirect, server));

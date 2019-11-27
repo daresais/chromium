@@ -7,7 +7,6 @@
 #include <memory>
 #include <string>
 
-#include "base/message_loop/message_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
@@ -41,7 +40,7 @@ class DataReductionProxyChromeSettingsTest
     ChromeRenderViewHostTestHarness::SetUp();
     network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
         network::mojom::ConnectionType::CONNECTION_4G);
-    auto settings = std::make_unique<DataReductionProxyChromeSettings>();
+    auto settings = std::make_unique<DataReductionProxyChromeSettings>(false);
     drp_chrome_settings_ = settings.get();
     test_context_ =
         data_reduction_proxy::DataReductionProxyTestContext::Builder()
@@ -50,8 +49,7 @@ class DataReductionProxyChromeSettingsTest
             .Build();
     net::ProxyList proxies;
     proxies.SetFromPacString(kProxyPac);
-    test_context_->data_reduction_proxy_service()->SetConfiguredProxiesOnUI(
-        proxies, {});
+    test_context_->config()->test_params()->SetConfiguredProxies(proxies);
     test_context_->test_network_quality_tracker()
         ->ReportEffectiveConnectionTypeForTesting(
             net::EFFECTIVE_CONNECTION_TYPE_4G);

@@ -15,11 +15,16 @@
 #include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/base/user_demographics.h"
 #include "components/sync/driver/sync_service_observer.h"
 
 struct CoreAccountInfo;
 class GoogleServiceAuthError;
 class GURL;
+
+namespace crypto {
+class ECPrivateKey;
+}  // namespace crypto
 
 namespace syncer {
 
@@ -239,6 +244,15 @@ class SyncService : public KeyedService {
   // Sync to work.
   virtual bool RequiresClientUpgrade() const = 0;
 
+  // Returns a high-entropy elliptic curve (EC) private key that is unique to a
+  // user and sync-ed across devices via Nigori. Populated when the transport
+  // state becomes CONFIGURING. Returns nullptr if not available. Consumers of
+  // this key should observe for changes via
+  // SyncServiceObserver::OnSyncCycleCompleted().
+  // TODO(crbug.com/1012226): Remove when VAPID migration is over.
+  virtual std::unique_ptr<crypto::ECPrivateKey>
+  GetExperimentalAuthenticationKey() const = 0;
+
   //////////////////////////////////////////////////////////////////////////////
   // DERIVED STATE ACCESS
   //////////////////////////////////////////////////////////////////////////////
@@ -331,11 +345,13 @@ class SyncService : public KeyedService {
   // from the sync server. Used by tests and debug UI (sync-internals).
   virtual void TriggerRefresh(const ModelTypeSet& types) = 0;
 
-  // Informs the data type manager that the ready-for-start status of a
-  // controller has changed. If the controller is not ready any more, it will
-  // stop |type|. Otherwise, it will trigger reconfiguration so that |type| gets
-  // started again. No-op if the type's state didn't actually change.
-  virtual void ReadyForStartChanged(ModelType type) = 0;
+  // Informs the data type manager that the preconditions for a controller have
+  // changed. If preconditions are NOT met, the datatype will be stopped
+  // according to the metadata clearing policy returned by the controller's
+  // GetPreconditionState(). Otherwise, if preconditions are newly met,
+  // reconfiguration will be triggered so that |type| gets started again. No-op
+  // if the type's state didn't actually change.
+  virtual void DataTypePreconditionChanged(ModelType type) = 0;
 
   // Enables/disables invalidations for session sync related datatypes.
   // The session sync generates a lot of changes, which results in many
@@ -344,6 +360,19 @@ class SyncService : public KeyedService {
   // only when user is interested in session sync data, e.g. the history sync
   // page is opened.
   virtual void SetInvalidationsForSessionsEnabled(bool enabled) = 0;
+
+  //////////////////////////////////////////////////////////////////////////////
+  // USER DEMOGRAPHICS
+  //////////////////////////////////////////////////////////////////////////////
+
+  // Gets the synced user’s noised birth year and gender, see doc of
+  // metrics::DemographicMetricsProvider in
+  // components/metrics/demographic_metrics_provider.h for more details. Returns
+  // an error status with an empty value when the user's birth year or gender
+  // cannot be provided. You need to provide an accurate |now| time that
+  // represents the current time.
+  virtual UserDemographicsResult GetUserNoisedBirthYearAndGender(
+      base::Time now) = 0;
 
   //////////////////////////////////////////////////////////////////////////////
   // OBSERVERS

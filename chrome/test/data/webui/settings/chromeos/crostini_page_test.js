@@ -51,6 +51,7 @@ suite('CrostiniPageTests', function() {
       const button = crostiniPage.$$('#enable');
       assertTrue(!!button);
       assertFalse(!!crostiniPage.$$('.subpage-arrow'));
+      assertFalse(button.disabled);
 
       button.click();
       Polymer.dom.flush();
@@ -59,6 +60,26 @@ suite('CrostiniPageTests', function() {
       setCrostiniPrefs(true);
 
       assertTrue(!!crostiniPage.$$('.subpage-arrow'));
+    });
+
+    test('ButtonDisabledDuringInstall', function() {
+      const button = crostiniPage.$$('#enable');
+      assertTrue(!!button);
+      return flushAsync()
+          .then(() => {
+            assertFalse(button.disabled);
+            cr.webUIListenerCallback('crostini-installer-status-changed', true);
+            flushAsync();
+          })
+          .then(() => {
+            assertTrue(button.disabled);
+            cr.webUIListenerCallback(
+                'crostini-installer-status-changed', false);
+            flushAsync();
+          })
+          .then(() => {
+            assertFalse(button.disabled);
+          });
     });
   });
 
@@ -84,19 +105,19 @@ suite('CrostiniPageTests', function() {
         showCrostiniExportImport: true,
       });
 
-      let eventPromise = new Promise((resolve) => {
-                           let v = cr.addWebUIListener(
-                               'crostini-installer-status-changed', () => {
-                                 resolve(v);
-                               });
-                         }).then((v) => {
+      const eventPromise = new Promise((resolve) => {
+                             const v = cr.addWebUIListener(
+                                 'crostini-installer-status-changed', () => {
+                                   resolve(v);
+                                 });
+                           }).then((v) => {
         assertTrue(cr.removeWebUIListener(v));
       });
 
       settings.navigateTo(settings.routes.CROSTINI);
       crostiniPage.$$('#crostini').click();
 
-      let pageLoadPromise = flushAsync().then(() => {
+      const pageLoadPromise = flushAsync().then(() => {
         subpage = crostiniPage.$$('settings-crostini-subpage');
         assertTrue(!!subpage);
       });
@@ -148,6 +169,33 @@ suite('CrostiniPageTests', function() {
             assertEquals(
                 1,
                 crostiniBrowserProxy.getCallCount('importCrostiniContainer'));
+          });
+    });
+
+    test('ExportImportButtonsGetDisabledOnOperationStatus', function() {
+      assertTrue(!!subpage.$$('#crostini-export-import'));
+      subpage.$$('#crostini-export-import').click();
+      return flushAsync()
+          .then(() => {
+            subpage = crostiniPage.$$('settings-crostini-export-import');
+            assertFalse(subpage.$$('#export cr-button').disabled);
+            assertFalse(subpage.$$('#import cr-button').disabled);
+            cr.webUIListenerCallback(
+                'crostini-export-import-operation-status-changed', true);
+            return flushAsync();
+          })
+          .then(() => {
+            subpage = crostiniPage.$$('settings-crostini-export-import');
+            assertTrue(subpage.$$('#export cr-button').disabled);
+            assertTrue(subpage.$$('#import cr-button').disabled);
+            cr.webUIListenerCallback(
+                'crostini-export-import-operation-status-changed', false);
+            return flushAsync();
+          })
+          .then(() => {
+            subpage = crostiniPage.$$('settings-crostini-export-import');
+            assertFalse(subpage.$$('#export cr-button').disabled);
+            assertFalse(subpage.$$('#import cr-button').disabled);
           });
     });
 

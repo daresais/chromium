@@ -10,6 +10,8 @@ import android.content.Intent;
 import android.net.Uri;
 import android.provider.Browser;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
@@ -80,7 +82,7 @@ public class TabDelegate extends TabCreator {
 
     @Override
     public boolean createTabWithWebContents(
-            Tab parent, WebContents webContents, @TabLaunchType int type, String url) {
+            @Nullable Tab parent, WebContents webContents, @TabLaunchType int type, String url) {
         if (url == null) url = "";
 
         AsyncTabCreationParams asyncParams =

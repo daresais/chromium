@@ -88,8 +88,7 @@ GeolocationPermissionContextAndroid::GeolocationPermissionContextAndroid(
     Profile* profile)
     : GeolocationPermissionContext(profile),
       location_settings_(new LocationSettingsImpl()),
-      location_settings_dialog_request_id_(0, 0, 0),
-      weak_factory_(this) {}
+      location_settings_dialog_request_id_(0, 0, 0) {}
 
 GeolocationPermissionContextAndroid::~GeolocationPermissionContextAndroid() {
 }
@@ -127,7 +126,7 @@ void GeolocationPermissionContextAndroid::RequestPermission(
           embedding_origin)
           .content_setting;
   std::vector<ContentSettingsType> content_settings_types;
-  content_settings_types.push_back(CONTENT_SETTINGS_TYPE_GEOLOCATION);
+  content_settings_types.push_back(ContentSettingsType::GEOLOCATION);
   if (content_setting == CONTENT_SETTING_ALLOW &&
       PermissionUpdateInfoBarDelegate::ShouldShowPermissionInfoBar(
           web_contents, content_settings_types) ==

@@ -8,15 +8,17 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.RecyclerView.AdapterDataObserver;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -28,8 +30,8 @@ import org.chromium.chrome.browser.native_page.BasicNativePage;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksReader;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.widget.dragreorder.DragStateDelegate;
 import org.chromium.chrome.browser.util.ConversionUtils;
-import org.chromium.chrome.browser.widget.dragreorder.DragStateDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
 import org.chromium.chrome.browser.widget.selection.SelectableListToolbar.SearchDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
@@ -76,6 +78,7 @@ public class BookmarkManager
     // TODO(crbug.com/160194): Clean up after bookmark reordering launches.
     private ItemsAdapter mAdapter;
     private BookmarkDragStateDelegate mDragStateDelegate;
+    private AdapterDataObserver mAdapterDataObserver;
 
     /**
      * An adapter responsible for managing bookmark items.
@@ -85,11 +88,14 @@ public class BookmarkManager
         void notifyDataSetChanged();
         void onBookmarkDelegateInitialized(BookmarkDelegate bookmarkDelegate);
         void search(String query);
+        void registerAdapterDataObserver(AdapterDataObserver observer);
+        void unregisterAdapterDataObserver(AdapterDataObserver observer);
 
         void moveUpOne(BookmarkId bookmarkId);
         void moveDownOne(BookmarkId bookmarkId);
-        void moveToTop(BookmarkId bookmarkId);
-        void moveToBottom(BookmarkId bookmarkId);
+
+        void highlightBookmark(BookmarkId bookmarkId);
+        int getPositionForBookmark(BookmarkId bookmarkId);
     }
 
     private final BookmarkModelObserver mBookmarkModelObserver = new BookmarkModelObserver() {
@@ -112,7 +118,6 @@ public class BookmarkManager
                     openFolder(parent.getId());
                 }
             }
-            mSelectionDelegate.clearSelection();
 
             // This is necessary as long as we rely on RecyclerView.ItemDecorations to apply padding
             // at the bottom of the bookmarks list to avoid the bottom navigation menu. This ensures
@@ -122,19 +127,12 @@ public class BookmarkManager
         }
 
         @Override
-        public void bookmarkNodeMoved(BookmarkItem oldParent, int oldIndex, BookmarkItem newParent,
-                int newIndex) {
-            mSelectionDelegate.clearSelection();
-        }
-
-        @Override
         public void bookmarkModelChanged() {
             // If the folder no longer exists in folder mode, we need to fall back. Relying on the
             // default behavior by setting the folder mode again.
             if (getCurrentState() == BookmarkUIState.STATE_FOLDER) {
                 setState(mStateStack.peek());
             }
-            mSelectionDelegate.clearSelection();
         }
     };
 
@@ -144,6 +142,8 @@ public class BookmarkManager
     class BookmarkDragStateDelegate implements DragStateDelegate {
         private BookmarkDelegate mBookmarkDelegate;
         private SelectionDelegate<BookmarkId> mSelectionDelegate;
+        private AccessibilityManager mA11yManager;
+        private AccessibilityManager.AccessibilityStateChangeListener mA11yChangeListener;
         private boolean mA11yEnabled;
 
         void onBookmarkDelegateInitialized(BookmarkDelegate delegate) {
@@ -151,11 +151,12 @@ public class BookmarkManager
 
             mSelectionDelegate = delegate.getSelectionDelegate();
 
-            AccessibilityManager a11yManager =
+            mA11yManager =
                     (AccessibilityManager) getSelectableListLayout().getContext().getSystemService(
                             Context.ACCESSIBILITY_SERVICE);
-            mA11yEnabled = a11yManager.isEnabled();
-            a11yManager.addAccessibilityStateChangeListener(enabled -> mA11yEnabled = enabled);
+            mA11yEnabled = mA11yManager.isEnabled();
+            mA11yChangeListener = enabled -> mA11yEnabled = enabled;
+            mA11yManager.addAccessibilityStateChangeListener(mA11yChangeListener);
         }
 
         // DragStateDelegate implementation
@@ -168,6 +169,17 @@ public class BookmarkManager
         @Override
         public boolean getDragActive() {
             return getDragEnabled() && mSelectionDelegate.isSelectionEnabled();
+        }
+
+        @VisibleForTesting
+        @Override
+        public void setA11yStateForTesting(boolean a11yEnabled) {
+            if (mA11yManager != null) {
+                mA11yManager.removeAccessibilityStateChangeListener(mA11yChangeListener);
+            }
+            mA11yChangeListener = null;
+            mA11yManager = null;
+            mA11yEnabled = a11yEnabled;
         }
     }
 
@@ -189,7 +201,10 @@ public class BookmarkManager
         mSelectionDelegate = new SelectionDelegate<BookmarkId>() {
             @Override
             public boolean toggleSelectionForItem(BookmarkId bookmark) {
-                if (!mBookmarkModel.getBookmarkById(bookmark).isEditable()) return false;
+                if (mBookmarkModel.getBookmarkById(bookmark) != null
+                        && !mBookmarkModel.getBookmarkById(bookmark).isEditable()) {
+                    return false;
+                }
                 return super.toggleSelectionForItem(bookmark);
             }
         };
@@ -213,6 +228,18 @@ public class BookmarkManager
         } else {
             mAdapter = new BookmarkItemsAdapter(activity);
         }
+        mAdapterDataObserver = new AdapterDataObserver() {
+            @Override
+            public void onItemRangeRemoved(int positionStart, int itemCount) {
+                syncAdapterAndSelectionDelegate();
+            }
+
+            @Override
+            public void onChanged() {
+                syncAdapterAndSelectionDelegate();
+            }
+        };
+        mAdapter.registerAdapterDataObserver(mAdapterDataObserver);
         mRecyclerView = mSelectableListLayout.initializeRecyclerView(
                 (RecyclerView.Adapter<RecyclerView.ViewHolder>) mAdapter);
 
@@ -234,6 +261,10 @@ public class BookmarkManager
                 }
                 mAdapter.onBookmarkDelegateInitialized(BookmarkManager.this);
                 mToolbar.onBookmarkDelegateInitialized(BookmarkManager.this);
+
+                if (reorderBookmarksEnabled) {
+                    ((ReorderBookmarkItemsAdapter) mAdapter).addDragListener(mToolbar);
+                }
 
                 if (!TextUtils.isEmpty(mInitialUrl)) {
                     setState(BookmarkUIState.createStateFromUrl(mInitialUrl, mBookmarkModel));
@@ -278,8 +309,9 @@ public class BookmarkManager
      * Destroys and cleans up itself. This must be called after done using this class.
      */
     public void onDestroyed() {
+        mAdapter.unregisterAdapterDataObserver(mAdapterDataObserver);
         mIsDestroyed = true;
-
+        RecordUserAction.record("MobileBookmarkManagerClose");
         mSelectableListLayout.onDestroyed();
 
         for (BookmarkUIObserver observer : mUIObservers) {
@@ -428,21 +460,23 @@ public class BookmarkManager
             }
         }
 
-        mSelectionDelegate.clearSelection();
-
         for (BookmarkUIObserver observer : mUIObservers) {
             notifyStateChange(observer);
         }
     }
 
-    @Override
-    public void moveToBottom(BookmarkId bookmarkId) {
-        mAdapter.moveToBottom(bookmarkId);
-    }
-
-    @Override
-    public void moveToTop(BookmarkId bookmarkId) {
-        mAdapter.moveToTop(bookmarkId);
+    // TODO(lazzzis): This method can be moved to adapter after bookmark reordering launches.
+    /**
+     * Some bookmarks may be moved to another folder or removed in another devices. However, it may
+     * still be stored by {@link #mSelectionDelegate}, which causes incorrect selection counting.
+     */
+    private void syncAdapterAndSelectionDelegate() {
+        for (BookmarkId node : mSelectionDelegate.getSelectedItemsAsList()) {
+            if (mSelectionDelegate.isItemSelected(node)
+                    && mAdapter.getPositionForBookmark(node) == -1) {
+                mSelectionDelegate.toggleSelectionForItem(node);
+            }
+        }
     }
 
     @Override
@@ -455,6 +489,11 @@ public class BookmarkManager
         mAdapter.moveUpOne(bookmarkId);
     }
 
+    @Override
+    public void onBookmarkItemMenuOpened() {
+        mToolbar.hideKeyboard();
+    }
+
     // BookmarkDelegate implementations.
 
     @Override
@@ -464,6 +503,7 @@ public class BookmarkManager
 
     @Override
     public void openFolder(BookmarkId folder) {
+        RecordUserAction.record("MobileBookmarkManagerOpenFolder");
         if (mToolbar.isSearching()) mToolbar.hideSearchView();
         setState(BookmarkUIState.createFolderState(folder, mBookmarkModel));
         mRecyclerView.scrollToPosition(0);
@@ -502,7 +542,6 @@ public class BookmarkManager
 
     @Override
     public void openBookmark(BookmarkId bookmark, int launchLocation) {
-        mSelectionDelegate.clearSelection();
         if (BookmarkUtils.openBookmark(
                     mBookmarkModel, mActivity, bookmark, launchLocation)) {
             BookmarkUtils.finishActivityOnPhone(mActivity);
@@ -570,6 +609,11 @@ public class BookmarkManager
         // the BookmarkItemsAdapter, will be notified of the change and the list of bookmarks will
         // be updated.
         setState(mStateStack.pop());
+    }
+
+    @Override
+    public void highlightBookmark(BookmarkId bookmarkId) {
+        mAdapter.highlightBookmark(bookmarkId);
     }
 
     // Testing methods

@@ -30,7 +30,6 @@ class AccessibilityFeatureDisableDialog : public views::DialogDelegateView {
   bool Accept() override;
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
 
   base::WeakPtr<AccessibilityFeatureDisableDialog> GetWeakPtr();
 
@@ -42,7 +41,8 @@ class AccessibilityFeatureDisableDialog : public views::DialogDelegateView {
   base::OnceClosure on_accept_callback_;
   base::OnceClosure on_cancel_callback_;
 
-  base::WeakPtrFactory<AccessibilityFeatureDisableDialog> weak_ptr_factory_;
+  base::WeakPtrFactory<AccessibilityFeatureDisableDialog> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(AccessibilityFeatureDisableDialog);
 };

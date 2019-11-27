@@ -137,8 +137,8 @@ void ResettableSettingsSnapshot::RequestShortcuts(
   cancellation_flag_ = new SharedCancellationFlag;
 #if defined(OS_WIN)
   base::PostTaskAndReplyWithResult(
-      base::CreateCOMSTATaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_VISIBLE})
+      base::CreateCOMSTATaskRunner({base::ThreadPool(), base::MayBlock(),
+                                    base::TaskPriority::USER_VISIBLE})
           .get(),
       FROM_HERE, base::Bind(&GetChromeLaunchShortcuts, cancellation_flag_),
       base::Bind(&ResettableSettingsSnapshot::SetShortcutsAndReport,
@@ -160,7 +160,7 @@ void ResettableSettingsSnapshot::SetShortcutsAndReport(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   shortcuts_ = shortcuts;
   shortcuts_determined_ = true;
-  cancellation_flag_ = NULL;
+  cancellation_flag_.reset();
 
   if (!callback.is_null())
     callback.Run();

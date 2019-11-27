@@ -85,8 +85,6 @@
 
 namespace blink {
 
-using namespace html_names;
-
 CompositeEditCommand::CompositeEditCommand(Document& document)
     : EditCommand(document) {
   const VisibleSelection& visible_selection =
@@ -267,15 +265,15 @@ void CompositeEditCommand::InsertParagraphSeparator(
 
 bool CompositeEditCommand::IsRemovableBlock(const Node* node) {
   DCHECK(node);
-  if (!IsHTMLDivElement(*node))
+  const auto* element = DynamicTo<HTMLDivElement>(node);
+  if (!element)
     return false;
 
-  const HTMLDivElement& element = ToHTMLDivElement(*node);
-  ContainerNode* parent_node = element.parentNode();
+  ContainerNode* parent_node = element->parentNode();
   if (parent_node && parent_node->firstChild() != parent_node->lastChild())
     return false;
 
-  if (!element.hasAttributes())
+  if (!element->hasAttributes())
     return true;
 
   return false;
@@ -366,9 +364,9 @@ void CompositeEditCommand::AppendNode(Node* node,
   // |cloneParagraphUnderNewElement()| attempt to clone non-well-formed HTML,
   // produced by JavaScript.
   auto* parent_element = DynamicTo<Element>(parent);
-  ABORT_EDITING_COMMAND_IF(
-      !CanHaveChildrenForEditing(parent) &&
-      !(parent_element && parent_element->TagQName() == kObjectTag));
+  ABORT_EDITING_COMMAND_IF(!CanHaveChildrenForEditing(parent) &&
+                           !(parent_element && parent_element->TagQName() ==
+                                                   html_names::kObjectTag));
   ABORT_EDITING_COMMAND_IF(!HasEditableStyle(*parent) &&
                            parent->InActiveDocument());
   ApplyCommandToComposite(MakeGarbageCollected<AppendNodeCommand>(parent, node),
@@ -1010,7 +1008,7 @@ void CompositeEditCommand::RemovePlaceholderAt(const Position& p) {
 
   // We are certain that the position is at a line break, but it may be a br or
   // a preserved newline.
-  if (IsHTMLBRElement(*p.AnchorNode())) {
+  if (IsA<HTMLBRElement>(*p.AnchorNode())) {
     // Removing a BR element won't dispatch synchronous events.
     RemoveNode(p.AnchorNode(), ASSERT_NO_EDITING_ABORT);
     return;
@@ -1099,7 +1097,7 @@ HTMLElement* CompositeEditCommand::MoveParagraphContentsToNewBlockIfNecessary(
   DCHECK(new_block);
 
   bool end_was_br =
-      IsHTMLBRElement(*visible_paragraph_end.DeepEquivalent().AnchorNode());
+      IsA<HTMLBRElement>(*visible_paragraph_end.DeepEquivalent().AnchorNode());
 
   // Inserting default paragraph element can change visible position. We
   // should update visible positions before use them.
@@ -1121,7 +1119,7 @@ HTMLElement* CompositeEditCommand::MoveParagraphContentsToNewBlockIfNecessary(
   if (editing_state->IsAborted())
     return nullptr;
 
-  if (new_block->lastChild() && IsHTMLBRElement(*new_block->lastChild()) &&
+  if (new_block->lastChild() && IsA<HTMLBRElement>(*new_block->lastChild()) &&
       !end_was_br) {
     RemoveNode(new_block->lastChild(), editing_state);
     if (editing_state->IsAborted())
@@ -1278,7 +1276,7 @@ void CompositeEditCommand::CleanupAfterDeletion(EditingState* editing_state,
       return;
 
     // Normally deletion will leave a br as a placeholder.
-    if (IsHTMLBRElement(*node)) {
+    if (IsA<HTMLBRElement>(*node)) {
       RemoveNodeAndPruneAncestors(node, editing_state, destination_node);
 
       // If the selection to move was empty and in an empty block that
@@ -1500,10 +1498,11 @@ void CompositeEditCommand::MoveParagraphs(
                 GetDocument(),
                 CreateMarkup(start.ParentAnchoredEquivalent(),
                              end.ParentAnchoredEquivalent(),
-                             kDoNotAnnotateForInterchange,
-                             ConvertBlocksToInlines::kConvert,
-                             kDoNotResolveURLs, constraining_ancestor),
-                "")
+                             CreateMarkupOptions::Builder()
+                                 .SetShouldConvertBlocksToInlines(true)
+                                 .SetConstrainingAncestor(constraining_ancestor)
+                                 .Build()),
+                "", kDisallowScriptingAndPluginContent)
           : nullptr;
 
   // A non-empty paragraph's style is moved when we copy and move it.  We don't
@@ -1661,14 +1660,15 @@ bool CompositeEditCommand::BreakOutOfEmptyListItem(
   // FIXME: Can't we do something better when the immediate parent wasn't a list
   // node?
   if (!list_node ||
-      (!IsHTMLUListElement(*list_node) && !IsHTMLOListElement(*list_node)) ||
+      (!IsA<HTMLUListElement>(*list_node) &&
+       !IsA<HTMLOListElement>(*list_node)) ||
       !HasEditableStyle(*list_node) ||
       list_node == RootEditableElement(*empty_list_item))
     return false;
 
   HTMLElement* new_block = nullptr;
   if (ContainerNode* block_enclosing_list = list_node->parentNode()) {
-    if (IsHTMLLIElement(
+    if (IsA<HTMLLIElement>(
             *block_enclosing_list)) {  // listNode is inside another list item
       if (CreateVisiblePosition(PositionAfterNode(*block_enclosing_list))
               .DeepEquivalent() ==
@@ -1695,8 +1695,8 @@ bool CompositeEditCommand::BreakOutOfEmptyListItem(
       }
       // If listNode does NOT appear at the end of the outer list item, then
       // behave as if in a regular paragraph.
-    } else if (IsHTMLOListElement(*block_enclosing_list) ||
-               IsHTMLUListElement(*block_enclosing_list)) {
+    } else if (IsA<HTMLOListElement>(*block_enclosing_list) ||
+               IsA<HTMLUListElement>(*block_enclosing_list)) {
       new_block = MakeGarbageCollected<HTMLLIElement>(GetDocument());
     }
   }
@@ -1772,9 +1772,8 @@ bool CompositeEditCommand::BreakOutOfEmptyMailBlockquotedParagraph(
   GetDocument().UpdateStyleAndLayout();
 
   VisiblePosition caret = EndingVisibleSelection().VisibleStart();
-  HTMLQuoteElement* highest_blockquote =
-      ToHTMLQuoteElement(HighestEnclosingNodeOfType(
-          caret.DeepEquivalent(), &IsMailHTMLBlockquoteElement));
+  auto* highest_blockquote = To<HTMLQuoteElement>(HighestEnclosingNodeOfType(
+      caret.DeepEquivalent(), &IsMailHTMLBlockquoteElement));
   if (!highest_blockquote)
     return false;
 
@@ -1821,12 +1820,12 @@ bool CompositeEditCommand::BreakOutOfEmptyMailBlockquotedParagraph(
   Position caret_pos(MostForwardCaretPosition(caret.DeepEquivalent()));
   // A line break is either a br or a preserved newline.
   DCHECK(
-      IsHTMLBRElement(caret_pos.AnchorNode()) ||
+      IsA<HTMLBRElement>(caret_pos.AnchorNode()) ||
       (caret_pos.AnchorNode()->IsTextNode() &&
        caret_pos.AnchorNode()->GetLayoutObject()->Style()->PreserveNewline()))
       << caret_pos;
 
-  if (IsHTMLBRElement(*caret_pos.AnchorNode())) {
+  if (IsA<HTMLBRElement>(*caret_pos.AnchorNode())) {
     RemoveNodeAndPruneAncestors(caret_pos.AnchorNode(), editing_state);
     if (editing_state->IsAborted())
       return false;

@@ -28,6 +28,22 @@ chrome.fileManagerPrivate = {
     PACK_WITH: 'pack_with',
     SHARE_WITH: 'share_with',
   },
+  SearchType: {
+    ALL: 'ALL',
+    SHARED_WITH_ME: 'SHARED_WITH_ME',
+    EXCLUDE_DIRECTORIES: 'EXCLUDE_DIRECTORIES',
+    OFFLINE: 'OFFLINE',
+  },
+  DriveConnectionStateType: {
+    ONLINE: 'ONLINE',
+    OFFLINE: 'OFFLINE',
+    METERED: 'METERED',
+  },
+  DriveOfflineReason: {
+    NOT_READY: 'NOT_READY',
+    NO_NETWORK: 'NO_NETWORK',
+    NO_SERVICE: 'NO_SERVICE',
+  },
   currentId_: 'test@example.com',
   displayedId_: 'test@example.com',
   preferences_: {
@@ -47,7 +63,6 @@ chrome.fileManagerPrivate = {
   token_: 'token',
   SourceRestriction: {
     ANY_SOURCE: 'any_source',
-    NATIVE_OR_DRIVE_SOURCE: 'native_or_drive_source',
     NATIVE_SOURCE: 'native_source',
   },
   addFileWatch: (entry, callback) => {
@@ -136,6 +151,7 @@ chrome.fileManagerPrivate = {
   grantAccess: (entryUrls, callback) => {
     setTimeout(callback, 0);
   },
+  importCrostiniImage: (entry) => {},
   // Simulate startup of vm and container by taking 1s.
   mountCrostiniDelay_: 1000,
   mountCrostini: (callback) => {
@@ -175,8 +191,8 @@ chrome.fileManagerPrivate = {
     setTimeout(callback, 0, entries);
   },
   searchDriveMetadata: (searchParams, callback) => {
-    // Returns chrome.fileManagerPrivate.SearchResult[].
-    // chrome.fileManagerPrivate.SearchResult { entry: Entry,
+    // Returns chrome.fileManagerPrivate.DriveMetadataSearchResult[].
+    // chrome.fileManagerPrivate.DriveMetadataSearchResult { entry: Entry,
     // highlightedBaseName: string }
     setTimeout(callback, 0, []);
   },

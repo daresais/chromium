@@ -7,11 +7,13 @@ package org.chromium.chrome.browser.accessibility;
 import android.annotation.SuppressLint;
 import android.content.SharedPreferences;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.util.MathUtils;
 
 /**
@@ -29,7 +31,7 @@ public class FontSizePrefs {
      * The font scale threshold beyond which force enable zoom is automatically turned on. It
      * is chosen such that force enable zoom will be activated when the accessibility large text
      * setting is on (i.e. this value should be the same as or lesser than the font size scale used
-     * by accessiblity large text).
+     * by accessibility large text).
      */
     public static final float FORCE_ENABLE_ZOOM_THRESHOLD_MULTIPLIER = 1.3f;
 
@@ -45,7 +47,6 @@ public class FontSizePrefs {
     private final ObserverList<FontSizePrefsObserver> mObserverList;
 
     private Float mSystemFontScaleForTests;
-    private boolean mTouchlessMode;
 
     /**
      * Interface for observing changes in font size-related preferences.
@@ -56,7 +57,7 @@ public class FontSizePrefs {
     }
 
     private FontSizePrefs() {
-        mFontSizePrefsAndroidPtr = nativeInit();
+        mFontSizePrefsAndroidPtr = FontSizePrefsJni.get().init(FontSizePrefs.this);
         mObserverList = new ObserverList<FontSizePrefsObserver>();
     }
 
@@ -140,7 +141,8 @@ public class FontSizePrefs {
      * font scale, and is the amount by which webpage text will be scaled during font boosting.
      */
     public float getFontScaleFactor() {
-        return nativeGetFontScaleFactor(mFontSizePrefsAndroidPtr);
+        return FontSizePrefsJni.get().getFontScaleFactor(
+                mFontSizePrefsAndroidPtr, FontSizePrefs.this);
     }
 
     /**
@@ -152,19 +154,11 @@ public class FontSizePrefs {
     }
 
     /**
-     * Enables touchless mode. This overrides user's preference and always enables force enable
-     * zoom.
-     */
-    public void enableTouchlessMode() {
-        mTouchlessMode = true;
-        nativeSetForceEnableZoom(mFontSizePrefsAndroidPtr, true);
-    }
-
-    /**
      * Returns whether forceEnableZoom is enabled.
      */
     public boolean getForceEnableZoom() {
-        return nativeGetForceEnableZoom(mFontSizePrefsAndroidPtr);
+        return FontSizePrefsJni.get().getForceEnableZoom(
+                mFontSizePrefsAndroidPtr, FontSizePrefs.this);
     }
 
     /**
@@ -181,14 +175,12 @@ public class FontSizePrefs {
     }
 
     private void setForceEnableZoom(boolean enabled, boolean fromUser) {
-        // Force enable zoom is always enabled in touchless mode and it should not be changed.
-        if (mTouchlessMode) return;
-
         SharedPreferences.Editor sharedPreferencesEditor =
                 ContextUtils.getAppSharedPreferences().edit();
         sharedPreferencesEditor.putBoolean(PREF_USER_SET_FORCE_ENABLE_ZOOM, fromUser);
         sharedPreferencesEditor.apply();
-        nativeSetForceEnableZoom(mFontSizePrefsAndroidPtr, enabled);
+        FontSizePrefsJni.get().setForceEnableZoom(
+                mFontSizePrefsAndroidPtr, FontSizePrefs.this, enabled);
     }
 
     private boolean getUserSetForceEnableZoom() {
@@ -198,7 +190,8 @@ public class FontSizePrefs {
 
     private void setFontScaleFactor(float fontScaleFactor) {
         float previousFontScaleFactor = getFontScaleFactor();
-        nativeSetFontScaleFactor(mFontSizePrefsAndroidPtr, fontScaleFactor);
+        FontSizePrefsJni.get().setFontScaleFactor(
+                mFontSizePrefsAndroidPtr, FontSizePrefs.this, fontScaleFactor);
 
         if (previousFontScaleFactor < FORCE_ENABLE_ZOOM_THRESHOLD_MULTIPLIER
                 && fontScaleFactor >= FORCE_ENABLE_ZOOM_THRESHOLD_MULTIPLIER
@@ -230,10 +223,14 @@ public class FontSizePrefs {
         }
     }
 
-    private native long nativeInit();
-    private native void nativeSetFontScaleFactor(long nativeFontSizePrefsAndroid,
-            float fontScaleFactor);
-    private native float nativeGetFontScaleFactor(long nativeFontSizePrefsAndroid);
-    private native boolean nativeGetForceEnableZoom(long nativeFontSizePrefsAndroid);
-    private native void nativeSetForceEnableZoom(long nativeFontSizePrefsAndroid, boolean enabled);
+    @NativeMethods
+    interface Natives {
+        long init(FontSizePrefs caller);
+        void setFontScaleFactor(
+                long nativeFontSizePrefsAndroid, FontSizePrefs caller, float fontScaleFactor);
+        float getFontScaleFactor(long nativeFontSizePrefsAndroid, FontSizePrefs caller);
+        boolean getForceEnableZoom(long nativeFontSizePrefsAndroid, FontSizePrefs caller);
+        void setForceEnableZoom(
+                long nativeFontSizePrefsAndroid, FontSizePrefs caller, boolean enabled);
+    }
 }

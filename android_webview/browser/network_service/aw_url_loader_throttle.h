@@ -5,8 +5,11 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_NETWORK_SERVICE_AW_URL_LOADER_THROTTLE_H_
 #define ANDROID_WEBVIEW_BROWSER_NETWORK_SERVICE_AW_URL_LOADER_THROTTLE_H_
 
+#include <string>
+#include <vector>
+
 #include "base/macros.h"
-#include "content/public/common/url_loader_throttle.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
 
 class GURL;
 
@@ -17,17 +20,17 @@ class HttpRequestHeaders;
 namespace android_webview {
 class AwResourceContext;
 
-class AwURLLoaderThrottle : public content::URLLoaderThrottle {
+class AwURLLoaderThrottle : public blink::URLLoaderThrottle {
  public:
   explicit AwURLLoaderThrottle(AwResourceContext* aw_resource_context);
   ~AwURLLoaderThrottle() override;
 
-  // content::URLLoaderThrottle implementation:
+  // blink::URLLoaderThrottle implementation:
   void WillStartRequest(network::ResourceRequest* request,
                         bool* defer) override;
   void WillRedirectRequest(
       net::RedirectInfo* redirect_info,
-      const network::ResourceResponseHead& response_head,
+      const network::mojom::URLResponseHead& response_head,
       bool* defer,
       std::vector<std::string>* to_be_removed_request_headers,
       net::HttpRequestHeaders* modified_request_headers) override;

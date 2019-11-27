@@ -18,9 +18,9 @@
 
 class Profile;
 
-namespace identity {
+namespace signin {
 class IdentityManager;
-}  // namespace identity.
+}  // namespace signin.
 
 // Shows signin-related errors as notifications in Ash.
 class SigninErrorNotifier : public SigninErrorController::Observer,
@@ -44,7 +44,7 @@ class SigninErrorNotifier : public SigninErrorController::Observer,
   // Displays a notification that allows users to open crOS Account Manager UI.
   // |account_id| is the account identifier (used by the Token Service chain)
   // for the Secondary Account which received an error.
-  void HandleSecondaryAccountError(const std::string& account_id);
+  void HandleSecondaryAccountError(const CoreAccountId& account_id);
 
   // |chromeos::AccountManager::GetAccounts| callback handler.
   void OnGetAccounts(
@@ -64,7 +64,7 @@ class SigninErrorNotifier : public SigninErrorController::Observer,
   Profile* const profile_;
 
   // A non-owning pointer to IdentityManager.
-  identity::IdentityManager* const identity_manager_;
+  signin::IdentityManager* const identity_manager_;
 
   // A non-owning pointer.
   chromeos::AccountManager* const account_manager_;
@@ -73,7 +73,7 @@ class SigninErrorNotifier : public SigninErrorController::Observer,
   std::string device_account_notification_id_;
   std::string secondary_account_notification_id_;
 
-  base::WeakPtrFactory<SigninErrorNotifier> weak_factory_;
+  base::WeakPtrFactory<SigninErrorNotifier> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(SigninErrorNotifier);
 };
 

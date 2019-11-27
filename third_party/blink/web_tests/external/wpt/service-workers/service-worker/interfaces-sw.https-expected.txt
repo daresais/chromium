@@ -1,21 +1,23 @@
 This is a testharness.js-based test.
-Found 183 tests; 166 PASS, 17 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 185 tests; 181 PASS, 4 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS Interfaces and attributes in ServiceWorkerGlobalScope
 PASS test setup (cache creation)
 FAIL Event constructors assert_equals: FetchEvent.isReload should not exist expected (undefined) undefined but got (boolean) false
 PASS xhr is not exposed
 PASS URL.createObjectURL is not exposed
-FAIL ServiceWorker interface: existence and properties of interface object assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface object length assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface object name assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: existence and properties of interface prototype object assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: existence and properties of interface prototype object's "constructor" property assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: existence and properties of interface prototype object's @@unscopables property assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: attribute scriptURL assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: attribute state assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: operation postMessage(any, [object Object]) assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: operation postMessage(any, PostMessageOptions) assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
-FAIL ServiceWorker interface: attribute onstatechange assert_own_property: self does not have own property "ServiceWorker" expected property "ServiceWorker" missing
+PASS ServiceWorker includes AbstractWorker: member names are unique
+PASS WorkerGlobalScope includes WindowOrWorkerGlobalScope: member names are unique
+PASS ServiceWorker interface: existence and properties of interface object
+PASS ServiceWorker interface object length
+PASS ServiceWorker interface object name
+PASS ServiceWorker interface: existence and properties of interface prototype object
+PASS ServiceWorker interface: existence and properties of interface prototype object's "constructor" property
+PASS ServiceWorker interface: existence and properties of interface prototype object's @@unscopables property
+PASS ServiceWorker interface: attribute scriptURL
+PASS ServiceWorker interface: attribute state
+PASS ServiceWorker interface: operation postMessage(any, [object Object])
+PASS ServiceWorker interface: operation postMessage(any, PostMessageOptions)
+PASS ServiceWorker interface: attribute onstatechange
 PASS ServiceWorkerRegistration interface: existence and properties of interface object
 PASS ServiceWorkerRegistration interface object length
 PASS ServiceWorkerRegistration interface object name
@@ -66,7 +68,7 @@ PASS ServiceWorkerGlobalScope interface: existence and properties of interface p
 PASS ServiceWorkerGlobalScope interface: existence and properties of interface prototype object's @@unscopables property
 PASS ServiceWorkerGlobalScope interface: attribute clients
 PASS ServiceWorkerGlobalScope interface: attribute registration
-FAIL ServiceWorkerGlobalScope interface: attribute serviceWorker assert_own_property: The global object must have a property "serviceWorker" expected property "serviceWorker" missing
+PASS ServiceWorkerGlobalScope interface: attribute serviceWorker
 PASS ServiceWorkerGlobalScope interface: operation skipWaiting()
 PASS ServiceWorkerGlobalScope interface: attribute oninstall
 PASS ServiceWorkerGlobalScope interface: attribute onactivate
@@ -83,7 +85,7 @@ PASS ServiceWorkerGlobalScope must be primary interface of self
 PASS Stringification of self
 PASS ServiceWorkerGlobalScope interface: self must inherit property "clients" with the proper type
 PASS ServiceWorkerGlobalScope interface: self must inherit property "registration" with the proper type
-FAIL ServiceWorkerGlobalScope interface: self must inherit property "serviceWorker" with the proper type assert_own_property: expected property "serviceWorker" missing
+PASS ServiceWorkerGlobalScope interface: self must inherit property "serviceWorker" with the proper type
 PASS ServiceWorkerGlobalScope interface: self must inherit property "skipWaiting()" with the proper type
 PASS ServiceWorkerGlobalScope interface: self must inherit property "oninstall" with the proper type
 PASS ServiceWorkerGlobalScope interface: self must inherit property "onactivate" with the proper type

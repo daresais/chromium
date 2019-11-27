@@ -9,6 +9,9 @@
 
 syntax = "proto2";
 
+option java_multiple_files = true;
+option java_package = "org.chromium.components.sync.protocol";
+
 option optimize_for = LITE_RUNTIME;
 
 package sync_pb;
@@ -16,8 +19,9 @@ package sync_pb;
 import "encryption.proto";
 
 message WifiConfigurationSpecificsData {
-  // May contain NUL, not necessarily UTF-8 encoded.
-  optional bytes ssid = 1;
+  // SSID encoded to hex, letters should be upper case and 0x prefix should be
+  // omitted. For example, ssid "network" would be provided as "6E6574776F726B".
+  optional bytes hex_ssid = 1;
   enum SecurityType {
     SECURITY_TYPE_UNSPECIFIED = 0;
     SECURITY_TYPE_NONE = 1;

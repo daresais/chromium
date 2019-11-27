@@ -13,6 +13,8 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "services/network/public/mojom/url_response_head.mojom-forward.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -23,7 +25,6 @@ struct RedirectInfo;
 namespace network {
 class SharedURLLoaderFactory;
 class SimpleURLLoader;
-struct ResourceResponseHead;
 }  // namespace network
 
 namespace payments {
@@ -127,7 +128,7 @@ class PaymentManifestDownloader {
   // Called by SimpleURLLoader on a redirect.
   void OnURLLoaderRedirect(network::SimpleURLLoader* url_loader,
                            const net::RedirectInfo& redirect_info,
-                           const network::ResourceResponseHead& response_head,
+                           const network::mojom::URLResponseHead& response_head,
                            std::vector<std::string>* to_be_removed_headers);
 
   // Called by SimpleURLLoader on completion.
@@ -163,6 +164,8 @@ class PaymentManifestDownloader {
   // collision between HEAD and GET requests.
   std::map<const network::SimpleURLLoader*, std::unique_ptr<Download>>
       downloads_;
+
+  base::WeakPtrFactory<PaymentManifestDownloader> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PaymentManifestDownloader);
 };

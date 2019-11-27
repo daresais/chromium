@@ -71,12 +71,17 @@ void IncrementCounters(const webrtc::DataChannelInterface& channel) {
   if (channel.negotiated())
     IncrementCounter(DataChannelCounters::kNegotiated);
 
-  UMA_HISTOGRAM_CUSTOM_COUNTS("WebRTC.DataChannelMaxRetransmits",
-                              channel.maxRetransmits(), 1,
-                              std::numeric_limits<uint16_t>::max(), 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("WebRTC.DataChannelMaxRetransmitTime",
-                              channel.maxRetransmitTime(), 1,
-                              std::numeric_limits<uint16_t>::max(), 50);
+  // Only record max retransmits and max packet life time if set.
+  if (channel.maxRetransmitsOpt()) {
+    UMA_HISTOGRAM_CUSTOM_COUNTS("WebRTC.DataChannelMaxRetransmits",
+                                *(channel.maxRetransmitsOpt()), 1,
+                                std::numeric_limits<uint16_t>::max(), 50);
+  }
+  if (channel.maxPacketLifeTime()) {
+    UMA_HISTOGRAM_CUSTOM_COUNTS("WebRTC.DataChannelMaxPacketLifeTime",
+                                *channel.maxPacketLifeTime(), 1,
+                                std::numeric_limits<uint16_t>::max(), 50);
+  }
 }
 
 void RecordMessageSent(const webrtc::DataChannelInterface& channel,
@@ -213,7 +218,7 @@ RTCDataChannel::RTCDataChannel(
       buffered_amount_(0U),
       stopped_(false),
       observer_(base::MakeRefCounted<Observer>(
-          context->GetTaskRunner(TaskType::kInternalMedia),
+          context->GetTaskRunner(TaskType::kNetworking),
           this,
           channel)) {
   DCHECK(peer_connection_handler);
@@ -244,7 +249,7 @@ RTCDataChannel::~RTCDataChannel() = default;
 
 String RTCDataChannel::label() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return WebString::FromUTF8(channel()->label());
+  return String::FromUTF8(channel()->label());
 }
 
 bool RTCDataChannel::reliable() const {
@@ -257,19 +262,29 @@ bool RTCDataChannel::ordered() const {
   return channel()->ordered();
 }
 
-uint16_t RTCDataChannel::maxRetransmitTime() const {
+uint16_t RTCDataChannel::maxPacketLifeTime(bool& is_null) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return channel()->maxRetransmitTime();
+  if (channel()->maxPacketLifeTime()) {
+    is_null = false;
+    return *(channel()->maxPacketLifeTime());
+  }
+  is_null = true;
+  return -1;
 }
 
-uint16_t RTCDataChannel::maxRetransmits() const {
+uint16_t RTCDataChannel::maxRetransmits(bool& is_null) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return channel()->maxRetransmits();
+  if (channel()->maxRetransmitsOpt()) {
+    is_null = false;
+    return *(channel()->maxRetransmitsOpt());
+  }
+  is_null = true;
+  return -1;
 }
 
 String RTCDataChannel::protocol() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return WebString::FromUTF8(channel()->protocol());
+  return String::FromUTF8(channel()->protocol());
 }
 
 bool RTCDataChannel::negotiated() const {
@@ -344,8 +359,7 @@ void RTCDataChannel::send(const String& data, ExceptionState& exception_state) {
     return;
   }
 
-  std::string utf8_buffer = static_cast<WebString>(data).Utf8();
-  webrtc::DataBuffer data_buffer(utf8_buffer);
+  webrtc::DataBuffer data_buffer(data.Utf8());
   buffered_amount_ += data_buffer.size();
   RecordMessageSent(*channel().get(), data_buffer.size());
   if (!channel()->Send(data_buffer)) {
@@ -362,7 +376,7 @@ void RTCDataChannel::send(DOMArrayBuffer* data,
     return;
   }
 
-  size_t data_length = data->ByteLength();
+  size_t data_length = data->ByteLengthAsSizeT();
   if (!data_length)
     return;
 

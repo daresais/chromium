@@ -25,10 +25,10 @@
 #include "extensions/browser/api/file_handlers/directory_util.h"
 #include "extensions/browser/api/file_handlers/mime_util.h"
 #include "extensions/browser/entry_info.h"
-#include "storage/browser/fileapi/file_system_backend.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_operation_runner.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_backend.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_operation_runner.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 using content::BrowserThread;
 using storage::FileSystemURL;
@@ -40,7 +40,8 @@ namespace {
 bool shell_operations_allowed = true;
 
 void IgnoreFileTaskExecuteResult(
-    extensions::api::file_manager_private::TaskResult result) {}
+    extensions::api::file_manager_private::TaskResult result,
+    std::string failure_reason) {}
 
 // Executes the |task| for the file specified by |url|.
 void ExecuteFileTaskForUrl(Profile* profile,

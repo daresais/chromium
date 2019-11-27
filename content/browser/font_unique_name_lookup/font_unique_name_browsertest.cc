@@ -129,6 +129,20 @@ class FontUniqueNameBrowserTest : public DevToolsProtocolTest {
     ASSERT_TRUE(cache_directory_.CreateUniqueTempDir());
     table_builder->SetCacheDirectoryForTesting(cache_directory_.GetPath());
   }
+
+  void PreRunTestOnMainThread() override {
+    DWriteFontLookupTableBuilder* table_builder =
+        DWriteFontLookupTableBuilder::GetInstance();
+    table_builder->SchedulePrepareFontUniqueNameTableIfNeeded();
+    DevToolsProtocolTest::PreRunTestOnMainThread();
+  }
+
+  void PostRunTestOnMainThread() override {
+    DWriteFontLookupTableBuilder* table_builder =
+        DWriteFontLookupTableBuilder::GetInstance();
+    table_builder->ResetStateForTesting();
+    DevToolsProtocolTest::PostRunTestOnMainThread();
+  }
 #endif
 
   void LoadAndWait(const std::string& url) {
@@ -136,7 +150,8 @@ class FontUniqueNameBrowserTest : public DevToolsProtocolTest {
     ASSERT_TRUE(embedded_test_server()->Start());
     TestNavigationObserver navigation_observer(
         static_cast<WebContentsImpl*>(shell()->web_contents()));
-    NavigateToURL(shell(), embedded_test_server()->GetURL("a.com", url));
+    EXPECT_TRUE(
+        NavigateToURL(shell(), embedded_test_server()->GetURL("a.com", url)));
     ASSERT_TRUE(navigation_observer.last_navigation_succeeded());
   }
 

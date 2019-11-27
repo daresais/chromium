@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/startup/startup_tab_provider.h"
 
 #include "base/metrics/histogram_macros.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/profile_resetter/triggered_profile_resetter.h"
 #include "chrome/browser/profile_resetter/triggered_profile_resetter_factory.h"
@@ -28,10 +29,6 @@
 #include "chrome/browser/shell_integration.h"
 #endif  // defined(OS_WIN)
 
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-#include "chrome/browser/ui/webui/welcome/nux_helper.h"
-#endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-
 namespace {
 
 // Attempts to find an existing, non-empty tabbed browser for this profile.
@@ -39,7 +36,7 @@ bool ProfileHasOtherTabbedBrowser(Profile* profile) {
   BrowserList* browser_list = BrowserList::GetInstance();
   auto other_tabbed_browser = std::find_if(
       browser_list->begin(), browser_list->end(), [profile](Browser* browser) {
-        return browser->profile() == profile && browser->is_type_tabbed() &&
+        return browser->profile() == profile && browser->is_type_normal() &&
                !browser->tab_strip_model()->empty();
       });
   return other_tabbed_browser != browser_list->end();
@@ -48,7 +45,7 @@ bool ProfileHasOtherTabbedBrowser(Profile* profile) {
 }  // namespace
 
 StartupTabs StartupTabProviderImpl::GetOnboardingTabs(Profile* profile) const {
-// Onboarding content has not been launched on Chrome OS.
+// Chrome OS has its own welcome flow provided by OOBE.
 #if defined(OS_CHROMEOS)
   return StartupTabs();
 #else
@@ -132,6 +129,11 @@ StartupTabs StartupTabProviderImpl::GetNewTabPageTabs(
 StartupTabs StartupTabProviderImpl::GetPostCrashTabs(
     bool has_incompatible_applications) const {
   return GetPostCrashTabsForState(has_incompatible_applications);
+}
+
+StartupTabs StartupTabProviderImpl::GetExtensionCheckupTabs(
+    bool serve_extensions_page) const {
+  return GetExtensionCheckupTabsForState(serve_extensions_page);
 }
 
 // static
@@ -230,10 +232,21 @@ StartupTabs StartupTabProviderImpl::GetNewTabPageTabsForState(
 StartupTabs StartupTabProviderImpl::GetPostCrashTabsForState(
     bool has_incompatible_applications) {
   StartupTabs tabs;
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
   if (has_incompatible_applications)
-    tabs.emplace_back(GetIncompatibleApplicationsUrl(), false);
-#endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+    AddIncompatibleApplicationsUrl(&tabs);
+  return tabs;
+}
+
+// static
+StartupTabs StartupTabProviderImpl::GetExtensionCheckupTabsForState(
+    bool serve_extensions_page) {
+  StartupTabs tabs;
+  if (serve_extensions_page) {
+    tabs.emplace_back(
+        net::AppendQueryParameter(GURL(chrome::kChromeUIExtensionsURL),
+                                  "checkup", "shown"),
+        false);
+  }
   return tabs;
 }
 
@@ -245,14 +258,14 @@ GURL StartupTabProviderImpl::GetWelcomePageUrl(bool use_later_run_variant) {
              : url;
 }
 
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
 // static
-GURL StartupTabProviderImpl::GetIncompatibleApplicationsUrl() {
+void StartupTabProviderImpl::AddIncompatibleApplicationsUrl(StartupTabs* tabs) {
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
   UMA_HISTOGRAM_BOOLEAN("IncompatibleApplicationsPage.AddedPostCrash", true);
   GURL url(chrome::kChromeUISettingsURL);
-  return url.Resolve("incompatibleApplications");
+  tabs->emplace_back(url.Resolve("incompatibleApplications"), false);
+#endif  // defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
-#endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
 
 // static
 GURL StartupTabProviderImpl::GetTriggeredResetSettingsUrl() {

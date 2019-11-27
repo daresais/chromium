@@ -85,11 +85,6 @@ void ManualFillingViewAndroid::ShowWhenKeyboardIsVisible() {
       base::android::AttachCurrentThread(), java_object_);
 }
 
-void ManualFillingViewAndroid::ShowTouchToFillSheet() {
-  Java_ManualFillingComponentBridge_showTouchToFillSheet(
-      base::android::AttachCurrentThread(), java_object_);
-}
-
 void ManualFillingViewAndroid::Hide() {
   Java_ManualFillingComponentBridge_hide(base::android::AttachCurrentThread(),
                                          java_object_);
@@ -108,12 +103,14 @@ void ManualFillingViewAndroid::OnAutomaticGenerationStatusChanged(
 void ManualFillingViewAndroid::OnFaviconRequested(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj,
+    const base::android::JavaParamRef<jstring>& j_origin,
     jint desired_size_in_px,
     const base::android::JavaParamRef<jobject>& j_callback) {
   controller_->GetFavicon(
-      desired_size_in_px,
+      desired_size_in_px, ConvertJavaStringToUTF8(env, j_origin),
       base::BindOnce(&ManualFillingViewAndroid::OnImageFetched,
                      base::Unretained(this),  // Outlives or cancels request.
+                     base::android::ScopedJavaGlobalRef<jstring>(j_origin),
                      base::android::ScopedJavaGlobalRef<jobject>(j_callback)));
 }
 
@@ -136,13 +133,17 @@ void ManualFillingViewAndroid::OnOptionSelected(
 }
 
 void ManualFillingViewAndroid::OnImageFetched(
-    const base::android::ScopedJavaGlobalRef<jobject>& j_callback,
+    base::android::ScopedJavaGlobalRef<jstring> j_origin,
+    base::android::ScopedJavaGlobalRef<jobject> j_callback,
     const gfx::Image& image) {
   base::android::ScopedJavaLocalRef<jobject> j_bitmap;
   if (!image.IsEmpty())
     j_bitmap = gfx::ConvertToJavaBitmap(image.ToSkBitmap());
 
-  RunObjectCallbackAndroid(j_callback, j_bitmap);
+  RunObjectCallbackAndroid(
+      j_callback,
+      Java_ManualFillingComponentBridge_createFaviconResult(
+          base::android::AttachCurrentThread(), j_origin, j_bitmap));
 }
 
 ScopedJavaLocalRef<jobject>
@@ -152,7 +153,8 @@ ManualFillingViewAndroid::ConvertAccessorySheetDataToJavaObject(
   ScopedJavaLocalRef<jobject> j_tab_data =
       Java_ManualFillingComponentBridge_createAccessorySheetData(
           env, static_cast<int>(tab_data.get_sheet_type()),
-          ConvertUTF16ToJavaString(env, tab_data.title()));
+          ConvertUTF16ToJavaString(env, tab_data.title()),
+          ConvertUTF16ToJavaString(env, tab_data.warning()));
 
   for (const UserInfo& user_info : tab_data.user_info_list()) {
     ScopedJavaLocalRef<jobject> j_user_info =
@@ -211,12 +213,12 @@ void JNI_ManualFillingComponentBridge_CachePasswordSheetDataForTesting(
   base::android::AppendJavaStringArrayToStringVector(env, j_passwords,
                                                      &passwords);
   std::vector<autofill::PasswordForm> password_forms(usernames.size());
-  std::map<base::string16, const autofill::PasswordForm*> credentials;
+  std::vector<const autofill::PasswordForm*> credentials;
   for (unsigned int i = 0; i < usernames.size(); ++i) {
     password_forms[i].origin = origin.GetURL();
     password_forms[i].username_value = base::ASCIIToUTF16(usernames[i]);
     password_forms[i].password_value = base::ASCIIToUTF16(passwords[i]);
-    credentials[password_forms[i].username_value] = &password_forms[i];
+    credentials.push_back(&password_forms[i]);
   }
   return ChromePasswordManagerClient::FromWebContents(web_contents)
       ->GetCredentialCacheForTesting()

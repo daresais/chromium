@@ -17,12 +17,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
+#include "content/public/browser/storage_partition.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/notifications/scheduler/display_agent_android.h"
 #include "chrome/browser/notifications/scheduler/notification_background_task_scheduler_android.h"
-#endif
+#include "chrome/browser/updates/update_notification_client.h"
+#endif  // defined(OS_ANDROID)
 
 namespace {
 std::unique_ptr<notifications::NotificationSchedulerClientRegistrar>
@@ -30,6 +31,14 @@ RegisterClients() {
   auto client_registrar =
       std::make_unique<notifications::NotificationSchedulerClientRegistrar>();
   // TODO(xingliu): Register clients here.
+#if defined(OS_ANDROID)
+  // Register UpdateNotificationClient.
+  auto chrome_update_client =
+      std::make_unique<updates::UpdateNotificationClient>();
+  client_registrar->RegisterClient(
+      notifications::SchedulerClientType::kChromeUpdate,
+      std::move(chrome_update_client));
+#endif  // defined(OS_ANDROID)
   return client_registrar;
 }
 
@@ -53,9 +62,7 @@ NotificationScheduleServiceFactory::GetForBrowserContext(
 NotificationScheduleServiceFactory::NotificationScheduleServiceFactory()
     : BrowserContextKeyedServiceFactory(
           "notifications::NotificationScheduleService",
-          BrowserContextDependencyManager::GetInstance()) {
-  DependsOn(leveldb_proto::ProtoDatabaseProviderFactory::GetInstance());
-}
+          BrowserContextDependencyManager::GetInstance()) {}
 
 NotificationScheduleServiceFactory::~NotificationScheduleServiceFactory() =
     default;
@@ -74,12 +81,14 @@ KeyedService* NotificationScheduleServiceFactory::BuildServiceInstanceFor(
   auto display_agent = notifications::DisplayAgent::Create();
   auto background_task_scheduler =
       std::make_unique<NotificationBackgroundTaskSchedulerImpl>();
-#endif
-  auto* db_provider = leveldb_proto::ProtoDatabaseProviderFactory::GetForKey(
-      profile->GetProfileKey());
+#endif  // defined(OS_ANDROID)
+  auto* db_provider =
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetProtoDatabaseProvider();
   return notifications::CreateNotificationScheduleService(
       std::move(client_registrar), std::move(background_task_scheduler),
-      std::move(display_agent), db_provider, storage_dir);
+      std::move(display_agent), db_provider, storage_dir,
+      context->IsOffTheRecord());
 }
 
 content::BrowserContext*

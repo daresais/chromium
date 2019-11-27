@@ -16,9 +16,11 @@
 #include "base/barrier_closure.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/observer_list.h"
 #include "base/strings/string_util.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -68,9 +70,7 @@ std::string FormatFileSystemTypeToString(FormatFileSystemType filesystem) {
 class DiskMountManagerImpl : public DiskMountManager,
                              public CrosDisksClient::Observer {
  public:
-  DiskMountManagerImpl() :
-    already_refreshed_(false),
-    weak_ptr_factory_(this) {
+  DiskMountManagerImpl() : already_refreshed_(false) {
     DBusThreadManager* dbus_thread_manager = DBusThreadManager::Get();
     cros_disks_client_ = dbus_thread_manager->GetCrosDisksClient();
     suspend_unmount_manager_.reset(new SuspendUnmountManager(this));
@@ -123,14 +123,12 @@ class DiskMountManagerImpl : public DiskMountManager,
 
   // DiskMountManager override.
   void UnmountPath(const std::string& mount_path,
-                   UnmountOptions options,
                    UnmountPathCallback callback) override {
     UnmountChildMounts(mount_path);
     cros_disks_client_->Unmount(
-        mount_path, options,
-        base::BindOnce(&DiskMountManagerImpl::OnUnmountPath,
-                       weak_ptr_factory_.GetWeakPtr(), std::move(callback),
-                       mount_path));
+        mount_path, base::BindOnce(&DiskMountManagerImpl::OnUnmountPath,
+                                   weak_ptr_factory_.GetWeakPtr(),
+                                   std::move(callback), mount_path));
   }
 
   void RemountAllRemovableDrives(MountAccessMode mode) override {
@@ -179,7 +177,7 @@ class DiskMountManagerImpl : public DiskMountManager,
       return;
     }
 
-    UnmountPath(disk->second->mount_path(), UNMOUNT_OPTIONS_NONE,
+    UnmountPath(disk->second->mount_path(),
                 base::BindOnce(&DiskMountManagerImpl::OnUnmountPathForFormat,
                                weak_ptr_factory_.GetWeakPtr(), device_path,
                                filesystem, label));
@@ -208,7 +206,7 @@ class DiskMountManagerImpl : public DiskMountManager,
       return;
     }
 
-    UnmountPath(iter->second->mount_path(), UNMOUNT_OPTIONS_NONE,
+    UnmountPath(iter->second->mount_path(),
                 base::BindOnce(&DiskMountManagerImpl::OnUnmountPathForRename,
                                weak_ptr_factory_.GetWeakPtr(), device_path,
                                volume_name));
@@ -254,7 +252,7 @@ class DiskMountManagerImpl : public DiskMountManager,
 
     for (size_t i = 0; i < devices_to_unmount.size(); ++i) {
       cros_disks_client_->Unmount(
-          devices_to_unmount[i], UNMOUNT_OPTIONS_NONE,
+          devices_to_unmount[i],
           base::BindOnce(&DiskMountManagerImpl::OnUnmountDeviceRecursively,
                          weak_ptr_factory_.GetWeakPtr(), raw_cb_data,
                          devices_to_unmount[i], done_callback));
@@ -394,9 +392,7 @@ class DiskMountManagerImpl : public DiskMountManager,
       if (base::StartsWith(it->second.source_path, mount_path,
                            base::CompareCase::SENSITIVE)) {
         // TODO(tbarzic): Handle the case where this fails.
-        UnmountPath(it->second.mount_path,
-                    UNMOUNT_OPTIONS_NONE,
-                    UnmountPathCallback());
+        UnmountPath(it->second.mount_path, UnmountPathCallback());
       }
     }
   }
@@ -555,6 +551,9 @@ class DiskMountManagerImpl : public DiskMountManager,
     DiskMap::const_iterator disk = disks_.find(device_path);
     DCHECK(disk != disks_.end() && disk->second->mount_path().empty());
 
+    base::UmaHistogramEnumeration("FileBrowser.FormatFileSystemType",
+                                  filesystem);
+
     const std::string filesystem_str = FormatFileSystemTypeToString(filesystem);
     pending_format_changes_[device_path] = {filesystem_str, label};
 
@@ -661,9 +660,11 @@ class DiskMountManagerImpl : public DiskMountManager,
     DVLOG(1) << "Found disk " << disk_info.device_path();
     // Delete previous disk info for this path:
     bool is_new = true;
+    bool is_first_mount = false;
     std::string base_mount_path = std::string();
     DiskMap::iterator iter = disks_.find(disk_info.device_path());
     if (iter != disks_.end()) {
+      is_first_mount = iter->second->is_first_mount();
       base_mount_path = iter->second->base_mount_path();
       disks_.erase(iter);
       is_new = false;
@@ -678,6 +679,9 @@ class DiskMountManagerImpl : public DiskMountManager,
         && access_mode->second == chromeos::MOUNT_ACCESS_MODE_READ_ONLY;
     Disk* disk = new Disk(disk_info, write_disabled_by_policy,
                           base_mount_path);
+    if (!is_new) {
+      disk->set_is_first_mount(is_first_mount);
+    }
     disks_.insert(
         std::make_pair(disk_info.device_path(), base::WrapUnique(disk)));
     NotifyDiskStatusUpdate(is_new ? DISK_ADDED : DISK_CHANGED, *disk);
@@ -823,7 +827,7 @@ class DiskMountManagerImpl : public DiskMountManager,
   }
 
   // Mount event change observers.
-  base::ObserverList<DiskMountManager::Observer>::Unchecked observers_;
+  base::ObserverList<DiskMountManager::Observer> observers_;
 
   CrosDisksClient* cros_disks_client_;
 
@@ -842,12 +846,16 @@ class DiskMountManagerImpl : public DiskMountManager,
   typedef std::map<std::string, chromeos::MountAccessMode> AccessModeMap;
   AccessModeMap access_modes_;
 
-  base::WeakPtrFactory<DiskMountManagerImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<DiskMountManagerImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DiskMountManagerImpl);
 };
 
 }  // namespace
+
+DiskMountManager::Observer::~Observer() {
+  DCHECK(!IsInObserverList());
+}
 
 bool DiskMountManager::AddDiskForTest(std::unique_ptr<Disk> disk) {
   return false;

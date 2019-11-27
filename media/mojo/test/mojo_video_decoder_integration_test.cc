@@ -17,7 +17,7 @@
 #include "base/stl_util.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/decode_status.h"
@@ -33,7 +33,9 @@
 #include "media/mojo/services/mojo_cdm_service_context.h"
 #include "media/mojo/services/mojo_media_client.h"
 #include "media/mojo/services/mojo_video_decoder_service.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_space.h"
@@ -203,16 +205,16 @@ class MojoVideoDecoderIntegrationTest : public ::testing::Test {
   }
 
  protected:
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
   void SetWriterCapacity(uint32_t capacity) { writer_capacity_ = capacity; }
 
-  mojom::VideoDecoderPtr CreateRemoteVideoDecoder() {
-    mojom::VideoDecoderPtr remote_video_decoder;
-    mojo::MakeStrongBinding(
+  mojo::PendingRemote<mojom::VideoDecoder> CreateRemoteVideoDecoder() {
+    mojo::PendingRemote<mojom::VideoDecoder> remote_video_decoder;
+    mojo::MakeSelfOwnedReceiver(
         std::make_unique<MojoVideoDecoderService>(&mojo_media_client_,
                                                   &mojo_cdm_service_context_),
-        mojo::MakeRequest(&remote_video_decoder));
+        remote_video_decoder.InitWithNewPipeAndPassReceiver());
     return remote_video_decoder;
   }
 
@@ -324,7 +326,7 @@ class MojoVideoDecoderIntegrationTest : public ::testing::Test {
     return std::unique_ptr<VideoDecoder>(decoder_.get());
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   // Capacity that will be used for the MojoDecoderBufferWriter.
   uint32_t writer_capacity_ = 0;
@@ -340,7 +342,8 @@ class MojoVideoDecoderIntegrationTest : public ::testing::Test {
 TEST_F(MojoVideoDecoderIntegrationTest, CreateAndDestroy) {}
 
 TEST_F(MojoVideoDecoderIntegrationTest, GetSupportedConfigs) {
-  mojom::VideoDecoderPtr remote_video_decoder = CreateRemoteVideoDecoder();
+  mojo::Remote<mojom::VideoDecoder> remote_video_decoder(
+      CreateRemoteVideoDecoder());
   StrictMock<
       base::MockCallback<mojom::VideoDecoder::GetSupportedConfigsCallback>>
       callback;

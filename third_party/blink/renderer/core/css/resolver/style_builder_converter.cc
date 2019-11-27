@@ -56,15 +56,15 @@
 #include "third_party/blink/renderer/core/css/resolver/transform_builder.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/style/intrinsic_length.h"
 #include "third_party/blink/renderer/core/style/reference_clip_path_operation.h"
 #include "third_party/blink/renderer/core/style/shape_clip_path_operation.h"
 #include "third_party/blink/renderer/core/style/style_svg_resource.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
-
-using namespace cssvalue;
 
 namespace {
 
@@ -96,7 +96,7 @@ scoped_refptr<StyleReflection> StyleBuilderConverter::ConvertBoxReflect(
     return ComputedStyleInitialValues::InitialBoxReflect();
   }
 
-  const auto& reflect_value = To<CSSReflectValue>(value);
+  const auto& reflect_value = To<cssvalue::CSSReflectValue>(value);
   scoped_refptr<StyleReflection> reflection = StyleReflection::Create();
   reflection->SetDirection(
       reflect_value.Direction()->ConvertTo<CSSReflectionDirection>());
@@ -124,7 +124,7 @@ Color StyleBuilderConverter::ConvertColor(StyleResolverState& state,
 scoped_refptr<StyleSVGResource> StyleBuilderConverter::ConvertElementReference(
     StyleResolverState& state,
     const CSSValue& value) {
-  const auto* url_value = DynamicTo<CSSURIValue>(value);
+  const auto* url_value = DynamicTo<cssvalue::CSSURIValue>(value);
   if (!url_value)
     return nullptr;
   SVGResource* resource =
@@ -148,7 +148,7 @@ scoped_refptr<ClipPathOperation> StyleBuilderConverter::ConvertClipPath(
     const CSSValue& value) {
   if (value.IsBasicShapeValue())
     return ShapeClipPathOperation::Create(BasicShapeForValue(state, value));
-  if (const auto* url_value = DynamicTo<CSSURIValue>(value)) {
+  if (const auto* url_value = DynamicTo<cssvalue::CSSURIValue>(value)) {
     SVGResource* resource =
         state.GetElementStyleResources().GetSVGResourceFromValue(
             state.GetTreeScope(), *url_value);
@@ -273,7 +273,7 @@ StyleBuilderConverter::ConvertFontFeatureSettings(StyleResolverState& state,
   scoped_refptr<FontFeatureSettings> settings = FontFeatureSettings::Create();
   int len = list.length();
   for (int i = 0; i < len; ++i) {
-    const auto& feature = To<CSSFontFeatureValue>(list.Item(i));
+    const auto& feature = To<cssvalue::CSSFontFeatureValue>(list.Item(i));
     settings->Append(FontFeature(feature.Tag(), feature.Value()));
   }
   return settings;
@@ -291,7 +291,7 @@ StyleBuilderConverter::ConvertFontVariationSettings(StyleResolverState& state,
       FontVariationSettings::Create();
   int len = list.length();
   for (int i = 0; i < len; ++i) {
-    const auto& feature = To<CSSFontVariationValue>(list.Item(i));
+    const auto& feature = To<cssvalue::CSSFontVariationValue>(list.Item(i));
     settings->Append(FontVariationAxis(feature.Tag(), feature.Value()));
   }
   return settings;
@@ -300,8 +300,21 @@ StyleBuilderConverter::ConvertFontVariationSettings(StyleResolverState& state,
 static float ComputeFontSize(const CSSToLengthConversionData& conversion_data,
                              const CSSPrimitiveValue& primitive_value,
                              const FontDescription::Size& parent_size) {
-  if (primitive_value.IsLength())
-    return primitive_value.ComputeLength<float>(conversion_data);
+  if (primitive_value.IsLength()) {
+    float result = primitive_value.ComputeLength<float>(conversion_data);
+    float font_size_zoom = conversion_data.FontSizeZoom();
+    // TODO(crbug.com/408777): Only accounting for numeric literal value here
+    // will leave calc() without zoom correction.
+    if (primitive_value.IsNumericLiteralValue() && font_size_zoom != 1) {
+      CSSPrimitiveValue::UnitType type =
+          To<CSSNumericLiteralValue>(&primitive_value)->GetType();
+      if (type == CSSPrimitiveValue::UnitType::kChs ||
+          type == CSSPrimitiveValue::UnitType::kExs) {
+        return result / font_size_zoom;
+      }
+    }
+    return result;
+  }
   if (primitive_value.IsCalculatedPercentageWithLength()) {
     return To<CSSMathFunctionValue>(primitive_value)
         .ToCalcValue(conversion_data)
@@ -337,9 +350,14 @@ FontDescription::Size StyleBuilderConverterBase::ConvertFontSize(
         parent_size.is_absolute);
   }
 
+  // TODO(crbug.com/979895): This is the result of a refactoring, which might
+  // have revealed an existing bug with calculated lengths. Investigate.
+  const bool is_absolute =
+      parent_size.is_absolute || primitive_value.IsMathFunctionValue() ||
+      !To<CSSNumericLiteralValue>(primitive_value).IsFontRelativeLength();
   return FontDescription::Size(
       0, ComputeFontSize(conversion_data, primitive_value, parent_size),
-      parent_size.is_absolute || !primitive_value.IsFontRelativeLength());
+      is_absolute);
 }
 
 FontDescription::Size StyleBuilderConverter::ConvertFontSize(
@@ -422,7 +440,7 @@ FontSelectionValue StyleBuilderConverterBase::ConvertFontStyle(
         return NormalSlopeValue();
     }
   } else if (const auto* style_range_value =
-                 DynamicTo<CSSFontStyleRangeValue>(value)) {
+                 DynamicTo<cssvalue::CSSFontStyleRangeValue>(value)) {
     const CSSValueList* values = style_range_value->GetObliqueValues();
     CHECK_LT(values->length(), 2u);
     if (values->length()) {
@@ -688,8 +706,8 @@ StyleContentAlignmentData StyleBuilderConverter::ConvertContentAlignmentData(
     const CSSValue& value) {
   StyleContentAlignmentData alignment_data =
       ComputedStyleInitialValues::InitialContentAlignment();
-  const CSSContentDistributionValue& content_value =
-      To<CSSContentDistributionValue>(value);
+  const cssvalue::CSSContentDistributionValue& content_value =
+      To<cssvalue::CSSContentDistributionValue>(value);
   if (IsValidCSSValueID(content_value.Distribution())) {
     alignment_data.SetDistribution(
         CSSIdentifierValue::Create(content_value.Distribution())
@@ -879,7 +897,7 @@ void StyleBuilderConverter::ConvertGridTrackList(
 
   for (auto curr_value : To<CSSValueList>(value)) {
     if (auto* grid_auto_repeat_value =
-            DynamicTo<CSSGridAutoRepeatValue>(curr_value.Get())) {
+            DynamicTo<cssvalue::CSSGridAutoRepeatValue>(curr_value.Get())) {
       DCHECK(auto_repeat_track_sizes.IsEmpty());
       size_t auto_repeat_index = 0;
       CSSValueID auto_repeat_id = grid_auto_repeat_value->AutoRepeatID();
@@ -904,7 +922,7 @@ void StyleBuilderConverter::ConvertGridTrackList(
     }
 
     if (auto* repeated_values =
-            DynamicTo<CSSGridIntegerRepeatValue>(curr_value.Get())) {
+            DynamicTo<cssvalue::CSSGridIntegerRepeatValue>(curr_value.Get())) {
       size_t repetitions = repeated_values->Repetitions();
       for (size_t i = 0; i < repetitions; ++i) {
         for (auto curr_value : *repeated_values)
@@ -982,11 +1000,8 @@ float StyleBuilderConverter::ConvertBorderWidth(StyleResolverState& state,
     return 0;
   }
   const auto& primitive_value = To<CSSPrimitiveValue>(value);
-  double result =
-      primitive_value.ComputeLength<double>(state.CssToLengthConversionData());
-  return clampTo<float>(RoundForImpreciseConversion<float>(result),
-                        defaultMinimumForClamp<float>(),
-                        defaultMaximumForClamp<float>());
+  return primitive_value.ComputeLength<float>(
+      state.CssToLengthConversionData());
 }
 
 GapLength StyleBuilderConverter::ConvertGapLength(StyleResolverState& state,
@@ -1288,7 +1303,8 @@ ShadowData StyleBuilderConverter::ConvertShadow(
       // For OffScreen canvas, we default to black and only parse non
       // Document dependent CSS colors.
       color = StyleColor(Color::kBlack);
-      if (auto* color_value = DynamicTo<CSSColorValue>(shadow.color.Get())) {
+      if (auto* color_value =
+              DynamicTo<cssvalue::CSSColorValue>(shadow.color.Get())) {
         color = color_value->Value();
       } else {
         CSSValueID value_id =
@@ -1304,7 +1320,8 @@ ShadowData StyleBuilderConverter::ConvertShadow(
           case CSSValueID::kCurrentcolor:
             break;
           default:
-            color = StyleColor::ColorFromKeyword(value_id);
+            color = StyleColor::ColorFromKeyword(
+                value_id, ComputedStyle::InitialStyle().UsedColorScheme());
         }
       }
     }
@@ -1617,7 +1634,8 @@ Rotation StyleBuilderConverter::ConvertRotation(const CSSValue& value) {
   double z = 1;
   if (list.length() == 2) {
     // axis angle
-    const CSSAxisValue& axis = To<CSSAxisValue>(list.Item(0));
+    const cssvalue::CSSAxisValue& axis =
+        To<cssvalue::CSSAxisValue>(list.Item(0));
     x = axis.X();
     y = axis.Y();
     z = axis.Z();
@@ -1674,7 +1692,7 @@ RespectImageOrientationEnum StyleBuilderConverter::ConvertImageOrientation(
 scoped_refptr<StylePath> StyleBuilderConverter::ConvertPathOrNone(
     StyleResolverState& state,
     const CSSValue& value) {
-  if (auto* path_value = DynamicTo<CSSPathValue>(value))
+  if (auto* path_value = DynamicTo<cssvalue::CSSPathValue>(value))
     return path_value->GetStylePath();
   DCHECK_EQ(To<CSSIdentifierValue>(value).GetValueID(), CSSValueID::kNone);
   return nullptr;
@@ -1773,15 +1791,15 @@ static const CSSValue& ComputeRegisteredPropertyValue(
     if (value_id == CSSValueID::kCurrentcolor)
       return value;
     if (StyleColor::IsColorKeyword(value_id)) {
-      ColorScheme scheme =
-          state ? state->Style()->UsedColorScheme() : ColorScheme::kLight;
+      WebColorScheme scheme =
+          state ? state->Style()->UsedColorScheme() : WebColorScheme::kLight;
       Color color = document.GetTextLinkColors().ColorFromCSSValue(
           value, Color(), scheme, false);
-      return *CSSColorValue::Create(color.Rgb());
+      return *cssvalue::CSSColorValue::Create(color.Rgb());
     }
   }
 
-  if (const auto* uri_value = DynamicTo<CSSURIValue>(value))
+  if (const auto* uri_value = DynamicTo<cssvalue::CSSURIValue>(value))
     return *uri_value->ValueWithURLMadeAbsolute(KURL(base_url), charset);
 
   return value;
@@ -1840,6 +1858,19 @@ StyleBuilderConverter::ConvertRegisteredPropertyVariableData(
 const CSSToLengthConversionData&
 StyleBuilderConverter::CssToLengthConversionData(StyleResolverState& state) {
   return state.CssToLengthConversionData();
+}
+
+IntrinsicLength StyleBuilderConverter::ConvertIntrinsicLength(
+    StyleResolverState& state,
+    const CSSValue& value) {
+  auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
+  if (identifier_value) {
+    if (identifier_value->GetValueID() == CSSValueID::kLegacy)
+      return IntrinsicLength::MakeLegacy();
+    if (identifier_value->GetValueID() == CSSValueID::kAuto)
+      return IntrinsicLength::MakeAuto();
+  }
+  return IntrinsicLength::Make(ConvertLength(state, value));
 }
 
 }  // namespace blink

@@ -6,6 +6,7 @@
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/account_manager/account_manager_policy_controller.h"
 #include "chrome/browser/chromeos/account_manager/account_manager_policy_controller_factory.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
@@ -14,8 +15,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/components/account_manager/account_manager_factory.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_pref_names.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,10 +32,6 @@ class AccountManagerPolicyControllerTest : public InProcessBrowserTest {
  public:
   AccountManagerPolicyControllerTest() = default;
   ~AccountManagerPolicyControllerTest() override = default;
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    scoped_feature_list_.InitAndEnableFeature(switches::kAccountManager);
-  }
 
   void SetUpOnMainThread() override {
     // Prep private fields.
@@ -105,13 +102,12 @@ class AccountManagerPolicyControllerTest : public InProcessBrowserTest {
 
   Profile* profile() { return profile_.get(); }
 
-  identity::IdentityManager* identity_manager() {
+  signin::IdentityManager* identity_manager() {
     return identity_test_environment_adaptor_->identity_test_env()
         ->identity_manager();
   }
 
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
   base::ScopedTempDir temp_dir_;
   // Non-owning pointer.
   AccountManager* account_manager_ = nullptr;

@@ -103,7 +103,7 @@ TEST_F(HTMLInputElementTest, NoAssertWhenMovedInNewDocument) {
       MakeGarbageCollected<HTMLBodyElement>(*document_without_frame));
 
   // Create an input element with type "range" inside a document without frame.
-  ToHTMLBodyElement(html->firstChild())
+  To<HTMLBodyElement>(html->firstChild())
       ->SetInnerHTMLFromString("<input type='range' />");
   document_without_frame->AppendChild(html);
 
@@ -235,6 +235,18 @@ TEST_F(HTMLInputElementTest, RepaintAfterClearingFile) {
 
   ASSERT_TRUE(input->GetLayoutObject());
   EXPECT_TRUE(input->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+}
+
+TEST_F(HTMLInputElementTest, UpdateTypeDcheck) {
+  Document& doc = GetDocument();
+  // Removing <body> is required to reproduce the issue.
+  doc.body()->remove();
+  Element* input = doc.CreateRawElement(html_names::kInputTag);
+  doc.documentElement()->appendChild(input);
+  input->focus();
+  input->setAttribute(html_names::kTypeAttr, AtomicString("radio"));
+  // Test succeeds if the above setAttribute() didn't trigger a DCHECK failure
+  // in Document::UpdateFocusAppearanceAfterLayout().
 }
 
 }  // namespace blink

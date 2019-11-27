@@ -11,11 +11,15 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
+#include "storage/browser/quota/quota_settings.h"
 
 namespace content {
 class RenderFrameHost;
@@ -53,9 +57,10 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   // moment during startup. AwContentBrowserClient owns the result.
   AwBrowserContext* InitBrowserContext();
 
+  // content::ContentBrowserClient:
   void OnNetworkServiceCreated(
       network::mojom::NetworkService* network_service) override;
-  network::mojom::NetworkContextPtr CreateNetworkContext(
+  mojo::Remote<network::mojom::NetworkContext> CreateNetworkContext(
       content::BrowserContext* context,
       bool in_memory,
       const base::FilePath& relative_partition_path) override;
@@ -64,9 +69,8 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       const content::MainFunctionParams& parameters) override;
   content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) override;
-  void RenderProcessWillLaunch(
-      content::RenderProcessHost* host,
-      service_manager::mojom::ServiceRequest* service_request) override;
+  void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
+  bool IsExplicitNavigation(ui::PageTransition transition) override;
   bool ShouldUseMobileFlingCurve() override;
   bool IsHandledURL(const GURL& url) override;
   bool ForceSniffingFileUrlsForHtml() override;
@@ -75,33 +79,9 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   std::string GetApplicationLocale() override;
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   gfx::ImageSkia GetDefaultFavicon() override;
-  bool AllowAppCacheOnIO(const GURL& manifest_url,
-                         const GURL& first_party,
-                         content::ResourceContext* context) override;
   bool AllowAppCache(const GURL& manifest_url,
                      const GURL& first_party,
                      content::BrowserContext* context) override;
-  bool AllowGetCookie(const GURL& url,
-                      const GURL& first_party,
-                      const net::CookieList& cookie_list,
-                      content::ResourceContext* context,
-                      int render_process_id,
-                      int render_frame_id) override;
-  bool AllowSetCookie(const GURL& url,
-                      const GURL& first_party,
-                      const net::CanonicalCookie& cookie,
-                      content::ResourceContext* context,
-                      int render_process_id,
-                      int render_frame_id) override;
-  void AllowWorkerFileSystem(
-      const GURL& url,
-      content::ResourceContext* context,
-      const std::vector<content::GlobalFrameRoutingId>& render_frames,
-      base::Callback<void(bool)> callback) override;
-  bool AllowWorkerIndexedDB(
-      const GURL& url,
-      content::ResourceContext* context,
-      const std::vector<content::GlobalFrameRoutingId>& render_frames) override;
   scoped_refptr<content::QuotaPermissionContext> CreateQuotaPermissionContext()
       override;
   void GetQuotaSettings(
@@ -117,7 +97,6 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       const GURL& request_url,
       bool is_main_frame_request,
       bool strict_enforcement,
-      bool expired_previous_decision,
       const base::Callback<void(content::CertificateRequestResultType)>&
           callback) override;
   base::OnceClosure SelectClientCertificate(
@@ -138,7 +117,6 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                        bool user_gesture,
                        bool opener_suppressed,
                        bool* no_javascript_access) override;
-  void ResourceDispatcherHostCreated() override;
   base::FilePath GetDefaultDownloadDirectory() override;
   std::string GetDefaultDownloadName() override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
@@ -162,15 +140,11 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
   base::Optional<service_manager::Manifest> GetServiceManifestOverlay(
       base::StringPiece name) override;
-  void RunServiceInstanceOnIOThread(
-      const service_manager::Identity& identity,
-      mojo::PendingReceiver<service_manager::mojom::Service>* receiver)
-      override;
   void BindInterfaceRequestFromFrame(
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) override;
-  bool BindAssociatedInterfaceRequestFromFrame(
+  bool BindAssociatedReceiverFromFrame(
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedInterfaceEndpointHandle* handle) override;
@@ -181,14 +155,7 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   void ExposeInterfacesToMediaService(
       service_manager::BinderRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
-  std::vector<std::unique_ptr<content::URLLoaderThrottle>>
-  CreateURLLoaderThrottlesOnIO(
-      const network::ResourceRequest& request,
-      content::ResourceContext* resource_context,
-      const base::RepeatingCallback<content::WebContents*()>& wc_getter,
-      content::NavigationUIData* navigation_ui_data,
-      int frame_tree_node_id) override;
-  std::vector<std::unique_ptr<content::URLLoaderThrottle>>
+  std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
       const network::ResourceRequest& request,
       content::BrowserContext* browser_context,
@@ -216,45 +183,51 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       LoginAuthRequiredCallback auth_required_callback) override;
   bool HandleExternalProtocol(
       const GURL& url,
-      content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+      content::WebContents::Getter web_contents_getter,
       int child_id,
       content::NavigationUIData* navigation_data,
       bool is_main_frame,
       ui::PageTransition page_transition,
       bool has_user_gesture,
-      network::mojom::URLLoaderFactoryPtr* out_factory) override;
+      const base::Optional<url::Origin>& initiating_origin,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory>* out_factory)
+      override;
   void RegisterNonNetworkSubresourceURLLoaderFactories(
       int render_process_id,
       int render_frame_id,
       NonNetworkURLLoaderFactoryMap* factories) override;
   bool ShouldIsolateErrorPage(bool in_main_frame) override;
   bool ShouldEnableStrictSiteIsolation() override;
+  bool ShouldLockToOrigin(content::BrowserContext* browser_context,
+                          const GURL& effective_url) override;
   bool WillCreateURLLoaderFactory(
       content::BrowserContext* browser_context,
       content::RenderFrameHost* frame,
       int render_process_id,
-      bool is_navigation,
-      bool is_download,
+      URLLoaderFactoryType type,
       const url::Origin& request_initiator,
       mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
-      network::mojom::TrustedURLLoaderHeaderClientPtrInfo* header_client,
+      mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>*
+          header_client,
       bool* bypass_redirect_checks) override;
-  void WillCreateURLLoaderFactoryForAppCacheSubresource(
-      int render_process_id,
-      mojo::PendingRemote<network::mojom::URLLoaderFactory>* pending_factory)
-      override;
   uint32_t GetWebSocketOptions(content::RenderFrameHost* frame) override;
   bool WillCreateRestrictedCookieManager(
+      network::mojom::RestrictedCookieManagerRole role,
       content::BrowserContext* browser_context,
       const url::Origin& origin,
+      const GURL& site_for_cookies,
+      const url::Origin& top_frame_origin,
       bool is_service_worker,
       int process_id,
       int routing_id,
-      network::mojom::RestrictedCookieManagerRequest* request) override;
+      mojo::PendingReceiver<network::mojom::RestrictedCookieManager>* receiver)
+      override;
   std::string GetProduct() override;
   std::string GetUserAgent() override;
   ContentBrowserClient::WideColorGamutHeuristic GetWideColorGamutHeuristic()
       override;
+  void LogWebFeatureForCurrentPage(content::RenderFrameHost* render_frame_host,
+                                   blink::mojom::WebFeature feature) override;
 
   AwFeatureListCreator* aw_feature_list_creator() {
     return aw_feature_list_creator_;

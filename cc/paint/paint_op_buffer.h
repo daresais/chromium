@@ -18,7 +18,7 @@
 #include "base/memory/aligned_memory.h"
 #include "base/optional.h"
 #include "cc/base/math_util.h"
-#include "cc/paint/node_holder.h"
+#include "cc/paint/node_id.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_export.h"
 #include "cc/paint/paint_flags.h"
@@ -744,8 +744,8 @@ class CC_PAINT_EXPORT DrawTextBlobOp final : public PaintOpWithFlags {
   DrawTextBlobOp(sk_sp<SkTextBlob> blob,
                  SkScalar x,
                  SkScalar y,
-                 const PaintFlags& flags,
-                 const NodeHolder& node_holder);
+                 NodeId node_id,
+                 const PaintFlags& flags);
   ~DrawTextBlobOp();
   static void RasterWithFlags(const DrawTextBlobOp* op,
                               const PaintFlags* flags,
@@ -760,7 +760,7 @@ class CC_PAINT_EXPORT DrawTextBlobOp final : public PaintOpWithFlags {
   SkScalar x;
   SkScalar y;
   // This field isn't serialized.
-  NodeHolder node_holder;
+  NodeId node_id = kInvalidNodeId;
 
  private:
   DrawTextBlobOp();
@@ -937,6 +937,12 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
   void Playback(SkCanvas* canvas) const;
   void Playback(SkCanvas* canvas, const PlaybackParams& params) const;
 
+  // Deserialize PaintOps from |input|. The original content will be
+  // overwritten.
+  bool Deserialize(const volatile void* input,
+                   size_t input_size,
+                   const PaintOp::DeserializeOptions& options);
+
   static sk_sp<PaintOpBuffer> MakeFromMemory(
       const volatile void* input,
       size_t input_size,
@@ -949,6 +955,8 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
   size_t bytes_used() const {
     return sizeof(*this) + reserved_ + subrecord_bytes_used_;
   }
+  // Returns the number of bytes used by paint ops.
+  size_t paint_ops_size() const { return used_ + subrecord_bytes_used_; }
   // Returns the total number of ops including sub-records.
   size_t total_op_count() const { return op_count_ + subrecord_op_count_; }
 

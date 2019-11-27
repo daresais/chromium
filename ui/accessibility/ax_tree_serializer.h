@@ -162,6 +162,9 @@ class AXTreeSerializer {
   // Invalidate the subtree rooted at this node.
   void InvalidateClientSubtree(ClientTreeNode* client_node);
 
+  // Delete all descendants of this node.
+  void DeleteDescendants(ClientTreeNode* client_node);
+
   // Delete the client subtree rooted at this node.
   void DeleteClientSubtree(ClientTreeNode* client_node);
 
@@ -406,7 +409,7 @@ bool AXTreeSerializer<AXSourceNode, AXNodeData, AXTreeData>::SerializeChanges(
         out_update->node_id_to_clear = tree_->GetId(lca);
         ClientTreeNode* client_lca = ClientTreeNodeById(tree_->GetId(lca));
         CHECK(client_lca);
-        DeleteClientSubtree(client_lca);
+        DeleteDescendants(client_lca);
       }
     }
   } while (need_delete);
@@ -464,12 +467,19 @@ void AXTreeSerializer<AXSourceNode, AXNodeData, AXTreeData>::
     DeleteClientSubtree(ClientTreeNode* client_node) {
   if (client_node == client_root_) {
     Reset();  // Do not try to reuse a bad root later.
-    return;
+  } else {
+    DeleteDescendants(client_node);
+    client_id_map_.erase(client_node->id);
+    delete client_node;
   }
+}
+
+template <typename AXSourceNode, typename AXNodeData, typename AXTreeData>
+void AXTreeSerializer<AXSourceNode, AXNodeData, AXTreeData>::DeleteDescendants(
+    ClientTreeNode* client_node) {
   for (size_t i = 0; i < client_node->children.size(); ++i)
     DeleteClientSubtree(client_node->children[i]);
-  client_id_map_.erase(client_node->id);
-  delete client_node;
+  client_node->children.clear();
 }
 
 template <typename AXSourceNode, typename AXNodeData, typename AXTreeData>

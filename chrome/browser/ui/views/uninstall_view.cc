@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/uninstall_view.h"
 
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/process/launch.h"
 #include "base/run_loop.h"
 #include "chrome/browser/shell_integration.h"
@@ -28,6 +28,9 @@ UninstallView::UninstallView(int* user_selection,
       browsers_combo_(NULL),
       user_selection_(*user_selection),
       quit_closure_(quit_closure) {
+  DialogDelegate::set_button_label(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_UNINSTALL_BUTTON_TEXT));
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
   SetupControls();
@@ -92,7 +95,7 @@ void UninstallView::SetupControls() {
   // instance because the OS doesn't permit that).
   if (ShellUtil::CanMakeChromeDefaultUnattended() &&
       shell_integration::GetDefaultBrowser() == shell_integration::IS_DEFAULT) {
-    browsers_.reset(new BrowsersMap());
+    browsers_ = std::make_unique<BrowsersMap>();
     ShellUtil::GetRegisteredBrowsers(browsers_.get());
     if (!browsers_->empty()) {
       layout->AddPaddingRow(views::GridLayout::kFixedSize,
@@ -141,14 +144,6 @@ bool UninstallView::Accept() {
 bool UninstallView::Cancel() {
   user_selection_ = chrome::RESULT_CODE_UNINSTALL_USER_CANCEL;
   return true;
-}
-
-base::string16 UninstallView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  // Label the OK button 'Uninstall'; Cancel remains the same.
-  if (button == ui::DIALOG_BUTTON_OK)
-    return l10n_util::GetStringUTF16(IDS_UNINSTALL_BUTTON_TEXT);
-  return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
 
 void UninstallView::ButtonPressed(views::Button* sender,

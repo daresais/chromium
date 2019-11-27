@@ -9,14 +9,12 @@ import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQuali
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.support.annotation.WorkerThread;
 
 import org.chromium.base.Log;
+import org.chromium.base.PackageManagerUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.browserservices.BrowserServicesMetrics;
 import org.chromium.chrome.browser.browserservices.Origin;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
@@ -25,6 +23,8 @@ import org.chromium.content_public.browser.UiThreadTaskTraits;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.inject.Singleton;
+
+import androidx.annotation.WorkerThread;
 
 /**
  * This class updates the notification permission for an Origin based on the notification permission
@@ -40,14 +40,12 @@ public class NotificationPermissionUpdater {
     private static final String TAG = "TWANotifications";
 
     private final TrustedWebActivityPermissionManager mPermissionManager;
-    private final PackageManager mPackageManager;
     private final TrustedWebActivityClient mTrustedWebActivityClient;
 
     @Inject
     public NotificationPermissionUpdater(@Named(APP_CONTEXT) Context context,
             TrustedWebActivityPermissionManager permissionManager,
             TrustedWebActivityClient trustedWebActivityClient) {
-        mPackageManager = context.getPackageManager();
         mPermissionManager = permissionManager;
         mTrustedWebActivityClient = trustedWebActivityClient;
     }
@@ -61,11 +59,6 @@ public class NotificationPermissionUpdater {
      * - Otherwise, it does nothing.
      */
     public void onOriginVerified(Origin origin, String packageName) {
-        if (!ChromeFeatureList.isEnabled(
-                ChromeFeatureList.TRUSTED_WEB_ACTIVITY_NOTIFICATION_DELEGATION_ENROLMENT)) {
-            return;
-        }
-
         // If the client doesn't handle browsable Intents for the URL, we don't do anything special
         // for the origin's notifications.
         if (!appHandlesBrowsableIntent(packageName, origin.uri())) {
@@ -89,11 +82,6 @@ public class NotificationPermissionUpdater {
      * app was installed.
      */
     public void onClientAppUninstalled(Origin origin) {
-        if (!ChromeFeatureList.isEnabled(
-                ChromeFeatureList.TRUSTED_WEB_ACTIVITY_NOTIFICATION_DELEGATION_ENROLMENT)) {
-            return;
-        }
-
         // See if there is any other app installed that could handle the notifications (and update
         // to that apps notification permission if it exists).
         boolean couldConnect = mTrustedWebActivityClient.checkNotificationPermission(origin,
@@ -140,7 +128,7 @@ public class NotificationPermissionUpdater {
 
         try (BrowserServicesMetrics.TimingMetric unused =
                      BrowserServicesMetrics.getBrowsableIntentResolutionTimingContext()) {
-            return mPackageManager.resolveActivity(browsableIntent, 0) != null;
+            return PackageManagerUtils.resolveActivity(browsableIntent, 0) != null;
         }
     }
 }

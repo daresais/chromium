@@ -46,15 +46,16 @@ MediaControllerImpl::~MediaControllerImpl() = default;
 
 // static
 void MediaControllerImpl::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kLockScreenMediaKeysEnabled, true,
-                                PrefRegistry::PUBLIC);
+  registry->RegisterBooleanPref(prefs::kLockScreenMediaControlsEnabled, true);
 }
 
 bool MediaControllerImpl::AreLockScreenMediaKeysEnabled() const {
   PrefService* prefs =
       Shell::Get()->session_controller()->GetPrimaryUserPrefService();
-  return base::FeatureList::IsEnabled(features::kLockScreenMediaKeys) &&
-         prefs->GetBoolean(prefs::kLockScreenMediaKeysEnabled) &&
+  DCHECK(prefs);
+
+  return base::FeatureList::IsEnabled(features::kLockScreenMediaControls) &&
+         prefs->GetBoolean(prefs::kLockScreenMediaControlsEnabled) &&
          !media_controls_dismissed_;
 }
 
@@ -205,48 +206,50 @@ void MediaControllerImpl::MediaSessionActionsChanged(
 }
 
 void MediaControllerImpl::SetMediaSessionControllerForTest(
-    media_session::mojom::MediaControllerPtr controller) {
-  media_session_controller_ptr_ = std::move(controller);
+    mojo::Remote<media_session::mojom::MediaController> controller) {
+  media_session_controller_remote_ = std::move(controller);
   BindMediaControllerObserver();
 }
 
 void MediaControllerImpl::FlushForTesting() {
-  if (media_session_controller_ptr_)
-    media_session_controller_ptr_.FlushForTesting();
+  if (media_session_controller_remote_)
+    media_session_controller_remote_.FlushForTesting();
 }
 
 media_session::mojom::MediaController*
 MediaControllerImpl::GetMediaSessionController() {
   // |connector_| can be null in tests.
-  if (connector_ && !media_session_controller_ptr_.is_bound()) {
-    media_session::mojom::MediaControllerManagerPtr controller_manager_ptr;
-    connector_->BindInterface(media_session::mojom::kServiceName,
-                              &controller_manager_ptr);
-    controller_manager_ptr->CreateActiveMediaController(
-        mojo::MakeRequest(&media_session_controller_ptr_));
+  if (connector_ && !media_session_controller_remote_.is_bound()) {
+    mojo::Remote<media_session::mojom::MediaControllerManager>
+        controller_manager_remote;
+    connector_->Connect(media_session::mojom::kServiceName,
+                        controller_manager_remote.BindNewPipeAndPassReceiver());
+    controller_manager_remote->CreateActiveMediaController(
+        media_session_controller_remote_.BindNewPipeAndPassReceiver());
 
-    media_session_controller_ptr_.set_connection_error_handler(
+    media_session_controller_remote_.set_disconnect_handler(
         base::BindRepeating(&MediaControllerImpl::OnMediaSessionControllerError,
                             base::Unretained(this)));
 
     BindMediaControllerObserver();
   }
 
-  return media_session_controller_ptr_.get();
+  return media_session_controller_remote_.is_bound()
+             ? media_session_controller_remote_.get()
+             : nullptr;
 }
 
 void MediaControllerImpl::OnMediaSessionControllerError() {
-  media_session_controller_ptr_.reset();
+  media_session_controller_remote_.reset();
   supported_media_session_action_ = false;
 }
 
 void MediaControllerImpl::BindMediaControllerObserver() {
-  if (!media_session_controller_ptr_.is_bound())
+  if (!media_session_controller_remote_.is_bound())
     return;
 
-  media_session::mojom::MediaControllerObserverPtr observer;
-  media_controller_observer_binding_.Bind(mojo::MakeRequest(&observer));
-  media_session_controller_ptr_->AddObserver(std::move(observer));
+  media_session_controller_remote_->AddObserver(
+      media_controller_observer_receiver_.BindNewPipeAndPassRemote());
 }
 
 bool MediaControllerImpl::ShouldUseMediaSession() {

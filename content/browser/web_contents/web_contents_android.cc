@@ -15,7 +15,6 @@
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -41,7 +40,6 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "net/android/network_library.h"
 #include "ui/accessibility/ax_assistant_structure.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/mojom/ax_assistant_structure.mojom.h"
@@ -195,21 +193,13 @@ ScopedJavaLocalRef<jobject> JNI_WebContentsImpl_FromNativePtr(
 
 WebContentsAndroid::WebContentsAndroid(WebContentsImpl* web_contents)
     : web_contents_(web_contents),
-      navigation_controller_(&(web_contents->GetController())),
-      weak_factory_(this) {
+      navigation_controller_(&(web_contents->GetController())) {
   g_allocated_web_contents_androids.Get().insert(this);
   JNIEnv* env = AttachCurrentThread();
   obj_.Reset(env,
              Java_WebContentsImpl_create(env, reinterpret_cast<intptr_t>(this),
                                          navigation_controller_.GetJavaObject())
                  .obj());
-  blink::mojom::RendererPreferences* prefs =
-      web_contents_->GetMutableRendererPrefs();
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  prefs->network_contry_iso =
-      command_line->HasSwitch(switches::kNetworkCountryIso) ?
-          command_line->GetSwitchValueASCII(switches::kNetworkCountryIso)
-          : net::android::GetTelephonyNetworkCountryIso();
 }
 
 WebContentsAndroid::~WebContentsAndroid() {
@@ -569,10 +559,9 @@ void WebContentsAndroid::AddMessageToDevToolsConsole(
       ConvertJavaStringToUTF8(env, message));
 }
 
-void WebContentsAndroid::PostMessageToFrame(
+void WebContentsAndroid::PostMessageToMainFrame(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jstring>& jframe_name,
     const JavaParamRef<jstring>& jmessage,
     const JavaParamRef<jstring>& jsource_origin,
     const JavaParamRef<jstring>& jtarget_origin,
@@ -593,9 +582,9 @@ jint WebContentsAndroid::GetThemeColor(JNIEnv* env,
   return web_contents_->GetThemeColor().value_or(SK_ColorTRANSPARENT);
 }
 
-jint WebContentsAndroid::GetLoadProgress(JNIEnv* env,
-                                         const JavaParamRef<jobject>& obj) {
-  return web_contents_->GetLoadProgress() * 100;
+jfloat WebContentsAndroid::GetLoadProgress(JNIEnv* env,
+                                           const JavaParamRef<jobject>& obj) {
+  return web_contents_->GetLoadProgress();
 }
 
 void WebContentsAndroid::RequestSmartClipExtract(
@@ -656,11 +645,6 @@ void WebContentsAndroid::SetSpatialNavigationDisabled(
   web_contents_->SetSpatialNavigationDisabled(disabled);
 }
 
-void WebContentsAndroid::ReloadLoFiImages(JNIEnv* env,
-                                          const JavaParamRef<jobject>& obj) {
-  static_cast<WebContentsImpl*>(web_contents_)->ReloadLoFiImages();
-}
-
 int WebContentsAndroid::DownloadImage(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj,
@@ -670,8 +654,9 @@ int WebContentsAndroid::DownloadImage(
     jboolean bypass_cache,
     const base::android::JavaParamRef<jobject>& jcallback) {
   GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
+  const uint32_t preferred_size = 0;
   return web_contents_->DownloadImage(
-      url, is_fav_icon, max_bitmap_size, bypass_cache,
+      url, is_fav_icon, preferred_size, max_bitmap_size, bypass_cache,
       base::Bind(&WebContentsAndroid::OnFinishDownloadImage,
                  weak_factory_.GetWeakPtr(),
                  ScopedJavaGlobalRef<jobject>(env, obj),

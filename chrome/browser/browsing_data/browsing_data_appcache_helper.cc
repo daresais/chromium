@@ -30,7 +30,6 @@ void OnAppCacheInfoFetchComplete(
     BrowsingDataAppCacheHelper::FetchCallback callback,
     scoped_refptr<content::AppCacheInfoCollection> info_collection,
     int /*rv*/) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback.is_null());
 
   std::list<content::StorageUsageInfo> result;
@@ -57,9 +56,7 @@ void OnAppCacheInfoFetchComplete(
     result.emplace_back(origin, total_size, last_modified);
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(std::move(callback), std::move(result)));
+  std::move(callback).Run(std::move(result));
 }
 
 }  // namespace
@@ -72,27 +69,6 @@ void BrowsingDataAppCacheHelper::StartFetching(FetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&BrowsingDataAppCacheHelper::StartFetchingOnIOThread, this,
-                     std::move(callback)));
-}
-
-void BrowsingDataAppCacheHelper::DeleteAppCaches(const url::Origin& origin) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&BrowsingDataAppCacheHelper::DeleteAppCachesOnIOThread,
-                     this, origin));
-}
-
-BrowsingDataAppCacheHelper::~BrowsingDataAppCacheHelper() {}
-
-void BrowsingDataAppCacheHelper::StartFetchingOnIOThread(
-    FetchCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(!callback.is_null());
-
   scoped_refptr<content::AppCacheInfoCollection> info_collection =
       new content::AppCacheInfoCollection();
 
@@ -102,12 +78,13 @@ void BrowsingDataAppCacheHelper::StartFetchingOnIOThread(
                      info_collection));
 }
 
-void BrowsingDataAppCacheHelper::DeleteAppCachesOnIOThread(
-    const url::Origin& origin) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+void BrowsingDataAppCacheHelper::DeleteAppCaches(const url::Origin& origin) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   appcache_service_->DeleteAppCachesForOrigin(origin,
                                               net::CompletionOnceCallback());
 }
+
+BrowsingDataAppCacheHelper::~BrowsingDataAppCacheHelper() {}
 
 CannedBrowsingDataAppCacheHelper::CannedBrowsingDataAppCacheHelper(
     AppCacheService* appcache_service)
@@ -145,8 +122,8 @@ void CannedBrowsingDataAppCacheHelper::StartFetching(FetchCallback callback) {
   for (const auto& origin : pending_origins_)
     result.emplace_back(origin, 0, base::Time());
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(std::move(callback), result));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(std::move(callback), result));
 }
 
 void CannedBrowsingDataAppCacheHelper::DeleteAppCaches(

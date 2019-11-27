@@ -22,7 +22,12 @@ namespace base {
 class CommandLine;
 }
 
+namespace tracing {
+class TracingSamplerProfiler;
+}
+
 class ChromeContentBrowserClient;
+class HeapProfilerController;
 
 // Chrome implementation of ContentMainDelegate.
 class ChromeMainDelegate : public content::ContentMainDelegate {
@@ -61,7 +66,6 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
   void PostEarlyInitialization(bool is_running_tests) override;
   bool ShouldCreateFeatureList() override;
-  void PostTaskSchedulerStart() override;
 #endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
   void PostFieldTrialInitialization() override;
 
@@ -83,6 +87,12 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
   std::unique_ptr<StartupData> startup_data_;
 #endif
+
+  std::unique_ptr<tracing::TracingSamplerProfiler> tracing_sampler_profiler_;
+
+  // The controller schedules UMA heap profiles collections and forwarding down
+  // the reporting pipeline.
+  std::unique_ptr<HeapProfilerController> heap_profiler_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeMainDelegate);
 };

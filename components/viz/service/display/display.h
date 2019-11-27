@@ -31,10 +31,16 @@
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/common/texture_in_use_response.h"
 #include "ui/gfx/color_space.h"
+#include "ui/gfx/overlay_transform.h"
+#include "ui/gfx/swap_result.h"
 #include "ui/latency/latency_info.h"
 
 namespace gfx {
 class Size;
+}
+
+namespace gpu {
+class ScopedAllowScheduleGpuTask;
 }
 
 namespace viz {
@@ -143,8 +149,6 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   void DidSwapWithSize(const gfx::Size& pixel_size) override;
   void DidReceivePresentationFeedback(
       const gfx::PresentationFeedback& feedback) override;
-  void DidFinishLatencyInfo(
-      const std::vector<ui::LatencyInfo>& latency_info) override;
 
   // LatestLocalSurfaceIdLookupDelegate implementation.
   LocalSurfaceId GetSurfaceAtAggregation(
@@ -171,7 +175,39 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
 
   base::ScopedClosureRunner GetCacheBackBufferCb();
 
+  bool IsRootFrameMissing() const;
+
  private:
+  // PresentationGroupTiming stores rendering pipeline stage timings associated
+  // with a call to Display::DrawAndSwap along with a list of
+  // Surface::PresentationHelper's for each aggregated Surface that will be
+  // presented.
+  class PresentationGroupTiming {
+   public:
+    PresentationGroupTiming();
+    PresentationGroupTiming(PresentationGroupTiming&& other);
+    ~PresentationGroupTiming();
+
+    void AddPresentationHelper(
+        std::unique_ptr<Surface::PresentationHelper> helper);
+    void OnDraw(base::TimeTicks draw_start_timestamp);
+    void OnSwap(gfx::SwapTimings timings);
+    bool HasSwapped() const { return !swap_timings_.is_null(); }
+    void OnPresent(const gfx::PresentationFeedback& feedback);
+
+    base::TimeTicks draw_start_timestamp() const {
+      return draw_start_timestamp_;
+    }
+
+   private:
+    base::TimeTicks draw_start_timestamp_;
+    gfx::SwapTimings swap_timings_;
+    std::vector<std::unique_ptr<Surface::PresentationHelper>>
+        presentation_helpers_;
+
+    DISALLOW_COPY_AND_ASSIGN(PresentationGroupTiming);
+  };
+
   // TODO(cblume, crbug.com/900973): |enable_shared_images| is a temporary
   // solution that unblocks us until SharedImages are threadsafe in WebView.
   void InitializeRenderer(bool enable_shared_images = true);
@@ -197,6 +233,10 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   bool swapped_since_resize_ = false;
   bool output_is_secure_ = false;
 
+#if DCHECK_IS_ON()
+  std::unique_ptr<gpu::ScopedAllowScheduleGpuTask>
+      allow_schedule_gpu_task_during_destruction_;
+#endif
   std::unique_ptr<OutputSurface> output_surface_;
   SkiaOutputSurface* const skia_output_surface_;
   std::unique_ptr<DisplayScheduler> scheduler_;
@@ -210,22 +250,21 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   std::vector<ui::LatencyInfo> stored_latency_info_;
   std::vector<SurfaceId> surfaces_to_ack_on_next_draw_;
 
-  // |pending_surfaces_with_presentation_helpers_| is a list of lists of
-  // Surface::PresentationHelpers. The lists are grouped by swap (each surface
-  // involved in an individual Swap is added to the list. These are then
-  // notified of presentation after the appropriate Swap is completed.
-  base::circular_deque<
-      std::pair<base::TimeTicks,
-                std::vector<std::unique_ptr<Surface::PresentationHelper>>>>
-      pending_surfaces_with_presentation_helpers_;
+  // |pending_presentation_group_timings_| stores a
+  // Display::PresentationGroupTiming for each group currently waiting for
+  // Display::DidReceivePresentationFeedack()
+  base::circular_deque<Display::PresentationGroupTiming>
+      pending_presentation_group_timings_;
 
   // Callback that will be run after all pending swaps have acked.
   base::OnceClosure no_pending_swaps_callback_;
 
   int64_t swapped_trace_id_ = 0;
+  int64_t last_swap_ack_trace_id_ = 0;
   int64_t last_presented_trace_id_ = 0;
 
-  base::circular_deque<base::TimeTicks> draw_start_times_pending_swap_ack_;
+  gfx::OverlayTransform last_display_transform_swapped_ =
+      gfx::OVERLAY_TRANSFORM_NONE;
 
   DISALLOW_COPY_AND_ASSIGN(Display);
 };

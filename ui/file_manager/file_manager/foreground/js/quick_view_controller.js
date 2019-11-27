@@ -12,7 +12,7 @@ class QuickViewController {
    * @param {!MetadataModel} metadataModel File system metadata.
    * @param {!FileSelectionHandler} selectionHandler
    * @param {!ListContainer} listContainer
-   * @param {!cr.ui.MenuButton} selectionMenuButton
+   * @param {!cr.ui.MultiMenuButton} selectionMenuButton
    * @param {!QuickViewModel} quickViewModel
    * @param {!TaskController} taskController
    * @param {!cr.ui.ListSelectionModel} fileListSelectionModel
@@ -96,13 +96,17 @@ class QuickViewController {
    */
   init_(quickView) {
     this.quickView_ = quickView;
+    this.quickView_.isModal = DialogType.isModal(this.dialogType_);
+
     this.metadataBoxController_.init(quickView);
+
     document.body.addEventListener(
         'keydown', this.onQuickViewKeyDown_.bind(this));
-    quickView.addEventListener('close', () => {
+    this.quickView_.addEventListener('close', () => {
       this.listContainer_.focus();
     });
-    quickView.onOpenInNewButtonTap = this.onOpenInNewButtonTap_.bind(this);
+    this.quickView_.onOpenInNewButtonTap =
+        this.onOpenInNewButtonTap_.bind(this);
 
     const toolTip = this.quickView_.$$('files-tooltip');
     const elems =
@@ -488,6 +492,7 @@ QuickViewController.LOCAL_VOLUME_TYPES_ = [
   VolumeManagerCommon.VolumeType.CROSTINI,
   VolumeManagerCommon.VolumeType.MEDIA_VIEW,
   VolumeManagerCommon.VolumeType.DOCUMENTS_PROVIDER,
+  VolumeManagerCommon.VolumeType.SMB,
 ];
 
 /**

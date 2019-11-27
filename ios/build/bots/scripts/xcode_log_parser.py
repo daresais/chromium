@@ -30,7 +30,8 @@ def parse_passed_tests_for_interrupted_run(output):
   passed_tests = []
   # Test has format:
   # [09:04:42:INFO] Test case '-[Test_class test_method]' passed.
-  passed_test_regex = re.compile(r'Test case \'\-\[(.+?)\s(.+?)\]\' passed')
+  # [09:04:42:INFO] Test Case '-[Test_class test_method]' passed.
+  passed_test_regex = re.compile(r'Test [Cc]ase \'\-\[(.+?)\s(.+?)\]\' passed')
 
   for test_line in output:
     m_test = passed_test_regex.search(test_line)
@@ -66,12 +67,9 @@ def copy_screenshots_for_failed_test(failure_message, test_case_folder):
     # "Screenshot At Failure" : <UIImage: 0x6000032ab410>, {768, 1024}
     if 'UIImage:' in screenshots_files:
       return
-    LOGGER.info('Screenshots for failure "%s" in "%s"' % (
-        os.path.basename(test_case_folder), test_case_folder))
     d = json.loads(screenshots_files)
     for f in d.values():
       if not os.path.exists(f):
-        LOGGER.warning('File %s does not exist!' % f)
         continue
       screenshot = os.path.join(test_case_folder, os.path.basename(f))
       shutil.copyfile(f, screenshot)
@@ -185,7 +183,7 @@ class Xcode11LogParser(object):
 
   @staticmethod
   def collect_test_results(xcresult, output):
-    """Gets test result data from xcresult.
+    """Gets test result and diagnostic data from xcresult.
 
     Args:
       xcresult: (str) A path to xcresult.
@@ -226,6 +224,7 @@ class Xcode11LogParser(object):
     else:
       test_results['failed'] = Xcode11LogParser._list_of_failed_tests(root)
       test_results['passed'] = Xcode11LogParser._list_of_passed_tests(xcresult)
+    Xcode11LogParser._export_diagnostic_data(xcresult + '.xcresult')
     return test_results
 
   @staticmethod
@@ -251,6 +250,34 @@ class Xcode11LogParser(object):
                                       format_test_case(test_case))
       copy_screenshots_for_failed_test(failure_summary['message']['_value'],
                                        test_case_folder)
+
+  @staticmethod
+  def _export_diagnostic_data(xcresult):
+    """Exports diagnostic data from xcresult to xcresult_diagnostic folder.
+
+    Since Xcode 11 format of result bundles changed, to get diagnostic data
+    need to run command below:
+    xcresulttool export --type directory --id DIAGNOSTICS_REF --output-path
+    ./export_folder --path ./RB.xcresult
+
+    Args:
+      xcresult: (str) A path to xcresult directory.
+    """
+    plist_path = os.path.join(xcresult, 'Info.plist')
+    if not (os.path.exists(xcresult) and os.path.exists(plist_path)):
+      return
+    root = json.loads(Xcode11LogParser._xcresulttool_get(xcresult))
+    try:
+      diagnostics_ref = root['actions']['_values'][0]['actionResult'][
+          'diagnosticsRef']['id']['_value']
+      export_command = ['xcresulttool', 'export',
+                        '--type', 'directory',
+                        '--id', diagnostics_ref,
+                        '--path', xcresult,
+                        '--output-path', '%s_diagnostic' % xcresult]
+      subprocess.check_output(export_command).strip()
+    except KeyError:
+      LOGGER.warn('Did not parse diagnosticsRef from %s!' % xcresult)
 
 
 class XcodeLogParser(object):

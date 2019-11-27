@@ -185,6 +185,7 @@ test("cast_base_unittests") {
     ":thread_health_checker",
     "//base/test:run_all_unittests",
     "//base/test:test_support",
+    "//chromecast/base/static_sequence:tests",
     "//testing/gmock",
     "//testing/gtest",
   ]
@@ -379,7 +380,9 @@ if (is_android) {
 
     deps = [
       "//base:base_java",
+      "//base:jni_java",
     ]
+    annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
   }
 
   android_library("cast_base_test_utils_java") {

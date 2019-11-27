@@ -4,13 +4,18 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
+import android.content.Context;
 import android.os.Bundle;
-import android.support.annotation.NonNull;
+
+import androidx.annotation.NonNull;
 
 import org.chromium.base.annotations.UsedByReflection;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.autofill_assistant.metrics.OnBoarding;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
+import org.chromium.chrome.browser.widget.ScrimView;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.Map;
@@ -32,7 +37,7 @@ public class AutofillAssistantModuleEntryImpl implements AutofillAssistantModule
             return;
         }
 
-        ChromeActivity activity = tab.getActivity();
+        ChromeActivity activity = ((TabImpl) tab).getActivity();
         AssistantOnboardingCoordinator onboardingCoordinator = new AssistantOnboardingCoordinator(
                 experimentIds, activity, activity.getBottomSheetController(), tab);
         onboardingCoordinator.show(accepted -> {
@@ -40,7 +45,15 @@ public class AutofillAssistantModuleEntryImpl implements AutofillAssistantModule
 
             AutofillAssistantClient.fromWebContents(tab.getWebContents())
                     .start(initialUrl, parameters, experimentIds, intentExtras,
-                            onboardingCoordinator.transferControls());
+                            onboardingCoordinator);
         });
+    }
+
+    @Override
+    public AutofillAssistantActionHandler createActionHandler(Context context,
+            BottomSheetController bottomSheetController, ScrimView scrimView,
+            GetCurrentTab getCurrentTab) {
+        return new AutofillAssistantActionHandlerImpl(
+                context, bottomSheetController, scrimView, getCurrentTab);
     }
 }

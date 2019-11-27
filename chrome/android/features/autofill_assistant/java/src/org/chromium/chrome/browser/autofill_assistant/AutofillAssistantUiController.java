@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.autofill_assistant.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
@@ -17,7 +18,6 @@ import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantChip;
 import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantChip.Type;
 import org.chromium.chrome.browser.autofill_assistant.header.AssistantHeaderModel;
 import org.chromium.chrome.browser.autofill_assistant.metrics.DropOutReason;
-import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayCoordinator;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tab.Tab;
@@ -84,7 +84,7 @@ class AutofillAssistantUiController {
     @CalledByNative
     private static AutofillAssistantUiController create(ChromeActivity activity,
             boolean allowTabSwitching, long nativeUiController,
-            @Nullable AssistantOverlayCoordinator overlayCoordinator) {
+            @Nullable AssistantOnboardingCoordinator onboardingCoordinator) {
         assert activity != null;
         assert activity.getBottomSheetController() != null;
 
@@ -94,15 +94,16 @@ class AutofillAssistantUiController {
         sActiveChromeActivities.add(activity);
 
         return new AutofillAssistantUiController(activity, activity.getBottomSheetController(),
-                allowTabSwitching, nativeUiController, overlayCoordinator);
+                allowTabSwitching, nativeUiController, onboardingCoordinator);
     }
 
     private AutofillAssistantUiController(ChromeActivity activity, BottomSheetController controller,
             boolean allowTabSwitching, long nativeUiController,
-            @Nullable AssistantOverlayCoordinator overlayCoordinator) {
+            @Nullable AssistantOnboardingCoordinator onboardingCoordinator) {
         mNativeUiController = nativeUiController;
         mActivity = activity;
-        mCoordinator = new AssistantCoordinator(activity, controller, overlayCoordinator);
+        mCoordinator = new AssistantCoordinator(activity, controller,
+                onboardingCoordinator == null ? null : onboardingCoordinator.transferControls());
         mActivityTabObserver =
                 new ActivityTabProvider.ActivityTabTabObserver(activity.getActivityTabProvider()) {
                     @Override
@@ -201,8 +202,19 @@ class AutofillAssistantUiController {
     }
 
     @CalledByNative
-    private void showSnackbar(String message) {
-        mSnackbarController = AssistantSnackbar.show(mActivity, message, this::safeSnackbarResult);
+    private boolean isKeyboardShown() {
+        return mCoordinator.getKeyboardCoordinator().isKeyboardShown();
+    }
+
+    @CalledByNative
+    private void hideKeyboard() {
+        mCoordinator.getKeyboardCoordinator().hideKeyboard();
+    }
+
+    @CalledByNative
+    private void showSnackbar(int delayMs, String message) {
+        mSnackbarController =
+                AssistantSnackbar.show(mActivity, delayMs, message, this::safeSnackbarResult);
     }
 
     private void dismissSnackbar() {
@@ -248,7 +260,8 @@ class AutofillAssistantUiController {
     }
 
     /**
-     * Adds a cancel action button to the chip list, which shows the snackbar and then executes
+     * Adds a cancel action button to the chip list. If the keyboard is currently shown, it
+     * dismisses the keyboard. Otherwise, it shows the snackbar and then executes
      * {@code actionIndex}, or shuts down Autofill Assistant if {@code actionIndex} is {@code -1}.
      */
     @CalledByNative
@@ -303,8 +316,8 @@ class AutofillAssistantUiController {
     }
 
     @CalledByNative
-    private void setResizeViewport(boolean resizeViewport) {
-        mCoordinator.getBottomBarCoordinator().setResizeViewport(resizeViewport);
+    private void setViewportMode(@AssistantViewportMode int mode) {
+        mCoordinator.getBottomBarCoordinator().setViewportMode(mode);
     }
 
     @CalledByNative
@@ -314,38 +327,69 @@ class AutofillAssistantUiController {
 
     // Native methods.
     private void safeSnackbarResult(boolean undo) {
-        if (mNativeUiController != 0) nativeSnackbarResult(mNativeUiController, undo);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().snackbarResult(
+                    mNativeUiController, AutofillAssistantUiController.this, undo);
+        }
     }
-    private native void nativeSnackbarResult(long nativeUiControllerAndroid, boolean undo);
 
     private void safeNativeStop(@DropOutReason int reason) {
-        if (mNativeUiController != 0) nativeStop(mNativeUiController, reason);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().stop(
+                    mNativeUiController, AutofillAssistantUiController.this, reason);
+        }
     }
-    private native void nativeStop(long nativeUiControllerAndroid, @DropOutReason int reason);
 
     private void safeNativeOnFatalError(String message, @DropOutReason int reason) {
-        if (mNativeUiController != 0) nativeOnFatalError(mNativeUiController, message, reason);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().onFatalError(
+                    mNativeUiController, AutofillAssistantUiController.this, message, reason);
+        }
     }
-    private native void nativeOnFatalError(
-            long nativeUiControllerAndroid, String message, @DropOutReason int reason);
 
     private void safeNativeOnUserActionSelected(int index) {
-        if (mNativeUiController != 0) nativeOnUserActionSelected(mNativeUiController, index);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().onUserActionSelected(
+                    mNativeUiController, AutofillAssistantUiController.this, index);
+        }
     }
-    private native void nativeOnUserActionSelected(long nativeUiControllerAndroid, int index);
 
     private void safeNativeOnCancelButtonClicked(int index) {
-        if (mNativeUiController != 0) nativeOnCancelButtonClicked(mNativeUiController, index);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().onCancelButtonClicked(
+                    mNativeUiController, AutofillAssistantUiController.this, index);
+        }
     }
-    private native void nativeOnCancelButtonClicked(long nativeUiControllerAndroid, int index);
 
     private void safeNativeOnCloseButtonClicked() {
-        if (mNativeUiController != 0) nativeOnCloseButtonClicked(mNativeUiController);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().onCloseButtonClicked(
+                    mNativeUiController, AutofillAssistantUiController.this);
+        }
     }
-    private native void nativeOnCloseButtonClicked(long nativeUiControllerAndroid);
 
     private void safeNativeSetVisible(boolean visible) {
-        if (mNativeUiController != 0) nativeSetVisible(mNativeUiController, visible);
+        if (mNativeUiController != 0) {
+            AutofillAssistantUiControllerJni.get().setVisible(
+                    mNativeUiController, AutofillAssistantUiController.this, visible);
+        }
     }
-    private native void nativeSetVisible(long nativeUiControllerAndroid, boolean visible);
+
+    @NativeMethods
+    interface Natives {
+        void snackbarResult(
+                long nativeUiControllerAndroid, AutofillAssistantUiController caller, boolean undo);
+        void stop(long nativeUiControllerAndroid, AutofillAssistantUiController caller,
+                @DropOutReason int reason);
+        void onFatalError(long nativeUiControllerAndroid, AutofillAssistantUiController caller,
+                String message, @DropOutReason int reason);
+        void onUserActionSelected(
+                long nativeUiControllerAndroid, AutofillAssistantUiController caller, int index);
+        void onCancelButtonClicked(
+                long nativeUiControllerAndroid, AutofillAssistantUiController caller, int index);
+        void onCloseButtonClicked(
+                long nativeUiControllerAndroid, AutofillAssistantUiController caller);
+        void setVisible(long nativeUiControllerAndroid, AutofillAssistantUiController caller,
+                boolean visible);
+    }
 }

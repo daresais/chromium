@@ -9,18 +9,14 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
+#include "base/test/task_environment.h"
 #include "base/timer/mock_timer.h"
 #include "components/account_id/account_id.h"
-#include "services/identity/public/mojom/constants.mojom.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/identity/public/mojom/identity_accessor.mojom-test-utils.h"
+#include "services/identity/public/mojom/identity_service.mojom.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,11 +27,11 @@ using testing::_;
 
 class AuthDelegateImpl : public DriveFsAuth::Delegate {
  public:
-  AuthDelegateImpl(std::unique_ptr<service_manager::Connector> connector,
+  AuthDelegateImpl(identity::mojom::IdentityService* identity_service,
                    const AccountId& account_id)
-      : connector_(std::move(connector)), account_id_(account_id) {}
+      : identity_service_(identity_service), account_id_(account_id) {}
 
-  ~AuthDelegateImpl() override {}
+  ~AuthDelegateImpl() override = default;
 
  private:
   // AuthDelegate::Delegate:
@@ -43,8 +39,10 @@ class AuthDelegateImpl : public DriveFsAuth::Delegate {
       override {
     return nullptr;
   }
-  service_manager::Connector* GetConnector() override {
-    return connector_.get();
+  void BindIdentityAccessor(
+      mojo::PendingReceiver<identity::mojom::IdentityAccessor> receiver)
+      override {
+    identity_service_->BindIdentityAccessor(std::move(receiver));
   }
   const AccountId& GetAccountId() override { return account_id_; }
   std::string GetObfuscatedAccountId() override {
@@ -53,7 +51,7 @@ class AuthDelegateImpl : public DriveFsAuth::Delegate {
 
   bool IsMetricsCollectionEnabled() override { return false; }
 
-  const std::unique_ptr<service_manager::Connector> connector_;
+  identity::mojom::IdentityService* const identity_service_;
   const AccountId account_id_;
 
   DISALLOW_COPY_AND_ASSIGN(AuthDelegateImpl);
@@ -64,41 +62,33 @@ class MockIdentityAccessor {
   MOCK_METHOD3(
       GetAccessToken,
       std::pair<base::Optional<std::string>, GoogleServiceAuthError::State>(
-          const std::string& account_id,
+          const CoreAccountId& account_id,
           const ::identity::ScopeSet& scopes,
           const std::string& consumer_id));
 
-  mojo::BindingSet<identity::mojom::IdentityAccessor>* bindings_ = nullptr;
+  mojo::ReceiverSet<identity::mojom::IdentityAccessor>* receivers_ = nullptr;
 };
 
 class FakeIdentityService
     : public identity::mojom::IdentityAccessorInterceptorForTesting,
-      public service_manager::Service {
+      public identity::mojom::IdentityService {
  public:
   explicit FakeIdentityService(MockIdentityAccessor* mock,
-                               const base::Clock* clock,
-                               service_manager::mojom::ServiceRequest request)
-      : mock_(mock), clock_(clock), binding_(this, std::move(request)) {
-    binder_registry_.AddInterface(
-        base::BindRepeating(&FakeIdentityService::BindIdentityAccessorRequest,
-                            base::Unretained(this)));
-    mock_->bindings_ = &bindings_;
+                               const base::Clock* clock)
+      : mock_(mock), clock_(clock) {
+    mock_->receivers_ = &receivers_;
   }
 
-  ~FakeIdentityService() override { mock_->bindings_ = nullptr; }
+  ~FakeIdentityService() override { mock_->receivers_ = nullptr; }
 
   void set_auth_enabled(bool enabled) { auth_enabled_ = enabled; }
 
  private:
-  void OnBindInterface(const service_manager::BindSourceInfo& source,
-                       const std::string& interface_name,
-                       mojo::ScopedMessagePipeHandle interface_pipe) override {
-    binder_registry_.BindInterface(interface_name, std::move(interface_pipe));
-  }
-
-  void BindIdentityAccessorRequest(
-      identity::mojom::IdentityAccessorRequest request) {
-    bindings_.AddBinding(this, std::move(request));
+  // identity::mojom::IdentityService:
+  void BindIdentityAccessor(
+      mojo::PendingReceiver<identity::mojom::IdentityAccessor> receiver)
+      override {
+    receivers_.Add(this, std::move(receiver));
   }
 
   // identity::mojom::IdentityAccessorInterceptorForTesting overrides:
@@ -130,9 +120,7 @@ class FakeIdentityService
 
   MockIdentityAccessor* const mock_;
   const base::Clock* const clock_;
-  service_manager::ServiceBinding binding_;
-  service_manager::BinderRegistry binder_registry_;
-  mojo::BindingSet<identity::mojom::IdentityAccessor> bindings_;
+  mojo::ReceiverSet<identity::mojom::IdentityAccessor> receivers_;
   bool auth_enabled_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(FakeIdentityService);
@@ -140,19 +128,18 @@ class FakeIdentityService
 
 class DriveFsAuthTest : public ::testing::Test {
  public:
-  DriveFsAuthTest() = default;
+  DriveFsAuthTest() : kTestAccountId("test@example.com") {}
 
  protected:
   void SetUp() override {
-    account_id_ = AccountId::FromUserEmailGaiaId("test@example.com", "ID");
     clock_.SetNow(base::Time::Now());
     identity_service_ = std::make_unique<FakeIdentityService>(
-        &mock_identity_accessor_, &clock_,
-        connector_factory_.RegisterInstance(identity::mojom::kServiceName));
+        &mock_identity_accessor_, &clock_);
     auto timer = std::make_unique<base::MockOneShotTimer>();
     timer_ = timer.get();
     delegate_ = std::make_unique<AuthDelegateImpl>(
-        connector_factory_.CreateConnector(), account_id_);
+        identity_service_.get(),
+        AccountId::FromUserEmailGaiaId("test@example.com", "ID"));
     auth_ = std::make_unique<DriveFsAuth>(&clock_,
                                           base::FilePath("/path/to/profile"),
                                           std::move(timer), delegate_.get());
@@ -178,13 +165,11 @@ class DriveFsAuthTest : public ::testing::Test {
     run_loop.Run();
   }
 
-  base::test::ScopedTaskEnvironment task_environment_;
-  service_manager::TestConnectorFactory connector_factory_;
+  const CoreAccountId kTestAccountId;
+  base::test::TaskEnvironment task_environment_;
   MockIdentityAccessor mock_identity_accessor_;
   base::SimpleTestClock clock_;
   std::unique_ptr<FakeIdentityService> identity_service_;
-
-  AccountId account_id_;
 
   std::unique_ptr<AuthDelegateImpl> delegate_;
   std::unique_ptr<DriveFsAuth> auth_;
@@ -196,7 +181,7 @@ class DriveFsAuthTest : public ::testing::Test {
 
 TEST_F(DriveFsAuthTest, GetAccessToken_Success) {
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(
           std::make_pair("auth token", GoogleServiceAuthError::NONE)));
   ExpectAccessToken(false, mojom::AccessTokenStatus::kSuccess, "auth token");
@@ -204,7 +189,7 @@ TEST_F(DriveFsAuthTest, GetAccessToken_Success) {
 
 TEST_F(DriveFsAuthTest, GetAccessToken_GetAccessTokenFailure_Permanent) {
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(std::make_pair(
           base::nullopt, GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS)));
   ExpectAccessToken(false, mojom::AccessTokenStatus::kAuthError, "");
@@ -212,7 +197,7 @@ TEST_F(DriveFsAuthTest, GetAccessToken_GetAccessTokenFailure_Permanent) {
 
 TEST_F(DriveFsAuthTest, GetAccessToken_GetAccessTokenFailure_Transient) {
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(std::make_pair(
           base::nullopt, GoogleServiceAuthError::SERVICE_UNAVAILABLE)));
   ExpectAccessToken(false, mojom::AccessTokenStatus::kTransientError, "");
@@ -235,7 +220,7 @@ TEST_F(DriveFsAuthTest, GetAccessToken_GetAccessTokenFailure_Timeout) {
 TEST_F(DriveFsAuthTest, GetAccessToken_ParallelRequests) {
   base::RunLoop run_loop;
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(
           std::make_pair("auth token", GoogleServiceAuthError::NONE)));
   auto quit_closure = run_loop.QuitClosure();
@@ -258,14 +243,14 @@ TEST_F(DriveFsAuthTest, GetAccessToken_ParallelRequests) {
 TEST_F(DriveFsAuthTest, GetAccessToken_SequentialRequests) {
   for (int i = 0; i < 3; ++i) {
     EXPECT_CALL(mock_identity_accessor_,
-                GetAccessToken("test@example.com", _, "drivefs"))
+                GetAccessToken(kTestAccountId, _, "drivefs"))
         .WillOnce(testing::Return(
             std::make_pair("auth token", GoogleServiceAuthError::NONE)));
     ExpectAccessToken(false, mojom::AccessTokenStatus::kSuccess, "auth token");
   }
   for (int i = 0; i < 3; ++i) {
     EXPECT_CALL(mock_identity_accessor_,
-                GetAccessToken("test@example.com", _, "drivefs"))
+                GetAccessToken(kTestAccountId, _, "drivefs"))
         .WillOnce(testing::Return(std::make_pair(
             base::nullopt, GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS)));
     ExpectAccessToken(false, mojom::AccessTokenStatus::kAuthError, "");
@@ -274,7 +259,7 @@ TEST_F(DriveFsAuthTest, GetAccessToken_SequentialRequests) {
 
 TEST_F(DriveFsAuthTest, Caching) {
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(
           std::make_pair("auth token", GoogleServiceAuthError::NONE)));
 
@@ -286,7 +271,7 @@ TEST_F(DriveFsAuthTest, Caching) {
 
 TEST_F(DriveFsAuthTest, CachedAndNotCached) {
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(
           std::make_pair("auth token", GoogleServiceAuthError::NONE)))
       .WillOnce(testing::Return(
@@ -303,7 +288,7 @@ TEST_F(DriveFsAuthTest, CachedAndNotCached) {
 
 TEST_F(DriveFsAuthTest, CacheExpired) {
   EXPECT_CALL(mock_identity_accessor_,
-              GetAccessToken("test@example.com", _, "drivefs"))
+              GetAccessToken(kTestAccountId, _, "drivefs"))
       .WillOnce(testing::Return(
           std::make_pair("auth token", GoogleServiceAuthError::NONE)))
       .WillOnce(testing::Return(

@@ -17,6 +17,7 @@
 #include "chrome/browser/offline_pages/request_coordinator_factory.h"
 #include "chrome/browser/offline_pages/test_offline_page_model_builder.h"
 #include "chrome/browser/offline_pages/test_request_coordinator_builder.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
@@ -175,7 +176,7 @@ class RecentTabHelperTest
   std::unique_ptr<base::ScopedMockTimeMessageLoopTaskRunner>
       mocked_main_runner_;
 
-  base::WeakPtrFactory<RecentTabHelperTest> weak_ptr_factory_;
+  base::WeakPtrFactory<RecentTabHelperTest> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(RecentTabHelperTest);
 };
@@ -210,8 +211,7 @@ RecentTabHelperTest::RecentTabHelperTest()
       default_test_delegate_(nullptr),
       page_added_count_(0),
       model_removed_count_(0),
-      all_pages_needs_updating_(true),
-      weak_ptr_factory_(this) {}
+      all_pages_needs_updating_(true) {}
 
 void RecentTabHelperTest::SetUp() {
   ChromeRenderViewHostTestHarness::SetUp();
@@ -279,6 +279,7 @@ void RecentTabHelperTest::FastForwardSnapshotController() {
 void RecentTabHelperTest::StartAndCommitNavigation(
     std::unique_ptr<content::NavigationSimulator> simulator) {
   simulator->SetAutoAdvance(false);
+  simulator->SetKeepLoading(true);
   simulator->Start();
 
   // Need to flush the task queue manually since there may be async tasks

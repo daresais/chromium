@@ -31,6 +31,8 @@ class HistoryService;
 
 namespace safe_browsing {
 
+class BaseBlockingPage;
+
 struct HitReport;
 
 // Construction needs to happen on the main thread.
@@ -105,9 +107,6 @@ class SafeBrowsingUIManager : public BaseUIManager {
   // Calls SafeBrowsingBlockingPage::ShowBlockingPage().
   void ShowBlockingPageForResource(const UnsafeResource& resource) override;
 
-  // Returns true if SB committed interstitials are enabled.
-  bool SafeBrowsingInterstitialsAreCommittedNavigations() override;
-
   // Helper method to ensure hit reports are only sent when the user has
   // opted in to extended reporting and is not currently in incognito mode.
   static bool ShouldSendHitReport(const HitReport& hit_report,
@@ -119,6 +118,13 @@ class SafeBrowsingUIManager : public BaseUIManager {
 
   static GURL GetMainFrameWhitelistUrlForResourceForTesting(
       const safe_browsing::SafeBrowsingUIManager::UnsafeResource& resource);
+
+  // Creates a blocking page, used for interstitials triggered by subresources.
+  // Override is using a different blocking page.
+  BaseBlockingPage* CreateBlockingPageForSubresource(
+      content::WebContents* contents,
+      const GURL& blocked_url,
+      const UnsafeResource& unsafe_resource) override;
 
   // Safebrowsing service.
   scoped_refptr<SafeBrowsingService> sb_service_;

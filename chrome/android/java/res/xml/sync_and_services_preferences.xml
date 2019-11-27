@@ -25,8 +25,11 @@
 
         <Preference
             android:key="sync_error_card"
+            android:layout="@layout/account_management_account_row"/>
+        <Preference
+            android:key="sync_disabled_by_administrator"
             android:layout="@layout/account_management_account_row"
-            android:title="@string/sync_error_card_title"/>
+            android:title="@string/sync_is_disabled_by_administrator"/>
         <org.chromium.chrome.browser.preferences.ChromeSwitchPreference
             android:key="sync_requested"
             android:title="@string/sync_switch_title"
@@ -56,6 +59,10 @@
             android:key="safe_browsing"
             android:title="@string/safe_browsing_title"
             android:summary="@string/safe_browsing_summary"
+            android:persistent="false"/>
+        <org.chromium.chrome.browser.preferences.ChromeSwitchPreference
+            android:key="password_leak_detection"
+            android:title="@string/passwords_leak_detection_switch_title"
             android:persistent="false"/>
         <org.chromium.chrome.browser.preferences.ChromeSwitchPreference
             android:key="safe_browsing_scout_reporting"

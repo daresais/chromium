@@ -22,19 +22,21 @@
 #include "ash/wallpaper/wallpaper_widget_controller.h"
 #include "ash/wm/window_state.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/task_observer.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/bind_test_util.h"
 #include "base/time/time_override.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/user_manager/fake_user_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_names.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window.h"
@@ -189,12 +191,12 @@ void WaitUntilCustomWallpapersDeleted(const AccountId& account_id) {
 }
 
 // Monitors if any task is processed by the message loop.
-class TaskObserver : public base::MessageLoop::TaskObserver {
+class TaskObserver : public base::TaskObserver {
  public:
   TaskObserver() : processed_(false) {}
   ~TaskObserver() override = default;
 
-  // MessageLoop::TaskObserver:
+  // TaskObserver:
   void WillProcessTask(const base::PendingTask& pending_task) override {}
   void DidProcessTask(const base::PendingTask& pending_task) override {
     processed_ = true;
@@ -231,15 +233,12 @@ class TestWallpaperControllerClient : public WallpaperControllerClient {
   virtual ~TestWallpaperControllerClient() = default;
 
   size_t open_count() const { return open_count_; }
-  size_t animation_count() const { return animation_count_; }
 
   // WallpaperControllerClient:
   void OpenWallpaperPicker() override { open_count_++; }
-  void OnFirstWallpaperAnimationFinished() override { animation_count_++; }
 
  private:
   size_t open_count_ = 0;
-  size_t animation_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TestWallpaperControllerClient);
 };
@@ -287,6 +286,14 @@ class WallpaperControllerTest : public AshTestBase {
     fake_user_manager_ = fake_user_manager.get();
     scoped_user_manager_ = std::make_unique<user_manager::ScopedUserManager>(
         std::move(fake_user_manager));
+
+    // This is almost certainly not what was originally intended for these
+    // tests, but they have never actually exercised properly decoded
+    // wallpapers, as they've never actually been connected to a Data Decoder.
+    // We simulate a "crashing" ImageDcoder to get the behavior the tests were
+    // written around, but at some point they should probably be fixed.
+    in_process_data_decoder_.service().SimulateImageDecoderCrashForTesting(
+        true);
 
     // Ash shell initialization creates wallpaper. Reset it so we can manually
     // control wallpaper creation and animation in our tests.
@@ -538,6 +545,8 @@ class WallpaperControllerTest : public AshTestBase {
   std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_;
 
  private:
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
+
   DISALLOW_COPY_AND_ASSIGN(WallpaperControllerTest);
 };
 
@@ -552,13 +561,6 @@ TEST_F(WallpaperControllerTest, Client) {
   EXPECT_TRUE(controller_->CanOpenWallpaperPicker());
   controller_->OpenWallpaperPickerIfAllowed();
   EXPECT_EQ(1u, client.open_count());
-
-  EXPECT_EQ(0u, client.animation_count());
-  controller_->ShowWallpaperImage(CreateImage(640, 480, SK_ColorBLUE),
-                                  CreateWallpaperInfo(WALLPAPER_LAYOUT_STRETCH),
-                                  /*preview_mode=*/false,
-                                  /*always_on_top=*/false);
-  EXPECT_EQ(1u, client.animation_count());
 }
 
 TEST_F(WallpaperControllerTest, BasicReparenting) {
@@ -1320,6 +1322,74 @@ TEST_F(WallpaperControllerTest, SetDefaultWallpaperForChildAccount) {
             GetDecodeFilePaths()[0]);
 }
 
+// Verify that the |ShowWallpaperImage| will be called with the default image
+// for the guest session only even if there's a policy that has been set for
+// another user which invokes |SetPolicyWallpaper|.
+TEST_F(WallpaperControllerTest,
+       SetDefaultWallpaperForGuestSessionUnaffectedByWallpaperPolicy) {
+  SetBypassDecode();
+  // Simulate the login screen.
+  ClearLogin();
+  CreateDefaultWallpapers();
+  ClearWallpaperCount();
+
+  // First, simulate settings for a guest user which will show the default
+  // wallpaper image by invoking |ShowWallpaperImage|.
+  SimulateGuestLogin();
+
+  UpdateDisplay("1600x1200");
+  RunAllTasksUntilIdle();
+  ClearWallpaperCount();
+  ClearDecodeFilePaths();
+
+  const AccountId guest_id =
+      AccountId::FromUserEmail(user_manager::kGuestUserName);
+  fake_user_manager_->AddGuestUser(guest_id);
+  controller_->SetDefaultWallpaper(guest_id, wallpaper_files_id_1,
+                                   /*show_wallpaper=*/true);
+
+  WallpaperInfo wallpaper_info;
+  WallpaperInfo default_wallpaper_info(std::string(),
+                                       WALLPAPER_LAYOUT_CENTER_CROPPED, DEFAULT,
+                                       base::Time::Now().LocalMidnight());
+  // Verify that the current displayed wallpaper is the default one inside the
+  // guest session.
+  EXPECT_EQ(1, GetWallpaperCount());
+  EXPECT_EQ(controller_->GetWallpaperType(), DEFAULT);
+  EXPECT_TRUE(controller_->GetUserWallpaperInfo(guest_id, &wallpaper_info));
+  EXPECT_EQ(wallpaper_info, default_wallpaper_info);
+  ASSERT_EQ(1u, GetDecodeFilePaths().size());
+  EXPECT_EQ(default_wallpaper_dir_.GetPath().Append(kGuestLargeWallpaperName),
+            GetDecodeFilePaths()[0]);
+
+  // Second, set a user policy for which is being set for another
+  // user and verifying that the policy has been applied successfully.
+  WallpaperInfo policy_wallpaper_info;
+  controller_->SetPolicyWallpaper(account_id_1, wallpaper_files_id_2,
+                                  /*data=*/std::string());
+  EXPECT_TRUE(
+      controller_->GetUserWallpaperInfo(account_id_1, &policy_wallpaper_info));
+  WallpaperInfo expected_policy_wallpaper_info(
+      base::FilePath(wallpaper_files_id_2)
+          .Append("policy-controlled.jpeg")
+          .value(),
+      WALLPAPER_LAYOUT_CENTER_CROPPED, POLICY,
+      base::Time::Now().LocalMidnight());
+  EXPECT_EQ(policy_wallpaper_info, expected_policy_wallpaper_info);
+  EXPECT_TRUE(controller_->IsPolicyControlled(account_id_1));
+
+  // Finally, verifying that the guest session hasn't been affected by the new
+  // policy and |ShowWallpaperImage| hasn't been invoked another time.
+
+  EXPECT_EQ(1, GetWallpaperCount());
+  EXPECT_EQ(controller_->GetWallpaperType(), DEFAULT);
+  EXPECT_TRUE(controller_->GetUserWallpaperInfo(guest_id, &wallpaper_info));
+  EXPECT_EQ(wallpaper_info, default_wallpaper_info);
+  ASSERT_EQ(1u, GetDecodeFilePaths().size());
+  EXPECT_EQ(default_wallpaper_dir_.GetPath().Append(kGuestLargeWallpaperName),
+            GetDecodeFilePaths()[0]);
+}
+
 TEST_F(WallpaperControllerTest, SetDefaultWallpaperForGuestSession) {
   CreateDefaultWallpapers();
 
@@ -1642,7 +1712,7 @@ TEST_F(WallpaperControllerTest, ReloadWallpaper) {
   SimulateUserLogin(kUser1);
   std::unique_ptr<aura::Window> wallpaper_picker_window(
       CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  wm::GetWindowState(wallpaper_picker_window.get())->Activate();
+  WindowState::Get(wallpaper_picker_window.get())->Activate();
   ClearWallpaperCount();
   controller_->SetCustomWallpaper(
       account_id_1, wallpaper_files_id_1, file_name_1, WALLPAPER_LAYOUT_CENTER,
@@ -1855,10 +1925,22 @@ TEST_F(WallpaperControllerTest, WallpaperBlur) {
 }
 
 TEST_F(WallpaperControllerTest, WallpaperBlurDuringLockScreenTransition) {
+  ui::ScopedAnimationDurationScaleMode test_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+
+  gfx::ImageSkia image = CreateImage(600, 400, kWallpaperColor);
+  controller_->ShowWallpaperImage(
+      image, CreateWallpaperInfo(WALLPAPER_LAYOUT_CENTER),
+      /*preview_mode=*/false, /*always_on_top=*/false);
+
   TestWallpaperControllerObserver observer(controller_);
 
   ASSERT_TRUE(controller_->IsBlurAllowed());
   ASSERT_FALSE(controller_->IsWallpaperBlurred());
+
+  ASSERT_EQ(1u, wallpaper_view()->layer()->parent()->children().size());
+  EXPECT_EQ(ui::LAYER_TEXTURED,
+            wallpaper_view()->layer()->parent()->children()[0]->type());
 
   // Simulate lock and unlock sequence.
   controller_->UpdateWallpaperBlur(true);
@@ -1867,12 +1949,20 @@ TEST_F(WallpaperControllerTest, WallpaperBlurDuringLockScreenTransition) {
 
   SetSessionState(SessionState::LOCKED);
   EXPECT_TRUE(controller_->IsWallpaperBlurred());
+  ASSERT_EQ(2u, wallpaper_view()->layer()->parent()->children().size());
+  EXPECT_EQ(ui::LAYER_SOLID_COLOR,
+            wallpaper_view()->layer()->parent()->children()[0]->type());
+  EXPECT_EQ(ui::LAYER_TEXTURED,
+            wallpaper_view()->layer()->parent()->children()[1]->type());
 
   // Change of state to ACTIVE triggers post lock animation and
   // UpdateWallpaperBlur(false)
   SetSessionState(SessionState::ACTIVE);
   EXPECT_FALSE(controller_->IsWallpaperBlurred());
   EXPECT_EQ(2, observer.blur_changed_count());
+  ASSERT_EQ(1u, wallpaper_view()->layer()->parent()->children().size());
+  EXPECT_EQ(ui::LAYER_TEXTURED,
+            wallpaper_view()->layer()->parent()->children()[0]->type());
 }
 
 TEST_F(WallpaperControllerTest, OnlyShowDevicePolicyWallpaperOnLoginScreen) {
@@ -2002,7 +2092,7 @@ TEST_F(WallpaperControllerTest, ConfirmPreviewWallpaper) {
   // Simulate opening the wallpaper picker window.
   std::unique_ptr<aura::Window> wallpaper_picker_window(
       CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  wm::GetWindowState(wallpaper_picker_window.get())->Activate();
+  WindowState::Get(wallpaper_picker_window.get())->Activate();
 
   // Set a custom wallpaper for the user and enable preview. Verify that the
   // wallpaper is changed to the expected color.
@@ -2107,7 +2197,7 @@ TEST_F(WallpaperControllerTest, CancelPreviewWallpaper) {
   // Simulate opening the wallpaper picker window.
   std::unique_ptr<aura::Window> wallpaper_picker_window(
       CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  wm::GetWindowState(wallpaper_picker_window.get())->Activate();
+  WindowState::Get(wallpaper_picker_window.get())->Activate();
 
   // Set a custom wallpaper for the user and enable preview. Verify that the
   // wallpaper is changed to the expected color.
@@ -2185,7 +2275,7 @@ TEST_F(WallpaperControllerTest, WallpaperSyncedDuringPreview) {
   // Simulate opening the wallpaper picker window.
   std::unique_ptr<aura::Window> wallpaper_picker_window(
       CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  wm::GetWindowState(wallpaper_picker_window.get())->Activate();
+  WindowState::Get(wallpaper_picker_window.get())->Activate();
 
   // Set a custom wallpaper for the user and enable preview. Verify that the
   // wallpaper is changed to the expected color.

@@ -5,8 +5,32 @@
 import("//build/config/jumbo.gni")
 import("//testing/test.gni")
 
+if (is_android) {
+  import("//build/config/android/rules.gni")
+}
+
+static_library("demographic_metrics_provider") {
+  sources = [
+    "demographic_metrics_provider.cc",
+    "demographic_metrics_provider.h",
+  ]
+
+  public_deps = [
+    "//third_party/metrics_proto",
+  ]
+
+  deps = [
+    ":metrics",
+    "//base",
+    "//components/sync/base",
+    "//components/sync/driver",
+  ]
+}
+
 jumbo_static_library("metrics") {
   sources = [
+    "android_metrics_provider.cc",
+    "android_metrics_provider.h",
     "call_stack_profile_metrics_provider.cc",
     "call_stack_profile_metrics_provider.h",
     "clean_exit_beacon.cc",
@@ -23,8 +47,6 @@ jumbo_static_library("metrics") {
     "data_use_tracker.h",
     "delegating_provider.cc",
     "delegating_provider.h",
-    "demographic_metrics_provider.cc",
-    "demographic_metrics_provider.h",
     "drive_metrics_provider.cc",
     "drive_metrics_provider.h",
     "drive_metrics_provider_android.cc",
@@ -97,6 +119,7 @@ jumbo_static_library("metrics") {
     "system_memory_stats_recorder_linux.cc",
     "system_session_analyzer_win.cc",
     "system_session_analyzer_win.h",
+    "ukm_demographic_metrics_provider.h",
     "unsent_log_store.cc",
     "unsent_log_store.h",
     "unsent_log_store_metrics.h",
@@ -110,17 +133,18 @@ jumbo_static_library("metrics") {
 
   public_deps = [
     "//third_party/metrics_proto",
+    "//third_party/zlib/google:compression_utils",
   ]
 
   deps = [
     "//base",
     "//base:base_static",
+    "//build:branding_buildflags",
     "//components/prefs",
     "//components/variations",
     "//components/version_info:version_info",
     "//crypto",
     "//extensions/buildflags",
-    "//third_party/zlib/google:compression_utils",
     "//url",
   ]
 
@@ -146,6 +170,24 @@ jumbo_static_library("metrics") {
 
   if (is_fuchsia) {
     sources += [ "drive_metrics_provider_fuchsia.cc" ]
+  }
+}
+
+if (is_android) {
+  java_cpp_strings("java_switches_srcjar") {
+    # External code should depend on ":metrics_java" instead.
+    visibility = [ ":*" ]
+    sources = [
+      "//components/metrics/metrics_switches.cc",
+    ]
+    template =
+        "//components/metrics/android/java_templates/MetricsSwitches.java.tmpl"
+  }
+
+  android_library("metrics_java") {
+    # Right now, this only includes the Java switches. But if we need more Java
+    # files, they should be added here as necessary.
+    srcjar_deps = [ ":java_switches_srcjar" ]
   }
 }
 
@@ -257,7 +299,7 @@ static_library("single_sample_metrics") {
   ]
 
   public_deps = [
-    "//components/metrics/public/interfaces:single_sample_metrics_mojo_bindings",
+    "//components/metrics/public/mojom:single_sample_metrics_mojo_bindings",
   ]
 }
 
@@ -280,10 +322,12 @@ source_set("call_stack_profile_params") {
 source_set("child_call_stack_profile_builder") {
   public = [
     "call_stack_profile_builder.h",
+    "call_stack_profile_metadata.h",
     "child_call_stack_profile_collector.h",
   ]
   sources = [
     "call_stack_profile_builder.cc",
+    "call_stack_profile_metadata.cc",
     "child_call_stack_profile_collector.cc",
   ]
   public_deps = [
@@ -291,7 +335,7 @@ source_set("child_call_stack_profile_builder") {
   ]
   deps = [
     "//base",
-    "//components/metrics/public/interfaces:call_stack_mojo_bindings",
+    "//components/metrics/public/mojom:call_stack_mojo_bindings",
     "//third_party/metrics_proto",
   ]
 
@@ -320,7 +364,7 @@ source_set("call_stack_profile_collector") {
   deps = [
     ":call_stack_profile_params",
     ":metrics",
-    "//components/metrics/public/interfaces:call_stack_mojo_bindings",
+    "//components/metrics/public/mojom:call_stack_mojo_bindings",
   ]
 }
 
@@ -362,7 +406,9 @@ if (is_linux) {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "android_metrics_provider_unittest.cc",
     "call_stack_profile_builder_unittest.cc",
+    "call_stack_profile_metadata_unittest.cc",
     "call_stack_profile_metrics_provider_unittest.cc",
     "child_call_stack_profile_collector_unittest.cc",
     "cloned_install_detector_unittest.cc",
@@ -380,6 +426,7 @@ source_set("unit_tests") {
     "metrics_log_manager_unittest.cc",
     "metrics_log_store_unittest.cc",
     "metrics_log_unittest.cc",
+    "metrics_service_client_unittest.cc",
     "metrics_service_unittest.cc",
     "metrics_state_manager_unittest.cc",
     "net/net_metrics_log_uploader_unittest.cc",
@@ -397,6 +444,7 @@ source_set("unit_tests") {
   deps = [
     ":call_stack_profile_builder",
     ":component_metrics",
+    ":demographic_metrics_provider",
     ":metrics",
     ":net",
     ":single_sample_metrics",
@@ -406,6 +454,8 @@ source_set("unit_tests") {
     "//components/component_updater:test_support",
     "//components/encrypted_messages:encrypted_message_proto",
     "//components/prefs:test_support",
+    "//components/sync/base",
+    "//components/sync/driver:test_support",
     "//components/variations",
     "//extensions/buildflags",
     "//mojo/public/cpp/bindings",

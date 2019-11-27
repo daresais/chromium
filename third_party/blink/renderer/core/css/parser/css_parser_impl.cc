@@ -95,7 +95,6 @@ MutableCSSPropertyValueSet::SetResult CSSParserImpl::ParseValue(
 MutableCSSPropertyValueSet::SetResult CSSParserImpl::ParseVariableValue(
     MutableCSSPropertyValueSet* declaration,
     const AtomicString& property_name,
-    const PropertyRegistry* registry,
     const String& value,
     bool important,
     const CSSParserContext* context,
@@ -110,18 +109,6 @@ MutableCSSPropertyValueSet::SetResult CSSParserImpl::ParseVariableValue(
   bool did_parse = false;
   bool did_change = false;
   if (!parser.parsed_properties_.IsEmpty()) {
-    const auto* parsed_declaration =
-        To<CSSCustomPropertyDeclaration>(parser.parsed_properties_[0].Value());
-    if (parsed_declaration->Value() && registry) {
-      const PropertyRegistration* registration =
-          registry->Registration(property_name);
-      // TODO(timloh): This is a bit wasteful, we parse the registered property
-      // to validate but throw away the result.
-      if (registration &&
-          !registration->Syntax().Parse(range, context, is_animation_tainted)) {
-        return MutableCSSPropertyValueSet::SetResult{did_parse, did_change};
-      }
-    }
     did_parse = true;
     did_change = declaration->AddParsedProperties(parser.parsed_properties_);
   }
@@ -538,8 +525,6 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRule(CSSParserTokenStream& stream,
       return ConsumeViewportRule(prelude, prelude_offset, stream);
     case kCSSAtRuleFontFace:
       return ConsumeFontFaceRule(prelude, prelude_offset, stream);
-    case kCSSAtRuleFontFeatureValues:
-      return ConsumeFontFeatureValuesRule(prelude, prelude_offset, stream);
     case kCSSAtRuleWebkitKeyframes:
       return ConsumeKeyframesRule(true, prelude, prelude_offset, stream);
     case kCSSAtRuleKeyframes:
@@ -767,44 +752,6 @@ StyleRuleFontFace* CSSParserImpl::ConsumeFontFaceRule(
   ConsumeDeclarationList(stream, StyleRule::kFontFace);
   return MakeGarbageCollected<StyleRuleFontFace>(
       CreateCSSPropertyValueSet(parsed_properties_, kCSSFontFaceRuleMode));
-}
-
-StyleRuleFontFeatureValues* CSSParserImpl::ConsumeFontFeatureValuesRule(
-    CSSParserTokenRange prelude,
-    const RangeOffset& prelude_offset,
-    CSSParserTokenStream& block) {
-  if (!RuntimeEnabledFeatures::CSSFontFeatureValuesEnabled())
-    return nullptr;
-
-  const CSSValueList* font_family =
-      css_parsing_utils::ConsumeFontFamily(prelude);
-  if (!font_family || !prelude.AtEnd())
-    return nullptr;
-
-  if (observer_) {
-    observer_->StartRuleHeader(StyleRule::kFontFeatureValues,
-                               prelude_offset.start);
-    observer_->EndRuleHeader(prelude_offset.end);
-    observer_->StartRuleBody(block.Offset());
-  }
-
-  const CSSIdentifierValue* font_display = nullptr;
-  ConsumeRuleList(
-      block, kFontFeatureRuleList, [&font_display](StyleRuleBase* rule) {
-        const CSSValue* value =
-            To<StyleRuleFontFace>(rule)->Properties().GetPropertyCSSValue(
-                CSSPropertyID::kFontDisplay);
-        if (value)
-          font_display = To<CSSIdentifierValue>(value);
-      });
-
-  if (observer_)
-    observer_->EndRuleBody(block.Offset());
-
-  if (!block.AtEnd())
-    return nullptr;
-  return MakeGarbageCollected<StyleRuleFontFeatureValues>(font_family,
-                                                          font_display);
 }
 
 StyleRuleKeyframes* CSSParserImpl::ConsumeKeyframesRule(

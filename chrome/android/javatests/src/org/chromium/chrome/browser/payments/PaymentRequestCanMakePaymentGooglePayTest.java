@@ -31,8 +31,7 @@ import java.util.concurrent.TimeoutException;
  * depending on whether Google Pay cards are returned in basic-card.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        "enable-features=PaymentRequestHasEnrolledInstrument"})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestCanMakePaymentGooglePayTest implements MainActivityStartCallback {
     // Disable animations to reduce flakiness.
     @ClassRule
@@ -43,7 +42,7 @@ public class PaymentRequestCanMakePaymentGooglePayTest implements MainActivitySt
             new PaymentRequestTestRule("payment_request_can_make_payment_query_test.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         // The user has a valid server credit card with a billing address on file. This is
         // sufficient for canMakePayment() to return true.
         AutofillTestHelper helper = new AutofillTestHelper();
@@ -61,7 +60,7 @@ public class PaymentRequestCanMakePaymentGooglePayTest implements MainActivitySt
     @Feature({"Payments"})
     @CommandLineFlags.
     Add("enable-features=" + ChromeFeatureList.WEB_PAYMENTS_RETURN_GOOGLE_PAY_IN_BASIC_CARD)
-    public void testGooglePayServerCardsAllowed() throws InterruptedException, TimeoutException {
+    public void testGooglePayServerCardsAllowed() throws TimeoutException {
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(
                 mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
         mPaymentRequestTestRule.expectResultContains(new String[] {"true"});
@@ -76,7 +75,7 @@ public class PaymentRequestCanMakePaymentGooglePayTest implements MainActivitySt
     @Feature({"Payments"})
     @CommandLineFlags.
     Add("disable-features=" + ChromeFeatureList.WEB_PAYMENTS_RETURN_GOOGLE_PAY_IN_BASIC_CARD)
-    public void testGooglePayServerCardsNotAllowed() throws InterruptedException, TimeoutException {
+    public void testGooglePayServerCardsNotAllowed() throws TimeoutException {
         mPaymentRequestTestRule.openPageAndClickBuyAndWait(
                 mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
         mPaymentRequestTestRule.expectResultContains(new String[] {"true"});

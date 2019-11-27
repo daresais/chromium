@@ -8,7 +8,8 @@ import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQuali
 import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQualifiers.LAST_USED_PROFILE;
 
 import android.content.Context;
-import android.support.customtabs.trusted.TrustedWebActivityServiceConnectionManager;
+
+import androidx.browser.trusted.TrustedWebActivityServiceConnectionManager;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.WarmupManager;
@@ -17,6 +18,7 @@ import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.night_mode.SystemNightModeMonitor;
 import org.chromium.chrome.browser.notifications.channels.SiteChannelsManager;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
 
@@ -42,6 +44,11 @@ public class ChromeAppModule {
     @Provides
     public ChromePreferenceManager providesChromePreferenceManager() {
         return ChromePreferenceManager.getInstance();
+    }
+
+    @Provides
+    public SharedPreferencesManager providesSharedPreferencesManager() {
+        return SharedPreferencesManager.getInstance();
     }
 
     @Provides

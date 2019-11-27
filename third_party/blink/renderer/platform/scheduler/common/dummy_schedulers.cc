@@ -9,6 +9,8 @@
 #include "third_party/blink/renderer/platform/scheduler/public/page_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
+#include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_task_queue.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
@@ -29,6 +31,7 @@ class DummyFrameScheduler : public FrameScheduler {
 
   PageScheduler* GetPageScheduler() const override { return page_scheduler_; }
 
+  void SetPreemptedForCooperativeScheduling(Preempted) override {}
   void SetFrameVisible(bool) override {}
   bool IsFrameVisible() const override { return true; }
   bool IsPageVisible() const override { return true; }
@@ -49,6 +52,7 @@ class DummyFrameScheduler : public FrameScheduler {
   void DidStartProvisionalLoad(bool is_main_frame) override {}
   void DidCommitProvisionalLoad(bool, FrameScheduler::NavigationType) override {
   }
+  void OnFirstContentfulPaint() override {}
   void OnFirstMeaningfulPaint() override {}
   bool IsExemptFromBudgetBasedThrottling() const override { return false; }
   std::unique_ptr<blink::mojom::blink::PauseSubresourceLoadingHandle>
@@ -60,6 +64,10 @@ class DummyFrameScheduler : public FrameScheduler {
     return WebResourceLoadingTaskRunnerHandle::CreateUnprioritized(
         base::ThreadTaskRunnerHandle::Get());
   }
+  std::unique_ptr<WebSchedulingTaskQueue> CreateWebSchedulingTaskQueue(
+      WebSchedulingPriority) override {
+    return nullptr;
+  }
   ukm::SourceId GetUkmSourceId() override { return ukm::kInvalidSourceId; }
   void OnStartedUsingFeature(SchedulingPolicy::Feature feature,
                              const SchedulingPolicy& policy) override {}
@@ -69,10 +77,13 @@ class DummyFrameScheduler : public FrameScheduler {
   GetActiveFeaturesTrackedForBackForwardCacheMetrics() override {
     return WTF::HashSet<SchedulingPolicy::Feature>();
   }
-  base::WeakPtr<FrameScheduler> GetWeakPtr() override { return nullptr; }
+  base::WeakPtr<FrameScheduler> GetWeakPtr() override {
+    return weak_ptr_factory_.GetWeakPtr();
+  }
 
  private:
   PageScheduler* page_scheduler_;
+  base::WeakPtrFactory<FrameScheduler> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DummyFrameScheduler);
 };
@@ -110,6 +121,11 @@ class DummyPageScheduler : public PageScheduler {
     return false;
   }
   bool RequestBeginMainFrameNotExpected(bool) override { return false; }
+  WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser(
+      const String& name,
+      WebScopedVirtualTimePauser::VirtualTaskDuration) override {
+    return WebScopedVirtualTimePauser();
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DummyPageScheduler);
@@ -182,8 +198,8 @@ class DummyThreadScheduler : public ThreadScheduler {
   base::TimeTicks MonotonicallyIncreasingVirtualTime() override {
     return base::TimeTicks::Now();
   }
-  void AddTaskObserver(base::MessageLoop::TaskObserver*) override {}
-  void RemoveTaskObserver(base::MessageLoop::TaskObserver*) override {}
+  void AddTaskObserver(base::TaskObserver*) override {}
+  void RemoveTaskObserver(base::TaskObserver*) override {}
   NonMainThreadSchedulerImpl* AsNonMainThreadScheduler() override {
     return nullptr;
   }

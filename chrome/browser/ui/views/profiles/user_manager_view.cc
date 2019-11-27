@@ -39,7 +39,6 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/shell_integration_win.h"
@@ -68,6 +67,9 @@ UserManagerProfileDialogDelegate::UserManagerProfileDialogDelegate(
     const std::string& email_address,
     const GURL& url)
     : parent_(parent), web_view_(web_view), email_address_(email_address) {
+  DialogDelegate::set_buttons(ui::DIALOG_BUTTON_NONE);
+  DialogDelegate::set_use_custom_frame(false);
+
   AddChildView(web_view_);
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
@@ -99,10 +101,6 @@ bool UserManagerProfileDialogDelegate::CanMinimize() const {
   return true;
 }
 
-bool UserManagerProfileDialogDelegate::ShouldUseCustomFrame() const {
-  return false;
-}
-
 ui::ModalType UserManagerProfileDialogDelegate::GetModalType() const {
   return ui::MODAL_TYPE_WINDOW;
 }
@@ -114,10 +112,6 @@ void UserManagerProfileDialogDelegate::DeleteDelegate() {
 
 base::string16 UserManagerProfileDialogDelegate::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_PROFILES_GAIA_SIGNIN_TITLE);
-}
-
-int UserManagerProfileDialogDelegate::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
 }
 
 views::View* UserManagerProfileDialogDelegate::GetInitiallyFocusedView() {
@@ -300,8 +294,10 @@ UserManagerView::UserManagerView()
     : web_view_(nullptr),
       delegate_(nullptr),
       user_manager_started_showing_(base::Time()) {
-  keep_alive_.reset(new ScopedKeepAlive(KeepAliveOrigin::USER_MANAGER_VIEW,
-                                        KeepAliveRestartOption::DISABLED));
+  DialogDelegate::set_buttons(ui::DIALOG_BUTTON_NONE);
+  DialogDelegate::set_use_custom_frame(false);
+  keep_alive_ = std::make_unique<ScopedKeepAlive>(
+      KeepAliveOrigin::USER_MANAGER_VIEW, KeepAliveRestartOption::DISABLED);
   chrome::RecordDialogCreation(chrome::DialogIdentifier::USER_MANAGER);
 }
 
@@ -397,13 +393,7 @@ void UserManagerView::Init(Profile* system_profile, const GURL& url) {
 
   views::Widget::InitParams params =
       GetDialogWidgetInitParams(this, nullptr, nullptr, bounds);
-  (new views::Widget)->Init(params);
-
-  // Since the User Manager can be the only top level window, we don't
-  // want to accidentally quit all of Chrome if the user is just trying to
-  // unfocus the selected pod in the WebView.
-  GetDialogClientView()->RemoveAccelerator(
-      ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
+  (new views::Widget)->Init(std::move(params));
 
 #if defined(OS_WIN)
   // Set the app id for the user manager to the app id of its parent.
@@ -435,6 +425,14 @@ void UserManagerView::LogTimeToOpen() {
 bool UserManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   int key = accelerator.key_code();
   int modifier = accelerator.modifiers();
+
+  // Ignore presses of the Escape key. The user manager may be Chrome's only
+  // top-level window, in which case we don't want presses of Esc to maybe quit
+  // the entire browser. This has higher priority than the default dialog Esc
+  // accelerator (which would otherwise close the window).
+  if (key == ui::VKEY_ESCAPE && modifier == ui::EF_NONE)
+    return true;
+
   DCHECK((key == ui::VKEY_W && modifier == ui::EF_CONTROL_DOWN) ||
          (key == ui::VKEY_F4 && modifier == ui::EF_ALT_DOWN));
   GetWidget()->Close();
@@ -461,20 +459,12 @@ base::string16 UserManagerView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
 }
 
-int UserManagerView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
-}
-
 void UserManagerView::WindowClosing() {
   // Now that the window is closed, we can allow a new one to be opened.
   // (WindowClosing comes in asynchronously from the call to Close() and we
   // may have already opened a new instance).
   if (g_user_manager_view == this)
     g_user_manager_view = nullptr;
-}
-
-bool UserManagerView::ShouldUseCustomFrame() const {
-  return false;
 }
 
 void UserManagerView::DisplayErrorMessage() {

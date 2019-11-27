@@ -19,11 +19,23 @@ namespace blink {
 
 namespace {
 
+void MeasureFetchProperties(ExecutionContext* execution_context,
+                            FetchRequestData* data) {
+  // 'redirect' measurement
+  if (data->Redirect() == network::mojom::RedirectMode::kError)
+    UseCounter::Count(execution_context, WebFeature::kFetchRedirectError);
+  else if (data->Redirect() == network::mojom::RedirectMode::kManual)
+    UseCounter::Count(execution_context, WebFeature::kFetchRedirectManual);
+
+  // 'cache' measurement: https://crbug.com/959789
+  if (data->CacheMode() == mojom::FetchCacheMode::kBypassCache)
+    UseCounter::Count(execution_context, WebFeature::kFetchCacheReload);
+}
+
 template <typename T>
-class GlobalFetchImpl final
-    : public GarbageCollectedFinalized<GlobalFetchImpl<T>>,
-      public GlobalFetch::ScopedFetcher,
-      public Supplement<T> {
+class GlobalFetchImpl final : public GarbageCollected<GlobalFetchImpl<T>>,
+                              public GlobalFetch::ScopedFetcher,
+                              public Supplement<T> {
   USING_GARBAGE_COLLECTED_MIXIN(GlobalFetchImpl);
 
  public:
@@ -64,6 +76,7 @@ class GlobalFetchImpl final
     probe::WillSendXMLHttpOrFetchNetworkRequest(execution_context, r->url());
     FetchRequestData* request_data =
         r->PassRequestData(script_state, exception_state);
+    MeasureFetchProperties(execution_context, request_data);
     if (exception_state.HadException())
       return ScriptPromise();
     auto promise = fetch_manager_->Fetch(script_state, request_data,

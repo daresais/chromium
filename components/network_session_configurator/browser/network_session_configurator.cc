@@ -25,7 +25,9 @@
 #include "components/variations/variations_associated_data.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/http/http_stream_factory.h"
+#include "net/quic/platform/impl/quic_flags_impl.h"
 #include "net/quic/quic_utils_chromium.h"
+#include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/third_party/quiche/src/quic/core/quic_packets.h"
 #include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
@@ -107,6 +109,19 @@ bool ConfigureWebsocketOverHttp2(
   return websocket_value == "true";
 }
 
+int ConfigureSpdySessionMaxQueuedCappedFrames(
+    const base::CommandLine& /*command_line*/,
+    const VariationParameters& http2_trial_params) {
+  int value;
+  if (base::StringToInt(
+          GetVariationParam(http2_trial_params,
+                            "spdy_session_max_queued_capped_frames"),
+          &value)) {
+    return value;
+  }
+  return net::kSpdySessionMaxQueuedCappedFrames;
+}
+
 void ConfigureHttp2Params(const base::CommandLine& command_line,
                           base::StringPiece http2_trial_group,
                           const VariationParameters& http2_trial_params,
@@ -120,8 +135,9 @@ void ConfigureHttp2Params(const base::CommandLine& command_line,
   // identifier to "grease" settings, see
   // https://tools.ietf.org/html/draft-bishop-httpbis-grease-00.
   params->http2_settings = GetHttp2Settings(http2_trial_params);
-  if (GetVariationParam(http2_trial_params, "http2_grease_settings") ==
-      "true") {
+  if (command_line.HasSwitch(switches::kHttp2GreaseSettings) ||
+      GetVariationParam(http2_trial_params, "http2_grease_settings") ==
+          "true") {
     spdy::SpdySettingsId id = 0x0a0a + 0x1000 * base::RandGenerator(0xf + 1) +
                               0x0010 * base::RandGenerator(0xf + 1);
     uint32_t value = base::RandGenerator(
@@ -131,15 +147,19 @@ void ConfigureHttp2Params(const base::CommandLine& command_line,
 
   // Optionally define a frame of reserved type to "grease" frame types, see
   // https://tools.ietf.org/html/draft-bishop-httpbis-grease-00.
-  if (GetVariationParam(http2_trial_params, "http2_grease_frame_type") ==
-      "true") {
+  if (command_line.HasSwitch(switches::kHttp2GreaseFrameType) ||
+      GetVariationParam(http2_trial_params, "http2_grease_frame_type") ==
+          "true") {
     const uint8_t type = 0x0b + 0x1f * base::RandGenerator(8);
-    const uint8_t flags =
-        base::RandGenerator(std::numeric_limits<uint8_t>::max() + 1);
+
+    uint8_t flags;
+    base::RandBytes(&flags, /* output_length = */ sizeof(flags));
+
     const size_t length = base::RandGenerator(7);
     // RandBytesAsString() does not support zero length.
     const std::string payload =
         (length > 0) ? base::RandBytesAsString(length) : std::string();
+
     params->greased_http2_frame =
         base::Optional<net::SpdySessionPool::GreasedHttp2Frame>(
             {type, flags, payload});
@@ -147,6 +167,10 @@ void ConfigureHttp2Params(const base::CommandLine& command_line,
 
   params->enable_websocket_over_http2 =
       ConfigureWebsocketOverHttp2(command_line, http2_trial_params);
+
+  params->spdy_session_max_queued_capped_frames =
+      ConfigureSpdySessionMaxQueuedCappedFrames(command_line,
+                                                http2_trial_params);
 }
 
 bool ShouldEnableQuic(base::StringPiece quic_trial_group,
@@ -172,27 +196,12 @@ bool ShouldEnableQuicProxiesForHttpsUrls(
       "true");
 }
 
-bool ShouldMarkQuicBrokenWhenNetworkBlackholes(
-    const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params,
-                        "mark_quic_broken_when_network_blackholes"),
-      "true");
-}
-
 bool ShouldRetryWithoutAltSvcOnQuicErrors(
     const VariationParameters& quic_trial_params) {
   return !base::LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params,
                         "retry_without_alt_svc_on_quic_errors"),
       "false");
-}
-
-bool ShouldSupportIetfFormatQuicAltSvc(
-    const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "support_ietf_format_quic_altsvc"),
-      "true");
 }
 
 quic::QuicTagVector GetQuicConnectionOptions(
@@ -310,6 +319,12 @@ bool ShouldQuicMigrateSessionsEarlyV2(
       "true");
 }
 
+bool ShouldQuicAllowPortMigration(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "allow_port_migration"), "true");
+}
+
 bool ShouldQuicRetryOnAlternateNetworkBeforeHandshake(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
@@ -393,12 +408,6 @@ int GetQuicMaxNumMigrationsToNonDefaultNetworkOnPathDegrading(
   return 0;
 }
 
-bool ShouldQuicAllowServerMigration(
-    const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "allow_server_migration"), "true");
-}
-
 int GetQuicInitialRttForHandshakeMilliseconds(
     const VariationParameters& quic_trial_params) {
   int value;
@@ -411,13 +420,26 @@ int GetQuicInitialRttForHandshakeMilliseconds(
   return 0;
 }
 
-base::flat_set<std::string> GetQuicHostWhitelist(
+base::flat_set<std::string> GetQuicHostAllowlist(
     const VariationParameters& quic_trial_params) {
-  std::string host_whitelist =
+  std::string host_allowlist =
       GetVariationParam(quic_trial_params, "host_whitelist");
   std::vector<std::string> host_vector = base::SplitString(
-      host_whitelist, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+      host_allowlist, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   return base::flat_set<std::string>(std::move(host_vector));
+}
+
+void SetQuicFlags(const VariationParameters& quic_trial_params) {
+  std::string flags_list =
+      GetVariationParam(quic_trial_params, "set_quic_flags");
+  for (const auto& flag : base::SplitString(
+           flags_list, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+    std::vector<std::string> tokens = base::SplitString(
+        flag, "=", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    if (tokens.size() != 2)
+      continue;
+    SetQuicFlagByName(tokens[0], tokens[1]);
+  }
 }
 
 size_t GetQuicMaxPacketLength(const VariationParameters& quic_trial_params) {
@@ -451,17 +473,12 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
   params->enable_quic =
       ShouldEnableQuic(quic_trial_group, quic_trial_params,
                        is_quic_force_disabled, is_quic_force_enabled);
-  params->quic_params.mark_quic_broken_when_network_blackholes =
-      ShouldMarkQuicBrokenWhenNetworkBlackholes(quic_trial_params);
 
   params->enable_server_push_cancellation =
       ShouldEnableServerPushCancelation(quic_trial_params);
 
   params->quic_params.retry_without_alt_svc_on_quic_errors =
       ShouldRetryWithoutAltSvcOnQuicErrors(quic_trial_params);
-
-  params->quic_params.support_ietf_format_quic_altsvc =
-      ShouldSupportIetfFormatQuicAltSvc(quic_trial_params);
 
   if (params->enable_quic) {
     params->enable_quic_proxies_for_https_urls =
@@ -511,6 +528,8 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
         ShouldQuicMigrateSessionsOnNetworkChangeV2(quic_trial_params);
     params->quic_params.migrate_sessions_early_v2 =
         ShouldQuicMigrateSessionsEarlyV2(quic_trial_params);
+    params->quic_params.allow_port_migration =
+        ShouldQuicAllowPortMigration(quic_trial_params);
     params->quic_params.retry_on_alternate_network_before_handshake =
         ShouldQuicRetryOnAlternateNetworkBeforeHandshake(quic_trial_params);
     params->quic_params.go_away_on_path_degrading =
@@ -558,9 +577,9 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
           .max_migrations_to_non_default_network_on_path_degrading =
           max_migrations_to_non_default_network_on_path_degrading;
     }
-    params->quic_params.allow_server_migration =
-        ShouldQuicAllowServerMigration(quic_trial_params);
-    params->quic_host_whitelist = GetQuicHostWhitelist(quic_trial_params);
+    params->quic_host_allowlist = GetQuicHostAllowlist(quic_trial_params);
+
+    SetQuicFlags(quic_trial_params);
   }
 
   size_t max_packet_length = GetQuicMaxPacketLength(quic_trial_params);
@@ -599,6 +618,12 @@ quic::ParsedQuicVersionVector ParseQuicVersions(
         break;
       }
       it++;
+    }
+    for (const auto& supported_version : quic::AllSupportedVersions()) {
+      if (quic::AlpnForVersion(supported_version) == version) {
+        supported_versions.push_back(supported_version);
+        break;
+      }
     }
   }
   return supported_versions;

@@ -22,17 +22,21 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreferenceCompat;
-import org.chromium.chrome.browser.preferences.ChromeBasePreferenceCompat;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
+import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
+import org.chromium.chrome.browser.preferences.ChromeBasePreference;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.SearchUtils;
-import org.chromium.chrome.browser.preferences.TextMessagePreferenceCompat;
+import org.chromium.chrome.browser.preferences.TextMessagePreference;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.ui.text.SpanApplier;
 
 import java.util.Locale;
@@ -57,6 +61,7 @@ public class SavePasswordsPreferences
 
     public static final String PREF_SAVE_PASSWORDS_SWITCH = "save_passwords_switch";
     public static final String PREF_AUTOSIGNIN_SWITCH = "autosignin_switch";
+    public static final String PREF_KEY_MANAGE_ACCOUNT_LINK = "manage_account_link";
 
     // A PasswordEntryViewer receives a boolean value with this key. If set true, the the entry was
     // part of a search result.
@@ -64,7 +69,6 @@ public class SavePasswordsPreferences
 
     private static final String PREF_KEY_CATEGORY_SAVED_PASSWORDS = "saved_passwords";
     private static final String PREF_KEY_CATEGORY_EXCEPTIONS = "exceptions";
-    private static final String PREF_KEY_MANAGE_ACCOUNT_LINK = "manage_account_link";
     private static final String PREF_KEY_SAVED_PASSWORDS_NO_TEXT = "saved_passwords_no_text";
 
     private static final int ORDER_SWITCH = 0;
@@ -82,9 +86,9 @@ public class SavePasswordsPreferences
 
     private String mSearchQuery;
     private Preference mLinkPref;
-    private ChromeSwitchPreferenceCompat mSavePasswordsSwitch;
-    private ChromeBaseCheckBoxPreferenceCompat mAutoSignInSwitch;
-    private TextMessagePreferenceCompat mEmptyView;
+    private ChromeSwitchPreference mSavePasswordsSwitch;
+    private ChromeBaseCheckBoxPreference mAutoSignInSwitch;
+    private TextMessagePreference mEmptyView;
     private boolean mSearchRecorded;
     private Menu mMenu;
 
@@ -146,7 +150,7 @@ public class SavePasswordsPreferences
         menu.findItem(R.id.export_passwords).setEnabled(false);
         mSearchItem = menu.findItem(R.id.menu_id_search);
         mSearchItem.setVisible(true);
-        mHelpItem = menu.findItem(R.id.menu_id_general_help);
+        mHelpItem = menu.findItem(R.id.menu_id_targeted_help);
         SearchUtils.initializeSearchView(
                 mSearchItem, mSearchQuery, getActivity(), this::filterPasswords);
     }
@@ -168,6 +172,11 @@ public class SavePasswordsPreferences
             filterPasswords(null);
             return true;
         }
+        if (id == R.id.menu_id_targeted_help) {
+            HelpAndFeedback.getInstance().show(getActivity(),
+                    getString(R.string.help_context_passwords), Profile.getLastUsedProfile(), null);
+            return true;
+        }
         return super.onOptionsItemSelected(item);
     }
 
@@ -182,7 +191,7 @@ public class SavePasswordsPreferences
      * Empty screen message when no passwords or exceptions are stored.
      */
     private void displayEmptyScreenMessage() {
-        mEmptyView = new TextMessagePreferenceCompat(getStyledContext(), null);
+        mEmptyView = new TextMessagePreference(getStyledContext(), null);
         mEmptyView.setSummary(R.string.saved_passwords_none_text);
         mEmptyView.setKey(PREF_KEY_SAVED_PASSWORDS_NO_TEXT);
         mEmptyView.setOrder(ORDER_SAVED_PASSWORDS_NO_TEXT);
@@ -201,8 +210,10 @@ public class SavePasswordsPreferences
         mNoPasswords = false;
         mNoPasswordExceptions = false;
         getPreferenceScreen().removeAll();
-        createSavePasswordsSwitch();
-        createAutoSignInCheckbox();
+        if (mSearchQuery == null) {
+            createSavePasswordsSwitch();
+            createAutoSignInCheckbox();
+        }
         PasswordManagerHandlerProvider.getInstance()
                 .getPasswordManagerHandler()
                 .updatePasswordLists();
@@ -284,7 +295,7 @@ public class SavePasswordsPreferences
                 getPreferenceScreen().removePreference(passwordParent);
             } else {
                 getView().announceForAccessibility(
-                        getResources().getText(R.string.accessible_find_in_page_no_results));
+                        getString(R.string.accessible_find_in_page_no_results));
             }
         }
     }
@@ -377,28 +388,27 @@ public class SavePasswordsPreferences
             Bundle fragmentAgs = new Bundle(preference.getExtras());
             fragmentAgs.putBoolean(
                     SavePasswordsPreferences.EXTRA_FOUND_VIA_SEARCH, mSearchQuery != null);
-            PreferencesLauncher.launchSettingsPageCompat(
+            PreferencesLauncher.launchSettingsPage(
                     getActivity(), PasswordEntryViewer.class, fragmentAgs);
         }
         return true;
     }
 
     private void createSavePasswordsSwitch() {
-        if (mSearchQuery != null) {
-            return; // Don't create this option when the preferences are filtered for passwords.
-        }
-        mSavePasswordsSwitch = new ChromeSwitchPreferenceCompat(getStyledContext(), null);
+        mSavePasswordsSwitch = new ChromeSwitchPreference(getStyledContext(), null);
         mSavePasswordsSwitch.setKey(PREF_SAVE_PASSWORDS_SWITCH);
         mSavePasswordsSwitch.setTitle(R.string.prefs_saved_passwords);
         mSavePasswordsSwitch.setOrder(ORDER_SWITCH);
         mSavePasswordsSwitch.setSummaryOn(R.string.text_on);
         mSavePasswordsSwitch.setSummaryOff(R.string.text_off);
         mSavePasswordsSwitch.setOnPreferenceChangeListener((preference, newValue) -> {
-            PrefServiceBridge.getInstance().setRememberPasswordsEnabled((boolean) newValue);
+            PrefServiceBridge.getInstance().setBoolean(
+                    Pref.REMEMBER_PASSWORDS_ENABLED, (boolean) newValue);
             return true;
         });
-        mSavePasswordsSwitch.setManagedPreferenceDelegate(
-                preference -> PrefServiceBridge.getInstance().isRememberPasswordsManaged());
+        mSavePasswordsSwitch.setManagedPreferenceDelegate(preference
+                -> PrefServiceBridge.getInstance().isManagedPreference(
+                        Pref.REMEMBER_PASSWORDS_ENABLED));
 
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
             getPreferenceScreen().addPreference(mSavePasswordsSwitch);
@@ -409,30 +419,32 @@ public class SavePasswordsPreferences
         // (e.g. the switch will say "On" when save passwords is really turned off), so
         // .setChecked() should be called after .addPreference()
         mSavePasswordsSwitch.setChecked(
-                PrefServiceBridge.getInstance().isRememberPasswordsEnabled());
+                PrefServiceBridge.getInstance().getBoolean(Pref.REMEMBER_PASSWORDS_ENABLED));
     }
 
     private void createAutoSignInCheckbox() {
-        if (mSearchQuery != null) {
-            return; // Don't create this option when the preferences are filtered for passwords.
-        }
-        mAutoSignInSwitch = new ChromeBaseCheckBoxPreferenceCompat(getStyledContext(), null);
+        mAutoSignInSwitch = new ChromeBaseCheckBoxPreference(getStyledContext(), null);
         mAutoSignInSwitch.setKey(PREF_AUTOSIGNIN_SWITCH);
         mAutoSignInSwitch.setTitle(R.string.passwords_auto_signin_title);
         mAutoSignInSwitch.setOrder(ORDER_AUTO_SIGNIN_CHECKBOX);
         mAutoSignInSwitch.setSummary(R.string.passwords_auto_signin_description);
         mAutoSignInSwitch.setOnPreferenceChangeListener((preference, newValue) -> {
-            PrefServiceBridge.getInstance().setPasswordManagerAutoSigninEnabled((boolean) newValue);
+            PrefServiceBridge.getInstance().setBoolean(
+                    Pref.PASSWORD_MANAGER_AUTO_SIGNIN_ENABLED, (boolean) newValue);
             return true;
         });
-        mAutoSignInSwitch.setManagedPreferenceDelegate(
-                preference -> PrefServiceBridge.getInstance().isPasswordManagerAutoSigninManaged());
+        mAutoSignInSwitch.setManagedPreferenceDelegate(preference
+                -> PrefServiceBridge.getInstance().isManagedPreference(
+                        Pref.PASSWORD_MANAGER_AUTO_SIGNIN_ENABLED));
         getPreferenceScreen().addPreference(mAutoSignInSwitch);
-        mAutoSignInSwitch.setChecked(
-                PrefServiceBridge.getInstance().isPasswordManagerAutoSigninEnabled());
+        mAutoSignInSwitch.setChecked(PrefServiceBridge.getInstance().getBoolean(
+                Pref.PASSWORD_MANAGER_AUTO_SIGNIN_ENABLED));
     }
 
     private void displayManageAccountLink() {
+        if (!PreferencesLauncher.isSyncingPasswordsWithoutCustomPassphrase()) {
+            return;
+        }
         if (mSearchQuery != null && !mNoPasswords) {
             return; // Don't add the Manage Account link if there is a search going on.
         }
@@ -448,7 +460,7 @@ public class SavePasswordsPreferences
                 ApiCompatibilityUtils.getColor(getResources(), R.color.default_text_color_link));
         SpannableString title = SpanApplier.applySpans(getString(R.string.manage_passwords_text),
                 new SpanApplier.SpanInfo("<link>", "</link>", colorSpan));
-        mLinkPref = new ChromeBasePreferenceCompat(getStyledContext());
+        mLinkPref = new ChromeBasePreference(getStyledContext());
         mLinkPref.setKey(PREF_KEY_MANAGE_ACCOUNT_LINK);
         mLinkPref.setTitle(title);
         mLinkPref.setOnPreferenceClickListener(this);

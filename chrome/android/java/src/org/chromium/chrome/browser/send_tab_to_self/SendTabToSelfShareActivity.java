@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.browser.send_tab_to_self;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.send_tab_to_self.SendTabToSelfMetrics.SendTabToSelfShareClickResult;
 import org.chromium.chrome.browser.share.ShareActivity;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.BottomSheetContent;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContent;
 import org.chromium.content_public.browser.NavigationEntry;
 
 /**

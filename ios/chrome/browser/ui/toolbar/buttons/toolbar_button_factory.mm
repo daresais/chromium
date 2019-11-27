@@ -16,6 +16,8 @@
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/util/rtl_geometry.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/dynamic_color_util.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -150,7 +152,7 @@
   ToolbarButton* bookmarkButton = [ToolbarButton
       toolbarButtonWithImage:[UIImage imageNamed:@"toolbar_bookmark"]];
   [bookmarkButton setImage:[UIImage imageNamed:@"toolbar_bookmark_active"]
-                  forState:ControlStateSpotlighted];
+                  forState:kControlStateSpotlighted];
   [self configureButton:bookmarkButton width:kAdaptiveToolbarButtonWidth];
   bookmarkButton.adjustsImageWhenHighlighted = NO;
   [bookmarkButton
@@ -194,8 +196,6 @@
         l10n_util::GetNSString(IDS_IOS_TOOLBAR_SEARCH);
   }
 
-  searchButton.accessibilityLabel =
-      l10n_util::GetNSString(IDS_IOS_TOOLBAR_SEARCH);
   searchButton.accessibilityIdentifier = kToolbarSearchButtonIdentifier;
 
   searchButton.visibilityMask =
@@ -206,12 +206,12 @@
 - (UIButton*)cancelButton {
   UIButton* cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
   cancelButton.titleLabel.font = [UIFont systemFontOfSize:kLocationBarFontSize];
-  cancelButton.tintColor = self.style == NORMAL
-                               ? UIColorFromRGB(kLocationBarTintBlue)
-                               : [UIColor whiteColor];
+  cancelButton.tintColor = color::DarkModeDynamicColor(
+      [UIColor colorNamed:kBlueColor], self.style == INCOGNITO,
+      [UIColor colorNamed:kBlueDarkColor]);
   [cancelButton setTitle:l10n_util::GetNSString(IDS_CANCEL)
                 forState:UIControlStateNormal];
-  [cancelButton setContentHuggingPriority:UILayoutPriorityDefaultHigh
+  [cancelButton setContentHuggingPriority:UILayoutPriorityRequired
                                   forAxis:UILayoutConstraintAxisHorizontal];
   [cancelButton
       setContentCompressionResistancePriority:UILayoutPriorityRequired

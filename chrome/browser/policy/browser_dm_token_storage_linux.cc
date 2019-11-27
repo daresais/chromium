@@ -145,7 +145,7 @@ std::string BrowserDMTokenStorageLinux::InitDMToken() {
   if (!base::ReadFileToString(token_file_path, &token))
     return std::string();
 
-  return token;
+  return base::TrimWhitespaceASCII(token, base::TRIM_ALL).as_string();
 }
 
 bool BrowserDMTokenStorageLinux::InitEnrollmentErrorOption() {
@@ -169,8 +169,8 @@ bool BrowserDMTokenStorageLinux::InitEnrollmentErrorOption() {
 
 void BrowserDMTokenStorageLinux::SaveDMToken(const std::string& token) {
   std::string client_id = RetrieveClientId();
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock()},
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::ThreadPool(), base::MayBlock()},
       base::BindOnce(&StoreDMTokenInUserDataDir, token, client_id),
       base::BindOnce(&BrowserDMTokenStorage::OnDMTokenStored,
                      weak_factory_.GetWeakPtr()));

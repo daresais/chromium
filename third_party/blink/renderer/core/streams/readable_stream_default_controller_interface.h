@@ -15,10 +15,10 @@ class ScriptState;
 class Visitor;
 
 class CORE_EXPORT ReadableStreamDefaultControllerInterface
-    : public GarbageCollectedFinalized<
-          ReadableStreamDefaultControllerInterface> {
+    : public GarbageCollected<ReadableStreamDefaultControllerInterface> {
  public:
   static ReadableStreamDefaultControllerInterface* Create(
+      ScriptState* script_state,
       ScriptValue controller);
 
   virtual ~ReadableStreamDefaultControllerInterface();

@@ -14,9 +14,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/policy/policy_constants.h"
 #include "net/base/network_change_notifier.h"
@@ -188,7 +187,7 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
  private:
   void StartupHostStateHelper(const base::Closure& quit_closure);
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<base::RunLoop> run_loop_;
   std::unique_ptr<FakeSignalStrategy> fake_bot_signal_strategy_;
@@ -199,12 +198,12 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
   scoped_refptr<AutoThreadTaskRunner> network_task_runner_;
   scoped_refptr<AutoThreadTaskRunner> ui_task_runner_;
 
-  base::WeakPtrFactory<It2MeHostTest> weak_factory_;
+  base::WeakPtrFactory<It2MeHostTest> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(It2MeHostTest);
 };
 
-It2MeHostTest::It2MeHostTest() : weak_factory_(this) {}
+It2MeHostTest::It2MeHostTest() {}
 It2MeHostTest::~It2MeHostTest() = default;
 
 void It2MeHostTest::SetUp() {
@@ -215,7 +214,7 @@ void It2MeHostTest::SetUp() {
 #endif
   run_loop_.reset(new base::RunLoop());
 
-  network_change_notifier_ = net::NetworkChangeNotifier::Create();
+  network_change_notifier_ = net::NetworkChangeNotifier::CreateIfNeeded();
 
   host_context_ = ChromotingHostContext::Create(new AutoThreadTaskRunner(
       base::ThreadTaskRunnerHandle::Get(), run_loop_->QuitClosure()));
@@ -298,12 +297,11 @@ void It2MeHostTest::StartHost(bool enable_dialogs) {
   auto log_to_server = std::make_unique<XmppLogToServer>(
       ServerLogEntry::IT2ME, fake_signal_strategy.get(), "fake_bot_jid",
       host_context_->network_task_runner());
-  it2me_host_->Connect(host_context_->Copy(), policies_->CreateDeepCopy(),
-                       std::move(dialog_factory),
-                       std::move(register_host_request),
-                       std::move(log_to_server), weak_factory_.GetWeakPtr(),
-                       std::move(fake_signal_strategy), kTestUserName,
-                       "fake_bot_jid", ice_config);
+  it2me_host_->Connect(
+      host_context_->Copy(), policies_->CreateDeepCopy(),
+      std::move(dialog_factory), std::move(register_host_request),
+      std::move(log_to_server), weak_factory_.GetWeakPtr(),
+      std::move(fake_signal_strategy), kTestUserName, ice_config);
 
   base::RunLoop run_loop;
   state_change_callback_ =

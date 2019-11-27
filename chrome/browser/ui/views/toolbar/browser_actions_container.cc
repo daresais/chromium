@@ -36,6 +36,7 @@
 #include "chrome/grit/theme_resources.h"
 #include "extensions/common/feature_switch.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -97,7 +98,7 @@ BrowserActionsContainer::BrowserActionsContainer(
       resize_area_ = new views::ResizeArea(this);
       AddChildView(resize_area_);
     }
-    resize_animation_.reset(new gfx::SlideAnimation(this));
+    resize_animation_ = std::make_unique<gfx::SlideAnimation>(this);
 
     if (GetSeparatorAreaWidth() > 0) {
       separator_ = new views::Separator();
@@ -165,7 +166,7 @@ void BrowserActionsContainer::OnToolbarActionViewDragDone() {
   toolbar_actions_bar_->OnDragEnded();
 }
 
-views::LabelButton* BrowserActionsContainer::GetOverflowReferenceView() {
+views::LabelButton* BrowserActionsContainer::GetOverflowReferenceView() const {
   return delegate_->GetOverflowReferenceView();
 }
 
@@ -319,8 +320,7 @@ void BrowserActionsContainer::ShowToolbarActionBubble(
   }
 
   ToolbarActionsBarBubbleViews* bubble = new ToolbarActionsBarBubbleViews(
-      anchor_view, gfx::Point(), anchored_to_action_view,
-      std::move(controller));
+      anchor_view, anchored_to_action_view, std::move(controller));
   active_bubble_ = bubble;
   views::BubbleDialogDelegateView::CreateBubble(bubble);
   bubble->GetWidget()->AddObserver(this);

@@ -54,8 +54,7 @@ AutoEnrollmentCheckScreen::AutoEnrollmentCheckScreen(
       captive_portal_status_(
           NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN),
       auto_enrollment_state_(policy::AUTO_ENROLLMENT_STATE_IDLE),
-      histogram_helper_(new ErrorScreensHistogramHelper("Enrollment")),
-      weak_ptr_factory_(this) {
+      histogram_helper_(new ErrorScreensHistogramHelper("Enrollment")) {
   if (view_)
     view_->SetDelegate(this);
 }
@@ -215,6 +214,7 @@ bool AutoEnrollmentCheckScreen::UpdateAutoEnrollmentState(
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH:
     case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
+    case policy::AUTO_ENROLLMENT_STATE_DISABLED:
       return false;
     case policy::AUTO_ENROLLMENT_STATE_SERVER_ERROR:
       if (!ShouldBlockOnServerError())
@@ -283,6 +283,7 @@ bool AutoEnrollmentCheckScreen::IsCompleted() const {
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH:
     case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
+    case policy::AUTO_ENROLLMENT_STATE_DISABLED:
       // Decision made, ready to proceed.
       return true;
   }

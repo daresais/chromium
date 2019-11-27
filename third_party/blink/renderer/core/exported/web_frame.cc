@@ -34,6 +34,8 @@ bool WebFrame::Swap(WebFrame* frame) {
   Frame* old_frame = ToCoreFrame(*this);
   if (!old_frame->IsAttached())
     return false;
+  FrameOwner* owner = old_frame->Owner();
+  FrameSwapScope frame_swap_scope(owner);
 
   // Unload the current Document in this frame: this calls unload handlers,
   // detaches child frames, etc. Since this runs script, make sure this frame
@@ -89,7 +91,6 @@ bool WebFrame::Swap(WebFrame* frame) {
 
   Page* page = old_frame->GetPage();
   AtomicString name = old_frame->Tree().GetName();
-  FrameOwner* owner = old_frame->Owner();
 
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
   WindowProxyManager::GlobalProxyVector global_proxies;
@@ -199,11 +200,6 @@ void WebFrame::SetFrameOwnerProperties(
   owner->SetAllowPaymentRequest(properties.allow_payment_request);
   owner->SetIsDisplayNone(properties.is_display_none);
   owner->SetRequiredCsp(properties.required_csp);
-}
-
-void WebFrame::Collapse(bool collapsed) {
-  FrameOwner* owner = ToCoreFrame(*this)->Owner();
-  To<HTMLFrameOwnerElement>(owner)->SetCollapsed(collapsed);
 }
 
 WebFrame* WebFrame::Opener() const {
@@ -384,10 +380,10 @@ Frame* WebFrame::ToCoreFrame(const WebFrame& frame) {
 }
 
 STATIC_ASSERT_ENUM(WebFrameOwnerProperties::ScrollingMode::kAuto,
-                   kScrollbarAuto);
+                   ScrollbarMode::kAuto);
 STATIC_ASSERT_ENUM(WebFrameOwnerProperties::ScrollingMode::kAlwaysOff,
-                   kScrollbarAlwaysOff);
+                   ScrollbarMode::kAlwaysOff);
 STATIC_ASSERT_ENUM(WebFrameOwnerProperties::ScrollingMode::kAlwaysOn,
-                   kScrollbarAlwaysOn);
+                   ScrollbarMode::kAlwaysOn);
 
 }  // namespace blink

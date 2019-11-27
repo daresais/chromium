@@ -179,6 +179,7 @@ class InstallableManager
   void SetManifestDependentTasksComplete();
 
   // Methods coordinating and dispatching work for the current task.
+  void CleanupAndStartNextTask();
   void RunCallback(InstallableTask task,
                    std::vector<InstallableStatusCode> errors);
   void WorkOnTask();
@@ -189,9 +190,11 @@ class InstallableManager
   void OnDidGetManifest(const GURL& manifest_url,
                         const blink::Manifest& manifest);
 
-  void CheckManifestValid(bool check_webapp_manifest_display);
+  void CheckManifestValid(bool check_webapp_manifest_display,
+                          bool prefer_maskable_icon);
   bool IsManifestValidForWebApp(const blink::Manifest& manifest,
-                                bool check_webapp_manifest_display);
+                                bool check_webapp_manifest_display,
+                                bool prefer_maskable_icon);
   void CheckServiceWorker();
   void OnDidCheckHasServiceWorker(content::ServiceWorkerCapability capability);
 
@@ -204,6 +207,7 @@ class InstallableManager
 
   // content::ServiceWorkerContextObserver overrides
   void OnRegistrationCompleted(const GURL& pattern) override;
+  void OnDestruct(content::ServiceWorkerContext* context) override;
 
   // content::WebContentsObserver overrides
   void DidFinishNavigation(content::NavigationHandle* handle) override;

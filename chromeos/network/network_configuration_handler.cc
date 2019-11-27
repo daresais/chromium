@@ -109,8 +109,7 @@ class NetworkConfigurationHandler::ProfileEntryDeleter {
         service_path_(service_path),
         guid_(guid),
         callback_(callback),
-        error_callback_(error_callback),
-        weak_ptr_factory_(this) {}
+        error_callback_(error_callback) {}
 
   void RestrictToProfilePath(const std::string& profile_path) {
     restrict_to_profile_path_ = profile_path;
@@ -163,6 +162,11 @@ class NetworkConfigurationHandler::ProfileEntryDeleter {
       NET_LOG(DEBUG) << "Delete Profile Entry: " << profile_path << ": "
                      << entry_path;
       profile_delete_entries_[profile_path] = entry_path;
+
+      // If the ShillErrorCallback is executed synchronously, this object can
+      // be deleted while this loop is still running.  While this shouldn't be
+      // possible in practice, it should still be fixed to avoid problems in
+      // the future.  Tracked in crbug.com/1019396.
       ShillProfileClient::Get()->DeleteEntry(
           dbus::ObjectPath(profile_path), entry_path,
           base::Bind(&ProfileEntryDeleter::ProfileEntryDeletedCallback,
@@ -220,7 +224,7 @@ class NetworkConfigurationHandler::ProfileEntryDeleter {
   // Map of pending profile entry deletions, indexed by profile path.
   std::map<std::string, std::string> profile_delete_entries_;
 
-  base::WeakPtrFactory<ProfileEntryDeleter> weak_ptr_factory_;
+  base::WeakPtrFactory<ProfileEntryDeleter> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ProfileEntryDeleter);
 };
@@ -301,11 +305,6 @@ void NetworkConfigurationHandler::SetShillProperties(
                  base::Passed(&properties_copy), callback),
       base::Bind(&NetworkConfigurationHandler::SetPropertiesErrorCallback,
                  weak_ptr_factory_.GetWeakPtr(), service_path, error_callback));
-
-  // If we set the StaticIPConfig property, request an IP config refresh
-  // after calling SetProperties.
-  if (properties_to_set->HasKey(shill::kStaticIPConfigProperty))
-    RequestRefreshIPConfigs(service_path);
 }
 
 void NetworkConfigurationHandler::ClearShillProperties(
@@ -481,7 +480,7 @@ void NetworkConfigurationHandler::OnShuttingDown() {
 // NetworkConfigurationHandler Private methods
 
 NetworkConfigurationHandler::NetworkConfigurationHandler()
-    : network_state_handler_(nullptr), weak_ptr_factory_(this) {}
+    : network_state_handler_(nullptr) {}
 
 NetworkConfigurationHandler::~NetworkConfigurationHandler() {
   // Make sure that this has been removed as a NetworkStateHandler observer.
@@ -659,19 +658,6 @@ void NetworkConfigurationHandler::ClearPropertiesErrorCallback(
       dbus_error_name, dbus_error_message);
   // Some properties may have changed so request an update regardless.
   network_state_handler_->RequestUpdateForNetwork(service_path);
-}
-
-void NetworkConfigurationHandler::RequestRefreshIPConfigs(
-    const std::string& service_path) {
-  if (!network_device_handler_)
-    return;
-  const NetworkState* network_state =
-      network_state_handler_->GetNetworkState(service_path);
-  if (!network_state || network_state->device_path().empty())
-    return;
-  network_device_handler_->RequestRefreshIPConfigs(
-      network_state->device_path(), base::DoNothing(),
-      network_handler::ErrorCallback());
 }
 
 // static

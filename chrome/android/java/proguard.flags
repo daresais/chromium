@@ -5,13 +5,25 @@
 # Fragments loaded by name via Fragment.instantiate(Context,String)
 # Not all fragments in this package are PreferenceFragments. E.g. HomepageEditor
 # is a normal Fragment.
-# TODO(crbug.com/967022): Remove the android.app.Fragment rule once all
-# Fragments have been migrated to the support library.
--keep public class org.chromium.chrome.browser.** extends android.app.Fragment {
-  public <init>();
-}
 -keep public class org.chromium.chrome.browser.preferences.** extends android.support.v4.app.Fragment {
   public <init>();
+}
+
+# Referenced by android.support.v7.preference.PreferenceInflater
+-keep public class android.support.v14.preference.SwitchPreference {}
+
+# Inflated via reflection
+-keep public class android.support.v7.preference.Preference {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keep public class android.support.v7.preference.PreferenceScreen {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keep public class android.support.v7.preference.PreferenceCategory {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keep public class android.support.v7.preference.ListPreference {
+    public <init>(android.content.Context, android.util.AttributeSet);
 }
 
 # These classes aren't themselves referenced, but __ProcessService[0,1,2...] are
@@ -38,14 +50,10 @@
     boolean mShiftingMode;
 }
 
-# Trichrome builds don't include a native library list in the main APK; it's
-# picked up from the library APK at runtime.
--dontwarn org.chromium.base.library_loader.NativeLibraries
-
 # Let proguard know CastMediaOptions in CastOptions is always null, so it can
 # trim unused MediaNotificationService methods. This saves about 170 methods in
 # the dex file. https://crbug.com/855081
--assumevalues class com.google.android.gms.cast.framework.CastOptions {
+-assumenosideeffects class com.google.android.gms.cast.framework.CastOptions {
   *** getCastMediaOptions() return null;
 }
 
@@ -53,12 +61,8 @@
 # construction, we need to trim out the its builder as well, so we are truly
 # assuming there's no CastMediaOptions instances anywhere. This is to avoid
 # CastMediaOptions to reference resources upon construction.
--assumevalues class com.google.android.gms.cast.framework.media.CastMediaOptions$Builder {
-  *** build() return null;
-}
-
 -assumenosideeffects class com.google.android.gms.cast.framework.media.CastMediaOptions$Builder {
   public <init>();
   public <clinit>();
-  *** build();
+  *** build() return null;
 }

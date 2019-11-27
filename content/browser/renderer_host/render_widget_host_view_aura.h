@@ -65,7 +65,7 @@ class LocatedEvent;
 namespace content {
 #if defined(OS_WIN)
 class LegacyRenderWidgetHostHWND;
-class DirectManipulationBrowserTest;
+class DirectManipulationBrowserTestBase;
 #endif
 
 class CursorManager;
@@ -113,7 +113,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   bool IsMouseLocked() override;
   gfx::Size GetVisibleViewportSize() override;
   void SetInsets(const gfx::Insets& insets) override;
-  void FocusedNodeTouched(bool editable) override;
   void SetNeedsBeginFrames(bool needs_begin_frames) override;
   void SetWantsAnimateOnlyBeginFrames() override;
   TouchSelectionControllerClientManager*
@@ -160,8 +159,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   gfx::AcceleratedWidget AccessibilityGetAcceleratedWidget() override;
   gfx::NativeViewAccessible AccessibilityGetNativeViewAccessible() override;
   void SetMainFrameAXTreeID(ui::AXTreeID id) override;
-  bool LockMouse() override;
+  bool LockMouse(bool request_unadjusted_movement) override;
   void UnlockMouse() override;
+  bool GetIsMouseLockedUnadjustedMovementForTesting() override;
   bool LockKeyboard(base::Optional<base::flat_set<ui::DomCode>> codes) override;
   void UnlockKeyboard() override;
   bool IsKeyboardLocked() override;
@@ -174,7 +174,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       viz::CompositorFrame frame,
       base::Optional<viz::HitTestRegionList> hit_test_region_list) override;
   void OnDidNotProduceFrame(const viz::BeginFrameAck& ack) override;
-  void ClearCompositorFrame() override;
   void ResetFallbackToFirstNavigationSurface() override;
   bool RequestRepaintForTesting() override;
   void DidStopFlinging() override;
@@ -196,11 +195,14 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void DidNavigate() override;
   void TakeFallbackContentFrom(RenderWidgetHostView* view) override;
   bool CanSynchronizeVisualProperties() override;
-  void CancelActiveTouches() override;
+  std::vector<std::unique_ptr<ui::TouchEvent>> ExtractAndCancelActiveTouches()
+      override;
+  void TransferTouches(
+      const std::vector<std::unique_ptr<ui::TouchEvent>>& touches) override;
 
   // Overridden from ui::TextInputClient:
   void SetCompositionText(const ui::CompositionText& composition) override;
-  void ConfirmCompositionText() override;
+  void ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
   void InsertText(const base::string16& text) override;
   void InsertChar(const ui::KeyEvent& event) override;
@@ -381,7 +383,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 #if defined(OS_WIN)
   friend class AccessibilityObjectLifetimeWinBrowserTest;
   friend class AccessibilityTreeLinkageWinBrowserTest;
-  friend class DirectManipulationBrowserTest;
+  friend class DirectManipulationBrowserTestBase;
 #endif
   FRIEND_TEST_ALL_PREFIXES(InputMethodResultAuraTest,
                            FinishImeCompositionSession);
@@ -459,6 +461,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   class WindowAncestorObserver;
   friend class WindowAncestorObserver;
+  friend void VerifyStaleContentOnFrameEviction(
+      RenderWidgetHostView* render_widget_host_view);
 
   // Allocate a new FrameSinkId if this object is the platform view of a
   // RenderWidgetHostViewGuest. This FrameSinkId will not be actually used in
@@ -513,10 +517,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // the mouse cursor is visible anywhere on the screen.
   void NotifyRendererOfCursorVisibilityState(bool is_visible);
 
-  // If |clip| is non-empty and and doesn't contain |rect| or |clip| is empty
-  // SchedulePaint() is invoked for |rect|.
-  void SchedulePaintIfNotInClip(const gfx::Rect& rect, const gfx::Rect& clip);
-
   // Called after |window_| is parented to a WindowEventDispatcher.
   void AddedToRootWindow();
 
@@ -570,6 +570,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   // Called to process a display metrics change.
   void ProcessDisplayMetricsChanged();
+
+  void CancelActiveTouches();
 
   // NOTE: this is null if |is_mus_browser_plugin_guest_| is true.
   aura::Window* window_;
@@ -647,9 +649,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Contains a copy of the last context menu request parameters. Only set when
   // we receive a request to show the context menu on a long press.
   std::unique_ptr<ContextMenuParams> last_context_menu_params_;
-
-  // Set to true if we requested the on screen keyboard to be displayed.
-  bool virtual_keyboard_requested_;
 
   friend class WinScreenKeyboardObserver;
   std::unique_ptr<WinScreenKeyboardObserver> keyboard_observer_;

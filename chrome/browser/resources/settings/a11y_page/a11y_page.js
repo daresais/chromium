@@ -67,19 +67,36 @@ Polymer({
       },
     },
 
-    // <if expr="chromeos">
     /**
-     * Whether to show experimental accessibility features.
-     * Only used in Chrome OS.
+     * Whether to show OS settings.
      * @private {boolean}
      */
-    showExperimentalFeatures_: {
+    showOsSettings_: {
       type: Boolean,
       value: function() {
-        return loadTimeData.getBoolean('showExperimentalA11yFeatures');
+        return loadTimeData.getBoolean('showOSSettings');
       },
     },
-    // </if>
+
+    /**
+     * Whether the caption settings link opens externally.
+     * @private {boolean}
+     */
+    captionSettingsOpensExternally_: {
+      type: Boolean,
+      value: function() {
+        let opensExternally = false;
+        // <if expr="is_macosx">
+        opensExternally = true;
+        // </if>
+
+        // <if expr="is_win">
+        opensExternally = loadTimeData.getBoolean('isWindows10OrNewer');
+        // </if>
+
+        return opensExternally;
+      },
+    },
   },
 
   /** @override */
@@ -115,6 +132,11 @@ Polymer({
   /** @private */
   onManageAccessibilityFeaturesTap_: function() {
     settings.navigateTo(settings.routes.MANAGE_ACCESSIBILITY);
+  },
+
+  /** @private */
+  onManageSystemAccessibilityFeaturesTap_: function() {
+    window.location.href = 'chrome://os-settings/manageAccessibility';
   },
   // </if>
 

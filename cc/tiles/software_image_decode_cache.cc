@@ -72,10 +72,15 @@ class SoftwareImageDecodeTaskImpl : public TileTask {
     TRACE_EVENT2("cc", "SoftwareImageDecodeTaskImpl::RunOnWorkerThread", "mode",
                  "software", "source_prepare_tiles_id",
                  tracing_info_.prepare_tiles_id);
+
+    const auto* image_metadata = paint_image_.GetImageHeaderMetadata();
+    const ImageType image_type =
+        image_metadata ? image_metadata->image_type : ImageType::kInvalid;
     devtools_instrumentation::ScopedImageDecodeTask image_decode_task(
         paint_image_.GetSkImage().get(),
         devtools_instrumentation::ScopedImageDecodeTask::kSoftware,
-        ImageDecodeCache::ToScopedTaskType(tracing_info_.task_type));
+        ImageDecodeCache::ToScopedTaskType(tracing_info_.task_type),
+        ImageDecodeCache::ToScopedImageType(image_type));
     SoftwareImageDecodeCache::TaskProcessingResult result =
         cache_->DecodeImageInTask(image_key_, paint_image_, task_type_);
 
@@ -200,10 +205,10 @@ SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
   // If the target size is empty, we can skip this image during draw (and thus
   // we don't need to decode it or ref it).
   if (key.target_size().IsEmpty())
-    return TaskResult(false);
+    return TaskResult(/*need_unref=*/false, /*is_at_raster_decode=*/false);
 
   if (!UseCacheForDrawImage(image))
-    return TaskResult(false);
+    return TaskResult(/*need_unref=*/false, /*is_at_raster_decode=*/false);
 
   base::AutoLock lock(lock_);
 
@@ -216,7 +221,7 @@ SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
   if (decoded_it == decoded_images_.end()) {
     // There is no reason to create a new entry if we know it won't fit anyway.
     if (!new_image_fits_in_memory)
-      return TaskResult(false);
+      return TaskResult(/*need_unref=*/false, /*is_at_raster_decode=*/true);
     cache_entry = AddCacheEntry(key);
     if (task_type == DecodeTaskType::USE_OUT_OF_RASTER_TASKS)
       cache_entry->mark_out_of_raster();
@@ -229,7 +234,7 @@ SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
     if (!new_image_fits_in_memory) {
       // We don't need to ref anything here because this image will be at
       // raster.
-      return TaskResult(false);
+      return TaskResult(/*need_unref=*/false, /*is_at_raster_decode=*/true);
     }
     AddBudgetForImage(key, cache_entry);
   }
@@ -242,7 +247,7 @@ SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
   // If we already have a locked entry, then we can just use that. Otherwise
   // we'll have to create a task.
   if (cache_entry->is_locked)
-    return TaskResult(true);
+    return TaskResult(/*need_unref=*/true, /*is_at_raster_decode=*/false);
 
   scoped_refptr<TileTask>& task =
       task_type == DecodeTaskType::USE_IN_RASTER_TASKS

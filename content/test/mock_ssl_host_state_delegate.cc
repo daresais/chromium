@@ -18,7 +18,7 @@ void MockSSLHostStateDelegate::AllowCert(const std::string& host,
 }
 
 void MockSSLHostStateDelegate::Clear(
-    const base::Callback<bool(const std::string&)>& host_filter) {
+    base::RepeatingCallback<bool(const std::string&)> host_filter) {
   if (host_filter.is_null()) {
     exceptions_.clear();
   } else {
@@ -36,8 +36,7 @@ void MockSSLHostStateDelegate::Clear(
 SSLHostStateDelegate::CertJudgment MockSSLHostStateDelegate::QueryPolicy(
     const std::string& host,
     const net::X509Certificate& cert,
-    int error,
-    bool* expired_previous_decision) {
+    int error) {
   if (exceptions_.find(host) == exceptions_.end())
     return SSLHostStateDelegate::DENIED;
 

@@ -14,6 +14,7 @@
 #include "chrome/test/chromedriver/chrome/page_load_strategy.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/web_view_impl.h"
+#include "url/gurl.h"
 
 ChromeImpl::~ChromeImpl() {
 }
@@ -99,9 +100,9 @@ void ChromeImpl::UpdateWebViews(const WebViewsInfo& views_info,
         // OnConnected will fire when DevToolsClient connects later.
         CHECK(!page_load_strategy_.empty());
         web_views_.push_back(std::make_unique<WebViewImpl>(
-            view.id, w3c_compliant, devtools_http_client_->browser_info(),
-            std::move(client), devtools_http_client_->device_metrics(),
-            page_load_strategy_));
+            view.id, w3c_compliant, nullptr,
+            devtools_http_client_->browser_info(), std::move(client),
+            devtools_http_client_->device_metrics(), page_load_strategy_));
       }
     }
   }
@@ -428,14 +429,40 @@ Status ChromeImpl::SetAcceptInsecureCerts() {
 
   base::DictionaryValue params;
   params.SetBoolean("ignore", true);
-  // We ignore the status returned by this command - If it is an error, the
-  // target likely doesn't yet support the command. In that case, we'll fall
-  // back to --ignore-certificate-errors.
-  // TODO(eseckler): Handle status once we remove support for
-  // --ignore-certificate-errors.
-  devtools_websocket_client_->SendCommand("Security.setIgnoreCertificateErrors",
-                                          params);
-  return Status(kOk);
+  return devtools_websocket_client_->SendCommand(
+      "Security.setIgnoreCertificateErrors", params);
+}
+
+Status ChromeImpl::SetPermission(
+    std::unique_ptr<base::DictionaryValue> permission_descriptor,
+    PermissionState desired_state,
+    bool unused_one_realm,  // This is ignored. https://crbug.com/977612.
+    WebView* current_view) {
+  Status status = devtools_websocket_client_->ConnectIfNecessary();
+  if (status.IsError())
+    return status;
+
+  // Process URL.
+  std::string current_url;
+  status = current_view->GetUrl(&current_url);
+  if (status.IsError())
+    current_url = "";
+
+  std::string permission_setting;
+  if (desired_state == PermissionState::kGranted)
+    permission_setting = "granted";
+  else if (desired_state == PermissionState::kDenied)
+    permission_setting = "denied";
+  else if (desired_state == PermissionState::kPrompt)
+    permission_setting = "prompt";
+  else
+    return Status(kInvalidArgument, "unsupported PermissionState");
+
+  base::DictionaryValue args;
+  args.SetString("origin", current_url);
+  args.SetDictionary("permission", std::move(permission_descriptor));
+  args.SetString("setting", permission_setting);
+  return devtools_websocket_client_->SendCommand("Browser.setPermission", args);
 }
 
 bool ChromeImpl::IsMobileEmulationEnabled() const {

@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "components/grit/components_resources.h"
+#include "components/grit/sync_driver_resources.h"
 #include "components/sync/driver/about_sync_util.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
@@ -20,7 +20,7 @@ web::WebUIIOSDataSource* CreateSyncInternalsHTMLSource() {
   web::WebUIIOSDataSource* source =
       web::WebUIIOSDataSource::Create(kChromeUISyncInternalsHost);
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
   source->AddResourcePath(syncer::sync_ui_util::kSyncIndexJS,
                           IDR_SYNC_DRIVER_SYNC_INTERNALS_INDEX_JS);
   source->AddResourcePath(syncer::sync_ui_util::kChromeSyncJS,

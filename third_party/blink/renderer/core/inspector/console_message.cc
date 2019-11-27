@@ -11,7 +11,7 @@
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -93,7 +93,7 @@ ConsoleMessage::ConsoleMessage(mojom::ConsoleMessageSource source,
       level_(level),
       message_(message),
       location_(std::move(location)),
-      timestamp_(WTF::CurrentTimeMS()),
+      timestamp_(base::Time::Now().ToDoubleT() * 1000.0),
       frame_(nullptr) {}
 
 ConsoleMessage::~ConsoleMessage() = default;

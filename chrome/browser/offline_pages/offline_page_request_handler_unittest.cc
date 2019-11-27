@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/memory/weak_ptr.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/offline_pages/offline_page_model_factory.h"
 #include "chrome/browser/offline_pages/offline_page_tab_helper.h"
 #include "chrome/browser/offline_pages/offline_page_url_loader.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -39,15 +39,18 @@
 #include "components/offline_pages/core/request_header/offline_page_navigation_ui_data.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/previews_state.h"
 #include "content/public/common/resource_type.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/wait.h"
 #include "net/base/filename_util.h"
 #include "net/http/http_request_headers.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -146,7 +149,7 @@ class TestURLLoaderClient : public network::mojom::URLLoaderClient {
    public:
     virtual void OnReceiveRedirect(const GURL& redirected_url) = 0;
     virtual void OnReceiveResponse(
-        const network::ResourceResponseHead& response_head) = 0;
+        network::mojom::URLResponseHeadPtr response_head) = 0;
     virtual void OnStartLoadingResponseBody() = 0;
     virtual void OnComplete() = 0;
 
@@ -154,18 +157,17 @@ class TestURLLoaderClient : public network::mojom::URLLoaderClient {
     virtual ~Observer() {}
   };
 
-  explicit TestURLLoaderClient(Observer* observer)
-      : observer_(observer), binding_(this) {}
+  explicit TestURLLoaderClient(Observer* observer) : observer_(observer) {}
   ~TestURLLoaderClient() override {}
 
   void OnReceiveResponse(
-      const network::ResourceResponseHead& response_head) override {
-    observer_->OnReceiveResponse(response_head);
+      network::mojom::URLResponseHeadPtr response_head) override {
+    observer_->OnReceiveResponse(std::move(response_head));
   }
 
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
-      const network::ResourceResponseHead& response_head) override {
+      network::mojom::URLResponseHeadPtr response_head) override {
     observer_->OnReceiveRedirect(redirect_info.new_url);
   }
 
@@ -188,12 +190,12 @@ class TestURLLoaderClient : public network::mojom::URLLoaderClient {
     observer_->OnComplete();
   }
 
-  network::mojom::URLLoaderClientPtr CreateInterfacePtr() {
-    network::mojom::URLLoaderClientPtr client_ptr;
-    binding_.Bind(mojo::MakeRequest(&client_ptr));
-    binding_.set_connection_error_handler(base::BindOnce(
-        &TestURLLoaderClient::OnConnectionError, base::Unretained(this)));
-    return client_ptr;
+  mojo::PendingRemote<network::mojom::URLLoaderClient> CreateRemote() {
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote =
+        receiver_.BindNewPipeAndPassRemote();
+    receiver_.set_disconnect_handler(base::BindOnce(
+        &TestURLLoaderClient::OnMojoDisconnect, base::Unretained(this)));
+    return client_remote;
   }
 
   mojo::DataPipeConsumerHandle response_body() { return response_body_.get(); }
@@ -203,10 +205,10 @@ class TestURLLoaderClient : public network::mojom::URLLoaderClient {
   }
 
  private:
-  void OnConnectionError() {}
+  void OnMojoDisconnect() {}
 
   Observer* observer_ = nullptr;
-  mojo::Binding<network::mojom::URLLoaderClient> binding_;
+  mojo::Receiver<network::mojom::URLLoaderClient> receiver_{this};
   mojo::ScopedDataPipeConsumerHandle response_body_;
   network::URLLoaderCompletionStatus completion_status_;
 
@@ -249,7 +251,7 @@ class OfflinePageURLLoaderBuilder : public TestURLLoaderClient::Observer {
 
   void OnReceiveRedirect(const GURL& redirected_url) override;
   void OnReceiveResponse(
-      const network::ResourceResponseHead& response_head) override;
+      network::mojom::URLResponseHeadPtr response_head) override;
   void OnStartLoadingResponseBody() override;
   void OnComplete() override;
 
@@ -262,22 +264,22 @@ class OfflinePageURLLoaderBuilder : public TestURLLoaderClient::Observer {
 
  private:
   void OnHandleReady(MojoResult result, const mojo::HandleSignalsState& state);
-  void InterceptRequestOnIO(const GURL& url,
-                            const std::string& method,
-                            const net::HttpRequestHeaders& extra_headers,
-                            bool is_main_frame);
+  void InterceptRequestInternal(const GURL& url,
+                                const std::string& method,
+                                const net::HttpRequestHeaders& extra_headers,
+                                bool is_main_frame);
   void MaybeStartLoader(
       const network::ResourceRequest& request,
       content::URLLoaderRequestInterceptor::RequestHandler request_handler);
   void ReadBody();
-  void ReadCompletedOnIO(const ResponseInfo& response);
+  void ReadCompleted(const ResponseInfo& response);
 
   OfflinePageRequestHandlerTest* test_;
   std::unique_ptr<ChromeNavigationUIData> navigation_ui_data_;
   std::unique_ptr<OfflinePageURLLoader> url_loader_;
   std::unique_ptr<TestURLLoaderClient> client_;
   std::unique_ptr<mojo::SimpleWatcher> handle_watcher_;
-  network::mojom::URLLoaderPtr loader_;
+  mojo::Remote<network::mojom::URLLoader> loader_;
   std::string mime_type_;
   std::string body_;
 };
@@ -420,7 +422,7 @@ class OfflinePageRequestHandlerTest : public testing::Test {
   void CreateFileWithContentOnIO(const std::string& content,
                                  const base::Closure& callback);
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager_;
   TestingProfile* profile_;
   std::unique_ptr<content::WebContents> web_contents_;
@@ -434,14 +436,10 @@ class OfflinePageRequestHandlerTest : public testing::Test {
 
 #if defined(OS_ANDROID)
   // OfflinePageTabHelper instantiates PrefetchService which in turn requests a
-  // fresh GCM token automatically. These two lines mock out InstanceID (the
-  // component which actually requests the token from play services). Without
-  // this, each test takes an extra 30s waiting on the token (because
-  // content::TestBrowserThreadBundle tries to finish all pending tasks before
-  // ending the test).
+  // fresh GCM token automatically. This causes the request to be done
+  // synchronously instead of with a posted task.
   instance_id::InstanceIDAndroid::ScopedBlockOnAsyncTasksForTesting
       block_async_;
-  instance_id::ScopedUseFakeInstanceIDAndroid use_fake_;
 #endif  // OS_ANDROID
 
   // These are not thread-safe. But they can be used in the pattern that
@@ -466,7 +464,7 @@ class OfflinePageRequestHandlerTest : public testing::Test {
 };
 
 OfflinePageRequestHandlerTest::OfflinePageRequestHandlerTest()
-    : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
+    : task_environment_(content::BrowserTaskEnvironment::REAL_IO_THREAD),
       profile_manager_(TestingBrowserProcess::GetGlobal()),
       last_offline_id_(0),
       response_(net::ERR_IO_PENDING),
@@ -596,7 +594,7 @@ base::FilePath OfflinePageRequestHandlerTest::CreateFileWithContent(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   base::RunLoop run_loop;
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&OfflinePageRequestHandlerTest::CreateFileWithContentOnIO,
                      base::Unretained(this), content, run_loop.QuitClosure()));
@@ -941,12 +939,13 @@ OfflinePageURLLoaderBuilder::OfflinePageURLLoaderBuilder(
 
 void OfflinePageURLLoaderBuilder::OnReceiveRedirect(
     const GURL& redirected_url) {
-  InterceptRequestOnIO(redirected_url, "GET", net::HttpRequestHeaders(), true);
+  InterceptRequestInternal(redirected_url, "GET", net::HttpRequestHeaders(),
+                           true);
 }
 
 void OfflinePageURLLoaderBuilder::OnReceiveResponse(
-    const network::ResourceResponseHead& response_head) {
-  mime_type_ = response_head.mime_type;
+    network::mojom::URLResponseHeadPtr response_head) {
+  mime_type_ = response_head->mime_type;
 }
 
 void OfflinePageURLLoaderBuilder::OnStartLoadingResponseBody() {
@@ -958,19 +957,19 @@ void OfflinePageURLLoaderBuilder::OnComplete() {
     mime_type_.clear();
     body_.clear();
   }
-  ReadCompletedOnIO(
+  ReadCompleted(
       ResponseInfo(client_->completion_status().error_code, mime_type_, body_));
   // Clear intermediate data in preparation for next potential page loading.
   mime_type_.clear();
   body_.clear();
 }
 
-void OfflinePageURLLoaderBuilder::InterceptRequestOnIO(
+void OfflinePageURLLoaderBuilder::InterceptRequestInternal(
     const GURL& url,
     const std::string& method,
     const net::HttpRequestHeaders& extra_headers,
     bool is_main_frame) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   client_ = std::make_unique<TestURLLoaderClient>(this);
 
@@ -999,32 +998,29 @@ void OfflinePageURLLoaderBuilder::InterceptRequest(
     const net::HttpRequestHeaders& extra_headers,
     bool is_main_frame) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindOnce(&OfflinePageURLLoaderBuilder::InterceptRequestOnIO,
-                     base::Unretained(this), url, method, extra_headers,
-                     is_main_frame));
+  InterceptRequestInternal(url, method, extra_headers, is_main_frame);
   base::RunLoop().Run();
 }
 
 void OfflinePageURLLoaderBuilder::MaybeStartLoader(
     const network::ResourceRequest& request,
     content::URLLoaderRequestInterceptor::RequestHandler request_handler) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (!request_handler) {
-    ReadCompletedOnIO(ResponseInfo(net::ERR_FAILED));
+    ReadCompleted(ResponseInfo(net::ERR_FAILED));
     return;
   }
 
   // OfflinePageURLLoader decides to handle the request as offline page. Since
   // now, OfflinePageURLLoader will own itself and live as long as its URLLoader
-  // and URLLoaderClientPtr are alive.
+  // and URLLoaderClient are alive.
   url_loader_.release();
 
+  loader_.reset();
   std::move(request_handler)
-      .Run(request, mojo::MakeRequest(&loader_), client_->CreateInterfacePtr());
+      .Run(request, loader_.BindNewPipeAndPassReceiver(),
+           client_->CreateRemote());
 }
 
 void OfflinePageURLLoaderBuilder::ReadBody() {
@@ -1049,7 +1045,7 @@ void OfflinePageURLLoaderBuilder::ReadBody() {
 
     // The pipe was closed.
     if (rv == MOJO_RESULT_FAILED_PRECONDITION) {
-      ReadCompletedOnIO(ResponseInfo(net::ERR_FAILED));
+      ReadCompleted(ResponseInfo(net::ERR_FAILED));
       return;
     }
 
@@ -1064,15 +1060,14 @@ void OfflinePageURLLoaderBuilder::OnHandleReady(
     MojoResult result,
     const mojo::HandleSignalsState& state) {
   if (result != MOJO_RESULT_OK) {
-    ReadCompletedOnIO(ResponseInfo(net::ERR_FAILED));
+    ReadCompleted(ResponseInfo(net::ERR_FAILED));
     return;
   }
   ReadBody();
 }
 
-void OfflinePageURLLoaderBuilder::ReadCompletedOnIO(
-    const ResponseInfo& response) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+void OfflinePageURLLoaderBuilder::ReadCompleted(const ResponseInfo& response) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   handle_watcher_.reset();
   client_.reset();
@@ -1085,11 +1080,7 @@ void OfflinePageURLLoaderBuilder::ReadCompletedOnIO(
   if (offline_page_data && offline_page_data->is_offline_page())
     is_offline_page_set_in_navigation_data = true;
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&OfflinePageRequestHandlerTest::ReadCompleted,
-                     base::Unretained(test()), response,
-                     is_offline_page_set_in_navigation_data));
+  test()->ReadCompleted(response, is_offline_page_set_in_navigation_data);
 }
 
 TEST_F(OfflinePageRequestHandlerTest, FailedToCreateRequestJob) {

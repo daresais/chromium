@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/ranges.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -80,7 +81,7 @@ float AveragePower(const media::AudioBus& buffer) {
 
   // Update accumulated average results, with clamping for sanity.
   const float average_power =
-      std::max(0.0f, std::min(1.0f, sum_power / (frames * channels)));
+      base::ClampToRange(sum_power / (frames * channels), 0.0f, 1.0f);
 
   // Convert average power level to dBFS units, and pin it down to zero if it
   // is insignificantly small.
@@ -94,10 +95,6 @@ float AveragePower(const media::AudioBus& buffer) {
 #endif  // AUDIO_POWER_MONITORING
 
 #if defined(AUDIO_PROCESSING_IN_AUDIO_SERVICE)
-
-bool CanRunApm() {
-  return base::FeatureList::IsEnabled(features::kWebRtcApmInAudioService);
-}
 
 bool SamplesNeedClamping(const media::AudioBus& bus) {
   const auto IsOutOfRange = [](float sample) {
@@ -402,8 +399,7 @@ InputController::InputController(
       type_(type),
       user_input_monitor_(user_input_monitor),
       stream_monitor_coordinator_(stream_monitor_coordinator),
-      processing_config_(std::move(processing_config)),
-      weak_ptr_factory_(this) {
+      processing_config_(std::move(processing_config)) {
   DCHECK_CALLED_ON_VALID_THREAD(owning_thread_);
   DCHECK(handler_);
   DCHECK(sync_writer_);
@@ -411,7 +407,8 @@ InputController::InputController(
 
 #if defined(AUDIO_PROCESSING_IN_AUDIO_SERVICE)
   if (processing_config_) {
-    if (processing_config_->settings.requires_apm() && CanRunApm()) {
+    if (processing_config_->settings.requires_apm() &&
+        media::IsWebRtcApmInAudioServiceEnabled()) {
       processing_helper_.emplace(
           params, processing_config_->settings,
           std::move(processing_config_->controls_receiver));
@@ -582,6 +579,9 @@ void InputController::SetVolume(double volume) {
   if (!stream_)
     return;
 
+  std::string log_string = base::StringPrintf("AIC::SetVolume: %.2f", volume);
+  handler_->OnLog(log_string);
+
   // Only ask for the maximum volume at first call and use cached value
   // for remaining function calls.
   if (!max_volume_) {
@@ -649,7 +649,10 @@ void InputController::DoCreate(media::AudioManager* audio_manager,
   DCHECK_CALLED_ON_VALID_THREAD(owning_thread_);
   DCHECK(!stream_);
   SCOPED_UMA_HISTOGRAM_TIMER("Media.AudioInputController.CreateTime");
-  handler_->OnLog("AIC::DoCreate");
+  std::string log_string = base::StringPrintf(
+      "AIC::DoCreate: device_id=%s, enable_agc=%d, params=%s",
+      device_id.c_str(), enable_agc, params.AsHumanReadableString().c_str());
+  handler_->OnLog(log_string);
 
 #if defined(AUDIO_POWER_MONITORING)
   // We only do power measurements for UMA stats for low latency streams, and
@@ -695,6 +698,8 @@ void InputController::DoCreate(media::AudioManager* audio_manager,
   // Send initial muted state along with OnCreated, to avoid races.
   is_muted_ = stream_->IsMuted();
   handler_->OnCreated(is_muted_);
+  log_string = base::StringPrintf("AIC::OnCreated: is_muted=%d", is_muted_);
+  handler_->OnLog(log_string);
 
   check_muted_state_timer_.Start(FROM_HERE, kCheckMutedStateInterval, this,
                                  &InputController::CheckMutedState);
@@ -720,7 +725,7 @@ void InputController::DoLogAudioLevels(float level_dbfs,
     LogMicrophoneMuteResult(MICROPHONE_IS_MUTED);
     handler_->OnLog("AIC::OnData: microphone is muted!");
     // Return early if microphone is muted. No need to adding logs and UMA stats
-    // of audio levels if we know that the micropone is muted.
+    // of audio levels if we know that the microphone is muted.
     return;
   }
 
@@ -863,6 +868,9 @@ void InputController::CheckMutedState() {
   if (new_state != is_muted_) {
     is_muted_ = new_state;
     handler_->OnMuted(is_muted_);
+    std::string log_string =
+        base::StringPrintf("AIC::OnMuted: is_muted=%d", is_muted_);
+    handler_->OnLog(log_string);
   }
 }
 

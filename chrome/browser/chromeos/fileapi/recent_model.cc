@@ -22,7 +22,7 @@
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/chromeos/fileapi/recent_model_factory.h"
 #include "content/public/browser/browser_thread.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 
 using content::BrowserThread;
 
@@ -75,7 +75,7 @@ RecentModel::RecentModel(Profile* profile)
     : RecentModel(CreateDefaultSources(profile)) {}
 
 RecentModel::RecentModel(std::vector<std::unique_ptr<RecentSource>> sources)
-    : sources_(std::move(sources)), weak_ptr_factory_(this) {
+    : sources_(std::move(sources)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 

@@ -12,17 +12,18 @@
 #include "components/signin/internal/identity_manager/gaia_cookie_manager_service.h"
 #include "components/signin/internal/identity_manager/primary_account_manager.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 #include "components/signin/public/base/list_accounts_test_utils.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/test_identity_manager_observer.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
+#include "google_apis/gaia/gaia_constants.h"
 
 #if defined(OS_ANDROID)
 #include "components/signin/internal/identity_manager/oauth2_token_service_delegate_android.h"
 #endif
 
-namespace identity {
+namespace signin {
 
 namespace {
 
@@ -50,7 +51,7 @@ void UpdateRefreshTokenForAccount(
     ProfileOAuth2TokenService* token_service,
     AccountTrackerService* account_tracker_service,
     IdentityManager* identity_manager,
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const std::string& new_token) {
   DCHECK_EQ(account_tracker_service->GetAccountInfo(account_id).account_id,
             account_id)
@@ -105,14 +106,14 @@ CoreAccountInfo SetPrimaryAccount(IdentityManager* identity_manager,
 void SetRefreshTokenForPrimaryAccount(IdentityManager* identity_manager,
                                       const std::string& token_value) {
   DCHECK(identity_manager->HasPrimaryAccount());
-  std::string account_id = identity_manager->GetPrimaryAccountId();
+  CoreAccountId account_id = identity_manager->GetPrimaryAccountId();
   SetRefreshTokenForAccount(identity_manager, account_id, token_value);
 }
 
 void SetInvalidRefreshTokenForPrimaryAccount(
     IdentityManager* identity_manager) {
   DCHECK(identity_manager->HasPrimaryAccount());
-  std::string account_id = identity_manager->GetPrimaryAccountId();
+  CoreAccountId account_id = identity_manager->GetPrimaryAccountId();
 
   SetInvalidRefreshTokenForAccount(identity_manager, account_id);
 }
@@ -121,7 +122,7 @@ void RemoveRefreshTokenForPrimaryAccount(IdentityManager* identity_manager) {
   if (!identity_manager->HasPrimaryAccount())
     return;
 
-  std::string account_id = identity_manager->GetPrimaryAccountId();
+  CoreAccountId account_id = identity_manager->GetPrimaryAccountId();
 
   RemoveRefreshTokenForAccount(identity_manager, account_id);
 }
@@ -131,8 +132,9 @@ AccountInfo MakePrimaryAccountAvailable(IdentityManager* identity_manager,
   CoreAccountInfo account_info = SetPrimaryAccount(identity_manager, email);
   SetRefreshTokenForPrimaryAccount(identity_manager);
   base::Optional<AccountInfo> primary_account_info =
-      identity_manager->FindAccountInfoForAccountWithRefreshTokenByAccountId(
-          account_info.account_id);
+      identity_manager
+          ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
+              account_info.account_id);
   // Ensure that extended information for the account is available after setting
   // the refresh token.
   DCHECK(primary_account_info.has_value());
@@ -219,8 +221,8 @@ AccountInfo MakeAccountAvailableWithCookies(
   // as tokens finish loading.
   WaitForLoadCredentialsToComplete(identity_manager);
 
-  identity::SetCookieAccounts(identity_manager, test_url_loader_factory,
-                              {{email, gaia_id}});
+  SetCookieAccounts(identity_manager, test_url_loader_factory,
+                    {{email, gaia_id}});
 
   account_tracker_service->SeedAccountInfo(gaia_id, email);
 
@@ -234,26 +236,26 @@ AccountInfo MakeAccountAvailableWithCookies(
 }
 
 void SetRefreshTokenForAccount(IdentityManager* identity_manager,
-                               const std::string& account_id,
+                               const CoreAccountId& account_id,
                                const std::string& token_value) {
   UpdateRefreshTokenForAccount(
       identity_manager->GetTokenService(),
       identity_manager->GetAccountTrackerService(), identity_manager,
       account_id,
-      token_value.empty() ? "refresh_token_for_" + account_id : token_value);
+      token_value.empty() ? "refresh_token_for_" + account_id.id : token_value);
 }
 
 void SetInvalidRefreshTokenForAccount(IdentityManager* identity_manager,
-                                      const std::string& account_id) {
-  UpdateRefreshTokenForAccount(
-      identity_manager->GetTokenService(),
+                                      const CoreAccountId& account_id) {
+  UpdateRefreshTokenForAccount(identity_manager->GetTokenService(),
 
-      identity_manager->GetAccountTrackerService(), identity_manager,
-      account_id, OAuth2TokenServiceDelegate::kInvalidRefreshToken);
+                               identity_manager->GetAccountTrackerService(),
+                               identity_manager, account_id,
+                               GaiaConstants::kInvalidRefreshToken);
 }
 
 void RemoveRefreshTokenForAccount(IdentityManager* identity_manager,
-                                  const std::string& account_id) {
+                                  const CoreAccountId& account_id) {
   if (!identity_manager->HasAccountWithRefreshToken(account_id))
     return;
 
@@ -267,12 +269,13 @@ void RemoveRefreshTokenForAccount(IdentityManager* identity_manager,
   run_loop.Run();
 }
 
-void SetCookieAccounts(IdentityManager* identity_manager,
-                       network::TestURLLoaderFactory* test_url_loader_factory,
-                       const std::vector<CookieParams>& cookie_accounts) {
+void SetCookieAccounts(
+    IdentityManager* identity_manager,
+    network::TestURLLoaderFactory* test_url_loader_factory,
+    const std::vector<CookieParamsForTest>& cookie_accounts) {
   // Convert |cookie_accounts| to the format list_accounts_test_utils wants.
-  std::vector<signin::CookieParams> gaia_cookie_accounts;
-  for (const CookieParams& params : cookie_accounts) {
+  std::vector<CookieParams> gaia_cookie_accounts;
+  for (const CookieParamsForTest& params : cookie_accounts) {
     gaia_cookie_accounts.push_back({params.email, params.gaia_id,
                                     /*valid=*/true, /*signed_out=*/false,
                                     /*verified=*/true});
@@ -282,8 +285,8 @@ void SetCookieAccounts(IdentityManager* identity_manager,
   TestIdentityManagerObserver cookie_observer(identity_manager);
   cookie_observer.SetOnAccountsInCookieUpdatedCallback(run_loop.QuitClosure());
 
-  signin::SetListAccountsResponseWithParams(gaia_cookie_accounts,
-                                            test_url_loader_factory);
+  SetListAccountsResponseWithParams(gaia_cookie_accounts,
+                                    test_url_loader_factory);
 
   GaiaCookieManagerService* cookie_manager =
       identity_manager->GetGaiaCookieManagerService();
@@ -307,6 +310,14 @@ void UpdateAccountInfoForAccount(IdentityManager* identity_manager,
   account_tracker_service->SeedAccountInfo(account_info);
 }
 
+void SimulateAccountImageFetch(IdentityManager* identity_manager,
+                               const CoreAccountId& account_id,
+                               const gfx::Image& image) {
+  AccountTrackerService* account_tracker_service =
+      identity_manager->GetAccountTrackerService();
+  account_tracker_service->SetAccountImage(account_id, image);
+}
+
 void SetFreshnessOfAccountsInGaiaCookie(IdentityManager* identity_manager,
                                         bool accounts_are_fresh) {
   GaiaCookieManagerService* cookie_manager =
@@ -325,7 +336,7 @@ std::string GetTestGaiaIdForEmail(const std::string& email) {
 
 void UpdatePersistentErrorOfRefreshTokenForAccount(
     IdentityManager* identity_manager,
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const GoogleServiceAuthError& auth_error) {
   DCHECK(identity_manager->HasAccountWithRefreshToken(account_id));
   identity_manager->GetTokenService()->GetDelegate()->UpdateAuthError(
@@ -349,7 +360,7 @@ void CancelAllOngoingGaiaCookieOperations(IdentityManager* identity_manager) {
 }
 
 void SimulateSuccessfulFetchOfAccountInfo(IdentityManager* identity_manager,
-                                          const std::string& account_id,
+                                          const CoreAccountId& account_id,
                                           const std::string& email,
                                           const std::string& gaia,
                                           const std::string& hosted_domain,
@@ -371,4 +382,4 @@ void SimulateSuccessfulFetchOfAccountInfo(IdentityManager* identity_manager,
   account_tracker_service->SetAccountInfoFromUserInfo(account_id, &user_info);
 }
 
-}  // namespace identity
+}  // namespace signin

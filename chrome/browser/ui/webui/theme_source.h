@@ -23,8 +23,8 @@ class ThemeSource : public content::URLDataSource {
   // content::URLDataSource implementation.
   std::string GetSource() override;
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
   std::string GetMimeType(const std::string& path) override;
   scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForRequestPath(
@@ -33,6 +33,8 @@ class ThemeSource : public content::URLDataSource {
   bool ShouldServiceRequest(const GURL& url,
                             content::ResourceContext* resource_context,
                             int render_process_id) override;
+  std::string GetAccessControlAllowOriginForOrigin(
+      const std::string& origin) override;
 
  private:
   // Fetches and sends the theme bitmap.

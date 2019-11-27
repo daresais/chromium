@@ -43,8 +43,8 @@ using base::UserMetricsAction;
 
 namespace {
 // Constants for 3D touch application static shortcuts.
-NSString* const kShortcutNewTab = @"OpenNewTab";
-NSString* const kShortcutNewIncognitoTab = @"OpenIncognitoTab";
+NSString* const kShortcutNewSearch = @"OpenNewSearch";
+NSString* const kShortcutNewIncognitoSearch = @"OpenIncognitoSearch";
 NSString* const kShortcutVoiceSearch = @"OpenVoiceSearch";
 NSString* const kShortcutQRScanner = @"OpenQRScanner";
 
@@ -172,11 +172,15 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   if (applicationIsActive && ![startupInformation isPresentingFirstRunUI]) {
     // The app is already active so the applicationDidBecomeActive: method will
     // never be called. Open the requested URL immediately.
-    ApplicationMode targetMode =
+    ApplicationModeForTabOpening targetMode =
         [[startupInformation startupParameters] launchInIncognito]
-            ? ApplicationMode::INCOGNITO
-            : ApplicationMode::NORMAL;
+            ? ApplicationModeForTabOpening::INCOGNITO
+            : ApplicationModeForTabOpening::NORMAL;
     UrlLoadParams params = UrlLoadParams::InNewTab(webpageGURL);
+    if (![[startupInformation startupParameters] launchInIncognito] &&
+        [tabOpener URLIsOpenedInRegularMode:webpageGURL]) {
+      // Record metric.
+    }
     [tabOpener dismissModalsAndOpenSelectedTabInMode:targetMode
                                    withUrlLoadParams:params
                                       dismissOmnibox:YES
@@ -209,7 +213,9 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   BOOL handledShortcutItem =
       [UserActivityHandler handleShortcutItem:shortcutItem
                            startupInformation:startupInformation];
-  if (handledShortcutItem) {
+  BOOL isActive = [[UIApplication sharedApplication] applicationState] ==
+                  UIApplicationStateActive;
+  if (handledShortcutItem && isActive) {
     [UserActivityHandler
         handleStartupParametersWithTabOpener:tabOpener
                           startupInformation:startupInformation
@@ -262,10 +268,10 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
     // will never be called. Open the requested URL after all modal UIs have
     // been dismissed. |_startupParameters| must be retained until all deferred
     // modal UIs are dismissed and tab opened with requested URL.
-    ApplicationMode targetMode =
+    ApplicationModeForTabOpening targetMode =
         [[startupInformation startupParameters] launchInIncognito]
-            ? ApplicationMode::INCOGNITO
-            : ApplicationMode::NORMAL;
+            ? ApplicationModeForTabOpening::INCOGNITO
+            : ApplicationModeForTabOpening::NORMAL;
     GURL URL;
     GURL virtualURL;
     GURL completeURL = startupInformation.startupParameters.completeURL;
@@ -311,6 +317,11 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
       params.web_params.url = result;
     }
 
+    if (![[startupInformation startupParameters] launchInIncognito] &&
+        [tabOpener URLIsOpenedInRegularMode:params.web_params.url]) {
+      // Record metric.
+    }
+
     [tabOpener dismissModalsAndOpenSelectedTabInMode:targetMode
                                    withUrlLoadParams:params
                                       dismissOmnibox:[[startupInformation
@@ -335,30 +346,33 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
       initWithExternalURL:GURL(kChromeUINewTabURL)
               completeURL:GURL(kChromeUINewTabURL)];
 
-  if ([shortcutItem.type isEqualToString:kShortcutNewTab]) {
-    base::RecordAction(UserMetricsAction("ApplicationShortcut.NewTabPressed"));
-    [startupInformation setStartupParameters:startupParams];
+  if ([shortcutItem.type isEqualToString:kShortcutNewSearch]) {
+    base::RecordAction(
+        UserMetricsAction("ApplicationShortcut.NewSearchPressed"));
+    startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    startupInformation.startupParameters = startupParams;
     return YES;
 
-  } else if ([shortcutItem.type isEqualToString:kShortcutNewIncognitoTab]) {
+  } else if ([shortcutItem.type isEqualToString:kShortcutNewIncognitoSearch]) {
     base::RecordAction(
-        UserMetricsAction("ApplicationShortcut.NewIncognitoTabPressed"));
-    [startupParams setLaunchInIncognito:YES];
-    [startupInformation setStartupParameters:startupParams];
+        UserMetricsAction("ApplicationShortcut.NewIncognitoSearchPressed"));
+    startupParams.launchInIncognito = YES;
+    startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    startupInformation.startupParameters = startupParams;
     return YES;
 
   } else if ([shortcutItem.type isEqualToString:kShortcutVoiceSearch]) {
     base::RecordAction(
         UserMetricsAction("ApplicationShortcut.VoiceSearchPressed"));
-    [startupParams setPostOpeningAction:START_VOICE_SEARCH];
-    [startupInformation setStartupParameters:startupParams];
+    startupParams.postOpeningAction = START_VOICE_SEARCH;
+    startupInformation.startupParameters = startupParams;
     return YES;
 
   } else if ([shortcutItem.type isEqualToString:kShortcutQRScanner]) {
     base::RecordAction(
         UserMetricsAction("ApplicationShortcut.ScanQRCodePressed"));
-    [startupParams setPostOpeningAction:START_QR_CODE_SCANNER];
-    [startupInformation setStartupParameters:startupParams];
+    startupParams.postOpeningAction = START_QR_CODE_SCANNER;
+    startupInformation.startupParameters = startupParams;
     return YES;
   }
 

@@ -15,13 +15,14 @@
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_test_helper.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/performance_timing.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
-#include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
@@ -32,15 +33,10 @@
 
 namespace blink {
 
-class ImagePaintTimingDetectorTest
-    : public testing::Test,
-      private ScopedFirstContentfulPaintPlusPlusForTest {
-  using CallbackQueue = std::queue<WebWidgetClient::ReportTimeCallback>;
-
+class ImagePaintTimingDetectorTest : public testing::Test {
  public:
   ImagePaintTimingDetectorTest()
-      : ScopedFirstContentfulPaintPlusPlusForTest(true),
-        test_task_runner_(
+      : test_task_runner_(
             base::MakeRefCounted<base::TestMockTimeTaskRunner>()) {}
 
   void SetUp() override {
@@ -85,12 +81,6 @@ class ImagePaintTimingDetectorTest
     return scrollable_area->VisibleContentRect();
   }
 
-  void ReplaceCallBackQueue(PaintTimingDetector& detector) {
-    detector.GetImagePaintTimingDetector()
-        ->notify_swap_time_override_for_testing_ =
-        base::BindRepeating(&ImagePaintTimingDetectorTest::FakeNotifySwapTime,
-                            base::Unretained(this));
-  }
   ImageRecord* FindLargestPaintCandidate() {
     return GetPaintTimingDetector()
         .GetImagePaintTimingDetector()
@@ -128,7 +118,10 @@ class ImagePaintTimingDetectorTest
                ->records_manager_.size_ordered_set_.size() +
            GetPaintTimingDetector()
                .GetImagePaintTimingDetector()
-               ->records_manager_.images_queued_for_paint_time_.size();
+               ->records_manager_.images_queued_for_paint_time_.size() +
+           GetPaintTimingDetector()
+               .GetImagePaintTimingDetector()
+               ->records_manager_.image_finished_times_.size();
   }
 
   size_t CountChildFrameRecords() {
@@ -144,9 +137,7 @@ class ImagePaintTimingDetectorTest
   }
 
   void UpdateCandidate() {
-    return GetPaintTimingDetector()
-        .GetImagePaintTimingDetector()
-        ->UpdateCandidate();
+    GetPaintTimingDetector().GetImagePaintTimingDetector()->UpdateCandidate();
   }
 
   base::TimeTicks LargestPaintStoredResult() {
@@ -168,15 +159,19 @@ class ImagePaintTimingDetectorTest
   void UpdateAllLifecyclePhasesAndInvokeCallbackIfAny() {
     UpdateAllLifecyclePhases();
     SimulatePassOfTime();
-    if (!callback_queue_.empty())
-      InvokeCallback();
+    while (mock_callback_manager_->CountCallbacks() > 0)
+      InvokeSwapTimeCallback(mock_callback_manager_);
   }
 
   void SetBodyInnerHTML(const std::string& content) {
     frame_test_helpers::LoadHTMLString(
         web_view_helper_.GetWebView()->MainFrameImpl(), content,
         KURL("http://test.com"));
-    ReplaceCallBackQueue(GetPaintTimingDetector());
+    mock_callback_manager_ =
+        MakeGarbageCollected<MockPaintTimingCallbackManager>();
+    GetPaintTimingDetector()
+        .GetImagePaintTimingDetector()
+        ->ResetCallbackManager(mock_callback_manager_);
     UpdateAllLifecyclePhases();
   }
 
@@ -184,15 +179,29 @@ class ImagePaintTimingDetectorTest
     GetChildDocument()->SetBaseURLOverride(KURL("http://test.com"));
     GetChildDocument()->body()->SetInnerHTMLFromString(content,
                                                        ASSERT_NO_EXCEPTION);
+    child_mock_callback_manager_ =
+        MakeGarbageCollected<MockPaintTimingCallbackManager>();
+    GetChildPaintTimingDetector()
+        .GetImagePaintTimingDetector()
+        ->ResetCallbackManager(child_mock_callback_manager_);
     UpdateAllLifecyclePhases();
   }
 
   void InvokeCallback() {
-    DCHECK_GT(callback_queue_.size(), 0UL);
-    std::move(callback_queue_.front())
-        .Run(WebWidgetClient::SwapResult::kDidSwap,
-             test_task_runner_->NowTicks());
-    callback_queue_.pop();
+    DCHECK_GT(mock_callback_manager_->CountCallbacks(), 0UL);
+    InvokeSwapTimeCallback(mock_callback_manager_);
+  }
+
+  void InvokeChildFrameCallback() {
+    DCHECK_GT(child_mock_callback_manager_->CountCallbacks(), 0UL);
+    InvokeSwapTimeCallback(child_mock_callback_manager_);
+  }
+
+  void InvokeSwapTimeCallback(
+      MockPaintTimingCallbackManager* image_callback_manager) {
+    image_callback_manager->InvokeSwapTimeCallback(
+        test_task_runner_->NowTicks());
+    UpdateCandidate();
   }
 
   void SetImageAndPaint(AtomicString id, int width, int height) {
@@ -238,9 +247,6 @@ class ImagePaintTimingDetectorTest
   LocalFrame* GetChildFrame() {
     return To<LocalFrame>(GetFrame()->Tree().FirstChild());
   }
-  void FakeNotifySwapTime(WebWidgetClient::ReportTimeCallback callback) {
-    callback_queue_.push(std::move(callback));
-  }
   ImageResourceContent* CreateImageForTest(int width, int height) {
     sk_sp<SkColorSpace> src_rgb_color_space = SkColorSpace::MakeSRGB();
     SkImageInfo raster_image_info =
@@ -249,11 +255,13 @@ class ImagePaintTimingDetectorTest
     sk_sp<SkImage> image = surface->makeImageSnapshot();
     ImageResourceContent* original_image_resource =
         ImageResourceContent::CreateLoaded(
-            StaticBitmapImage::Create(image).get());
+            UnacceleratedStaticBitmapImage::Create(image).get());
     return original_image_resource;
   }
 
-  CallbackQueue callback_queue_;
+  PaintTimingCallbackManager::CallbackQueue callback_queue_;
+  Persistent<MockPaintTimingCallbackManager> mock_callback_manager_;
+  Persistent<MockPaintTimingCallbackManager> child_mock_callback_manager_;
 };
 
 constexpr base::TimeDelta ImagePaintTimingDetectorTest::kQuantumOfTime;
@@ -629,7 +637,7 @@ TEST_F(ImagePaintTimingDetectorTest,
   )HTML");
   SetImageAndPaint("target", 5, 5);
   UpdateAllLifecyclePhasesAndInvokeCallbackIfAny();
-  EXPECT_EQ(ContainerTotalSize(), 2u);
+  EXPECT_EQ(ContainerTotalSize(), 3u);
 
   GetDocument().getElementById("parent")->RemoveChild(
       GetDocument().getElementById("target"));
@@ -657,7 +665,7 @@ TEST_F(ImagePaintTimingDetectorTest,
   )HTML");
   SetImageAndPaint("target", 5, 5);
   UpdateAllLifecyclePhasesAndInvokeCallbackIfAny();
-  EXPECT_EQ(ContainerTotalSize(), 1u);
+  EXPECT_EQ(ContainerTotalSize(), 2u);
   EXPECT_EQ(CountInvisibleRecords(), 1u);
 
   GetDocument().body()->RemoveChild(GetDocument().getElementById("parent"));
@@ -680,7 +688,7 @@ TEST_F(ImagePaintTimingDetectorTest,
     </div>
   )HTML");
   UpdateAllLifecyclePhasesAndInvokeCallbackIfAny();
-  EXPECT_EQ(ContainerTotalSize(), 2u);
+  EXPECT_EQ(ContainerTotalSize(), 3u);
 
   GetDocument().getElementById("parent")->RemoveChild(
       GetDocument().getElementById("target"));
@@ -696,7 +704,7 @@ TEST_F(ImagePaintTimingDetectorTest,
   )HTML");
   SetImageAndPaint("target", 5, 5);
   UpdateAllLifecyclePhases();
-  EXPECT_EQ(ContainerTotalSize(), 3u);
+  EXPECT_EQ(ContainerTotalSize(), 4u);
 
   GetDocument().getElementById("parent")->RemoveChild(
       GetDocument().getElementById("target"));
@@ -993,13 +1001,12 @@ TEST_F(ImagePaintTimingDetectorTest, Iframe) {
     <style>img { display:block }</style>
     <img id="target"></img>
   )HTML");
-  ReplaceCallBackQueue(GetChildPaintTimingDetector());
   SetChildFrameImageAndPaint("target", 5, 5);
   UpdateAllLifecyclePhases();
   // Ensure main frame doesn't capture this image.
   EXPECT_EQ(CountVisibleImageRecords(), 0u);
   EXPECT_EQ(CountChildFrameRecords(), 1u);
-  InvokeCallback();
+  InvokeChildFrameCallback();
   ImageRecord* image = FindChildFrameLargestPaintCandidate();
   EXPECT_TRUE(image);
   // Ensure the image size is not clipped (5*5).
@@ -1019,7 +1026,6 @@ TEST_F(ImagePaintTimingDetectorTest, Iframe_ClippedByMainFrameViewport) {
   )HTML");
   // Make sure the iframe is out of main-frame's viewport.
   DCHECK_LT(GetViewportRect(GetFrameView()).Height(), 1234567);
-  ReplaceCallBackQueue(GetChildPaintTimingDetector());
   SetChildFrameImageAndPaint("target", 5, 5);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(CountVisibleImageRecords(), 0u);
@@ -1036,12 +1042,11 @@ TEST_F(ImagePaintTimingDetectorTest, Iframe_HalfClippedByMainFrameViewport) {
     <style>img { display:block }</style>
     <img id="target"></img>
   )HTML");
-  ReplaceCallBackQueue(GetChildPaintTimingDetector());
   SetChildFrameImageAndPaint("target", 10, 10);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(CountVisibleImageRecords(), 0u);
   EXPECT_EQ(CountChildFrameRecords(), 1u);
-  InvokeCallback();
+  InvokeChildFrameCallback();
   ImageRecord* image = FindChildFrameLargestPaintCandidate();
   EXPECT_TRUE(image);
   EXPECT_LT(image->first_size, 100ul);

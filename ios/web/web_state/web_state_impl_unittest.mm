@@ -23,7 +23,7 @@
 #import "ios/web/navigation/serializable_user_data_manager_impl.h"
 #import "ios/web/navigation/wk_navigation_util.h"
 #include "ios/web/public/deprecated/global_web_state_observer.h"
-#import "ios/web/public/java_script_dialog_presenter.h"
+#import "ios/web/public/navigation/web_state_policy_decider.h"
 #import "ios/web/public/session/crw_navigation_item_storage.h"
 #import "ios/web/public/session/crw_session_storage.h"
 #import "ios/web/public/session/serializable_user_data_manager.h"
@@ -34,13 +34,13 @@
 #import "ios/web/public/test/fakes/test_web_state_delegate.h"
 #import "ios/web/public/test/fakes/test_web_state_observer.h"
 #include "ios/web/public/test/web_test.h"
-#import "ios/web/public/web_state/context_menu_params.h"
-#import "ios/web/public/web_state/web_state_delegate.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_policy_decider.h"
+#import "ios/web/public/ui/context_menu_params.h"
+#import "ios/web/public/ui/java_script_dialog_presenter.h"
+#import "ios/web/public/web_state_delegate.h"
+#include "ios/web/public/web_state_observer.h"
 #import "ios/web/security/web_interstitial_impl.h"
 #import "ios/web/test/fakes/mock_interstitial_delegate.h"
-#include "ios/web/web_state/global_web_state_event_tracker.h"
+#import "ios/web/web_state/global_web_state_event_tracker.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
@@ -58,6 +58,8 @@ using testing::Assign;
 using testing::AtMost;
 using testing::DoAll;
 using testing::Return;
+using base::test::ios::WaitUntilConditionOrTimeout;
+using base::test::ios::kWaitForPageLoadTimeout;
 
 namespace web {
 namespace {
@@ -206,61 +208,6 @@ TEST_P(WebStateImplTest, WebUsageEnabled) {
   web_state_->SetWebUsageEnabled(true);
   EXPECT_TRUE(web_state_->IsWebUsageEnabled());
   EXPECT_TRUE(web_state_->GetWebController().webUsageEnabled);
-}
-
-TEST_P(WebStateImplTest, ResponseHeaders) {
-  GURL real_url("http://foo.com/bar");
-  GURL frame_url("http://frames-r-us.com/");
-  auto real_headers = base::MakeRefCounted<net::HttpResponseHeaders>(
-      net::HttpUtil::AssembleRawHeaders("HTTP/1.1 200 OK\r\n"
-                                        "Content-Type: text/html\r\n"
-                                        "X-Should-Be-Here: yep\r\n"
-                                        "\r\n"));
-  auto frame_headers = base::MakeRefCounted<net::HttpResponseHeaders>(
-      net::HttpUtil::AssembleRawHeaders("HTTP/1.1 200 OK\r\n"
-                                        "Content-Type: application/pdf\r\n"
-                                        "X-Should-Not-Be-Here: oops\r\n"
-                                        "\r\n"));
-  // Simulate a load of a page with a frame.
-  web_state_->OnHttpResponseHeadersReceived(real_headers.get(), real_url);
-  web_state_->OnHttpResponseHeadersReceived(frame_headers.get(), frame_url);
-  // Include a hash to be sure it's handled correctly.
-  web_state_->UpdateHttpResponseHeaders(
-      GURL(real_url.spec() + std::string("#baz")));
-
-  // Verify that the right header set was kept.
-  ASSERT_TRUE(web_state_->GetHttpResponseHeaders());
-  EXPECT_TRUE(
-      web_state_->GetHttpResponseHeaders()->HasHeader("X-Should-Be-Here"));
-  EXPECT_FALSE(
-      web_state_->GetHttpResponseHeaders()->HasHeader("X-Should-Not-Be-Here"));
-
-  // And that it was parsed correctly.
-  EXPECT_EQ("text/html", web_state_->GetContentsMimeType());
-}
-
-TEST_P(WebStateImplTest, ResponseHeaderClearing) {
-  GURL url("http://foo.com/");
-  auto headers = base::MakeRefCounted<net::HttpResponseHeaders>(
-      net::HttpUtil::AssembleRawHeaders("HTTP/1.1 200 OK\r\n"
-                                        "Content-Type: text/html\r\n"
-                                        "\r\n"));
-  web_state_->OnHttpResponseHeadersReceived(headers.get(), url);
-
-  // There should be no headers before loading.
-  EXPECT_EQ(NULL, web_state_->GetHttpResponseHeaders());
-
-  // There should be headers and parsed values after loading.
-  web_state_->UpdateHttpResponseHeaders(url);
-  ASSERT_TRUE(web_state_->GetHttpResponseHeaders());
-  EXPECT_TRUE(web_state_->GetHttpResponseHeaders()->HasHeader("Content-Type"));
-  EXPECT_NE("", web_state_->GetContentsMimeType());
-
-  // ... but not after loading another page, nor should there be specific
-  // parsed values.
-  web_state_->UpdateHttpResponseHeaders(GURL("http://elsewhere.com/"));
-  EXPECT_EQ(NULL, web_state_->GetHttpResponseHeaders());
-  EXPECT_EQ("", web_state_->GetContentsMimeType());
 }
 
 // Tests forwarding to WebStateObserver callbacks.
@@ -747,7 +694,7 @@ TEST_P(WebStateImplTest, ScriptCommand) {
   const GURL kUrl1("http://foo");
   bool is_called_1 = false;
   web::FakeWebFrame main_frame("main", true, GURL());
-  web_state_->AddScriptCommandCallback(
+  auto subscription_1 = web_state_->AddScriptCommandCallback(
       base::BindRepeating(&HandleScriptCommand, &is_called_1, &value_1, kUrl1,
                           /*expected_user_is_interacting*/ false, &main_frame),
       kPrefix1);
@@ -758,7 +705,7 @@ TEST_P(WebStateImplTest, ScriptCommand) {
   value_2.SetString("c", "d");
   const GURL kUrl2("http://bar");
   bool is_called_2 = false;
-  web_state_->AddScriptCommandCallback(
+  auto subscription_2 = web_state_->AddScriptCommandCallback(
       base::BindRepeating(&HandleScriptCommand, &is_called_2, &value_2, kUrl2,
                           /*expected_user_is_interacting*/ false, &main_frame),
       kPrefix2);
@@ -770,7 +717,7 @@ TEST_P(WebStateImplTest, ScriptCommand) {
   const GURL kUrl3("http://iframe");
   bool is_called_3 = false;
   web::FakeWebFrame subframe("subframe", false, GURL());
-  web_state_->AddScriptCommandCallback(
+  auto subscription_3 = web_state_->AddScriptCommandCallback(
       base::BindRepeating(&HandleScriptCommand, &is_called_3, &value_3, kUrl3,
                           /*expected_user_is_interacting*/ false, &subframe),
       kPrefix3);
@@ -812,7 +759,7 @@ TEST_P(WebStateImplTest, ScriptCommand) {
   is_called_3 = false;
 
   // Remove the callback and check it is no longer called.
-  web_state_->RemoveScriptCommandCallback(kPrefix1);
+  subscription_1.reset();
   web_state_->OnScriptCommandReceived(kCommand1, value_1, kUrl1,
                                       /*user_is_interacting*/ false,
                                       /*sender_frame*/ &main_frame);
@@ -827,9 +774,6 @@ TEST_P(WebStateImplTest, ScriptCommand) {
   EXPECT_FALSE(is_called_1);
   EXPECT_TRUE(is_called_2);
   EXPECT_FALSE(is_called_3);
-
-  web_state_->RemoveScriptCommandCallback(kPrefix2);
-  web_state_->RemoveScriptCommandCallback(kPrefix3);
 }
 
 // Tests that WebState::CreateParams::created_with_opener is translated to
@@ -941,6 +885,8 @@ TEST_P(WebStateImplTest, UncommittedRestoreSession) {
   EXPECT_EQ(@(1), user_data_value);
 }
 
+// Test that lastCommittedItemIndex is end-of-list when there's no defined
+// index, such as during a restore.
 TEST_P(WebStateImplTest, NoUncommittedRestoreSession) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(
@@ -951,6 +897,51 @@ TEST_P(WebStateImplTest, NoUncommittedRestoreSession) {
   EXPECT_NSEQ(@[], session_storage.itemStorages);
   EXPECT_TRUE(web_state_->GetTitle().empty());
   EXPECT_EQ(GURL::EmptyGURL(), web_state_->GetVisibleURL());
+}
+
+TEST_P(WebStateImplTest, BuildStorageDuringRestore) {
+  if (GetParam() == NavigationManagerChoice::LEGACY) {
+    return;
+  }
+
+  GURL urls[3] = {GURL("https://chromium.test/1"),
+                  GURL("https://chromium.test/2"),
+                  GURL("https://chromium.test/3")};
+  std::vector<std::unique_ptr<NavigationItem>> items;
+  for (size_t index = 0; index < base::size(urls); ++index) {
+    items.push_back(NavigationItem::Create());
+    items.back()->SetURL(urls[index]);
+  }
+
+  // Force generation of child views; necessary for some tests.
+  web_state_->GetView();
+  web_state_->SetKeepRenderProcessAlive(true);
+
+  web_state_->GetNavigationManager()->Restore(0, std::move(items));
+  __block bool restore_done = false;
+  web_state_->GetNavigationManager()->AddRestoreCompletionCallback(
+      base::BindOnce(^{
+        restore_done = true;
+      }));
+  ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
+    return restore_done;
+  }));
+  // Trying to grab the lastCommittedItemIndex while a restore is happening is
+  // undefined, so the last committed item defaults to end-of-list.
+  CRWSessionStorage* session_storage = web_state_->BuildSessionStorage();
+  EXPECT_EQ(2, session_storage.lastCommittedItemIndex);
+
+  // Now wait until the last committed item is fully loaded, and
+  // lastCommittedItemIndex goes back to 0.
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
+    EXPECT_FALSE(
+        wk_navigation_util::IsWKInternalUrl(web_state_->GetVisibleURL()));
+
+    return !web_state_->GetNavigationManager()->GetPendingItem() &&
+           !web_state_->IsLoading() && web_state_->GetLoadingProgress() == 1.0;
+  }));
+  session_storage = web_state_->BuildSessionStorage();
+  EXPECT_EQ(0, session_storage.lastCommittedItemIndex);
 }
 
 // Tests showing and clearing interstitial when NavigationManager is

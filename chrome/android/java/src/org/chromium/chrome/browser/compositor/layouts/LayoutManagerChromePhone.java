@@ -60,6 +60,16 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
     }
 
     @Override
+    public boolean closeAllTabsRequest(boolean incognito) {
+        if (getActiveLayout() == mStaticLayout && !incognito) {
+            startShowing(DeviceClassManager.enableAccessibilityLayout() ? mOverviewListLayout
+                                                                        : mOverviewLayout,
+                    /* animate= */ false);
+        }
+        return super.closeAllTabsRequest(incognito);
+    }
+
+    @Override
     protected LayoutManagerTabModelObserver createTabModelObserver() {
         return new LayoutManagerTabModelObserver() {
             @Override
@@ -108,7 +118,7 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
         }
         getActiveLayout().onTabClosed(time(), id, nextId, incognito);
         Tab nextTab = getTabById(nextId);
-        if (nextTab != null) nextTab.requestFocus();
+        if (nextTab != null && nextTab.getView() != null) nextTab.getView().requestFocus();
         boolean animate = !tabRemoved && animationsEnabled();
         if (getActiveLayout() != overviewLayout && showOverview && !animate) {
             showOverview(false);
@@ -143,7 +153,7 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
 
         if (willBeSelected) {
             Tab newTab = TabModelUtils.getTabById(getTabModelSelector().getModel(isIncognito), id);
-            if (newTab != null) newTab.requestFocus();
+            if (newTab != null && newTab.getView() != null) newTab.getView().requestFocus();
         }
     }
 

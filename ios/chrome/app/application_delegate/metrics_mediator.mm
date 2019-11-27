@@ -4,11 +4,14 @@
 
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
 
+#include <sys/sysctl.h>
+
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "build/branding_buildflags.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
@@ -31,7 +34,7 @@
 #include "ios/public/provider/chrome/browser/distribution/app_distribution_provider.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -41,6 +44,22 @@
 namespace {
 // The amount of time (in seconds) to wait for the user to start a new task.
 const NSTimeInterval kFirstUserActionTimeout = 30.0;
+
+// Returns time delta since app launch as retrieved from kernel info about
+// the current process.
+base::TimeDelta TimeDeltaSinceAppLaunchFromProcess() {
+  struct kinfo_proc info;
+  size_t length = sizeof(struct kinfo_proc);
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
+  const int kr = sysctl(mib, base::size(mib), &info, &length, nullptr, 0);
+  DCHECK_EQ(KERN_SUCCESS, kr);
+
+  const struct timeval time = info.kp_proc.p_starttime;
+  const NSTimeInterval time_since_1970 =
+      time.tv_sec + (time.tv_usec / (double)USEC_PER_SEC);
+  NSDate* date = [NSDate dateWithTimeIntervalSince1970:time_since_1970];
+  return base::TimeDelta::FromSecondsD(-date.timeIntervalSinceNow);
+}
 }  // namespace
 
 namespace metrics_mediator {
@@ -98,8 +117,15 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
   if (![startupInformation isColdStart])
     return;
 
-  base::TimeDelta startDuration =
+  const base::TimeDelta startDuration =
       base::TimeTicks::Now() - [startupInformation appLaunchTime];
+
+  const base::TimeDelta startDurationFromProcess =
+      TimeDeltaSinceAppLaunchFromProcess();
+
+  UMA_HISTOGRAM_TIMES("Startup.ColdStartFromProcessCreationTime",
+                      startDurationFromProcess);
+
   if ([startupInformation startupParameters]) {
     UMA_HISTOGRAM_TIMES("Startup.ColdStartWithExternalURLTime", startDuration);
   } else {
@@ -178,7 +204,7 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
 - (BOOL)areMetricsEnabled {
 // If this if-def changes, it needs to be changed in
 // IOSChromeMainParts::IsMetricsReportingEnabled and settings_egtest.mm.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   BOOL optIn = GetApplicationContext()->GetLocalState()->GetBoolean(
       metrics::prefs::kMetricsReportingEnabled);
 #else
@@ -246,7 +272,7 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
     callback = ^(NSData* log_content) {
       std::string log(static_cast<const char*>([log_content bytes]),
                       static_cast<size_t>([log_content length]));
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {web::WebThread::UI}, base::BindOnce(^{
             GetApplicationContext()->GetMetricsService()->PushExternalLog(log);
           }));
@@ -256,8 +282,9 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
   }
 
   app_group::main_app::RecordWidgetUsage();
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+  base::PostTask(
+      FROM_HERE,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&app_group::main_app::ProcessPendingLogs, callback));
 }
 

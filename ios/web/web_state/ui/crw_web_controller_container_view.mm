@@ -155,7 +155,9 @@
       ![_delegate shouldKeepRenderProcessAliveForContainerView:self]) {
     if (self.webViewContentView.superview != self) {
       [_webViewContentView setFrame:self.bounds];
-      [self addSubview:_webViewContentView];
+      // Insert the content view on the back of the container view so any view
+      // that was presented on top of the content view can still appear.
+      [self insertSubview:_webViewContentView atIndex:0];
     }
     return;
   }
@@ -217,14 +219,6 @@
 - (void)clearTransientContentView {
   self.transientContentView = nil;
   self.contentViewProxy.contentView = self.webViewContentView;
-}
-
-- (void)disconnectScrollProxy {
-  [self.contentViewProxy disconnectScrollProxy];
-}
-
-- (void)reconnectScrollProxy {
-  [self.contentViewProxy reconnectScrollProxy];
 }
 
 #pragma mark UIView (printing)

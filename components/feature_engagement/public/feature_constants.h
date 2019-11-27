@@ -19,8 +19,9 @@ extern const base::Feature kIPHDummyFeature;
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
     defined(OS_CHROMEOS)
-extern const base::Feature kIPHReopenTabFeature;
 extern const base::Feature kIPHFocusModeFeature;
+extern const base::Feature kIPHGlobalMediaControlsFeature;
+extern const base::Feature kIPHReopenTabFeature;
 
 #if BUILDFLAG(ENABLE_LEGACY_DESKTOP_IN_PRODUCT_HELP)
 extern const base::Feature kIPHBookmarkFeature;
@@ -40,7 +41,9 @@ extern const base::Feature kIPHDataSaverPreviewFeature;
 extern const base::Feature kIPHDownloadHomeFeature;
 extern const base::Feature kIPHDownloadPageFeature;
 extern const base::Feature kIPHDownloadPageScreenshotFeature;
-extern const base::Feature kIPHChromeDuetFeature;
+extern const base::Feature kIPHChromeDuetHomeButtonFeature;
+extern const base::Feature kIPHChromeDuetSearchFeature;
+extern const base::Feature kIPHChromeDuetTabSwitcherFeature;
 extern const base::Feature kIPHChromeHomeExpandFeature;
 extern const base::Feature kIPHChromeHomePullToRefreshFeature;
 extern const base::Feature kIPHContextualSearchWebSearchFeature;
@@ -62,6 +65,7 @@ extern const base::Feature kIPHPreviewsOmniboxUIFeature;
 extern const base::Feature kIPHTabGroupsQuicklyComparePagesFeature;
 extern const base::Feature kIPHTabGroupsTapToSeeAnotherTabFeature;
 extern const base::Feature kIPHTabGroupsYourTabsAreTogetherFeature;
+extern const base::Feature kIPHTabGroupsDragAndDropFeature;
 extern const base::Feature kIPHTranslateMenuButtonFeature;
 extern const base::Feature kIPHExploreSitesTileFeature;
 #endif  // defined(OS_ANDROID)

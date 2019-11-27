@@ -5,83 +5,6 @@
 'use strict';
 
 /**
- * Expected files shown in Downloads with hidden disabled
- *
- * @type {!Array<!TestEntryInfo>}
- */
-const BASIC_LOCAL_ENTRY_SET_WITHOUT_HIDDEN = [
-  ENTRIES.hello,
-  ENTRIES.world,
-  ENTRIES.desktop,
-  ENTRIES.beautiful,
-  ENTRIES.photos,
-  ENTRIES.crdownload,
-];
-
-/**
- * Expected files shown in Downloads with hidden enabled
- *
- * @type {!Array<!TestEntryInfo>}
- */
-const BASIC_LOCAL_ENTRY_SET_WITH_HIDDEN = [
-  ENTRIES.hello,
-  ENTRIES.world,
-  ENTRIES.desktop,
-  ENTRIES.beautiful,
-  ENTRIES.photos,
-  ENTRIES.crdownload,
-  ENTRIES.hiddenFile,
-];
-
-/**
- * Expected files shown in Drive with hidden enabled
- *
- * @type {!Array<!TestEntryInfo>}
- */
-const BASIC_DRIVE_ENTRY_SET_WITH_HIDDEN = [
-  ENTRIES.hello,
-  ENTRIES.world,
-  ENTRIES.desktop,
-  ENTRIES.beautiful,
-  ENTRIES.photos,
-  ENTRIES.unsupported,
-  ENTRIES.testDocument,
-  ENTRIES.testSharedDocument,
-  ENTRIES.hiddenFile,
-];
-
-const BASIC_ANDROID_ENTRY_SET = [
-  ENTRIES.directoryDocuments,
-  ENTRIES.directoryMovies,
-  ENTRIES.directoryMusic,
-  ENTRIES.directoryPictures,
-];
-
-const BASIC_ANDROID_ENTRY_SET_WITH_HIDDEN = [
-  ENTRIES.directoryDocuments,
-  ENTRIES.directoryMovies,
-  ENTRIES.directoryMusic,
-  ENTRIES.directoryPictures,
-  ENTRIES.hello,
-  ENTRIES.world,
-  ENTRIES.directoryA,
-];
-
-/**
- * Expected files shown in Drive with Google Docs disabled
- *
- * @type {!Array<!TestEntryInfo>}
- */
-const BASIC_DRIVE_ENTRY_SET_WITHOUT_GDOCS = [
-  ENTRIES.hello,
-  ENTRIES.world,
-  ENTRIES.desktop,
-  ENTRIES.beautiful,
-  ENTRIES.photos,
-  ENTRIES.unsupported,
-];
-
-/**
  * Gets the common steps to toggle hidden files in the Files app
  * @param {!Array<!TestEntryInfo>} basicSet Files expected before showing hidden
  * @param {!Array<!TestEntryInfo>} hiddenEntrySet Files expected after showing
@@ -170,8 +93,7 @@ testcase.showHiddenFilesDownloads = async () => {
       RootPath.DOWNLOADS, BASIC_LOCAL_ENTRY_SET_WITH_HIDDEN, []);
 
   await runHiddenFilesTest(
-      appId, BASIC_LOCAL_ENTRY_SET_WITHOUT_HIDDEN,
-      BASIC_LOCAL_ENTRY_SET_WITH_HIDDEN);
+      appId, BASIC_LOCAL_ENTRY_SET, BASIC_LOCAL_ENTRY_SET_WITH_HIDDEN);
 };
 
 /**
@@ -200,7 +122,11 @@ testcase.showToggleHiddenAndroidFoldersGearMenuItemsInMyFiles = async () => {
       appId, TestEntryInfo.getExpectedRows(BASIC_ANDROID_ENTRY_SET));
 
   // Click the gear menu button.
-  await remoteCall.waitAndClickElement(appId, '#gear-button:not([hidden])');
+  const gearButton =
+      await remoteCall.waitAndClickElement(appId, '#gear-button:not([hidden])');
+
+  // Check: gear-button has aria-haspopup set to true
+  chrome.test.assertEq(gearButton.attributes['aria-haspopup'], 'true');
 
   // Wait for the gear menu to appear.
   await remoteCall.waitForElement(appId, '#gear-menu:not([hidden])');

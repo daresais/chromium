@@ -63,6 +63,24 @@ Polymer({
     },
 
     /** @private */
+    eolMessageWithMonthAndYear_: {
+      type: String,
+      value: '',
+    },
+
+    /** @private */
+    hasInternetConnection_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private */
+    hasReleaseNotes_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private */
     showCrostini: Boolean,
 
     /** @private */
@@ -173,8 +191,17 @@ Polymer({
       this.regulatoryInfo_ = info;
     });
 
-    this.aboutBrowserProxy_.getHasEndOfLife().then(result => {
-      this.hasEndOfLife_ = result;
+    this.aboutBrowserProxy_.getEndOfLifeInfo().then(result => {
+      this.hasEndOfLife_ = !!result.hasEndOfLife;
+      this.eolMessageWithMonthAndYear_ = result.aboutPageEndOfLifeMessage || '';
+    });
+
+    this.aboutBrowserProxy_.getEnabledReleaseNotes().then(result => {
+      this.hasReleaseNotes_ = result;
+    });
+
+    this.aboutBrowserProxy_.checkInternetConnection().then(result => {
+      this.hasInternetConnection_ = result;
     });
 
     if (settings.getQueryParameters().get('checkForUpdate') == 'true') {
@@ -229,6 +256,11 @@ Polymer({
     // Stop the propagation of events, so that clicking on links inside
     // actionable items won't trigger action.
     event.stopPropagation();
+  },
+
+  /** @private */
+  onReleaseNotesTap_: function() {
+    this.aboutBrowserProxy_.launchReleaseNotes();
   },
 
   /** @private */
@@ -359,7 +391,7 @@ Polymer({
     // If Chrome OS has reached end of life, display a special icon and
     // ignore UpdateStatus.
     if (this.hasEndOfLife_) {
-      return 'settings:end-of-life';
+      return 'os-settings:end-of-life';
     }
 
     switch (this.currentUpdateStatusEvent_.status) {

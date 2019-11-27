@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/shell.h"
 #include "ash/wm/mru_window_tracker.h"
@@ -18,6 +19,7 @@
 #include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/stl_util.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
@@ -47,15 +49,9 @@ bool CanMoveWindowOutOfDeskContainer(aura::Window* window) {
   if (transient_root != window)
     return false;
 
-  const bool has_transient_children =
-      !::wm::GetTransientChildren(transient_root).empty();
-
-  // Do not move non-desk windows. A transient root can be blocked by a
-  // modal transient child, in which case it will be non-activatable and
-  // will be considered a non-desk window; however it shouldn't be excluded.
-  // TODO(afakhry): We need to implement a better mechanism for excluding
-  // non-desk windows that doesn't depend on the activatability of the window.
-  return has_transient_children || CanIncludeWindowInMruList(window);
+  // Only allow app windows to move to other desks.
+  return window->GetProperty(aura::client::kAppType) !=
+         static_cast<int>(AppType::NON_APP);
 }
 
 // Used to temporarily turn off the automatic window positioning while windows
@@ -89,7 +85,7 @@ class DeskContainerObserver : public aura::WindowObserver {
   // aura::WindowObserver:
   void OnWindowAdded(aura::Window* new_window) override {
     // TODO(afakhry): Overview mode creates a new widget for each window under
-    // the same parent for the CaptionContainerView. We will be notified with
+    // the same parent for the OverviewItemView. We will be notified with
     // this window addition here. Consider ignoring these windows if they cause
     // problems.
     owner_->AddWindowToDesk(new_window);
@@ -166,6 +162,20 @@ void Desk::OnRootWindowAdded(aura::Window* root) {
 void Desk::OnRootWindowClosing(aura::Window* root) {
   const size_t count = roots_to_containers_observers_.erase(root);
   DCHECK(count);
+
+  // The windows on this root are about to be destroyed. We already stopped
+  // observing the container above, so we won't get a call to
+  // DeskContainerObserver::OnWindowRemoved(). Therefore, we must remove those
+  // windows manually. If this is part of shutdown (i.e. when the
+  // RootWindowController is being destroyed), then we're done with those
+  // windows. If this is due to a display being removed, then the
+  // WindowTreeHostManager will move those windows to another host/root, and
+  // they will be added again to the desk container on the new root.
+  const auto windows = windows_;
+  for (auto* window : windows) {
+    if (window->GetRootWindow() == root)
+      base::Erase(windows_, window);
+  }
 }
 
 void Desk::AddWindowToDesk(aura::Window* window) {
@@ -208,7 +218,7 @@ void Desk::Activate(bool update_window_activation) {
       continue;
 
     // Do not activate minimized windows, otherwise they will unminimize.
-    if (wm::GetWindowState(window)->IsMinimized())
+    if (WindowState::Get(window)->IsMinimized())
       continue;
 
     wm::ActivateWindow(window);
@@ -217,7 +227,7 @@ void Desk::Activate(bool update_window_activation) {
 }
 
 void Desk::Deactivate(bool update_window_activation) {
-  auto* active_window = wm::GetActiveWindow();
+  auto* active_window = window_util::GetActiveWindow();
 
   // Hide the associated containers on all roots.
   for (aura::Window* root : Shell::GetAllRootWindows())
@@ -299,7 +309,7 @@ void Desk::MoveWindowToDesk(aura::Window* window, Desk* target_desk) {
 
     // Unminimize the window so that it shows up in the mini_view after it had
     // been dragged and moved to another desk.
-    auto* window_state = wm::GetWindowState(transient_root);
+    auto* window_state = WindowState::Get(transient_root);
     if (window_state->IsMinimized())
       window_state->Unminimize();
   }

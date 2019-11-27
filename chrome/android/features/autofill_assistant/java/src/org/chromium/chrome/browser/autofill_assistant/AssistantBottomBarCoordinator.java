@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
-import android.support.annotation.Nullable;
 import android.transition.ChangeBounds;
 import android.transition.Fade;
 import android.transition.TransitionManager;
@@ -15,8 +14,10 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.autofill_assistant.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantActionsCarouselCoordinator;
@@ -28,12 +29,14 @@ import org.chromium.chrome.browser.autofill_assistant.form.AssistantFormCoordina
 import org.chromium.chrome.browser.autofill_assistant.header.AssistantHeaderCoordinator;
 import org.chromium.chrome.browser.autofill_assistant.header.AssistantHeaderModel;
 import org.chromium.chrome.browser.autofill_assistant.infobox.AssistantInfoBoxCoordinator;
-import org.chromium.chrome.browser.autofill_assistant.payment.AssistantPaymentRequestCoordinator;
-import org.chromium.chrome.browser.autofill_assistant.payment.AssistantPaymentRequestModel;
+import org.chromium.chrome.browser.autofill_assistant.user_data.AssistantCollectUserDataCoordinator;
+import org.chromium.chrome.browser.autofill_assistant.user_data.AssistantCollectUserDataModel;
 import org.chromium.chrome.browser.compositor.CompositorViewResizer;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.tab.TabViewAndroidDelegate;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContent;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.modelutil.ListModel;
 
 /**
@@ -49,6 +52,8 @@ class AssistantBottomBarCoordinator
     private final BottomSheetController mBottomSheetController;
     private final AssistantBottomSheetContent mContent;
     private final ScrollView mScrollableContent;
+    @Nullable
+    private WebContents mWebContents;
 
     // Child coordinators.
     private final AssistantHeaderCoordinator mHeaderCoordinator;
@@ -58,7 +63,7 @@ class AssistantBottomBarCoordinator
     private final AssistantCarouselCoordinator mActionsCoordinator;
     private final AssistantPeekHeightCoordinator mPeekHeightCoordinator;
     private AssistantInfoBoxCoordinator mInfoBoxCoordinator;
-    private AssistantPaymentRequestCoordinator mPaymentRequestCoordinator;
+    private AssistantCollectUserDataCoordinator mPaymentRequestCoordinator;
 
     // The transition triggered whenever the layout of the BottomSheet content changes.
     private final TransitionSet mLayoutTransition =
@@ -68,17 +73,19 @@ class AssistantBottomBarCoordinator
                     .addTransition(new ChangeBounds().setDuration(CHANGE_BOUNDS_TRANSITION_TIME_MS))
                     .addTransition(new Fade(Fade.IN).setDuration(FADE_IN_TRANSITION_TIME_MS));
 
-    private final ObserverList<CompositorViewResizer.Observer> mSizeObservers =
+    private final ObserverList<CompositorViewResizer.Observer> mLayoutViewportSizeObservers =
             new ObserverList<>();
-    private boolean mResizeViewport;
+    @AssistantViewportMode
+    private int mViewportMode = AssistantViewportMode.NO_RESIZE;
+    private int mLastLayoutViewportResizing;
+    private int mLastVisualViewportResizing;
 
     AssistantBottomBarCoordinator(
             ChromeActivity activity, AssistantModel model, BottomSheetController controller) {
         mModel = model;
         mBottomSheetController = controller;
 
-        BottomSheet.BottomSheetContent currentSheetContent =
-                controller.getBottomSheet().getCurrentSheetContent();
+        BottomSheetContent currentSheetContent = controller.getCurrentSheetContent();
         if (currentSheetContent instanceof AssistantBottomSheetContent) {
             mContent = (AssistantBottomSheetContent) currentSheetContent;
         } else {
@@ -98,7 +105,7 @@ class AssistantBottomBarCoordinator
         // TODO(crbug.com/806868): We should only animate our BottomSheetContent instead of the root
         // view. However, it looks like doing that is not well supported by the BottomSheet, so the
         // BottomSheet offset is wrong during the animation.
-        ViewGroup rootView = (ViewGroup) controller.getBottomSheet().getRootView();
+        ViewGroup rootView = (ViewGroup) activity.findViewById(R.id.coordinator);
         setupAnimations(model, rootView);
 
         // Instantiate child components.
@@ -106,14 +113,13 @@ class AssistantBottomBarCoordinator
         mInfoBoxCoordinator = new AssistantInfoBoxCoordinator(activity, model.getInfoBoxModel());
         mDetailsCoordinator = new AssistantDetailsCoordinator(activity, model.getDetailsModel());
         mPaymentRequestCoordinator =
-                new AssistantPaymentRequestCoordinator(activity, model.getPaymentRequestModel());
+                new AssistantCollectUserDataCoordinator(activity, model.getCollectUserDataModel());
         mFormCoordinator = new AssistantFormCoordinator(activity, model.getFormModel());
         mSuggestionsCoordinator =
                 new AssistantSuggestionsCarouselCoordinator(activity, model.getSuggestionsModel());
         mActionsCoordinator =
                 new AssistantActionsCarouselCoordinator(activity, model.getActionsModel());
-        BottomSheet bottomSheet = controller.getBottomSheet();
-        mPeekHeightCoordinator = new AssistantPeekHeightCoordinator(activity, this, bottomSheet,
+        mPeekHeightCoordinator = new AssistantPeekHeightCoordinator(activity, this, controller,
                 mContent.getToolbarView(), mHeaderCoordinator.getView(),
                 mSuggestionsCoordinator.getView(), mActionsCoordinator.getView(),
                 AssistantPeekHeightCoordinator.PeekMode.HANDLE);
@@ -122,6 +128,15 @@ class AssistantBottomBarCoordinator
         // recyclers ItemAnimator, so we exclude them to avoid a clash between the animations.
         mLayoutTransition.excludeChildren(mSuggestionsCoordinator.getView(), /* exclude= */ true);
         mLayoutTransition.excludeChildren(mActionsCoordinator.getView(), /* exclude= */ true);
+
+        // do not animate the contents of the payment method section inside the section choice list,
+        // since the animation is not required and causes a rendering crash.
+        mLayoutTransition.excludeChildren(
+                mPaymentRequestCoordinator.getView()
+                        .findViewWithTag(AssistantTagsForTesting
+                                                 .COLLECT_USER_DATA_PAYMENT_METHOD_SECTION_TAG)
+                        .findViewWithTag(AssistantTagsForTesting.COLLECT_USER_DATA_CHOICE_LIST),
+                /* exclude= */ true);
 
         // Add child views to bottom bar container. We put all child views in the scrollable
         // container, except the actions and suggestions.
@@ -155,17 +170,23 @@ class AssistantBottomBarCoordinator
         setHorizontalMargins(mDetailsCoordinator.getView());
         setHorizontalMargins(mFormCoordinator.getView());
 
-        bottomSheet.addObserver(new EmptyBottomSheetObserver() {
+        controller.addObserver(new EmptyBottomSheetObserver() {
             @Override
             public void onSheetStateChanged(int newState) {
                 maybeShowHeaderChip();
             }
 
             @Override
-            public void onSheetContentChanged(@Nullable BottomSheet.BottomSheetContent newContent) {
+            public void onSheetContentChanged(@Nullable BottomSheetContent newContent) {
                 // TODO(crbug.com/806868): Make sure this works and does not interfere with Duet
                 // once we are in ChromeTabbedActivity.
-                notifyAutofillAssistantSizeChanged();
+                updateLayoutViewportHeight();
+                updateVisualViewportHeight();
+            }
+
+            @Override
+            public void onSheetOffsetChanged(float heightFraction, float offsetPx) {
+                updateVisualViewportHeight();
             }
         });
 
@@ -178,12 +199,10 @@ class AssistantBottomBarCoordinator
                     hide();
                 }
             } else if (AssistantModel.ALLOW_TALKBACK_ON_WEBSITE == propertyKey) {
-                boolean allow = model.get(AssistantModel.ALLOW_TALKBACK_ON_WEBSITE);
-                if (allow) {
-                    activity.removeViewObscuringAllTabs(bottomSheet);
-                } else {
-                    activity.addViewObscuringAllTabs(bottomSheet);
-                }
+                controller.setIsObscuringAllTabs(
+                        activity, !model.get(AssistantModel.ALLOW_TALKBACK_ON_WEBSITE));
+            } else if (AssistantModel.WEB_CONTENTS == propertyKey) {
+                mWebContents = model.get(AssistantModel.WEB_CONTENTS);
             }
         });
 
@@ -217,8 +236,8 @@ class AssistantBottomBarCoordinator
         model.getDetailsModel().addObserver((source, propertyKey) -> animateChildren(rootView));
 
         // Animate when a PR section is expanded.
-        model.getPaymentRequestModel().addObserver((source, propertyKey) -> {
-            if (propertyKey == AssistantPaymentRequestModel.EXPANDED_SECTION) {
+        model.getCollectUserDataModel().addObserver((source, propertyKey) -> {
+            if (propertyKey == AssistantCollectUserDataModel.EXPANDED_SECTION) {
                 animateChildren(rootView);
             }
         });
@@ -237,8 +256,8 @@ class AssistantBottomBarCoordinator
     }
 
     private void maybeShowHeaderChip() {
-        boolean showChip = mBottomSheetController.getBottomSheet().getSheetState()
-                        == BottomSheet.SheetState.PEEK
+        boolean showChip =
+                mBottomSheetController.getSheetState() == BottomSheetController.SheetState.PEEK
                 && mPeekHeightCoordinator.getPeekMode()
                         == AssistantPeekHeightCoordinator.PeekMode.HANDLE_HEADER;
         mModel.getHeaderModel().set(AssistantHeaderModel.CHIP_VISIBLE, showChip);
@@ -248,6 +267,8 @@ class AssistantBottomBarCoordinator
      * Cleanup resources when this goes out of scope.
      */
     public void destroy() {
+        resetVisualViewportHeight();
+
         mInfoBoxCoordinator.destroy();
         mInfoBoxCoordinator = null;
         mPaymentRequestCoordinator.destroy();
@@ -266,11 +287,12 @@ class AssistantBottomBarCoordinator
         mBottomSheetController.hideContent(mContent, /* animate= */ true);
     }
 
-    void setResizeViewport(boolean resizeViewport) {
-        if (resizeViewport == mResizeViewport) return;
+    void setViewportMode(@AssistantViewportMode int mode) {
+        if (mode == mViewportMode) return;
 
-        mResizeViewport = resizeViewport;
-        notifyAutofillAssistantSizeChanged();
+        mViewportMode = mode;
+        updateVisualViewportHeight();
+        updateLayoutViewportHeight();
     }
 
     /** Set the peek mode. */
@@ -286,7 +308,7 @@ class AssistantBottomBarCoordinator
 
     @Override
     public void onPeekHeightChanged() {
-        notifyAutofillAssistantSizeChanged();
+        updateLayoutViewportHeight();
     }
 
     private void setChildMarginTop(View child, int marginTop) {
@@ -332,31 +354,75 @@ class AssistantBottomBarCoordinator
         view.setLayoutParams(layoutParams);
     }
 
-    private void notifyAutofillAssistantSizeChanged() {
-        int height = getHeight();
-        for (Observer observer : mSizeObservers) {
-            observer.onHeightChanged(height);
+    private void updateLayoutViewportHeight() {
+        setLayoutViewportResizing(getHeight());
+    }
+
+    /**
+     * Shrink the layout viewport by {@code resizing} pixels. This is an expensive operation that
+     * should be used with care.
+     */
+    private void setLayoutViewportResizing(int resizing) {
+        if (resizing == mLastLayoutViewportResizing) return;
+        mLastLayoutViewportResizing = resizing;
+
+        for (Observer observer : mLayoutViewportSizeObservers) {
+            observer.onHeightChanged(resizing);
         }
+    }
+
+    private void updateVisualViewportHeight() {
+        if (mViewportMode != AssistantViewportMode.RESIZE_VISUAL_VIEWPORT
+                || mBottomSheetController.getCurrentSheetContent() != mContent) {
+            resetVisualViewportHeight();
+            return;
+        }
+
+        setVisualViewportResizing((int) Math.floor(mBottomSheetController.getCurrentOffset()
+                - mBottomSheetController.getTopShadowHeight()));
+    }
+
+    private void resetVisualViewportHeight() {
+        setVisualViewportResizing(0);
+    }
+
+    /**
+     * Shrink the visual viewport by {@code resizing} pixels. This operation is cheaper than calling
+     * {@link #setLayoutViewportResizing} and can therefore be often called (e.g. during
+     * animations).
+     */
+    private void setVisualViewportResizing(int resizing) {
+        if (resizing == mLastVisualViewportResizing || mWebContents == null
+                || mWebContents.getRenderWidgetHostView() == null) {
+            return;
+        }
+
+        mLastVisualViewportResizing = resizing;
+        TabViewAndroidDelegate chromeDelegate =
+                (TabViewAndroidDelegate) mWebContents.getViewAndroidDelegate();
+        assert chromeDelegate != null;
+        chromeDelegate.insetViewportBottom(resizing);
     }
 
     // Implementation of methods from AutofillAssistantSizeManager.
 
     @Override
     public int getHeight() {
-        if (mResizeViewport
-                && mBottomSheetController.getBottomSheet().getCurrentSheetContent() == mContent)
+        if (mViewportMode == AssistantViewportMode.RESIZE_LAYOUT_VIEWPORT
+                && mBottomSheetController.getCurrentSheetContent() == mContent) {
             return mPeekHeightCoordinator.getPeekHeight();
+        }
 
         return 0;
     }
 
     @Override
     public void addObserver(Observer observer) {
-        mSizeObservers.addObserver(observer);
+        mLayoutViewportSizeObservers.addObserver(observer);
     }
 
     @Override
     public void removeObserver(Observer observer) {
-        mSizeObservers.removeObserver(observer);
+        mLayoutViewportSizeObservers.removeObserver(observer);
     }
 }

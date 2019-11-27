@@ -19,7 +19,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
-#include "components/password_manager/core/browser/new_password_form_manager.h"
+#include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/test_password_store.h"
@@ -119,8 +119,8 @@ class PasswordGenerationInteractiveTest
         ChromePasswordManagerClient::FromWebContents(WebContents());
     client->SetTestObserver(&observer_);
     // The base class should enable password generation.
-    ASSERT_NE(password_manager::NOT_SYNCING, client->GetPasswordSyncState());
-    password_manager::NewPasswordFormManager::
+    ASSERT_TRUE(client->GetPasswordFeatureManager()->IsGenerationEnabled());
+    password_manager::PasswordFormManager::
         set_wait_for_server_predictions_for_filling(false);
 
     NavigateToFile("/password/signup_form_new_password.html");
@@ -295,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       PopupShownAndDismissed) {
+                       DISABLED_PopupShownAndDismissed) {
   FocusPasswordField();
   EXPECT_TRUE(GenerationPopupShowing());
 

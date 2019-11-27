@@ -7,14 +7,15 @@ package org.chromium.chrome.browser.tabmodel;
 import android.app.Activity;
 import android.os.Handler;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.Tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.browser.tabmodel.TabPersistentStore.TabPersistentStoreObserver;
-import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -26,16 +27,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class TabModelSelectorImpl extends TabModelSelectorBase implements TabModelDelegate {
     public static final int CUSTOM_TABS_SELECTOR_INDEX = -1;
 
-    private final TabCreatorManager mTabCreatorManager;
-
     /** Flag set to false when the asynchronous loading of tabs is finished. */
     private final AtomicBoolean mSessionRestoreInProgress =
             new AtomicBoolean(true);
     private final TabPersistentStore mTabSaver;
-
-    // This flag signifies the object has gotten an onNativeReady callback and
-    // has not been destroyed.
-    private boolean mActiveState;
 
     private boolean mIsUndoSupported;
 
@@ -64,9 +59,9 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
      * @param supportUndo Whether a tab closure can be undone.
      */
     public TabModelSelectorImpl(Activity activity, TabCreatorManager tabCreatorManager,
-            TabPersistencePolicy persistencePolicy, boolean supportUndo, boolean isTabbedActivity) {
-        super();
-        mTabCreatorManager = tabCreatorManager;
+            TabPersistencePolicy persistencePolicy, boolean supportUndo, boolean isTabbedActivity,
+            boolean startIncognito) {
+        super(tabCreatorManager, startIncognito);
         mUma = new TabModelSelectorUma(activity);
         final TabPersistentStoreObserver persistentStoreObserver =
                 new TabPersistentStoreObserver() {
@@ -78,8 +73,8 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
         mIsUndoSupported = supportUndo;
         mIsTabbedActivityForSync = isTabbedActivity;
         mTabSaver = new TabPersistentStore(
-                persistencePolicy, this, mTabCreatorManager, persistentStoreObserver);
-        mOrderController = new TabModelOrderController(this);
+                persistencePolicy, this, tabCreatorManager, persistentStoreObserver);
+        mOrderController = new TabModelOrderControllerImpl(this);
     }
 
     @Override
@@ -121,20 +116,20 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
      * @param tabContentProvider                      A {@link TabContentManager} instance.
      */
     public void onNativeLibraryReady(TabContentManager tabContentProvider) {
-        assert !mActiveState : "onNativeLibraryReady called twice!";
+        assert mTabContentManager == null : "onNativeLibraryReady called twice!";
         mTabContentManager = tabContentProvider;
 
         ChromeTabCreator regularTabCreator =
-                (ChromeTabCreator) mTabCreatorManager.getTabCreator(false);
+                (ChromeTabCreator) getTabCreatorManager().getTabCreator(false);
         ChromeTabCreator incognitoTabCreator =
-                (ChromeTabCreator) mTabCreatorManager.getTabCreator(true);
+                (ChromeTabCreator) getTabCreatorManager().getTabCreator(true);
         TabModelImpl normalModel = new TabModelImpl(false, mIsTabbedActivityForSync,
                 regularTabCreator, incognitoTabCreator, mUma, mOrderController, mTabContentManager,
                 mTabSaver, this, mIsUndoSupported);
         TabModel incognitoModel = new IncognitoTabModel(new IncognitoTabModelImplCreator(
                 regularTabCreator, incognitoTabCreator, mUma, mOrderController,
                 mTabContentManager, mTabSaver, this));
-        initialize(isIncognitoSelected(), normalModel, incognitoModel);
+        initialize(normalModel, incognitoModel);
         regularTabCreator.setTabModel(normalModel, mOrderController);
         incognitoTabCreator.setTabModel(incognitoModel, mOrderController);
         mTabSaver.setTabContentManager(mTabContentManager);
@@ -147,11 +142,9 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
                     mTabContentManager.invalidateIfChanged(tab.getId(), tab.getUrl());
                 }
 
-                if (tab.hasPendingLoadParams()) mTabSaver.addTabToSaveQueue(tab);
+                if (((TabImpl) tab).hasPendingLoadParams()) mTabSaver.addTabToSaveQueue(tab);
             }
         });
-
-        mActiveState = true;
 
         new TabModelSelectorTabObserver(this) {
             @Override
@@ -218,18 +211,12 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
      */
     @VisibleForTesting
     public void initializeForTesting(TabModel normalModel, TabModel incognitoModel) {
-        initialize(isIncognitoSelected(), normalModel, incognitoModel);
-        mActiveState = true;
+        initialize(normalModel, incognitoModel);
     }
 
     @Override
     public void setCloseAllTabsDelegate(CloseAllTabsDelegate delegate) {
         mCloseAllTabsDelegate = delegate;
-    }
-
-    @Override
-    public TabModel getModelAt(int index) {
-        return mActiveState ? super.getModelAt(index) : EmptyTabModel.getInstance();
     }
 
     @Override
@@ -258,7 +245,7 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
     @Override
     public void commitAllTabClosures() {
         for (int i = 0; i < getModels().size(); i++) {
-            getModelAt(i).commitAllTabClosures();
+            getModels().get(i).commitAllTabClosures();
         }
     }
 
@@ -328,14 +315,6 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
         mTabSaver.destroy();
         mUma.destroy();
         super.destroy();
-        mActiveState = false;
-    }
-
-    @Override
-    public Tab openNewTab(
-            LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent, boolean incognito) {
-        return mTabCreatorManager.getTabCreator(incognito).createNewTab(
-                loadUrlParams, type, parent);
     }
 
     /**
@@ -353,15 +332,16 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
             TabModelImpl.startTabSwitchLatencyTiming(type);
         }
         if (mVisibleTab != null && mVisibleTab != tab && !mVisibleTab.needsReload()) {
-            if (mVisibleTab.isInitialized() && !mVisibleTab.isDetached()) {
+            TabImpl visibleTab = (TabImpl) mVisibleTab;
+            if (visibleTab.isInitialized() && !TabImpl.isDetached(visibleTab)) {
                 // TODO(dtrainor): Once we figure out why we can't grab a snapshot from the current
                 // tab when we have other tabs loading from external apps remove the checks for
                 // FROM_EXTERNAL_APP/FROM_NEW.
-                if (!mVisibleTab.isClosing()
+                if (!visibleTab.isClosing()
                         && (!isFromExternalApp || type != TabSelectionType.FROM_NEW)) {
                     cacheTabBitmap(mVisibleTab);
                 }
-                mVisibleTab.hide(TabHidingType.CHANGED_TABS);
+                visibleTab.hide(TabHidingType.CHANGED_TABS);
                 mTabSaver.addTabToSaveQueue(mVisibleTab);
             }
             mVisibleTab = null;
@@ -374,7 +354,7 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
 
         // We hit this case when the user enters tab switcher and comes back to the current tab
         // without actual tab switch.
-        if (mVisibleTab == tab && !mVisibleTab.isHidden()) {
+        if (mVisibleTab == tab && !((TabImpl) mVisibleTab).isHidden()) {
             // The current tab might have been killed by the os while in tab switcher.
             tab.loadIfNeeded();
             // |tabToDropImportance| must be null, so no need to drop importance.
@@ -386,7 +366,7 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
         // avoids uneccessary work (tab restore) and prevents pollution of tab display metrics - see
         // http://crbug.com/316166.
         if (type != TabSelectionType.FROM_EXIT) {
-            tab.show(type);
+            ((TabImpl) tab).show(type);
             mUma.onShowTab(tab.getId(), tab.isBeingRestored());
         }
     }

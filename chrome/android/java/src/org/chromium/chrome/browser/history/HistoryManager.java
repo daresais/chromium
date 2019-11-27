@@ -11,7 +11,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.Browser;
-import android.support.annotation.VisibleForTesting;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.OnScrollListener;
@@ -21,7 +20,10 @@ import android.view.MenuItem;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -43,6 +45,7 @@ import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
 import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
@@ -51,7 +54,6 @@ import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.Clipboard;
-import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.PageTransition;
 
 import java.util.List;
@@ -67,14 +69,26 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
     private static final String METRICS_PREFIX = "Android.HistoryPage.";
     private static final String PREF_SHOW_HISTORY_INFO = "history_home_show_info";
 
+    // Keep consistent with the UMA constants on the WebUI history page (history/constants.js).
+    private static final int UMA_MAX_BUCKET_VALUE = 1000;
+    private static final int UMA_MAX_SUBSET_BUCKET_VALUE = 100;
+
+    // TODO(msramek): The WebUI counterpart computes the bucket count by
+    // dividing by 10 until it gets under 100, reaching 10 for both
+    // UMA_MAX_BUCKET_VALUE and UMA_MAX_SUBSET_BUCKET_VALUE, and adds +1
+    // for overflow. How do we keep that in sync with this code?
+    private static final int UMA_BUCKET_COUNT = 11;
+
     // PageTransition value to use for all URL requests triggered by the history page.
     private static final int PAGE_TRANSITION_TYPE = PageTransition.AUTO_BOOKMARK;
 
     private static HistoryProvider sProviderForTests;
+    private static Boolean sIsScrollToLoadDisabledForTests;
 
     private final Activity mActivity;
     private final boolean mIsIncognito;
     private final boolean mIsSeparateActivity;
+    private final boolean mIsScrollToLoadDisabled;
     private final SelectableListLayout<HistoryItem> mSelectableListLayout;
     private final HistoryAdapter mHistoryAdapter;
     private final SelectionDelegate<HistoryItem> mSelectionDelegate;
@@ -105,6 +119,9 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
         mIsSeparateActivity = isSeparateActivity;
         mSnackbarManager = snackbarManager;
         mIsIncognito = isIncognito;
+        mIsScrollToLoadDisabled = AccessibilityUtil.isAccessibilityEnabled()
+                || AccessibilityUtil.isHardwareKeyboardAttached(
+                        mActivity.getResources().getConfiguration());
 
         mSelectionDelegate = new SelectionDelegate<>();
         mSelectionDelegate.addObserver(this);
@@ -148,6 +165,7 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
 
         // 7. Initialize the adapter to load items.
         mHistoryAdapter.generateHeaderItems();
+        mHistoryAdapter.generateFooterItems();
         mHistoryAdapter.initialize();
 
         // 8. Add scroll listener to show/hide info button on scroll and page in more items
@@ -162,7 +180,10 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
                 mToolbar.updateInfoMenuItem(
                         shouldShowInfoButton(), shouldShowInfoHeaderIfAvailable());
 
-                if (!mHistoryAdapter.canLoadMoreItems()) return;
+                if (!mHistoryAdapter.canLoadMoreItems() || isScrollToLoadDisabled()) {
+                    return;
+                }
+
                 // Load more items if the scroll position is close to the bottom of the list.
                 if (layoutManager.findLastVisibleItemPosition()
                         > (mHistoryAdapter.getItemCount() - 25)) {
@@ -353,11 +374,11 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
 
         // Determine component or class name.
         ComponentName component;
-        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity)) {
-            component = mActivity.getComponentName();
-        } else {
+        if (mActivity instanceof HistoryActivity) { // phone
             component = IntentUtils.safeGetParcelableExtra(
                     mActivity.getIntent(), IntentHandler.EXTRA_PARENT_COMPONENT);
+        } else { // tablet
+            component = mActivity.getComponentName();
         }
         if (component != null) {
             ChromeTabbedActivity.setNonAliasedComponent(viewIntent, component);
@@ -380,8 +401,7 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
      */
     public void openClearBrowsingDataPreference() {
         recordUserAction("ClearBrowsingData");
-        PreferencesLauncher.launchSettingsPageCompat(
-                mActivity, ClearBrowsingDataTabsFragment.class);
+        PreferencesLauncher.launchSettingsPage(mActivity, ClearBrowsingDataTabsFragment.class);
     }
 
     @Override
@@ -415,6 +435,7 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
 
         for (HistoryItem item : items) {
             openUrl(item.getUrl(), isIncognito, true);
+            recordOpenedItemMetrics(item);
         }
     }
 
@@ -457,6 +478,25 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
     }
 
     /**
+     * Records metrics about the age of an opened history |item|.
+     * @param item The item that has been opened.
+     */
+    void recordOpenedItemMetrics(HistoryItem item) {
+        int ageInDays = 1
+                + (int) ((System.currentTimeMillis() - item.getTimestamp())
+                        / 1000 /* s/ms */ / 60 /* m/s */ / 60 /* h/m */ / 24 /* d/h */);
+
+        RecordHistogram.recordCustomCountHistogram("HistoryPage.ClickAgeInDays",
+                Math.min(ageInDays, UMA_MAX_BUCKET_VALUE), 1, UMA_MAX_BUCKET_VALUE,
+                UMA_BUCKET_COUNT);
+
+        if (ageInDays <= UMA_MAX_SUBSET_BUCKET_VALUE) {
+            RecordHistogram.recordCustomCountHistogram("HistoryPage.ClickAgeInDaysSubset",
+                    ageInDays, 1, UMA_MAX_SUBSET_BUCKET_VALUE, UMA_BUCKET_COUNT);
+        }
+    }
+
+    /**
      * @return True if info menu item should be shown on history toolbar, false otherwise.
      */
     boolean shouldShowInfoButton() {
@@ -478,6 +518,19 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
      */
     boolean shouldShowInfoHeaderIfAvailable() {
         return mShouldShowInfoHeader;
+    }
+
+    /**
+     * Check if we want to enable the scrolling to load for recycled view. Noting this function
+     * will be called during testing with RecycledView == null. Will return False in such case.
+     * @return True if accessibility is enabled or a hardware keyboard is attached.
+     */
+    boolean isScrollToLoadDisabled() {
+        if (sIsScrollToLoadDisabledForTests != null) {
+            return sIsScrollToLoadDisabledForTests.booleanValue();
+        }
+
+        return mIsScrollToLoadDisabled;
     }
 
     @Override
@@ -521,5 +574,10 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
     @VisibleForTesting
     public RecyclerView getRecyclerViewForTests() {
         return mRecyclerView;
+    }
+
+    @VisibleForTesting
+    public static void setScrollToLoadDisabledForTesting(boolean isScrollToLoadDisabled) {
+        sIsScrollToLoadDisabledForTests = isScrollToLoadDisabled;
     }
 }

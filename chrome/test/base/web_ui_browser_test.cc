@@ -16,6 +16,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/test_switches.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_content_browser_client.h"
@@ -27,12 +28,14 @@
 #include "chrome/browser/ui/webui/web_ui_test_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/base/js_test_api.h"
 #include "chrome/test/base/test_chrome_web_ui_controller_factory.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -256,7 +259,7 @@ void BaseWebUIBrowserTest::PreLoadJavascriptLibraries(
   libraries_preloaded_ = true;
 
   bool should_wait_flag = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      ::content::kWaitForDebuggerWebUI);
+      ::switches::kWaitForDebuggerWebUI);
 
   if (should_wait_flag)
     RunJavascriptUsingHandler("setWaitUser", {}, false, false, preload_host);
@@ -269,18 +272,7 @@ void BaseWebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
       web_contents, this, preload_test_fixture_, preload_test_name_);
   content::TestNavigationObserver navigation_observer(web_contents);
 
-  GURL browse_to_final(browse_to);
-  std::string path = browse_to.path();
-  if (!loader_file_.empty() && path.length() > 1) {
-    GURL::Replacements replace_url;
-    replace_url.SetPathStr(loader_file_);
-    // Remove the leading '/', and use file=<rest of the path> as the query.
-    std::string query = "file=" + path.substr(1);
-    replace_url.SetQueryStr(query);
-    browse_to_final = browse_to_final.ReplaceComponents(replace_url);
-  }
-
-  NavigateParams params(browser(), browse_to_final, ui::PAGE_TRANSITION_TYPED);
+  NavigateParams params(browser(), browse_to, ui::PAGE_TRANSITION_TYPED);
   params.disposition = WindowOpenDisposition::CURRENT_TAB;
 
   Navigate(&params);
@@ -371,10 +363,6 @@ void BaseWebUIBrowserTest::set_preload_test_name(
   preload_test_name_ = preload_test_name;
 }
 
-void BaseWebUIBrowserTest::set_loader_file(const std::string& loader_file) {
-  loader_file_ = loader_file;
-}
-
 void BaseWebUIBrowserTest::set_webui_host(const std::string& webui_host) {
   test_factory_->set_webui_host(webui_host);
 }
@@ -394,8 +382,8 @@ class MockWebUIDataSource : public content::URLDataSource {
   std::string GetSource() override { return "dummyurl"; }
 
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override {
     std::string dummy_html = "<html><body>Dummy</body></html>";
     scoped_refptr<base::RefCountedString> response =
@@ -454,8 +442,6 @@ void BaseWebUIBrowserTest::SetUpOnMainThread() {
   JavaScriptBrowserTest::SetUpOnMainThread();
 
   logging::SetLogMessageHandler(&LogHandler);
-
-  AddLibrary(base::FilePath(kA11yAuditLibraryJSPath));
 
   content::WebUIControllerFactory::UnregisterFactoryForTesting(
       ChromeWebUIControllerFactory::GetInstance());
@@ -558,9 +544,7 @@ bool BaseWebUIBrowserTest::RunJavascriptUsingHandler(
 GURL BaseWebUIBrowserTest::WebUITestDataPathToURL(
     const base::FilePath::StringType& path) {
   base::ScopedAllowBlockingForTesting allow_blocking;
-  base::FilePath dir_test_data;
-  EXPECT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &dir_test_data));
-  base::FilePath test_path(dir_test_data.Append(kWebUITestFolder).Append(path));
+  base::FilePath test_path(JsTestApiConfig().search_path);
   EXPECT_TRUE(base::PathExists(test_path));
   return net::FilePathToFileURL(test_path);
 }

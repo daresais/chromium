@@ -18,12 +18,12 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/version.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #import "chrome/browser/mac/keystone_registration.h"
 #include "chrome/common/channel_info.h"
@@ -41,10 +41,10 @@ namespace ksr = keystone_registration;
 // Constants for the brand file (uses an external file so it can survive
 // updates to Chrome.)
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #define kStableBrandFileName @"Google Chrome Brand.plist"
 #define kCanaryBrandFileName @"Google Chrome Canary Brand.plist"
-#elif defined(CHROMIUM_BUILD)
+#elif BUILDFLAG(CHROMIUM_BRANDING)
 #define kStableBrandFileName @"Chromium Brand.plist"
 #define kCanaryBrandFileName @"Chromium Canary Brand.plist"
 #else
@@ -84,10 +84,11 @@ class PerformBridge : public base::RefCountedThreadSafe<PerformBridge> {
     DCHECK(sel);
 
     scoped_refptr<PerformBridge> op = new PerformBridge(target, sel, arg);
-    base::PostTaskWithTraits(FROM_HERE,
-                             {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-                              base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-                             base::BindOnce(&PerformBridge::Run, op.get()));
+    base::PostTask(
+        FROM_HERE,
+        {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+        base::BindOnce(&PerformBridge::Run, op.get()));
   }
 
   // Convenience for the no-argument case.
@@ -109,8 +110,9 @@ class PerformBridge : public base::RefCountedThreadSafe<PerformBridge> {
 
   // Happens on a WorkerPool thread.
   void Run() {
-    base::mac::ScopedNSAutoreleasePool pool;
-    [target_ performSelector:sel_ withObject:arg_];
+    @autoreleasepool {
+      [target_ performSelector:sel_ withObject:arg_];
+    }
   }
 
   base::scoped_nsobject<id> target_;
@@ -328,7 +330,7 @@ NSString* const kVersionKey = @"KSVersion";
   version_info::Channel channelType = chrome::GetChannelByName(channel);
   if (channelType == version_info::Channel::STABLE) {
     channel = base::SysNSStringToUTF8(ksr::KSRegistrationRemoveExistingTag);
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     DCHECK(chrome::GetChannelByName(channel) == version_info::Channel::STABLE)
         << "-channel name modification has side effect";
 #endif

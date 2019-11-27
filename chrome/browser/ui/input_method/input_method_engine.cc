@@ -97,6 +97,11 @@ bool InputMethodEngine::SetCompositionRange(
   return false;
 }
 
+bool InputMethodEngine::SetSelectionRange(uint32_t start, uint32_t end) {
+  // Not supported on non-Chrome OS platforms.
+  return false;
+}
+
 void InputMethodEngine::CommitTextToInputContext(int context_id,
                                                  const std::string& text) {
   ui::IMEInputContextHandlerInterface* input_context =
@@ -112,15 +117,6 @@ void InputMethodEngine::CommitTextToInputContext(int context_id,
     text_ += text;
     commit_text_changed_ = true;
   }
-}
-
-void InputMethodEngine::DeleteSurroundingTextToInputContext(
-    int offset,
-    size_t number_of_chars) {
-  ui::IMEInputContextHandlerInterface* input_context =
-      ui::IMEBridge::Get()->GetInputContextHandler();
-  if (input_context)
-    input_context->DeleteSurroundingText(offset, number_of_chars);
 }
 
 bool InputMethodEngine::SendKeyEvent(ui::KeyEvent* event,
@@ -147,13 +143,6 @@ bool InputMethodEngine::SendKeyEvent(ui::KeyEvent* event,
 
   input_context->SendKeyEvent(event);
   return true;
-}
-
-void InputMethodEngine::ConfirmCompositionText() {
-  ui::IMEInputContextHandlerInterface* input_context =
-      ui::IMEBridge::Get()->GetInputContextHandler();
-  if (input_context)
-    input_context->ConfirmCompositionText();
 }
 
 bool InputMethodEngine::IsActive() const {

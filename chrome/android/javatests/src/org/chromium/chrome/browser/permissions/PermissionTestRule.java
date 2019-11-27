@@ -12,7 +12,6 @@ import org.junit.runners.model.Statement;
 
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.infobar.InfoBar;
 import org.chromium.chrome.browser.modaldialog.ModalDialogTestUtils;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -50,8 +49,6 @@ import java.util.concurrent.ExecutionException;
  * JS call with a gesture, and whether an infobar or a dialog is expected.
  */
 public class PermissionTestRule extends ChromeActivityTestRule<ChromeActivity> {
-    public static final String MODAL_FLAG = ChromeFeatureList.MODAL_PERMISSION_PROMPTS;
-
     private InfoBarTestAnimationListener mListener;
     private EmbeddedTestServer mTestServer;
 
@@ -119,9 +116,10 @@ public class PermissionTestRule extends ChromeActivityTestRule<ChromeActivity> {
                     public Boolean call() {
                         boolean isDialogShownForTest =
                                 PermissionDialogController.getInstance().isDialogShownForTest();
-                        if (isDialogShownForTest)
+                        if (isDialogShownForTest) {
                             ModalDialogTestUtils.checkCurrentPresenter(
                                     mModalDialogManager, ModalDialogType.TAB);
+                        }
                         return isDialogShownForTest == mExpectDialog;
                     }
                 });
@@ -135,7 +133,7 @@ public class PermissionTestRule extends ChromeActivityTestRule<ChromeActivity> {
         super(ChromeActivity.class);
     }
 
-    private void ruleSetUp() throws Throwable {
+    private void ruleSetUp() {
         // TODO(https://crbug.com/867446): Refactor to use EmbeddedTestServerRule.
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
@@ -149,11 +147,11 @@ public class PermissionTestRule extends ChromeActivityTestRule<ChromeActivity> {
         getInfoBarContainer().addAnimationListener(mListener);
     }
 
-    private void ruleTearDown() throws Exception {
+    private void ruleTearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
-    protected void setUpUrl(final String url) throws InterruptedException {
+    protected void setUpUrl(final String url) {
         loadUrl(getURL(url));
     }
 
@@ -226,7 +224,7 @@ public class PermissionTestRule extends ChromeActivityTestRule<ChromeActivity> {
     }
 
     private void runJavaScriptCodeInCurrentTabWithGesture(String javascript)
-            throws InterruptedException, java.util.concurrent.TimeoutException {
+            throws java.util.concurrent.TimeoutException {
         runJavaScriptCodeInCurrentTab("functionToRun = '" + javascript + "'");
         TouchCommon.singleClickView(getActivity().getActivityTab().getView());
     }

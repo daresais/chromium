@@ -23,8 +23,6 @@
 
 namespace blink {
 
-using namespace cssvalue;
-
 bool CSSParser::ParseDeclarationList(const CSSParserContext* context,
                                      MutableCSSPropertyValueSet* property_set,
                                      const String& declaration) {
@@ -135,7 +133,6 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValue(
 MutableCSSPropertyValueSet::SetResult CSSParser::ParseValueForCustomProperty(
     MutableCSSPropertyValueSet* declaration,
     const AtomicString& property_name,
-    const PropertyRegistry* registry,
     const String& value,
     bool important,
     SecureContextMode secure_context_mode,
@@ -157,8 +154,8 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValueForCustomProperty(
     context = MakeGarbageCollected<CSSParserContext>(parser_mode,
                                                      secure_context_mode);
   }
-  return CSSParserImpl::ParseVariableValue(declaration, property_name, registry,
-                                           value, important, context,
+  return CSSParserImpl::ParseVariableValue(declaration, property_name, value,
+                                           important, context,
                                            is_animation_tainted);
 }
 
@@ -246,7 +243,7 @@ bool CSSParser::ParseColor(Color& color, const String& string, bool strict) {
         StrictCSSParserContext(SecureContextMode::kInsecureContext));
   }
 
-  auto* color_value = DynamicTo<CSSColorValue>(value);
+  auto* color_value = DynamicTo<cssvalue::CSSColorValue>(value);
   if (!color_value)
     return false;
 
@@ -254,12 +251,22 @@ bool CSSParser::ParseColor(Color& color, const String& string, bool strict) {
   return true;
 }
 
-bool CSSParser::ParseSystemColor(Color& color, const String& color_string) {
+bool CSSParser::ParseSystemColor(Color& color,
+                                 const String& color_string,
+                                 WebColorScheme color_scheme) {
   CSSValueID id = CssValueKeywordID(color_string);
   if (!StyleColor::IsSystemColor(id))
     return false;
 
-  color = LayoutTheme::GetTheme().SystemColor(id);
+  if (!RuntimeEnabledFeatures::LinkSystemColorsEnabled() &&
+      (id == CSSValueID::kLinktext || id == CSSValueID::kVisitedtext)) {
+    return false;
+  } else if (!RuntimeEnabledFeatures::NewSystemColorsEnabled() &&
+             (id == CSSValueID::kActivetext || id == CSSValueID::kField ||
+              id == CSSValueID::kFieldtext)) {
+    return false;
+  }
+  color = LayoutTheme::GetTheme().SystemColor(id, color_scheme);
   return true;
 }
 

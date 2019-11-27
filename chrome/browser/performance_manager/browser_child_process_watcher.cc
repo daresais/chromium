@@ -11,35 +11,50 @@
 #include "base/process/process.h"
 #include "base/stl_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/performance_manager/graph/process_node_impl.h"
-#include "chrome/browser/performance_manager/performance_manager.h"
+#include "components/performance_manager/graph/process_node_impl.h"
+#include "components/performance_manager/performance_manager_impl.h"
+#include "components/performance_manager/public/render_process_host_proxy.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/child_process_termination_info.h"
 #include "content/public/common/process_type.h"
 
 namespace performance_manager {
 
-BrowserChildProcessWatcher::BrowserChildProcessWatcher()
-    : browser_process_node_(
-          PerformanceManager::GetInstance()->CreateProcessNode()) {
+BrowserChildProcessWatcher::BrowserChildProcessWatcher() = default;
+
+BrowserChildProcessWatcher::~BrowserChildProcessWatcher() {
+  DCHECK(!browser_process_node_);
+  DCHECK(gpu_process_nodes_.empty());
+}
+
+void BrowserChildProcessWatcher::Initialize() {
+  DCHECK(!browser_process_node_);
+  DCHECK(gpu_process_nodes_.empty());
+
+  browser_process_node_ =
+      PerformanceManagerImpl::GetInstance()->CreateProcessNode(
+          RenderProcessHostProxy());
   OnProcessLaunched(base::Process::Current(), browser_process_node_.get());
   BrowserChildProcessObserver::Add(this);
 }
 
-BrowserChildProcessWatcher::~BrowserChildProcessWatcher() {
+void BrowserChildProcessWatcher::TearDown() {
   BrowserChildProcessObserver::Remove(this);
 
-  PerformanceManager* performance_manager = PerformanceManager::GetInstance();
+  PerformanceManagerImpl* performance_manager =
+      PerformanceManagerImpl::GetInstance();
   performance_manager->DeleteNode(std::move(browser_process_node_));
   for (auto& node : gpu_process_nodes_)
     performance_manager->DeleteNode(std::move(node.second));
+  gpu_process_nodes_.clear();
 }
 
 void BrowserChildProcessWatcher::BrowserChildProcessLaunchedAndConnected(
     const content::ChildProcessData& data) {
   if (data.process_type == content::PROCESS_TYPE_GPU) {
     std::unique_ptr<ProcessNodeImpl> gpu_node =
-        PerformanceManager::GetInstance()->CreateProcessNode();
+        PerformanceManagerImpl::GetInstance()->CreateProcessNode(
+            RenderProcessHostProxy());
     OnProcessLaunched(data.GetProcess(), gpu_node.get());
     gpu_process_nodes_[data.id] = std::move(gpu_node);
   }
@@ -54,7 +69,7 @@ void BrowserChildProcessWatcher::BrowserChildProcessHostDisconnected(
     // launch-and-connect notification arrives.
     // See https://crbug.com/942500.
     if (it != gpu_process_nodes_.end()) {
-      PerformanceManager::GetInstance()->DeleteNode(std::move(it->second));
+      PerformanceManagerImpl::GetInstance()->DeleteNode(std::move(it->second));
       gpu_process_nodes_.erase(it);
     }
   }
@@ -80,9 +95,9 @@ void BrowserChildProcessWatcher::GPUProcessExited(int id, int exit_code) {
   // specifically on crash.
   if (base::Contains(gpu_process_nodes_, id)) {
     auto* process_node = gpu_process_nodes_[id].get();
-    PerformanceManager* performance_manager = PerformanceManager::GetInstance();
 
-    performance_manager->task_runner()->PostTask(
+    DCHECK(PerformanceManagerImpl::GetInstance());
+    PerformanceManagerImpl::GetTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&ProcessNodeImpl::SetProcessExitStatus,
                                   base::Unretained(process_node), exit_code));
   }
@@ -102,8 +117,8 @@ void BrowserChildProcessWatcher::OnProcessLaunched(
       process.CreationTime();
 #endif
 
-  PerformanceManager* performance_manager = PerformanceManager::GetInstance();
-  performance_manager->task_runner()->PostTask(
+  DCHECK(PerformanceManagerImpl::GetInstance());
+  PerformanceManagerImpl::GetTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&ProcessNodeImpl::SetProcess,
                                 base::Unretained(process_node),
                                 process.Duplicate(), launch_time));

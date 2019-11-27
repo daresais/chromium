@@ -7,7 +7,6 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/signin/feature_flags.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_cell.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
@@ -16,6 +15,7 @@
 #include "ios/chrome/browser/ui/util/dynamic_type_util.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -43,9 +43,6 @@ const CGFloat kSearchFieldTopMargin = 32;
 // Bottom margin for the search field.
 const CGFloat kNTPSearchFieldBottomPadding = 18;
 
-// Alpha for search hint text.
-const CGFloat kHintAlpha = 0.3;
-
 const CGFloat kTopSpacingMaterial = 24;
 
 const CGFloat kVoiceSearchButtonWidth = 48;
@@ -55,10 +52,6 @@ const CGFloat kGoogleSearchDoodleHeight = 120;
 
 // Height for the doodle frame when Google is not the default search engine.
 const CGFloat kNonGoogleSearchDoodleHeight = 60;
-
-// Height for the header view on tablet when Google is not the default search
-// engine.
-const CGFloat kNonGoogleSearchHeaderHeightIPad = 10;
 }
 
 namespace content_suggestions {
@@ -107,13 +100,10 @@ CGFloat heightForLogoHeader(BOOL logoIsShowing,
     return headerHeight;
   }
   if (!logoIsShowing) {
-    if (IsIdentityDiscFeatureEnabled()) {
-      // Returns sufficient vertical space for the Identity Disc to be
-      // displayed.
-      return ntp_home::kIdentityAvatarDimension +
-             2 * ntp_home::kIdentityAvatarMargin;
-    }
-    return kNonGoogleSearchHeaderHeightIPad;
+    // Returns sufficient vertical space for the Identity Disc to be
+    // displayed.
+    return ntp_home::kIdentityAvatarDimension +
+           2 * ntp_home::kIdentityAvatarMargin;
   }
   if (!promoCanShow) {
     headerHeight += kTopSpacingMaterial;
@@ -131,7 +121,7 @@ void configureSearchHintLabel(UILabel* searchHintLabel,
   if (base::i18n::IsRTL()) {
     [searchHintLabel setTextAlignment:NSTextAlignmentRight];
   }
-  [searchHintLabel setTextColor:[UIColor colorWithWhite:0 alpha:kHintAlpha]];
+  searchHintLabel.textColor = [UIColor colorNamed:kTextfieldPlaceholderColor];
   searchHintLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
   searchHintLabel.adjustsFontForContentSizeCategory = YES;
   searchHintLabel.textAlignment = NSTextAlignmentCenter;

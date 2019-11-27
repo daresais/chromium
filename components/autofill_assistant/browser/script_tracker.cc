@@ -32,8 +32,10 @@ void SortScripts(std::vector<Script*>* scripts) {
             });
 }
 
-// Creates a value containing a vector of strings.
-base::Value StringVectorToValue(const std::vector<std::string>& v) {
+// Creates a value containing a vector of a simple type, accepted by base::Value
+// constructor, from a container.
+template <typename T>
+base::Value ToValueArray(const T& v) {
   std::vector<base::Value> values;
   for (const auto& s : v) {
     values.emplace_back(base::Value(s));
@@ -45,9 +47,7 @@ base::Value StringVectorToValue(const std::vector<std::string>& v) {
 
 ScriptTracker::ScriptTracker(ScriptExecutorDelegate* delegate,
                              ScriptTracker::Listener* listener)
-    : delegate_(delegate),
-      listener_(listener),
-      weak_ptr_factory_(this) {
+    : delegate_(delegate), listener_(listener) {
   DCHECK(delegate_);
   DCHECK(listener_);
 }
@@ -178,14 +178,13 @@ base::Value ScriptTracker::GetDebugContext() const {
     script_js.SetKey("chip_type", base::Value(entry.chip.type));
 
     base::Value direct_action_js = base::Value(base::Value::Type::DICTIONARY);
-    direct_action_js.SetKey("names",
-                            StringVectorToValue(entry.direct_action.names));
+    direct_action_js.SetKey("names", ToValueArray(entry.direct_action.names));
     direct_action_js.SetKey(
         "required_arguments",
-        StringVectorToValue(entry.direct_action.required_arguments));
+        ToValueArray(entry.direct_action.required_arguments));
     direct_action_js.SetKey(
         "optional_arguments",
-        StringVectorToValue(entry.direct_action.optional_arguments));
+        ToValueArray(entry.direct_action.optional_arguments));
     script_js.SetKey("direct_action", std::move(direct_action_js));
 
     runnable_scripts_js.push_back(std::move(script_js));

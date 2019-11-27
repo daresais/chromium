@@ -57,6 +57,8 @@ cr.define('settings_about_page', function() {
           aboutBrowserProxy.whenCalled('getChannelInfo'),
           aboutBrowserProxy.whenCalled('refreshUpdateStatus'),
           aboutBrowserProxy.whenCalled('refreshTPMFirmwareUpdateStatus'),
+          aboutBrowserProxy.whenCalled('getEnabledReleaseNotes'),
+          aboutBrowserProxy.whenCalled('checkInternetConnection'),
         ]);
       }
 
@@ -278,6 +280,78 @@ cr.define('settings_about_page', function() {
         assertFalse(page.$.relaunchAndPowerwash.hidden);
       });
 
+      /**
+       * Test that release notes button can toggled by feature flags.
+       * Test that release notes button handles offline/online mode properly.
+       * page.$$("#") is used to access items inside dom-if.
+       */
+      test('ReleaseNotes', async () => {
+        const releaseNotes = null;
+
+        /**
+         * Checks the visibility of the "release notes" section when online.
+         * @param {boolean} isShowing Whether the section is expected to be
+         *     visible.
+         * @return {!Promise}
+         */
+        async function checkReleaseNotesOnline(isShowing) {
+          await aboutBrowserProxy.whenCalled('getEnabledReleaseNotes');
+          const releaseNotesOnlineEl = page.$$('#releaseNotesOnline');
+          assertTrue(!!releaseNotesOnlineEl);
+          assertEquals(isShowing, !releaseNotesOnlineEl.hidden);
+        }
+
+        /**
+         * Checks the visibility of the "release notes" for offline mode.
+         * @param {boolean} isShowing Whether the section is expected to be
+         *     visible.
+         * @return {!Promise}
+         */
+        async function checkReleaseNotesOffline(isShowing) {
+          await aboutBrowserProxy.whenCalled('getEnabledReleaseNotes');
+          const releaseNotesOfflineEl = page.$$('#releaseNotesOffline');
+          assertTrue(!!releaseNotesOfflineEl);
+          assertEquals(isShowing, !releaseNotesOfflineEl.hidden);
+        }
+
+        /**
+         * Checks the visibility of the "release notes" section when disabled.
+         * @return {!Promise}
+         */
+        async function checkReleaseNotesDisabled() {
+          await aboutBrowserProxy.whenCalled('getEnabledReleaseNotes');
+          const releaseNotesOnlineEl = page.$$('#releaseNotesOnline');
+          assertTrue(!releaseNotesOnlineEl);
+          const releaseNotesOfflineEl = page.$$('#releaseNotesOffline');
+          assertTrue(!releaseNotesOfflineEl);
+        }
+
+        aboutBrowserProxy.setReleaseNotes(false);
+        aboutBrowserProxy.setInternetConnection(false);
+        await initNewPage();
+        await checkReleaseNotesDisabled();
+
+        aboutBrowserProxy.setReleaseNotes(false);
+        aboutBrowserProxy.setInternetConnection(true);
+        await initNewPage();
+        await checkReleaseNotesDisabled();
+
+        aboutBrowserProxy.setReleaseNotes(true);
+        aboutBrowserProxy.setInternetConnection(false);
+        await initNewPage();
+        await checkReleaseNotesOnline(false);
+        await checkReleaseNotesOffline(true);
+
+        aboutBrowserProxy.setReleaseNotes(true);
+        aboutBrowserProxy.setInternetConnection(true);
+        await initNewPage();
+        await checkReleaseNotesOnline(true);
+        await checkReleaseNotesOffline(false);
+
+        page.$$('#releaseNotesOnline').click();
+        return aboutBrowserProxy.whenCalled('launchReleaseNotes');
+      });
+
       test('RegulatoryInfo', async () => {
         const regulatoryInfo = {text: 'foo', url: 'bar'};
 
@@ -313,7 +387,7 @@ cr.define('settings_about_page', function() {
         aboutBrowserProxy.refreshTPMFirmwareUpdateStatus();
         assertFalse(page.$.aboutTPMFirmwareUpdate.hidden);
         page.$.aboutTPMFirmwareUpdate.click();
-        await PolymerTest.flushTasks();
+        await test_util.flushTasks();
         const dialog = page.$$('os-settings-powerwash-dialog');
         assertTrue(!!dialog);
         assertTrue(dialog.$.dialog.open);
@@ -331,9 +405,10 @@ cr.define('settings_about_page', function() {
          * @return {!Promise}
          */
         async function checkHasEndOfLife(isShowing) {
-          await aboutBrowserProxy.whenCalled('getHasEndOfLife');
+          await aboutBrowserProxy.whenCalled('getEndOfLifeInfo');
           const {endOfLifeMessageContainer} = page.$;
           assertTrue(!!endOfLifeMessageContainer);
+
           assertEquals(isShowing, !endOfLifeMessageContainer.hidden);
 
           // Update status message should be hidden before user has
@@ -347,7 +422,7 @@ cr.define('settings_about_page', function() {
             const icon = page.$$('iron-icon');
             assertTrue(!!icon);
             assertEquals(null, icon.src);
-            assertEquals('settings:end-of-life', icon.icon);
+            assertEquals('os-settings:end-of-life', icon.icon);
 
             const {checkForUpdates} = page.$;
             assertTrue(!!checkForUpdates);
@@ -357,15 +432,53 @@ cr.define('settings_about_page', function() {
 
         // Force test proxy to not respond to JS requests.
         // End of life message should still be hidden in this case.
-        aboutBrowserProxy.setHasEndOfLife(new Promise(() => {}));
+        aboutBrowserProxy.setEndOfLifeInfo(new Promise(function(res, rej) {}));
         await initNewPage();
         await checkHasEndOfLife(false);
-        aboutBrowserProxy.setHasEndOfLife(true);
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: true,
+          endOfLifeAboutMessage: '',
+        });
         await initNewPage();
         await checkHasEndOfLife(true);
-        aboutBrowserProxy.setHasEndOfLife(false);
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: false,
+          endOfLifeAboutMessage: '',
+        });
         await initNewPage();
         await checkHasEndOfLife(false);
+      });
+
+      test('detailed build info page', async () => {
+        async function checkEndOfLifeSection() {
+          await aboutBrowserProxy.whenCalled('getEndOfLifeInfo');
+          const buildInfoPage = page.$$('settings-detailed-build-info');
+          assertTrue(!!buildInfoPage.$['endOfLifeSectionContainer']);
+          assertFalse(buildInfoPage.$['endOfLifeSectionContainer'].hidden);
+        }
+
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: true,
+          aboutPageEndOfLifeMessage: '',
+        });
+        await initNewPage();
+        page.scroller = page.offsetParent;
+        assertTrue(!!page.$['detailed-build-info-trigger']);
+        page.$['detailed-build-info-trigger'].click();
+        const buildInfoPage = page.$$('settings-detailed-build-info');
+        assertTrue(!!buildInfoPage);
+        assertTrue(!!buildInfoPage.$['endOfLifeSectionContainer']);
+        assertTrue(buildInfoPage.$['endOfLifeSectionContainer'].hidden);
+
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: true,
+          aboutPageEndOfLifeMessage: 'message',
+        });
+        await initNewPage();
+        page.scroller = page.offsetParent;
+        assertTrue(!!page.$['detailed-build-info-trigger']);
+        page.$['detailed-build-info-trigger'].click();
+        checkEndOfLifeSection();
       });
 
       test('GetHelp', function() {
@@ -393,7 +506,7 @@ cr.define('settings_about_page', function() {
   }
 
   return {
-    // TODO(aee): move the detailed build info and channel switch dialog tests
+    // TODO(crbug.com/950007): Move the channel switch dialog tests to here
     // from the browser about page tests when those CrOS-specific parts are
     // removed from the browser about page.
     registerTests: registerAboutPageTests,

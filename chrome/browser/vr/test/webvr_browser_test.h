@@ -44,7 +44,7 @@ class WebVrBrowserTestBase : public WebXrVrBrowserTestBase {
 class WebVrRuntimelessBrowserTest : public WebVrBrowserTestBase {
  public:
   WebVrRuntimelessBrowserTest() {
-    append_switches_.push_back(switches::kEnableWebVR);
+    enable_blink_features_.push_back("WebVR");
 
 #if BUILDFLAG(ENABLE_WINDOWS_MR)
     disable_features_.push_back(features::kWindowsMixedReality);
@@ -58,7 +58,7 @@ class WebVrRuntimelessBrowserTest : public WebVrBrowserTestBase {
 class WebVrOpenVrBrowserTest : public WebVrBrowserTestBase {
  public:
   WebVrOpenVrBrowserTest() {
-    append_switches_.push_back(switches::kEnableWebVR);
+    enable_blink_features_.push_back("WebVR");
     enable_features_.push_back(features::kOpenVR);
 
     runtime_requirements_.push_back(XrTestRequirement::DIRECTX_11_1);
@@ -80,6 +80,24 @@ class WebVrOpenVrBrowserTestWebVrDisabled : public WebVrBrowserTestBase {
 #endif
   }
 };
+
+#if BUILDFLAG(ENABLE_OPENXR)
+// OpenXR Test class with standard features enabled: WebVR, OpenXR support
+// and the Gamepad API.
+class WebVrOpenXrBrowserTest : public WebVrBrowserTestBase {
+ public:
+  WebVrOpenXrBrowserTest() {
+    enable_blink_features_.push_back("WebVR");
+    enable_features_.push_back(features::kOpenXR);
+
+    runtime_requirements_.push_back(XrTestRequirement::DIRECTX_11_1);
+
+#if BUILDFLAG(ENABLE_WINDOWS_MR)
+    disable_features_.push_back(features::kWindowsMixedReality);
+#endif
+  }
+};
+#endif  // BUILDFLAG(ENABLE_OPENXR)
 #endif  // OS_WIN
 
 }  // namespace vr

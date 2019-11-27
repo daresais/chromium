@@ -57,21 +57,37 @@ Polymer({
     /** @private */
     showAddLanguagesDialog_: Boolean,
 
-    /** @private {!Map<string, string>} */
-    focusConfig_: {
+    /** @type {!Map<string, (string|Function)>} */
+    focusConfig: {
       type: Object,
+      observer: 'focusConfigChanged_',
+    },
+
+    /** @private */
+    isGuest_: {
+      type: Boolean,
       value: function() {
-        const map = new Map();
-        if (settings.routes.INPUT_METHODS) {
-          map.set(settings.routes.INPUT_METHODS.path, '#manageInputMethods');
-        }
-        return map;
+        return loadTimeData.getBoolean('isGuest');
       },
     },
   },
 
   /** @private {boolean} */
   isChangeInProgress_: false,
+
+  /**
+   * @param {!Map<string, (string|Function)>} newConfig
+   * @param {?Map<string, (string|Function)>} oldConfig
+   * @private
+   */
+  focusConfigChanged_: function(newConfig, oldConfig) {
+    // focusConfig is set only once on the parent, so this observer should only
+    // fire once.
+    assert(!oldConfig);
+    this.focusConfig.set(
+        settings.routes.INPUT_METHODS.path,
+        () => cr.ui.focusWithoutInk(this.$.manageInputMethods));
+  },
 
   /**
    * Stamps and opens the Add Languages dialog, registering a listener to
@@ -111,7 +127,8 @@ Polymer({
    * @private
    */
   shouldShowDialogSeparator_: function() {
-    return this.languages != undefined && this.languages.enabled.length > 1;
+    return this.languages != undefined && this.languages.enabled.length > 1 &&
+        !this.isGuest_;
   },
 
   /**
@@ -405,11 +422,6 @@ Polymer({
       if (this.isSecondaryUser_()) {
         menu.querySelector('#uiLanguageItem').hidden = true;
       }
-
-      // The UI language choice doesn't persist for guests.
-      if (loadTimeData.getBoolean('isGuest')) {
-        menu.querySelector('#uiLanguageItem').hidden = true;
-      }
     }
 
     menu.showAt(/** @type {!Element} */ (e.target));
@@ -458,6 +470,30 @@ Polymer({
     assert(expandButton);
     expandButton.expanded = !expandButton.expanded;
     cr.ui.focusWithoutInk(expandButton);
+  },
+
+  /**
+   * @param {string} id The selected input method ID.
+   * @param {string} currentId The ID of the currently enabled input method.
+   * @return {string} The default tab index '0' if the selected input method is
+   *     not currently enabled; otherwise, returns an empty string which
+   *     effectively unsets the tabindex attribute.
+   * @private
+   */
+  getInputMethodTabIndex_: function(id, currentId) {
+    return id == currentId ? '' : '0';
+  },
+
+  /**
+   * Handles the mousedown even by preventing focusing an input method list
+   * item. This is only registered by the input method list item to avoid
+   * unwanted focus.
+   * @param {!Event} e
+   * @private
+   */
+  onMouseDown_: function(e) {
+    // Preventing the mousedown event from propagating prevents focus being set.
+    e.preventDefault();
   },
 });
 })();

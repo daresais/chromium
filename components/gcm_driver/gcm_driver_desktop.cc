@@ -72,8 +72,8 @@ class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
       std::unique_ptr<GCMClientFactory> gcm_client_factory,
       const GCMClient::ChromeBuildInfo& chrome_build_info,
       const base::FilePath& store_path,
-      base::RepeatingCallback<
-          void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+      base::RepeatingCallback<void(
+          mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
           get_socket_factory_callback,
       std::unique_ptr<network::SharedURLLoaderFactoryInfo> loader_factory_info,
       network::NetworkConnectionTracker* network_connection_tracker,
@@ -93,7 +93,7 @@ class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
   void SetAccountTokens(
       const std::vector<GCMClient::AccountTokenInfo>& account_tokens);
   void UpdateAccountMapping(const AccountMapping& account_mapping);
-  void RemoveAccountMapping(const std::string& account_id);
+  void RemoveAccountMapping(const CoreAccountId& account_id);
   void SetLastTokenFetchTime(const base::Time& time);
   void WakeFromSuspendForHeartbeat(bool wake);
   void AddHeartbeatInterval(const std::string& scope, int interval_ms);
@@ -147,8 +147,8 @@ void GCMDriverDesktop::IOWorker::Initialize(
     std::unique_ptr<GCMClientFactory> gcm_client_factory,
     const GCMClient::ChromeBuildInfo& chrome_build_info,
     const base::FilePath& store_path,
-    base::RepeatingCallback<
-        void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+    base::RepeatingCallback<void(
+        mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
         get_socket_factory_callback,
     std::unique_ptr<network::SharedURLLoaderFactoryInfo> loader_factory_info,
     network::NetworkConnectionTracker* network_connection_tracker,
@@ -396,7 +396,7 @@ void GCMDriverDesktop::IOWorker::UpdateAccountMapping(
 }
 
 void GCMDriverDesktop::IOWorker::RemoveAccountMapping(
-    const std::string& account_id) {
+    const CoreAccountId& account_id) {
   DCHECK(io_thread_->RunsTasksInCurrentSequence());
 
   if (gcm_client_)
@@ -512,8 +512,8 @@ GCMDriverDesktop::GCMDriverDesktop(
     const std::string& user_agent,
     PrefService* prefs,
     const base::FilePath& store_path,
-    base::RepeatingCallback<
-        void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+    base::RepeatingCallback<void(
+        mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
         get_socket_factory_callback,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_for_ui,
     network::NetworkConnectionTracker* network_connection_tracker,
@@ -831,7 +831,7 @@ void GCMDriverDesktop::UpdateAccountMapping(
                      base::Unretained(io_worker_.get()), account_mapping));
 }
 
-void GCMDriverDesktop::RemoveAccountMapping(const std::string& account_id) {
+void GCMDriverDesktop::RemoveAccountMapping(const CoreAccountId& account_id) {
   DCHECK(ui_thread_->RunsTasksInCurrentSequence());
 
   io_thread_->PostTask(
@@ -1089,10 +1089,16 @@ void GCMDriverDesktop::GetInstanceIDData(
   DCHECK(ui_thread_->RunsTasksInCurrentSequence());
 
   GCMClient::Result result = EnsureStarted(GCMClient::IMMEDIATE_START);
+  // TODO(crbug/1028761): This method is only used by InstanceIDImpl to get the
+  // current instance ID from the store. As this method doesn't support error
+  // codes, the instance ID will assume no current ID and generate a new one
+  // if the gcm client is not ready and we pass an empty string to the callback
+  // below. We should fix this!
+  UMA_HISTOGRAM_ENUMERATION("GCM.GetInstanceIDData.ClientStarted", result,
+                            GCMClient::Result::LAST_RESULT + 1);
   if (result != GCMClient::SUCCESS) {
     DLOG(ERROR)
         << "Unable to get the InstanceID data: cannot start the GCM Client";
-
     // Resolve the |callback| to not leave it hanging indefinitely.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(callback, std::string(), std::string()));

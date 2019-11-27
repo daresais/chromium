@@ -20,7 +20,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/authpolicy/auth_policy_credentials_manager.h"
+#include "chrome/browser/chromeos/authpolicy/authpolicy_credentials_manager.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -46,7 +46,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/dbus/auth_policy/fake_auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/fake_authpolicy_client.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
@@ -348,7 +348,8 @@ MATCHER_P(HasDetails, expected, "") {
 }
 
 class ExistingUserControllerPublicSessionTest
-    : public ExistingUserControllerTest {
+    : public ExistingUserControllerTest,
+      public user_manager::UserManager::Observer {
  protected:
   ExistingUserControllerPublicSessionTest() {}
 
@@ -358,13 +359,13 @@ class ExistingUserControllerPublicSessionTest
     // Wait for the public session user to be created.
     if (!user_manager::UserManager::Get()->IsKnownUser(
             public_session_account_id_)) {
-      content::WindowedNotificationObserver(
-          chrome::NOTIFICATION_USER_LIST_CHANGED,
-          base::Bind(&user_manager::UserManager::IsKnownUser,
-                     base::Unretained(user_manager::UserManager::Get()),
-                     public_session_account_id_))
-          .Wait();
+      user_manager::UserManager::Get()->AddObserver(this);
+      local_state_changed_run_loop_ = std::make_unique<base::RunLoop>();
+      local_state_changed_run_loop_->Run();
+      user_manager::UserManager::Get()->RemoveObserver(this);
     }
+    EXPECT_TRUE(user_manager::UserManager::Get()->IsKnownUser(
+        public_session_account_id_));
 
     // Wait for the device local account policy to be installed.
     policy::CloudPolicyStore* store =
@@ -436,6 +437,11 @@ class ExistingUserControllerPublicSessionTest
       controller->current_screen()->Hide();
   }
 
+  // user_manager::UserManager::Observer:
+  void LocalStateChanged(user_manager::UserManager* user_manager) override {
+    local_state_changed_run_loop_->Quit();
+  }
+
   void ExpectSuccessfulLogin(const UserContext& user_context) {
     test::UserSessionManagerTestApi session_manager_test_api(
         UserSessionManager::GetInstance());
@@ -505,6 +511,8 @@ class ExistingUserControllerPublicSessionTest
           policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION));
 
  private:
+  std::unique_ptr<base::RunLoop> local_state_changed_run_loop_;
+
   DISALLOW_COPY_AND_ASSIGN(ExistingUserControllerPublicSessionTest);
 };
 
@@ -740,16 +748,6 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
   FireAutoLogin();
 }
 
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
-                       PRE_TestLoadingPublicUsersFromLocalState) {
-  // First run propagates public accounts and stores them in Local State.
-}
-
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
-                       TestLoadingPublicUsersFromLocalState) {
-  // Second run loads list of public accounts from Local State.
-}
-
 class ExistingUserControllerActiveDirectoryTest
     : public ExistingUserControllerTest {
  public:
@@ -789,13 +787,13 @@ class ExistingUserControllerActiveDirectoryTest
   // Needs to be a member because this class is a friend of
   // AuthPolicyCredentialsManagerFactory to access GetServiceForBrowserContext.
   KerberosFilesHandler* GetKerberosFilesHandler() {
-    auto* auth_policy_credentials_manager =
+    auto* authpolicy_credentials_manager =
         static_cast<AuthPolicyCredentialsManager*>(
             AuthPolicyCredentialsManagerFactory::GetInstance()
                 ->GetServiceForBrowserContext(
                     ProfileManager::GetLastUsedProfile(), false /* create */));
-    EXPECT_TRUE(auth_policy_credentials_manager);
-    return auth_policy_credentials_manager->GetKerberosFilesHandlerForTesting();
+    EXPECT_TRUE(authpolicy_credentials_manager);
+    return authpolicy_credentials_manager->GetKerberosFilesHandlerForTesting();
   }
 
   void LoginAdOnline() {
@@ -1149,8 +1147,9 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerAuthFailureTest, TpmError) {
   EXPECT_EQ(0, FakePowerManagerClient::Get()->num_request_restart_calls());
 
   test::OobeJS().ExpectVisiblePath({"tpm-error-message"});
-  test::OobeJS().ExpectVisiblePath({"reboot-button"});
-  test::OobeJS().Evaluate("document.getElementById('reboot-button').click()");
+  test::OobeJS().ExpectVisiblePath({"tpm-restart-button"});
+  test::OobeJS().Evaluate(
+      "document.getElementById('tpm-restart-button').click()");
 
   EXPECT_EQ(1, FakePowerManagerClient::Get()->num_request_restart_calls());
 }

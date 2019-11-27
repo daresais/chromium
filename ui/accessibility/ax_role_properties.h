@@ -5,7 +5,7 @@
 #ifndef UI_ACCESSIBILITY_AX_ROLE_PROPERTIES_H_
 #define UI_ACCESSIBILITY_AX_ROLE_PROPERTIES_H_
 
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_node_data.h"
 
@@ -37,11 +37,24 @@ AX_EXPORT bool IsControl(const ax::mojom::Role role);
 // Returns true if the provided role belongs to a document.
 AX_EXPORT bool IsDocument(const ax::mojom::Role role);
 
+// Returns true if the provided role represents a dialog.
+AX_EXPORT bool IsDialog(const ax::mojom::Role role);
+
+// Returns true if the given ax node data should belong to a control that is a
+// a plain textfield.
+AX_EXPORT bool IsPlainTextField(const AXNodeData& data);
+
 // Returns true if the provided role belongs to a heading.
 AX_EXPORT bool IsHeading(const ax::mojom::Role role);
 
 // Returns true if the provided role belongs to a heading or a table header.
 AX_EXPORT bool IsHeadingOrTableHeader(const ax::mojom::Role role);
+
+// Returns true if the given AXNodeData has ignored state or ignored role.
+AX_EXPORT bool IsIgnored(const AXNodeData& data);
+
+// Returns true if the provided role is for any kind of image or video.
+AX_EXPORT bool IsImageOrVideo(const ax::mojom::Role role);
 
 // Returns true if the provided role belongs to an image, graphic, canvas, etc.
 AX_EXPORT bool IsImage(const ax::mojom::Role role);

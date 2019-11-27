@@ -41,7 +41,8 @@ ContentAutofillDriver::ContentAutofillDriver(
     AutofillProvider* provider)
     : render_frame_host_(render_frame_host),
       autofill_manager_(nullptr),
-      key_press_handler_manager_(this) {
+      key_press_handler_manager_(this),
+      log_manager_(client->GetLogManager()) {
   // AutofillManager isn't used if provider is valid, Autofill provider is
   // currently used by Android WebView only.
   if (provider) {
@@ -86,12 +87,6 @@ ui::AXTreeID ContentAutofillDriver::GetAxTreeId() const {
   return render_frame_host_->GetAXTreeID();
 }
 
-net::URLRequestContextGetter* ContentAutofillDriver::GetURLRequestContext() {
-  return content::BrowserContext::GetDefaultStoragePartition(
-      render_frame_host_->GetSiteInstance()->GetBrowserContext())->
-          GetURLRequestContext();
-}
-
 scoped_refptr<network::SharedURLLoaderFactory>
 ContentAutofillDriver::GetURLLoaderFactory() {
   return content::BrowserContext::GetDefaultStoragePartition(
@@ -104,13 +99,13 @@ bool ContentAutofillDriver::RendererIsAvailable() {
 }
 
 void ContentAutofillDriver::ConnectToAuthenticator(
-    blink::mojom::InternalAuthenticatorRequest request) {
+    mojo::PendingReceiver<blink::mojom::InternalAuthenticator> receiver) {
 #if defined(OS_ANDROID)
-  render_frame_host_->GetJavaInterfaces()->GetInterface(std::move(request));
+  render_frame_host_->GetJavaInterfaces()->GetInterface(std::move(receiver));
 #else
   authenticator_impl_ = std::make_unique<content::InternalAuthenticatorImpl>(
       render_frame_host_, url::Origin::Create(payments::GetBaseSecureUrl()));
-  authenticator_impl_->Bind(std::move(request));
+  authenticator_impl_->Bind(std::move(receiver));
 #endif
 }
 
@@ -181,10 +176,10 @@ void ContentAutofillDriver::RendererShouldPreviewFieldWithValue(
 }
 
 void ContentAutofillDriver::RendererShouldSetSuggestionAvailability(
-    bool available) {
+    const mojom::AutofillState state) {
   if (!RendererIsAvailable())
     return;
-  GetAutofillAgent()->SetSuggestionAvailability(available);
+  GetAutofillAgent()->SetSuggestionAvailability(state);
 }
 
 void ContentAutofillDriver::PopupHidden() {
@@ -205,6 +200,14 @@ gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
       view->TransformPointToRootCoordSpaceF(orig_point);
   return gfx::RectF(transformed_point.x(), transformed_point.y(),
                     bounding_box.width(), bounding_box.height());
+}
+
+net::NetworkIsolationKey ContentAutofillDriver::NetworkIsolationKey() {
+  content::RenderFrameHost* top_frame_host = render_frame_host_;
+  while (top_frame_host->GetParent())
+    top_frame_host = top_frame_host->GetParent();
+  return net::NetworkIsolationKey(top_frame_host->GetLastCommittedOrigin(),
+                                  render_frame_host_->GetLastCommittedOrigin());
 }
 
 void ContentAutofillDriver::FormsSeen(const std::vector<FormData>& forms,
@@ -338,7 +341,8 @@ void ContentAutofillDriver::RemoveHandler(
 }
 
 void ContentAutofillDriver::SetAutofillProvider(AutofillProvider* provider) {
-  autofill_handler_ = std::make_unique<AutofillHandlerProxy>(this, provider);
+  autofill_handler_ =
+      std::make_unique<AutofillHandlerProxy>(this, log_manager_, provider);
   GetAutofillAgent()->SetUserGestureRequired(false);
   GetAutofillAgent()->SetSecureContextRequired(true);
   GetAutofillAgent()->SetFocusRequiresScroll(false);

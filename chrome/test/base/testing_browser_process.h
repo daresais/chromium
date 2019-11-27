@@ -121,8 +121,10 @@ class TestingBrowserProcess : public BrowserProcess {
 #endif
 
   component_updater::ComponentUpdateService* component_updater() override;
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   component_updater::SupervisedUserWhitelistInstaller*
   supervised_user_whitelist_installer() override;
+#endif
   MediaFileSystemRegistry* media_file_system_registry() override;
 
   WebRtcLogUploader* webrtc_log_uploader() override;
@@ -133,9 +135,6 @@ class TestingBrowserProcess : public BrowserProcess {
   resource_coordinator::TabManager* GetTabManager() override;
   resource_coordinator::ResourceCoordinatorParts* resource_coordinator_parts()
       override;
-  shell_integration::DefaultWebClientState CachedDefaultWebClientState()
-      override;
-  prefs::InProcessPrefServiceFactory* pref_service_factory() const override;
 
   // Set the local state for tests. Consumer is responsible for cleaning it up
   // afterwards (using ScopedTestingLocalState, for example).
@@ -164,9 +163,11 @@ class TestingBrowserProcess : public BrowserProcess {
   TestingBrowserProcess();
   ~TestingBrowserProcess() override;
 
+  void Init();
+
   std::unique_ptr<content::NotificationService> notification_service_;
   std::string app_locale_;
-  bool is_shutting_down_;
+  bool is_shutting_down_ = false;
 
   std::unique_ptr<policy::ChromeBrowserPolicyConnector>
       browser_policy_connector_;
@@ -199,9 +200,9 @@ class TestingBrowserProcess : public BrowserProcess {
   std::unique_ptr<network_time::NetworkTimeTracker> network_time_tracker_;
 
   // The following objects are not owned by TestingBrowserProcess:
-  PrefService* local_state_;
+  PrefService* local_state_ = nullptr;
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
-  rappor::RapporServiceImpl* rappor_service_;
+  rappor::RapporServiceImpl* rappor_service_ = nullptr;
 
   std::unique_ptr<BrowserProcessPlatformPart> platform_part_;
   std::unique_ptr<network::TestNetworkConnectionTracker>

@@ -16,7 +16,6 @@ import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.common.BrowserControlsState;
 
 /**
  * An observer that is notified of changes to a {@link Tab} object.
@@ -199,9 +198,9 @@ public interface TabObserver {
     /**
      * Called when the load progress of a {@link Tab} changes.
      * @param tab      The notifying {@link Tab}.
-     * @param progress The new progress from [0,100].
+     * @param progress The new progress from [0,1].
      */
-    void onLoadProgressChanged(Tab tab, int progress);
+    void onLoadProgressChanged(Tab tab, float progress);
 
     /**
      * Called when the URL of a {@link Tab} changes.
@@ -332,18 +331,6 @@ public interface TabObserver {
      * @param tab The notifying {@link Tab}.
      */
     void onNavigationEntriesDeleted(Tab tab);
-
-    /**
-     * Called when the tab's browser controls constraints has been updated.
-     * @param tab The notifying {@link Tab}.
-     * @param constraints The updated browser controls constraints.
-     */
-    void onBrowserControlsConstraintsUpdated(Tab tab, @BrowserControlsState int constraints);
-
-    /**
-     * This method is invoked when the WebContents reloads the LoFi images on the page.
-     */
-    void didReloadLoFiImages(Tab tab);
 
     /**
      * Called when a find result is received.

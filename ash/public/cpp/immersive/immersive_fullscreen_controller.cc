@@ -54,12 +54,6 @@ class ImmersiveWindowTargeter : public aura::WindowTargeter {
   DISALLOW_COPY_AND_ASSIGN(ImmersiveWindowTargeter);
 };
 
-// Duration for the reveal show/hide slide animation. The slower duration is
-// used for the initial slide out to give the user more change to see what
-// happened.
-const int kRevealSlowAnimationDurationMs = 400;
-const int kRevealFastAnimationDurationMs = 200;
-
 // The delay in milliseconds between the mouse stopping at the top edge of the
 // screen and the top-of-window views revealing.
 const int kMouseRevealDelayMs = 200;
@@ -280,13 +274,11 @@ void ImmersiveFullscreenController::UnlockRevealedState() {
 // static
 void ImmersiveFullscreenController::EnableForWidget(views::Widget* widget,
                                                     bool enabled) {
-  auto* window = widget->GetNativeWindow();
-  if (window->GetProperty(kImmersiveIsActive) != enabled)
-    widget->GetNativeWindow()->SetProperty(kImmersiveIsActive, enabled);
+  widget->GetNativeWindow()->SetProperty(kImmersiveIsActive, enabled);
 }
 
 // static
-ImmersiveFullscreenController* ImmersiveFullscreenController::GetForTest(
+ImmersiveFullscreenController* ImmersiveFullscreenController::Get(
     views::Widget* widget) {
   return widget->GetNativeWindow()->GetProperty(
       kImmersiveFullscreenControllerKey);
@@ -419,7 +411,7 @@ void ImmersiveFullscreenController::UpdateTopEdgeHoverTimer(
   // Timer is stopped when |this| is destroyed, hence Unretained() is safe.
   top_edge_hover_timer_.Start(
       FROM_HERE, base::TimeDelta::FromMilliseconds(kMouseRevealDelayMs),
-      base::Bind(
+      base::BindOnce(
           &ImmersiveFullscreenController::AcquireLocatedEventRevealedLock,
           base::Unretained(this)));
 }
@@ -538,17 +530,18 @@ bool ImmersiveFullscreenController::UpdateRevealedLocksForSwipe(
   return false;
 }
 
-int ImmersiveFullscreenController::GetAnimationDuration(Animate animate) const {
+base::TimeDelta ImmersiveFullscreenController::GetAnimationDuration(
+    Animate animate) const {
   switch (animate) {
     case ANIMATE_NO:
-      return 0;
+      return base::TimeDelta();
     case ANIMATE_SLOW:
-      return kRevealSlowAnimationDurationMs;
+      return base::TimeDelta::FromMilliseconds(400);
     case ANIMATE_FAST:
-      return kRevealFastAnimationDurationMs;
+      return base::TimeDelta::FromMilliseconds(200);
   }
   NOTREACHED();
-  return 0;
+  return base::TimeDelta();
 }
 
 void ImmersiveFullscreenController::MaybeStartReveal(Animate animate) {
@@ -612,9 +605,9 @@ void ImmersiveFullscreenController::MaybeEndReveal(Animate animate) {
   }
 
   reveal_state_ = SLIDING_CLOSED;
-  int duration_ms = GetAnimationDuration(animate);
-  if (duration_ms > 0) {
-    animation_.SetSlideDuration(duration_ms);
+  base::TimeDelta duration = GetAnimationDuration(animate);
+  if (duration > base::TimeDelta()) {
+    animation_.SetSlideDuration(duration);
     animation_.Hide();
   } else {
     animation_.Reset(0);
@@ -715,8 +708,13 @@ void ImmersiveFullscreenController::UpdateEnabled() {
   const bool enabled =
       widget_->GetNativeWindow()->GetProperty(kImmersiveIsActive);
 
-  if (enabled_ == enabled)
+  if (enabled_ == enabled) {
+    // Frame layout depends on the window's state and size,
+    // which can happen asynchronously and/or independently,
+    // from the timing when the immersive state change.
+    delegate_->Relayout();
     return;
+  }
   enabled_ = enabled;
 
   EnableEventObservers(enabled_);

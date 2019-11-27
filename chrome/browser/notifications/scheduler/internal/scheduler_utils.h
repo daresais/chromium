@@ -5,14 +5,15 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_SCHEDULER_UTILS_H_
 #define CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_SCHEDULER_UTILS_H_
 
-#include <deque>
 #include <map>
 #include <memory>
+#include <string>
 
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_types.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace notifications {
 

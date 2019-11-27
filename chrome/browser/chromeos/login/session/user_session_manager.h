@@ -28,6 +28,7 @@
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
+#include "chrome/browser/chromeos/release_notes/release_notes_notification.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/u2f_notification.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
@@ -277,7 +278,7 @@ class UserSessionManager
   void AddSessionStateObserver(chromeos::UserSessionStateObserver* observer);
   void RemoveSessionStateObserver(chromeos::UserSessionStateObserver* observer);
 
-  void ActiveUserChanged(const user_manager::User* active_user) override;
+  void ActiveUserChanged(user_manager::User* active_user) override;
 
   // This method will be called when user have obtained oauth2 tokens.
   void OnOAuth2TokensFetched(UserContext context);
@@ -288,7 +289,7 @@ class UserSessionManager
 
   // Check to see if given profile should show EndOfLife Notification
   // and show the message accordingly.
-  void CheckEolStatus(Profile* profile);
+  void CheckEolInfo(Profile* profile);
 
   // Starts migrating accounts to Chrome OS Account Manager.
   void StartAccountManagerMigration(Profile* profile);
@@ -342,6 +343,9 @@ class UserSessionManager
   // Shows U2F notification if necessary.
   void MaybeShowU2FNotification();
 
+  // Shows Release Notes notification if necessary.
+  void MaybeShowReleaseNotesNotification(Profile* profile);
+
  protected:
   // Protected for testability reasons.
   UserSessionManager();
@@ -394,8 +398,10 @@ class UserSessionManager
   // PrepareProfile().
   void UpdateArcFileSystemCompatibilityAndPrepareProfile();
 
+  void InitializeAccountManager();
+
   void StartCrosSession();
-  void PrepareProfile();
+  void PrepareProfile(const base::FilePath& profile_path);
 
   // Callback for asynchronous profile creation.
   void OnProfileCreated(const UserContext& user_context,
@@ -652,7 +658,9 @@ class UserSessionManager
 
   std::unique_ptr<U2FNotification> u2f_notification_;
 
-  base::WeakPtrFactory<UserSessionManager> weak_factory_;
+  std::unique_ptr<ReleaseNotesNotification> release_notes_notification_;
+
+  base::WeakPtrFactory<UserSessionManager> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UserSessionManager);
 };

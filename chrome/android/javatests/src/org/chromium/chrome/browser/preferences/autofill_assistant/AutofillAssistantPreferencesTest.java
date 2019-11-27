@@ -23,7 +23,7 @@ import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.history.HistoryActivity;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.MainPreferences;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesTest;
@@ -76,7 +76,7 @@ public class AutofillAssistantPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     @EnableFeatures(ChromeFeatureList.AUTOFILL_ASSISTANT)
-    public void testAutofillAssistantSwitch() throws Exception {
+    public void testAutofillAssistantSwitch() {
         TestThreadUtils.runOnUiThreadBlocking(() -> { setAutofillAssistantSwitch(true); });
 
         final Preferences preferences =
@@ -85,9 +85,9 @@ public class AutofillAssistantPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             AutofillAssistantPreferences autofillAssistantPrefs =
-                    (AutofillAssistantPreferences) preferences.getMainFragmentCompat();
-            ChromeSwitchPreferenceCompat onOffSwitch =
-                    (ChromeSwitchPreferenceCompat) autofillAssistantPrefs.findPreference(
+                    (AutofillAssistantPreferences) preferences.getMainFragment();
+            ChromeSwitchPreference onOffSwitch =
+                    (ChromeSwitchPreference) autofillAssistantPrefs.findPreference(
                             AutofillAssistantPreferences.PREF_AUTOFILL_ASSISTANT_SWITCH);
             Assert.assertTrue(onOffSwitch.isChecked());
 
@@ -105,9 +105,9 @@ public class AutofillAssistantPreferencesTest {
                         AutofillAssistantPreferences.class.getName());
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             AutofillAssistantPreferences autofillAssistantPrefs =
-                    (AutofillAssistantPreferences) preferences2.getMainFragmentCompat();
-            ChromeSwitchPreferenceCompat onOffSwitch =
-                    (ChromeSwitchPreferenceCompat) autofillAssistantPrefs.findPreference(
+                    (AutofillAssistantPreferences) preferences2.getMainFragment();
+            ChromeSwitchPreference onOffSwitch =
+                    (ChromeSwitchPreference) autofillAssistantPrefs.findPreference(
                             AutofillAssistantPreferences.PREF_AUTOFILL_ASSISTANT_SWITCH);
             Assert.assertFalse(onOffSwitch.isChecked());
         });
@@ -123,7 +123,7 @@ public class AutofillAssistantPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     @EnableFeatures(ChromeFeatureList.AUTOFILL_ASSISTANT)
-    public void testAutofillAssistantNoPreferenceIfOnboardingNeverShown() throws Exception {
+    public void testAutofillAssistantNoPreferenceIfOnboardingNeverShown() {
         // Note: |PREF_AUTOFILL_ASSISTANT_SWITCH| is cleared in setUp().
         final Preferences preferences = PreferencesTest.startPreferences(
                 InstrumentationRegistry.getInstrumentation(), MainPreferences.class.getName());
@@ -144,7 +144,7 @@ public class AutofillAssistantPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     @EnableFeatures(ChromeFeatureList.AUTOFILL_ASSISTANT)
-    public void testAutofillAssistantPreferenceShownIfOnboardingShown() throws Exception {
+    public void testAutofillAssistantPreferenceShownIfOnboardingShown() {
         setAutofillAssistantSwitch(false);
         final Preferences preferences = PreferencesTest.startPreferences(
                 InstrumentationRegistry.getInstrumentation(), MainPreferences.class.getName());
@@ -162,7 +162,7 @@ public class AutofillAssistantPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     @DisableFeatures(ChromeFeatureList.AUTOFILL_ASSISTANT)
-    public void testAutofillAssistantNoPreferenceIfFeatureDisabled() throws Exception {
+    public void testAutofillAssistantNoPreferenceIfFeatureDisabled() {
         final Preferences preferences = PreferencesTest.startPreferences(
                 InstrumentationRegistry.getInstrumentation(), MainPreferences.class.getName());
 

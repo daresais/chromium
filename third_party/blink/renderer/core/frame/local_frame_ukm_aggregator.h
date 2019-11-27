@@ -6,13 +6,16 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_LOCAL_FRAME_UKM_AGGREGATOR_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace base {
 class TickClock;
+}
+
+namespace cc {
+struct BeginMainFrameMetrics;
 }
 
 namespace ukm {
@@ -129,7 +132,9 @@ class CORE_EXPORT LocalFrameUkmAggregator
     kIntersectionObservation,
     kPaint,
     kPrePaint,
-    kStyleAndLayout,
+    kStyleAndLayout,  // Remove for M-80
+    kStyle,
+    kLayout,
     kForcedStyleAndLayout,
     kScrollingCoordinator,
     kHandleInputEvents,
@@ -164,6 +169,8 @@ class CORE_EXPORT LocalFrameUkmAggregator
                                              {"Paint", true},
                                              {"PrePaint", true},
                                              {"StyleAndLayout", true},
+                                             {"Style", true},
+                                             {"Layout", true},
                                              {"ForcedStyleAndLayout", true},
                                              {"ScrollingCoordinator", true},
                                              {"HandleInputEvents", true},
@@ -219,7 +226,7 @@ class CORE_EXPORT LocalFrameUkmAggregator
 
   // Record a main frame time metric, that also computes the ratios for the
   // sub-metrics and generates UMA samples. UKM is only reported when
-  // BeginMainFrame() returned true. All counters are cleared when this method
+  // BeginMainFrame() had been called. All counters are cleared when this method
   // is called.
   void RecordEndOfFrameMetrics(base::TimeTicks start, base::TimeTicks end);
 
@@ -233,7 +240,18 @@ class CORE_EXPORT LocalFrameUkmAggregator
   // Mark the beginning of a main frame update.
   void BeginMainFrame();
 
-  bool InMainFrame() { return in_main_frame_update_; }
+  // Inform the aggregator that we have reached First Contentful Paint.
+  // The UKM event reports this and UMA for aggregated contributions to
+  // FCP are reported if are_painting_main_frame is true.
+  void DidReachFirstContentfulPaint(bool are_painting_main_frame);
+
+  bool InMainFrameUpdate() { return in_main_frame_update_; }
+
+  // Populate a BeginMainFrameMetrics structure with the latency numbers for
+  // the most recent frame. Must be called when within a main frame update.
+  // That is, after calling BeginMainFrame and before calling
+  // RecordEndOfFrameMetrics.
+  std::unique_ptr<cc::BeginMainFrameMetrics> GetBeginMainFrameMetrics();
 
   // The caller is the owner of the |clock|. The |clock| must outlive the
   // LocalFrameUkmAggregator.
@@ -242,10 +260,14 @@ class CORE_EXPORT LocalFrameUkmAggregator
  private:
   struct AbsoluteMetricRecord {
     std::unique_ptr<CustomCountHistogram> uma_counter;
+    std::unique_ptr<CustomCountHistogram> pre_fcp_uma_counter;
+    std::unique_ptr<CustomCountHistogram> post_fcp_uma_counter;
+    std::unique_ptr<CustomCountHistogram> uma_aggregate_counter;
 
     // Accumulated at each sample, then reset with a call to
     // RecordEndOfFrameMetrics.
     base::TimeDelta interval_duration;
+    base::TimeDelta pre_fcp_aggregate;
 
     void reset() { interval_duration = base::TimeDelta(); }
   };
@@ -274,6 +296,9 @@ class CORE_EXPORT LocalFrameUkmAggregator
     frames_to_next_event_for_test_ = num_frames;
   }
 
+  // Used to check that we only for the MainFrame of a document.
+  bool AllMetricsAreZero();
+
   // UKM system data
   const int64_t source_id_;
   ukm::UkmRecorder* const recorder_;
@@ -301,6 +326,9 @@ class CORE_EXPORT LocalFrameUkmAggregator
   // Set by BeginMainFrame() and cleared in RecordMEndOfFrameMetrics.
   // Main frame metrics are only recorded if this is true.
   bool in_main_frame_update_ = false;
+
+  // Record whether or not it is before the First Contentful Paint.
+  bool is_before_fcp_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(LocalFrameUkmAggregator);
 };

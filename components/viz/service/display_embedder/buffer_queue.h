@@ -54,7 +54,7 @@ class VIZ_SERVICE_EXPORT BufferQueue {
   unsigned GetCurrentBuffer(unsigned* stencil);
 
   // Returns a rectangle whose contents may have changed since the current
-  // buffer was last submitted and they need to be redrawn. For partial swap,
+  // buffer was last submitted and needs to be redrawn. For partial swap,
   // only the contents outside this rectangle can be considered valid and do not
   // need to be redrawn.
   gfx::Rect CurrentBufferDamage() const;

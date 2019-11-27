@@ -10,8 +10,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/launcher/unit_test_launcher.h"
-#include "base/test/test_suite.h"
 #include "media/base/test_data_util.h"
 #include "media/gpu/test/video_player/frame_renderer_dummy.h"
 #include "media/gpu/test/video_player/video.h"
@@ -89,8 +87,9 @@ struct PerformanceMetrics {
   // The number of frames dropped because of the decoder running behind, only
   // relevant for capped performance tests.
   size_t frames_dropped_ = 0;
-  // The rate at which frames are dropped: dropped frames / non-dropped frames.
-  double dropped_frame_rate_ = 0;
+  // The percentage of frames dropped because of the decoder running behind,
+  // only relevant for capped performance tests.
+  double dropped_frame_percentage_ = 0.0;
   // Statistics about the time between subsequent frame deliveries.
   PerformanceTimeStats delivery_time_stats_;
   // Statistics about the time between decode start and frame deliveries.
@@ -167,12 +166,12 @@ void PerformanceEvaluator::StopMeasuring() {
                                      perf_metrics_.total_duration_.InSecondsF();
   perf_metrics_.frames_dropped_ = frame_renderer_->FramesDropped();
 
-  // Calculate the frame drop rate.
-  // TODO(dstaessens@) Find a better metric for dropped frames.
-  size_t frames_rendered =
-      perf_metrics_.frames_decoded_ - perf_metrics_.frames_dropped_;
-  perf_metrics_.dropped_frame_rate_ =
-      perf_metrics_.frames_dropped_ / std::max<size_t>(frames_rendered, 1ul);
+  // Calculate the dropped frame percentage.
+  perf_metrics_.dropped_frame_percentage_ =
+      static_cast<double>(perf_metrics_.frames_dropped_) /
+      static_cast<double>(
+          std::max<size_t>(perf_metrics_.frames_decoded_, 1ul)) *
+      100.0;
 
   // Calculate delivery and decode time metrics.
   perf_metrics_.delivery_time_stats_ =
@@ -188,8 +187,8 @@ void PerformanceEvaluator::StopMeasuring() {
             << std::endl;
   std::cout << "Frames Dropped:     " << perf_metrics_.frames_dropped_
             << std::endl;
-  std::cout << "Dropped frame rate: " << perf_metrics_.dropped_frame_rate_
-            << std::endl;
+  std::cout << "Dropped frame percentage: "
+            << perf_metrics_.dropped_frame_percentage_ << "%" << std::endl;
   std::cout << "Frame delivery time - average:       "
             << perf_metrics_.delivery_time_stats_.avg_ms_ << "ms" << std::endl;
   std::cout << "Frame delivery time - percentile 25: "
@@ -231,8 +230,8 @@ void PerformanceEvaluator::WriteMetricsToFile() const {
   metrics.SetKey(
       "FramesDropped",
       base::Value(base::checked_cast<int>(perf_metrics_.frames_dropped_)));
-  metrics.SetKey("DroppedFrameRate",
-                 base::Value(perf_metrics_.dropped_frame_rate_));
+  metrics.SetKey("DroppedFramePercentage",
+                 base::Value(perf_metrics_.dropped_frame_percentage_));
   metrics.SetKey("FrameDeliveryTimeAverage",
                  base::Value(perf_metrics_.delivery_time_stats_.avg_ms_));
   metrics.SetKey(
@@ -259,14 +258,14 @@ void PerformanceEvaluator::WriteMetricsToFile() const {
   // Write frame delivery times to json.
   base::Value delivery_times(base::Value::Type::LIST);
   for (double frame_delivery_time : frame_delivery_times_) {
-    delivery_times.GetList().emplace_back(frame_delivery_time);
+    delivery_times.Append(frame_delivery_time);
   }
   metrics.SetKey("FrameDeliveryTimes", std::move(delivery_times));
 
   // Write frame decodes times to json.
   base::Value decode_times(base::Value::Type::LIST);
   for (double frame_decode_time : frame_decode_times_) {
-    decode_times.GetList().emplace_back(frame_decode_time);
+    decode_times.Append(frame_decode_time);
   }
   metrics.SetKey("FrameDecodeTimes", std::move(decode_times));
 
@@ -274,10 +273,10 @@ void PerformanceEvaluator::WriteMetricsToFile() const {
   std::string metrics_str;
   ASSERT_TRUE(base::JSONWriter::WriteWithOptions(
       metrics, base::JSONWriter::OPTIONS_PRETTY_PRINT, &metrics_str));
-
-  base::FilePath metrics_file_path =
-      output_folder_path.Append(base::FilePath(g_env->GetTestName())
-                                    .AddExtension(FILE_PATH_LITERAL(".json")));
+  base::FilePath metrics_file_path = output_folder_path.Append(
+      g_env->GetTestOutputFilePath().AddExtension(FILE_PATH_LITERAL(".json")));
+  // Make sure that the directory into which json is saved is created.
+  LOG_ASSERT(base::CreateDirectory(metrics_file_path.DirName()));
   base::File metrics_output_file(
       base::FilePath(metrics_file_path),
       base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
@@ -323,8 +322,16 @@ class VideoDecoderTest : public ::testing::Test {
     if (!g_env->ImportSupported())
       config.allocation_mode = AllocationMode::kAllocate;
 
-    return VideoPlayer::Create(video, std::move(frame_renderer),
-                               std::move(frame_processors), config);
+    auto video_player = VideoPlayer::Create(
+        config, g_env->GetGpuMemoryBufferFactory(), std::move(frame_renderer),
+        std::move(frame_processors));
+    LOG_ASSERT(video_player);
+    LOG_ASSERT(video_player->Initialize(video));
+
+    // Make sure the event timeout is at least as long as the video's duration.
+    video_player->SetEventWaitTimeout(
+        std::max(kDefaultEventWaitTimeout, g_env->Video()->GetDuration()));
+    return video_player;
   }
 
   PerformanceEvaluator* performance_evaluator_;
@@ -379,7 +386,7 @@ int main(int argc, char** argv) {
   LOG_ASSERT(cmd_line);
   if (cmd_line->HasSwitch("help")) {
     std::cout << media::test::usage_msg << "\n" << media::test::help_msg;
-    return EXIT_SUCCESS;
+    return 0;
   }
 
   // Check if a video was specified on the command line.
@@ -395,11 +402,8 @@ int main(int argc, char** argv) {
   base::CommandLine::SwitchMap switches = cmd_line->GetSwitches();
   for (base::CommandLine::SwitchMap::const_iterator it = switches.begin();
        it != switches.end(); ++it) {
-    // Ignore arguments handled by Chrome, GoogleTest, and base::TestLauncher.
-    if (it->first == "v" || it->first == "vmodule" ||
-        it->first.find("gtest_") == 0 ||
-        it->first.find("test-launcher") != std::string::npos ||
-        it->first == "single-process-tests") {
+    if (it->first.find("gtest_") == 0 ||               // Handled by GoogleTest
+        it->first == "v" || it->first == "vmodule") {  // Handled by Chrome
       continue;
     }
 
@@ -419,17 +423,13 @@ int main(int argc, char** argv) {
   // Set up our test environment.
   media::test::VideoPlayerTestEnvironment* test_environment =
       media::test::VideoPlayerTestEnvironment::Create(
-          video_path, video_metadata_path, false, false,
-          base::FilePath(output_folder), use_vd);
+          video_path, video_metadata_path, false, use_vd,
+          base::FilePath(output_folder));
   if (!test_environment)
     return EXIT_FAILURE;
 
   media::test::g_env = static_cast<media::test::VideoPlayerTestEnvironment*>(
       testing::AddGlobalTestEnvironment(test_environment));
 
-  // Launch all tests sequentially and disable batching.
-  base::TestSuite test_suite(argc, argv);
-  return base::LaunchUnitTestsWithOptions(
-      argc, argv, 1, 0, true,
-      base::BindOnce(&base::TestSuite::Run, base::Unretained(&test_suite)));
+  return RUN_ALL_TESTS();
 }

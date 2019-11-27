@@ -13,8 +13,8 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "components/autofill/content/common/autofill_agent.mojom.h"
-#include "components/autofill/content/common/autofill_driver.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_agent.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/autofill/content/renderer/renderer_save_password_progress_logger.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -91,10 +91,6 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   }
 #endif
 
- protected:
-  // Use to force enable during testing.
-  void set_enabled(bool enabled) { enabled_ = enabled; }
-
  private:
   // Contains information about generation status for an element for the
   // lifetime of the possible interaction.
@@ -164,12 +160,9 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   // the last focused password element.
   blink::WebInputElement last_focused_password_element_;
 
-  // Contains correspondence between generaiton enabled element and data for
+  // Contains correspondence between generation enabled element and data for
   // generation.
   std::map<uint32_t, PasswordFormGenerationData> generation_enabled_fields_;
-
-  // If this feature is enabled. Controlled by Finch.
-  bool enabled_;
 
   // True iff the generation element should be marked with special HTML
   // attribute (only for experimental purposes).

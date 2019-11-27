@@ -36,7 +36,10 @@ GURL URLEscapedForHistory(const GURL& url) {
 
 }  // namespace
 
-@interface CRWJSNavigationHandler ()
+@interface CRWJSNavigationHandler () {
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> _subscription;
+}
 
 @property(nonatomic, weak) id<CRWJSNavigationHandlerDelegate> delegate;
 
@@ -53,8 +56,6 @@ GURL URLEscapedForHistory(const GURL& url) {
     web::UserInteractionState* userInteractionState;
 // Returns WKWebView from self.delegate.
 @property(nonatomic, readonly, weak) WKWebView* webView;
-// Returns CRWJSInjector from self.delegate.
-@property(nonatomic, readonly, weak) CRWJSInjector* JSInjector;
 // Returns current URL from self.delegate.
 @property(nonatomic, readonly, assign) GURL currentURL;
 
@@ -92,7 +93,7 @@ GURL URLEscapedForHistory(const GURL& url) {
       }
     };
 
-    self.webStateImpl->AddScriptCommandCallback(
+    _subscription = self.webStateImpl->AddScriptCommandCallback(
         base::BindRepeating(navigationStateCallback), kCommandPrefix);
   }
   return self;
@@ -100,7 +101,6 @@ GURL URLEscapedForHistory(const GURL& url) {
 
 - (void)close {
   self.beingDestroyed = YES;
-  self.webStateImpl->RemoveScriptCommandCallback(kCommandPrefix);
 }
 
 - (NSString*)javaScriptToReplaceWebViewURL:(const GURL&)URL
@@ -128,10 +128,6 @@ GURL URLEscapedForHistory(const GURL& url) {
 
 - (WKWebView*)webView {
   return [self.delegate webViewForJSNavigationHandler:self];
-}
-
-- (CRWJSInjector*)JSInjector {
-  return [self.delegate JSInjectorForJSNavigationHandler:self];
 }
 
 - (GURL)currentURL {
@@ -221,22 +217,6 @@ GURL URLEscapedForHistory(const GURL& url) {
                                  self.webView)];
   [self.delegate
       JSNavigationHandlerUpdateSSLStatusForCurrentNavigationItem:self];
-
-  // This is needed for some special pushState. See http://crbug.com/949305 .
-  NSString* replaceWebViewJS = [self javaScriptToReplaceWebViewURL:pushURL
-                                                   stateObjectJSON:stateObject];
-  __weak CRWJSNavigationHandler* weakSelf = self;
-  [self.JSInjector
-      executeJavaScript:replaceWebViewJS
-      completionHandler:^(id, NSError*) {
-        CRWJSNavigationHandler* strongSelf = weakSelf;
-        if (strongSelf && !strongSelf.beingDestroyed) {
-          [strongSelf.delegate
-              JSNavigationHandlerOptOutScrollsToTopForSubviews:self];
-          [strongSelf.delegate JSNavigationHandler:self
-                               didFinishNavigation:nullptr];
-        }
-      }];
 }
 
 // Handles the navigation.didReplaceState message sent from |senderFrame|.
@@ -284,17 +264,6 @@ GURL URLEscapedForHistory(const GURL& url) {
                     stateObject:stateObject
                  hasUserGesture:self.userInteractionState->IsUserInteracting(
                                     self.webView)];
-  NSString* replaceStateJS = [self javaScriptToReplaceWebViewURL:replaceURL
-                                                 stateObjectJSON:stateObject];
-  __weak CRWJSNavigationHandler* weakSelf = self;
-  [self.JSInjector executeJavaScript:replaceStateJS
-                   completionHandler:^(id, NSError*) {
-                     CRWJSNavigationHandler* strongSelf = weakSelf;
-                     if (!strongSelf || strongSelf.beingDestroyed)
-                       return;
-                     [strongSelf.delegate JSNavigationHandler:self
-                                          didFinishNavigation:nullptr];
-                   }];
   return;
 }
 

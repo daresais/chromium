@@ -29,6 +29,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/auto_reset.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/layout_manager.h"
@@ -47,7 +48,6 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace wm {
 namespace {
 
 bool IsTabletModeEnabled() {
@@ -87,6 +87,25 @@ class BoundsSetter : public aura::LayoutManager {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BoundsSetter);
+};
+
+// Animation metrics reporter which reports animation smoothness percentages for
+// the given histogram name, and then self destructs.
+class WindowAnimationMetricsReporter : public ui::AnimationMetricsReporter {
+ public:
+  explicit WindowAnimationMetricsReporter(const std::string& histogram_name)
+      : histogram_name_(histogram_name) {}
+  ~WindowAnimationMetricsReporter() override = default;
+
+  // ui::AnimationMetricsReporter:
+  void Report(int value) override {
+    base::UmaHistogramPercentage(histogram_name_, value);
+    delete this;
+  }
+
+ private:
+  const std::string histogram_name_;
+  DISALLOW_COPY_AND_ASSIGN(WindowAnimationMetricsReporter);
 };
 
 WMEventType WMEventTypeFromShowState(ui::WindowShowState requested_show_state) {
@@ -157,27 +176,44 @@ void MoveAllTransientChildrenToNewRoot(aura::Window* window) {
     MoveAllTransientChildrenToNewRoot(child);
 }
 
-void CollectPipEnterExitMetrics(aura::Window* window, bool enter) {
-  const bool is_android = window->GetProperty(aura::client::kAppType) ==
-                          static_cast<int>(ash::AppType::ARC_APP);
-  if (enter) {
-    UMA_HISTOGRAM_ENUMERATION(kAshPipEventsHistogramName,
-                              AshPipEvents::PIP_START);
-    UMA_HISTOGRAM_ENUMERATION(kAshPipEventsHistogramName,
-                              is_android ? AshPipEvents::ANDROID_PIP_START
-                                         : AshPipEvents::CHROME_PIP_START);
-  } else {
-    UMA_HISTOGRAM_ENUMERATION(kAshPipEventsHistogramName,
-                              AshPipEvents::PIP_END);
-    UMA_HISTOGRAM_ENUMERATION(kAshPipEventsHistogramName,
-                              is_android ? AshPipEvents::ANDROID_PIP_END
-                                         : AshPipEvents::CHROME_PIP_END);
-  }
+void ReportAshPipEvents(AshPipEvents event) {
+  UMA_HISTOGRAM_ENUMERATION(kAshPipEventsHistogramName, event);
+}
+
+void ReportAshPipAndroidPipUseTime(base::TimeDelta duration) {
+  UMA_HISTOGRAM_CUSTOM_TIMES(kAshPipAndroidPipUseTimeHistogramName, duration,
+                             base::TimeDelta::FromSeconds(1),
+                             base::TimeDelta::FromHours(10), 50);
 }
 
 }  // namespace
 
 constexpr base::TimeDelta WindowState::kBoundsChangeSlideDuration;
+
+WindowState::ScopedBoundsChangeAnimation::ScopedBoundsChangeAnimation(
+    aura::Window* window,
+    BoundsChangeAnimationType bounds_animation_type)
+    : window_(window) {
+  window_->AddObserver(this);
+  previous_bounds_animation_type_ =
+      WindowState::Get(window_)->bounds_animation_type_;
+  WindowState::Get(window_)->bounds_animation_type_ = bounds_animation_type;
+}
+
+WindowState::ScopedBoundsChangeAnimation::~ScopedBoundsChangeAnimation() {
+  if (window_) {
+    WindowState::Get(window_)->bounds_animation_type_ =
+        previous_bounds_animation_type_;
+    window_->RemoveObserver(this);
+    window_ = nullptr;
+  }
+}
+
+void WindowState::ScopedBoundsChangeAnimation::OnWindowDestroying(
+    aura::Window* window) {
+  window_->RemoveObserver(this);
+  window_ = nullptr;
+}
 
 WindowState::~WindowState() {
   // WindowState is registered as an owned property of |window_|, and window
@@ -245,11 +281,11 @@ bool WindowState::IsNormalOrSnapped() const {
 }
 
 bool WindowState::IsActive() const {
-  return ::wm::IsActiveWindow(window_);
+  return wm::IsActiveWindow(window_);
 }
 
 bool WindowState::IsUserPositionable() const {
-  return wm::IsWindowUserPositionable(window_);
+  return window_util::IsWindowUserPositionable(window_);
 }
 
 bool WindowState::HasMaximumWidthOrHeight() const {
@@ -281,7 +317,7 @@ bool WindowState::CanResize() const {
 }
 
 bool WindowState::CanActivate() const {
-  return ::wm::CanActivateWindow(window_);
+  return wm::CanActivateWindow(window_);
 }
 
 bool WindowState::CanSnap() const {
@@ -549,6 +585,7 @@ WindowState::WindowState(aura::Window* window)
       ignore_property_change_(false),
       current_state_(new DefaultState(ToWindowStateType(GetShowState()))) {
   window_->AddObserver(this);
+  UpdateWindowPropertiesFromStateType();
   OnPrePipStateChange(WindowStateType::kDefault);
 }
 
@@ -683,6 +720,11 @@ void WindowState::SetBoundsDirectAnimated(const gfx::Rect& bounds,
       ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
   slide_settings.SetTweenType(tween_type);
   slide_settings.SetTransitionDuration(duration);
+  if (animation_smoothness_histogram_name_) {
+    slide_settings.SetAnimationMetricsReporter(
+        new WindowAnimationMetricsReporter(
+            *animation_smoothness_histogram_name_));
+  }
   SetBoundsDirect(bounds);
 }
 
@@ -740,7 +782,7 @@ void WindowState::OnPrePipStateChange(WindowStateType old_window_state_type) {
                             old_window_state_type);
     }
 
-    CollectPipEnterExitMetrics(window(), /*enter=*/true);
+    CollectPipEnterExitMetrics(/*enter=*/true);
   } else if (was_pip) {
     if (widget) {
       widget->widget_delegate()->SetCanActivate(true);
@@ -749,7 +791,7 @@ void WindowState::OnPrePipStateChange(WindowStateType old_window_state_type) {
     ::wm::SetWindowVisibilityAnimationType(
         window(), ::wm::WINDOW_VISIBILITY_ANIMATION_TYPE_DEFAULT);
 
-    CollectPipEnterExitMetrics(window(), /*enter=*/false);
+    CollectPipEnterExitMetrics(/*enter=*/false);
   }
   // PIP uses restore bounds in its own special context. Reset it in PIP
   // enter/exit transition so that it won't be used wrongly.
@@ -762,17 +804,35 @@ void WindowState::UpdatePipBounds() {
       PipPositioner::GetPositionAfterMovementAreaChange(this);
   ::wm::ConvertRectFromScreen(window()->GetRootWindow(), &new_bounds);
   if (window()->bounds() != new_bounds) {
-    wm::SetBoundsEvent event(new_bounds, /*animate=*/true);
+    SetBoundsWMEvent event(new_bounds, /*animate=*/true);
     OnWMEvent(&event);
   }
 }
 
-WindowState* GetActiveWindowState() {
-  aura::Window* active = GetActiveWindow();
-  return active ? GetWindowState(active) : nullptr;
+void WindowState::CollectPipEnterExitMetrics(bool enter) {
+  const bool is_arc = window_util::IsArcWindow(window());
+  if (enter) {
+    pip_start_time_ = base::TimeTicks::Now();
+
+    ReportAshPipEvents(AshPipEvents::PIP_START);
+    ReportAshPipEvents(is_arc ? AshPipEvents::ANDROID_PIP_START
+                              : AshPipEvents::CHROME_PIP_START);
+  } else {
+    ReportAshPipEvents(AshPipEvents::PIP_END);
+    ReportAshPipEvents(is_arc ? AshPipEvents::ANDROID_PIP_END
+                              : AshPipEvents::CHROME_PIP_END);
+
+    if (is_arc) {
+      DCHECK(!pip_start_time_.is_null());
+      const auto session_duration = base::TimeTicks::Now() - pip_start_time_;
+      ReportAshPipAndroidPipUseTime(session_duration);
+    }
+    pip_start_time_ = base::TimeTicks();
+  }
 }
 
-WindowState* GetWindowState(aura::Window* window) {
+// static
+WindowState* WindowState::Get(aura::Window* window) {
   if (!window)
     return nullptr;
 
@@ -793,8 +853,15 @@ WindowState* GetWindowState(aura::Window* window) {
   return state;
 }
 
-const WindowState* GetWindowState(const aura::Window* window) {
-  return GetWindowState(const_cast<aura::Window*>(window));
+// static
+const WindowState* WindowState::Get(const aura::Window* window) {
+  return Get(const_cast<aura::Window*>(window));
+}
+
+// static
+WindowState* WindowState::ForActiveWindow() {
+  aura::Window* active = window_util::GetActiveWindow();
+  return active ? WindowState::Get(active) : nullptr;
 }
 
 void WindowState::OnWindowPropertyChanged(aura::Window* window,
@@ -854,7 +921,7 @@ void WindowState::OnWindowDestroying(aura::Window* window) {
 
   // If the window is destroyed during PIP, count that as exiting.
   if (IsPip())
-    CollectPipEnterExitMetrics(window, /*enter=*/false);
+    CollectPipEnterExitMetrics(/*enter=*/false);
 
   auto* widget = views::Widget::GetWidgetForNativeWindow(window);
   if (widget)
@@ -864,5 +931,4 @@ void WindowState::OnWindowDestroying(aura::Window* window) {
   delegate_.reset();
 }
 
-}  // namespace wm
 }  // namespace ash

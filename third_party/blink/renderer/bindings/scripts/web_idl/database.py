@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from . import file_io
+from .typedef import Typedef
+from .union import Union
 from .user_defined_type import UserDefinedType
 
 
@@ -27,9 +30,10 @@ class DatabaseBody(object):
         DICTIONARY = 'dictionary'
         ENUMERATION = 'enumeration'
         INTERFACE = 'interface'
+        INTERFACE_MIXIN = 'interface mixin'
         NAMESPACE = 'namespace'
         TYPEDEF = 'typedef'
-        UNION_TYPE = 'union type'
+        UNION = 'union'
 
         _ALL_ENTRIES = (
             CALLBACK_FUNCTION,
@@ -37,9 +41,10 @@ class DatabaseBody(object):
             DICTIONARY,
             ENUMERATION,
             INTERFACE,
+            INTERFACE_MIXIN,
             NAMESPACE,
             TYPEDEF,
-            UNION_TYPE,
+            UNION,
         )
 
         @classmethod
@@ -52,7 +57,7 @@ class DatabaseBody(object):
             self._defs[kind] = {}
 
     def register(self, kind, user_defined_type):
-        assert isinstance(user_defined_type, UserDefinedType)
+        assert isinstance(user_defined_type, (Typedef, Union, UserDefinedType))
         assert kind in DatabaseBody.Kind.itervalues()
         try:
             self.find_by_identifier(user_defined_type.identifier)
@@ -62,7 +67,7 @@ class DatabaseBody(object):
         self._defs[kind][user_defined_type.identifier] = user_defined_type
 
     def find_by_identifier(self, identifier):
-        for defs_per_kind in self._defs:
+        for defs_per_kind in self._defs.itervalues():
             if identifier in defs_per_kind:
                 return defs_per_kind[identifier]
         raise KeyError(identifier)
@@ -85,6 +90,15 @@ class Database(object):
         assert isinstance(database_body, DatabaseBody)
         self._impl = database_body
 
+    @staticmethod
+    def read_from_file(filepath):
+        database = file_io.read_pickle_file(filepath)
+        assert isinstance(database, Database)
+        return database
+
+    def write_to_file(self, filepath):
+        return file_io.write_pickle_file_if_changed(filepath, self)
+
     def find(self, identifier):
         """
         Returns the IDL definition specified with |identifier|.  Raises KeyError
@@ -97,9 +111,14 @@ class Database(object):
         """
         Returns all interfaces.
 
-        Callback interfaces are not included.
+        Callback interfaces and mixins are not included.
         """
         return self._view_by_kind(Database._Kind.INTERFACE)
+
+    @property
+    def interface_mixins(self):
+        """Returns all interface mixins."""
+        return self._view_by_kind(Database._Kind.INTERFACE_MIXIN)
 
     @property
     def dictionaries(self):
@@ -129,7 +148,7 @@ class Database(object):
     @property
     def union_types(self):
         """Returns all union type definitions."""
-        return self._view_by_kind(Database._Kind.UNION_TYPE)
+        return self._view_by_kind(Database._Kind.UNION)
 
     def _view_by_kind(self, kind):
         return self._impl.find_by_kind(kind).viewvalues()

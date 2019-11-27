@@ -9,10 +9,12 @@
 
 #include "base/barrier_closure.h"
 #include "base/run_loop.h"
+#include "base/test/bind_test_util.h"
 #include "base/time/time.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_consts.h"
+#include "content/browser/service_worker/service_worker_container_host.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_database.h"
 #include "content/browser/service_worker/service_worker_disk_cache.h"
@@ -24,10 +26,14 @@
 #include "content/common/frame_messages.mojom.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/transferrable_url_loader.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_info.h"
+#include "third_party/blink/public/common/loader/throttling_url_loader.h"
 
 namespace content {
 
@@ -42,18 +48,21 @@ class MockSharedURLLoaderFactory final
   MockSharedURLLoaderFactory() = default;
 
   // network::mojom::URLLoaderFactory:
-  void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
-                            int32_t routing_id,
-                            int32_t request_id,
-                            uint32_t options,
-                            const network::ResourceRequest& url_request,
-                            network::mojom::URLLoaderClientPtr client,
-                            const net::MutableNetworkTrafficAnnotationTag&
-                                traffic_annotation) override {
-    client->OnComplete(
-        network::URLLoaderCompletionStatus(net::ERR_NOT_IMPLEMENTED));
+  void CreateLoaderAndStart(
+      mojo::PendingReceiver<network::mojom::URLLoader> receiver,
+      int32_t routing_id,
+      int32_t request_id,
+      uint32_t options,
+      const network::ResourceRequest& url_request,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
+      override {
+    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
+        ->OnComplete(
+            network::URLLoaderCompletionStatus(net::ERR_NOT_IMPLEMENTED));
   }
-  void Clone(network::mojom::URLLoaderFactoryRequest request) override {
+  void Clone(mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
+      override {
     NOTREACHED();
   }
 
@@ -90,18 +99,18 @@ class MockSharedURLLoaderFactoryInfo final
 class FakeNavigationClient : public mojom::NavigationClient {
  public:
   using ReceivedProviderInfoCallback = base::OnceCallback<void(
-      blink::mojom::ServiceWorkerProviderInfoForWindowPtr)>;
+      blink::mojom::ServiceWorkerProviderInfoForClientPtr)>;
 
   FakeNavigationClient(ReceivedProviderInfoCallback on_received_callback)
       : on_received_callback_(std::move(on_received_callback)) {}
   ~FakeNavigationClient() override = default;
 
  private:
-  // mojom::NavigationClientPtr implementation:
+  // mojom::NavigationClient implementation:
   void CommitNavigation(
-      const CommonNavigationParams& common_params,
-      const CommitNavigationParams& request_params,
-      const network::ResourceResponseHead& response_head,
+      mojom::CommonNavigationParamsPtr common_params,
+      mojom::CommitNavigationParamsPtr commit_params,
+      network::mojom::URLResponseHeadPtr response_head,
       mojo::ScopedDataPipeConsumerHandle response_body,
       network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
       std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
@@ -110,7 +119,7 @@ class FakeNavigationClient : public mojom::NavigationClient {
           subresource_overrides,
       blink::mojom::ControllerServiceWorkerInfoPtr
           controller_service_worker_info,
-      blink::mojom::ServiceWorkerProviderInfoForWindowPtr provider_info,
+      blink::mojom::ServiceWorkerProviderInfoForClientPtr provider_info,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           prefetch_loader_factory,
       const base::UnguessableToken& devtools_navigation_token,
@@ -119,8 +128,8 @@ class FakeNavigationClient : public mojom::NavigationClient {
     std::move(callback).Run(nullptr, nullptr);
   }
   void CommitFailedNavigation(
-      const CommonNavigationParams& common_params,
-      const CommitNavigationParams& commit_params,
+      mojom::CommonNavigationParamsPtr common_params,
+      mojom::CommitNavigationParamsPtr commit_params,
       bool has_stale_copy_in_cache,
       int error_code,
       const base::Optional<std::string>& error_page_content,
@@ -192,33 +201,33 @@ ServiceWorkerRemoteProviderEndpoint::ServiceWorkerRemoteProviderEndpoint() {}
 ServiceWorkerRemoteProviderEndpoint::ServiceWorkerRemoteProviderEndpoint(
     ServiceWorkerRemoteProviderEndpoint&& other)
     : navigation_client_(std::move(other.navigation_client_)),
-      host_ptr_(std::move(other.host_ptr_)),
-      client_request_(std::move(other.client_request_)) {}
+      host_remote_(std::move(other.host_remote_)),
+      client_receiver_(std::move(other.client_receiver_)) {}
 
 ServiceWorkerRemoteProviderEndpoint::~ServiceWorkerRemoteProviderEndpoint() {}
 
 void ServiceWorkerRemoteProviderEndpoint::BindForWindow(
-    blink::mojom::ServiceWorkerProviderInfoForWindowPtr info) {
+    blink::mojom::ServiceWorkerProviderInfoForClientPtr info) {
   // We establish a message pipe for connecting |navigation_client_| to a fake
   // navigation client, then simulate sending the navigation commit IPC which
   // carries a service worker provider info over it, then the provider info
-  // received there gets its |host_ptr_info| and |client_request| associated
+  // received there gets its |host_remote| and |client_receiver| associated
   // with a message pipe so that their users later can make Mojo calls without
   // crash.
-  blink::mojom::ServiceWorkerProviderInfoForWindowPtr received_info;
+  blink::mojom::ServiceWorkerProviderInfoForClientPtr received_info;
   base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
-  mojo::MakeStrongBinding(
+  mojo::MakeSelfOwnedReceiver(
       std::make_unique<FakeNavigationClient>(base::BindOnce(
           [](base::OnceClosure quit_closure,
-             blink::mojom::ServiceWorkerProviderInfoForWindowPtr* out_info,
-             blink::mojom::ServiceWorkerProviderInfoForWindowPtr info) {
+             blink::mojom::ServiceWorkerProviderInfoForClientPtr* out_info,
+             blink::mojom::ServiceWorkerProviderInfoForClientPtr info) {
             *out_info = std::move(info);
             std::move(quit_closure).Run();
           },
           loop.QuitClosure(), &received_info)),
-      mojo::MakeRequest(&navigation_client_));
+      navigation_client_.BindNewPipeAndPassReceiver());
   navigation_client_->CommitNavigation(
-      CommonNavigationParams(), CommitNavigationParams(),
+      CreateCommonNavigationParams(), CreateCommitNavigationParams(),
       network::ResourceResponseHead(), mojo::ScopedDataPipeConsumerHandle(),
       nullptr, nullptr, base::nullopt, nullptr, std::move(info),
       mojo::NullRemote(), base::UnguessableToken::Create(),
@@ -229,31 +238,57 @@ void ServiceWorkerRemoteProviderEndpoint::BindForWindow(
                  interface_params) {}));
   loop.Run();
 
-  client_request_ = std::move(received_info->client_request);
-  host_ptr_.Bind(std::move(received_info->host_ptr_info));
+  client_receiver_ = std::move(received_info->client_receiver);
+  host_remote_.Bind(std::move(received_info->host_remote));
 }
 
 void ServiceWorkerRemoteProviderEndpoint::BindForServiceWorker(
     blink::mojom::ServiceWorkerProviderInfoForStartWorkerPtr info) {
-  host_ptr_.Bind(std::move(info->host_ptr_info));
+  host_remote_.Bind(std::move(info->host_remote));
 }
+
+ServiceWorkerProviderHostAndInfo::ServiceWorkerProviderHostAndInfo(
+    base::WeakPtr<ServiceWorkerProviderHost> host,
+    blink::mojom::ServiceWorkerProviderInfoForClientPtr info)
+    : host(std::move(host)), info(std::move(info)) {}
+
+ServiceWorkerProviderHostAndInfo::~ServiceWorkerProviderHostAndInfo() = default;
 
 base::WeakPtr<ServiceWorkerProviderHost> CreateProviderHostForWindow(
     int process_id,
     bool is_parent_frame_secure,
     base::WeakPtr<ServiceWorkerContextCore> context,
     ServiceWorkerRemoteProviderEndpoint* output_endpoint) {
-  auto provider_info = blink::mojom::ServiceWorkerProviderInfoForWindow::New();
+  std::unique_ptr<ServiceWorkerProviderHostAndInfo> host_and_info =
+      CreateProviderHostAndInfoForWindow(context, is_parent_frame_secure);
   base::WeakPtr<ServiceWorkerProviderHost> host =
-      ServiceWorkerProviderHost::PreCreateNavigationHost(
-          context, is_parent_frame_secure,
-          FrameTreeNode::kFrameTreeNodeInvalidId, &provider_info);
-  output_endpoint->BindForWindow(std::move(provider_info));
+      std::move(host_and_info->host);
+  output_endpoint->BindForWindow(std::move(host_and_info->info));
 
   // In production code this is called from NavigationRequest in the browser
   // process right before navigation commit.
-  host->OnBeginNavigationCommit(process_id, 1 /* route_id */);
+  host->container_host()->OnBeginNavigationCommit(
+      process_id, 1 /* route_id */,
+      network::mojom::CrossOriginEmbedderPolicy::kNone);
   return host;
+}
+
+std::unique_ptr<ServiceWorkerProviderHostAndInfo>
+CreateProviderHostAndInfoForWindow(
+    base::WeakPtr<ServiceWorkerContextCore> context,
+    bool are_ancestors_secure) {
+  mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
+      client_remote;
+  mojo::PendingAssociatedReceiver<blink::mojom::ServiceWorkerContainerHost>
+      host_receiver;
+  auto info = blink::mojom::ServiceWorkerProviderInfoForClient::New();
+  info->client_receiver = client_remote.InitWithNewEndpointAndPassReceiver();
+  host_receiver = info->host_remote.InitWithNewEndpointAndPassReceiver();
+  return std::make_unique<ServiceWorkerProviderHostAndInfo>(
+      ServiceWorkerProviderHost::PreCreateNavigationHost(
+          context, are_ancestors_secure, FrameTreeNode::kFrameTreeNodeInvalidId,
+          std::move(host_receiver), std::move(client_remote)),
+      std::move(info));
 }
 
 base::OnceCallback<void(blink::ServiceWorkerStatusCode)>
@@ -269,6 +304,26 @@ ReceiveServiceWorkerStatus(base::Optional<blink::ServiceWorkerStatusCode>* out,
       std::move(quit_closure), out);
 }
 
+blink::ServiceWorkerStatusCode StartServiceWorker(
+    ServiceWorkerVersion* version) {
+  blink::ServiceWorkerStatusCode status;
+  base::RunLoop run_loop;
+  version->StartWorker(ServiceWorkerMetrics::EventType::UNKNOWN,
+                       base::BindLambdaForTesting(
+                           [&](blink::ServiceWorkerStatusCode result_status) {
+                             status = result_status;
+                             run_loop.Quit();
+                           }));
+  run_loop.Run();
+  return status;
+}
+
+void StopServiceWorker(ServiceWorkerVersion* version) {
+  base::RunLoop run_loop;
+  version->StopWorker(run_loop.QuitClosure());
+  run_loop.Run();
+}
+
 base::WeakPtr<ServiceWorkerProviderHost>
 CreateProviderHostForServiceWorkerContext(
     int process_id,
@@ -279,14 +334,39 @@ CreateProviderHostForServiceWorkerContext(
   auto provider_info =
       blink::mojom::ServiceWorkerProviderInfoForStartWorker::New();
   base::WeakPtr<ServiceWorkerProviderHost> host =
-      ServiceWorkerProviderHost::PreCreateForController(
+      ServiceWorkerProviderHost::CreateForServiceWorker(
           std::move(context), base::WrapRefCounted(hosted_version),
           &provider_info);
 
   host->CompleteStartWorkerPreparation(
-      process_id, mojo::MakeRequest(&provider_info->interface_provider));
+      process_id, mojo::MakeRequest(&provider_info->interface_provider),
+      provider_info->browser_interface_broker.InitWithNewPipeAndPassReceiver());
   output_endpoint->BindForServiceWorker(std::move(provider_info));
   return host;
+}
+
+scoped_refptr<ServiceWorkerRegistration>
+CreateServiceWorkerRegistrationAndVersion(ServiceWorkerContextCore* context,
+                                          const GURL& scope,
+                                          const GURL& script) {
+  ServiceWorkerStorage* storage = context->storage();
+
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = scope;
+  auto registration = base::MakeRefCounted<ServiceWorkerRegistration>(
+      options, storage->NewRegistrationId(), context->AsWeakPtr());
+  auto version = base::MakeRefCounted<ServiceWorkerVersion>(
+      registration.get(), script, blink::mojom::ScriptType::kClassic,
+      storage->NewVersionId(), context->AsWeakPtr());
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records = {
+      ServiceWorkerDatabase::ResourceRecord(storage->NewResourceId(), script,
+                                            100)};
+  version->script_cache_map()->SetResources(records);
+  version->set_fetch_handler_existence(
+      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
+  version->SetStatus(ServiceWorkerVersion::INSTALLED);
+  registration->SetWaitingVersion(version);
+  return registration;
 }
 
 ServiceWorkerDatabase::ResourceRecord WriteToDiskCacheSync(
@@ -575,17 +655,16 @@ ServiceWorkerUpdateCheckTestUtils::CreatePausedCacheWriter(
 std::unique_ptr<ServiceWorkerSingleScriptUpdateChecker::PausedState>
 ServiceWorkerUpdateCheckTestUtils::CreateUpdateCheckerPausedState(
     std::unique_ptr<ServiceWorkerCacheWriter> cache_writer,
-    ServiceWorkerNewScriptLoader::NetworkLoaderState network_loader_state,
-    ServiceWorkerNewScriptLoader::WriterState body_writer_state,
+    ServiceWorkerUpdatedScriptLoader::LoaderState network_loader_state,
+    ServiceWorkerUpdatedScriptLoader::WriterState body_writer_state,
     mojo::ScopedDataPipeConsumerHandle network_consumer) {
-  network::mojom::URLLoaderPtr network_loader;
-  network::mojom::URLLoaderClientPtr network_loader_client;
-  mojo::MakeRequest(&network_loader);
-  network::mojom::URLLoaderClientRequest network_loader_client_request =
-      mojo::MakeRequest(&network_loader_client);
+  mojo::PendingRemote<network::mojom::URLLoaderClient> network_loader_client;
+  mojo::PendingReceiver<network::mojom::URLLoaderClient>
+      network_loader_client_receiver =
+          network_loader_client.InitWithNewPipeAndPassReceiver();
   return std::make_unique<ServiceWorkerSingleScriptUpdateChecker::PausedState>(
-      std::move(cache_writer), std::move(network_loader),
-      std::move(network_loader_client_request), std::move(network_consumer),
+      std::move(cache_writer), /*network_loader=*/nullptr,
+      std::move(network_loader_client_receiver), std::move(network_consumer),
       network_loader_state, body_writer_state);
 }
 
@@ -597,9 +676,16 @@ void ServiceWorkerUpdateCheckTestUtils::SetComparedScriptInfoForVersion(
         paused_state,
     ServiceWorkerVersion* version) {
   std::map<GURL, ServiceWorkerUpdateChecker::ComparedScriptInfo> info_map;
-  info_map[script_url] = ServiceWorkerUpdateChecker::ComparedScriptInfo(
-      resource_id, compare_result, std::move(paused_state));
-  version->set_compared_script_info_map(std::move(info_map));
+  info_map.emplace(script_url,
+                   ServiceWorkerUpdateChecker::ComparedScriptInfo(
+                       resource_id, compare_result, std::move(paused_state),
+                       /*failure_info=*/nullptr));
+  version->PrepareForUpdate(
+      std::move(info_map),
+      (compare_result ==
+       ServiceWorkerSingleScriptUpdateChecker::Result::kDifferent)
+          ? script_url
+          : GURL());
 }
 
 void ServiceWorkerUpdateCheckTestUtils::
@@ -611,8 +697,8 @@ void ServiceWorkerUpdateCheckTestUtils::
         int64_t old_resource_id,
         int64_t new_resource_id,
         EmbeddedWorkerTestHelper* worker_test_helper,
-        ServiceWorkerNewScriptLoader::NetworkLoaderState network_loader_state,
-        ServiceWorkerNewScriptLoader::WriterState body_writer_state,
+        ServiceWorkerUpdatedScriptLoader::LoaderState network_loader_state,
+        ServiceWorkerUpdatedScriptLoader::WriterState body_writer_state,
         mojo::ScopedDataPipeConsumerHandle network_consumer,
         ServiceWorkerSingleScriptUpdateChecker::Result compare_result,
         ServiceWorkerVersion* version) {

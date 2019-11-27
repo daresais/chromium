@@ -13,6 +13,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -43,9 +44,9 @@ inline constexpr bool IsDebug() {
 }
 
 inline constexpr bool IsChromeBranded() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return true;
-#elif defined(CHROMIUM_BUILD)
+#elif BUILDFLAG(CHROMIUM_BRANDING)
   return false;
 #else
   #error Only Chrome and Chromium brands are supported.

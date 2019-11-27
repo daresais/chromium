@@ -30,8 +30,8 @@
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_constants.h"
-#include "ios/chrome/browser/crash_loop_detection_util.h"
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
+#include "ios/chrome/browser/crash_report/crash_loop_detection_util.h"
 #import "ios/chrome/browser/device_sharing/device_sharing_manager.h"
 #include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #import "ios/chrome/browser/geolocation/omnibox_geolocation_config.h"
@@ -65,7 +65,7 @@
 namespace {
 // Helper method to post |closure| on the UI thread.
 void PostTaskOnUIThread(base::OnceClosure closure) {
-  base::PostTaskWithTraits(FROM_HERE, {web::WebThread::UI}, std::move(closure));
+  base::PostTask(FROM_HERE, {web::WebThread::UI}, std::move(closure));
 }
 NSString* const kStartupAttemptReset = @"StartupAttempReset";
 }  // namespace
@@ -242,7 +242,7 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
           DCHECK_CURRENTLY_ON(web::WebThread::UI);
           _savingCookies = NO;
         }));
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {web::WebThread::IO}, base::BindOnce(^{
           net::CookieStoreIOS* store = static_cast<net::CookieStoreIOS*>(
               getter->GetURLRequestContext()->cookie_store());
@@ -354,9 +354,6 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   DCHECK([_browserLauncher browserInitializationStage] ==
          INITIALIZATION_STAGE_FOREGROUND);
   _sessionStartTime = base::TimeTicks::Now();
-  TabModel* mainTabModel =
-      _browserLauncher.interfaceProvider.mainInterface.tabModel;
-  [mainTabModel resetSessionMetrics];
 
   id<BrowserInterface> currentInterface =
       _browserLauncher.interfaceProvider.currentInterface;

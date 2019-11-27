@@ -19,8 +19,8 @@ import android.widget.TextView;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.BoundedLinearLayout;
-import org.chromium.chrome.browser.widget.FadingEdgeScrollView;
+import org.chromium.chrome.browser.ui.widget.BoundedLinearLayout;
+import org.chromium.chrome.browser.ui.widget.FadingEdgeScrollView;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
 
@@ -247,6 +247,16 @@ public class ModalDialogView extends BoundedLinearLayout implements View.OnClick
     void setButtonText(@ModalDialogProperties.ButtonType int buttonType, String buttonText) {
         getButton(buttonType).setText(buttonText);
         updateButtonVisibility();
+    }
+
+    /**
+     * Sets content description for the specified button.
+     * @param buttonType The {@link ModalDialogProperties.ButtonType} of the button.
+     * @param contentDescription The content description to be set for the specified button.
+     */
+    void setButtonContentDescription(
+            @ModalDialogProperties.ButtonType int buttonType, String contentDescription) {
+        getButton(buttonType).setContentDescription(contentDescription);
     }
 
     /**

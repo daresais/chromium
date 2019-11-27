@@ -10,11 +10,11 @@
 #include "base/macros.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/chrome_browser_main_linux.h"
-#include "chrome/browser/chromeos/crostini/crosvm_metrics.h"
 #include "chrome/browser/chromeos/external_metrics.h"
 #include "chrome/browser/memory/memory_kills_monitor.h"
-#include "chromeos/assistant/buildflags.h"
 
+class AssistantClient;
+class AssistantStateClient;
 class ChromeKeyboardControllerClient;
 class SpokenFeedbackEventRewriterDelegate;
 
@@ -24,16 +24,17 @@ class StateController;
 
 namespace arc {
 class ArcServiceLauncher;
-class VoiceInteractionControllerClient;
 }  // namespace arc
 
 namespace policy {
 class LockToSingleUserManager;
 }  // namespace policy
 
-#if BUILDFLAG(ENABLE_CROS_ASSISTANT)
-class AssistantClient;
-#endif
+
+namespace crostini {
+class CrostiniUnsupportedActionNotifier;
+class CrosvmMetrics;
+}  // namespace crostini
 
 namespace chromeos {
 
@@ -43,7 +44,10 @@ class DemoModeResourcesRemover;
 class DiscoverManager;
 class EventRewriterDelegateImpl;
 class FastTransitionObserver;
+class GnubbyNotification;
 class IdleActionWarningObserver;
+class LoginScreenExtensionsLifetimeManager;
+class LoginScreenExtensionsStorageCleaner;
 class LowDiskNotification;
 class NetworkChangeManagerClient;
 class NetworkPrefStateObserver;
@@ -53,9 +57,10 @@ class RendererFreezer;
 class SchedulerConfigurationManager;
 class SessionTerminationManager;
 class ShutdownPolicyForwarder;
+class SystemTokenCertDBInitializer;
 class WakeOnWifiManager;
+class WebKioskAppManager;
 class WilcoDtcSupportdManager;
-class GnubbyNotification;
 
 namespace default_app_order {
 class ExternalLoader;
@@ -63,7 +68,6 @@ class ExternalLoader;
 
 namespace internal {
 class DBusServices;
-class SystemTokenCertDBInitializer;
 }  // namespace internal
 
 namespace power {
@@ -118,7 +122,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<internal::DBusServices> dbus_services_;
 
-  std::unique_ptr<internal::SystemTokenCertDBInitializer>
+  std::unique_ptr<SystemTokenCertDBInitializer>
       system_token_certdb_initializer_;
 
   std::unique_ptr<ShutdownPolicyForwarder> shutdown_policy_forwarder_;
@@ -133,15 +137,13 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<arc::ArcServiceLauncher> arc_service_launcher_;
 
-  std::unique_ptr<arc::VoiceInteractionControllerClient>
-      arc_voice_interaction_controller_client_;
+  std::unique_ptr<AssistantStateClient> assistant_state_client_;
 
-#if BUILDFLAG(ENABLE_CROS_ASSISTANT)
   std::unique_ptr<AssistantClient> assistant_client_;
-#endif
 
   std::unique_ptr<LowDiskNotification> low_disk_notification_;
   std::unique_ptr<ArcKioskAppManager> arc_kiosk_app_manager_;
+  std::unique_ptr<WebKioskAppManager> web_kiosk_app_manager_;
 
   std::unique_ptr<memory::MemoryKillsMonitor::Handle> memory_kills_monitor_;
 
@@ -165,12 +167,25 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<CrosUsbDetector> cros_usb_detector_;
 
+  std::unique_ptr<crostini::CrostiniUnsupportedActionNotifier>
+      crostini_unsupported_action_notifier_;
+
   std::unique_ptr<chromeos::system::DarkResumeController>
       dark_resume_controller_;
 
   std::unique_ptr<SessionTerminationManager> session_termination_manager_;
+
+  // Set when PreProfileInit() is called. If PreMainMessageLoopRun() exits
+  // early, this will be false during PostMainMessageLoopRun(), etc.
+  // Used to prevent shutting down classes that were not initialized.
+  bool pre_profile_init_called_ = false;
+
   std::unique_ptr<policy::LockToSingleUserManager> lock_to_single_user_manager_;
   std::unique_ptr<WilcoDtcSupportdManager> wilco_dtc_supportd_manager_;
+  std::unique_ptr<LoginScreenExtensionsLifetimeManager>
+      login_screen_extensions_lifetime_manager_;
+  std::unique_ptr<LoginScreenExtensionsStorageCleaner>
+      login_screen_extensions_storage_cleaner_;
 
   std::unique_ptr<GnubbyNotification> gnubby_notification_;
 

@@ -19,7 +19,7 @@
 #include "ui/base/models/menu_model.h"
 
 ChromeAppListModelUpdater::ChromeAppListModelUpdater(Profile* profile)
-    : profile_(profile), weak_ptr_factory_(this) {}
+    : profile_(profile) {}
 
 ChromeAppListModelUpdater::~ChromeAppListModelUpdater() = default;
 
@@ -310,7 +310,7 @@ void ChromeAppListModelUpdater::NotifySearchResultItemInstalled(
 // Methods for item querying
 
 ChromeAppListItem* ChromeAppListModelUpdater::FindItem(const std::string& id) {
-  return items_.count(id) ? items_[id].get() : nullptr;
+  return items_.find(id) != items_.end() ? items_[id].get() : nullptr;
 }
 
 size_t ChromeAppListModelUpdater::ItemCount() {

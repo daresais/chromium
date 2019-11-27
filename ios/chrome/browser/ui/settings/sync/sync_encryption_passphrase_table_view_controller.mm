@@ -42,7 +42,11 @@
 #error "This file requires ARC support."
 #endif
 
-using namespace sync_encryption_passphrase;
+using sync_encryption_passphrase::ItemTypeEnterPassphrase;
+using sync_encryption_passphrase::ItemTypeError;
+using sync_encryption_passphrase::ItemTypeFooter;
+using sync_encryption_passphrase::ItemTypeMessage;
+using sync_encryption_passphrase::SectionIdentifierPassphrase;
 
 namespace {
 
@@ -60,7 +64,7 @@ const CGFloat kSpinnerButtonPadding = 18;
   NSString* savedTitle_;
   UIBarButtonItem* savedLeftButton_;
   std::unique_ptr<SyncObserverBridge> syncObserver_;
-  std::unique_ptr<identity::IdentityManagerObserverBridge>
+  std::unique_ptr<signin::IdentityManagerObserverBridge>
       identityManagerObserver_;
   UITextField* passphrase_;
 }
@@ -109,7 +113,7 @@ const CGFloat kSpinnerButtonPadding = 18;
     _footerMessage = l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_RECOVER);
 
     identityManagerObserver_ =
-        std::make_unique<identity::IdentityManagerObserverBridge>(
+        std::make_unique<signin::IdentityManagerObserverBridge>(
             IdentityManagerFactory::GetForBrowserState(browserState_), self);
   }
   return self;
@@ -183,6 +187,13 @@ const CGFloat kSpinnerButtonPadding = 18;
   }
   [model setFooter:[self footerItem]
       forSectionWithIdentifier:SectionIdentifierPassphrase];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (BOOL)presentationControllerShouldDismiss:
+    (UIPresentationController*)presentationController {
+  return ![passphrase_.text length];
 }
 
 #pragma mark - Items

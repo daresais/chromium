@@ -131,6 +131,11 @@ void NavigationManagerImpl::ApplyWKWebViewForwardHistoryClobberWorkaround() {
   NOTREACHED();
 }
 
+void NavigationManagerImpl::SetWKWebViewNextPendingUrlNotSerializable(
+    const GURL& url) {
+  NOTREACHED();
+}
+
 void NavigationManagerImpl::RemoveTransientURLRewriters() {
   transient_url_rewriters_.clear();
 }
@@ -221,6 +226,7 @@ void NavigationManagerImpl::GoToIndex(int index,
     delegate_->RecordPageStateInNavigationItem();
   }
   delegate_->ClearTransientContent();
+  delegate_->ClearDialogs();
 
   // Notify delegate if the new navigation will use a different user agent.
   UserAgentType to_item_user_agent_type =
@@ -290,6 +296,7 @@ void NavigationManagerImpl::LoadURLWithParams(
     const NavigationManager::WebLoadParams& params) {
   DCHECK(!(params.transition_type & ui::PAGE_TRANSITION_FORWARD_BACK));
   delegate_->ClearTransientContent();
+  delegate_->ClearDialogs();
   delegate_->RecordPageStateInNavigationItem();
 
   NavigationInitiationType initiation_type =
@@ -358,6 +365,8 @@ void NavigationManagerImpl::Reload(ReloadType reload_type,
   if (!GetTransientItem() && !GetPendingItem() && !GetLastCommittedItem())
     return;
 
+  delegate_->ClearDialogs();
+
   // Reload with ORIGINAL_REQUEST_URL type should reload with the original
   // request url of the transient item, or pending item if transient doesn't
   // exist, or last committed item if both of them don't exist. The reason is
@@ -418,6 +427,7 @@ void NavigationManagerImpl::ReloadWithUserAgentType(
         wk_navigation_util::ExtractTargetURL(reload_url, &target_url)) {
       reload_url = target_url;
     }
+    DCHECK(!wk_navigation_util::IsRestoreSessionUrl(reload_url));
     reload_url = wk_navigation_util::CreateRedirectUrl(reload_url);
   }
 
@@ -496,10 +506,11 @@ NavigationManagerImpl::CreateNavigationItemWithRewriters(
   }
 
   // The URL should not be changed to app-specific URL if the load is
-  // renderer-initiated requested by non-app-specific URL. Pages with
-  // app-specific urls have elevated previledges and should not be allowed to
-  // open app-specific URLs.
-  if (initiation_type == web::NavigationInitiationType::RENDERER_INITIATED &&
+  // renderer-initiated or a reload requested by non-app-specific URL. Pages
+  // with app-specific urls have elevated previledges and should not be allowed
+  // to open app-specific URLs.
+  if ((initiation_type == web::NavigationInitiationType::RENDERER_INITIATED ||
+       PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_RELOAD)) &&
       loaded_url != url && web::GetWebClient()->IsAppSpecificURL(loaded_url) &&
       !web::GetWebClient()->IsAppSpecificURL(previous_url)) {
     loaded_url = url;

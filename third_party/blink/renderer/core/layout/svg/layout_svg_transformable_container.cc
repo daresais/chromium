@@ -21,7 +21,7 @@
 
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_transformable_container.h"
 
-#include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
+#include "third_party/blink/renderer/core/layout/svg/transform_helper.h"
 #include "third_party/blink/renderer/core/svg/svg_g_element.h"
 #include "third_party/blink/renderer/core/svg/svg_graphics_element.h"
 #include "third_party/blink/renderer/core/svg/svg_use_element.h"
@@ -80,7 +80,7 @@ bool LayoutSVGTransformableContainer::IsUseElement() const {
   if (IsSVGUseElement(element))
     return true;
   // Nested <use> are replaced by <g> during shadow tree expansion.
-  if (IsSVGGElement(element) && ToSVGGElement(element).InUseShadowTree())
+  if (IsA<SVGGElement>(element) && To<SVGGElement>(element).InUseShadowTree())
     return IsSVGUseElement(element.CorrespondingElement());
   return false;
 }

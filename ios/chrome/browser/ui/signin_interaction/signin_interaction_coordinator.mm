@@ -6,7 +6,6 @@
 
 #import "base/ios/block_types.h"
 #include "base/logging.h"
-#include "components/unified_consent/feature.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/authentication/authentication_ui_util.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
@@ -25,14 +24,11 @@
 // Coordinator to present alerts.
 @property(nonatomic, strong) AlertCoordinator* alertCoordinator;
 
-// The BrowserState for this coordinator.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
-
 // The controller managed by this coordinator.
 @property(nonatomic, strong) SigninInteractionController* controller;
 
 // The dispatcher to which commands should be sent.
-@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
+@property(nonatomic, weak) id<ApplicationCommands, BrowserCommands> dispatcher;
 
 // The UIViewController upon which UI should be presented.
 @property(nonatomic, strong) UIViewController* presentingViewController;
@@ -51,12 +47,12 @@
 
 @implementation SigninInteractionCoordinator
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                          dispatcher:(id<ApplicationCommands>)dispatcher {
-  self = [super init];
+- (instancetype)initWithBrowser:(Browser*)browser
+                     dispatcher:
+                         (id<ApplicationCommands, BrowserCommands>)dispatcher {
+  DCHECK(browser);
+  self = [super initWithBaseViewController:nil browser:browser];
   if (self) {
-    DCHECK(browserState);
-    _browserState = browserState;
     _dispatcher = dispatcher;
   }
   return self;
@@ -181,7 +177,6 @@
                       completion:(ProceduralBlock)completion {
   DCHECK(viewController);
   DCHECK(self.topViewController);
-  DCHECK(![self.topViewController presentedViewController]);
   [self.topViewController presentViewController:viewController
                                        animated:animated
                                      completion:completion];
@@ -233,12 +228,12 @@
   self.presentingViewController = presentingViewController;
   self.topViewController = presentingViewController;
 
-  self.controller = [[SigninInteractionController alloc]
-      initWithBrowserState:self.browserState
-      presentationProvider:self
-               accessPoint:accessPoint
-               promoAction:promoAction
-                dispatcher:self.dispatcher];
+  self.controller =
+      [[SigninInteractionController alloc] initWithBrowser:self.browser
+                                      presentationProvider:self
+                                               accessPoint:accessPoint
+                                               promoAction:promoAction
+                                                dispatcher:self.dispatcher];
 }
 
 // Returns a callback that clears the state of the coordinator and runs
@@ -260,32 +255,20 @@
   self.topViewController = nil;
   self.alertCoordinator = nil;
   if (signinResult == SigninResultSignedInnAndOpennSettings) {
-    [self showAccountsSettings];
+    [self showAdvancedSigninSettings];
   } else {
     [self signinDoneWithSuccess:signinResult != SigninResultCanceled];
   }
 }
 
-// Shows the accounts settings UI.
-- (void)showAccountsSettings {
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    [self showAdvancedSigninSettings];
-  } else {
-    [self signinDoneWithSuccess:YES];
-    [self.dispatcher
-        showAccountsSettingsFromViewController:self.presentingViewController];
-  }
-}
-
 // Shows the advanced sign-in settings UI.
 - (void)showAdvancedSigninSettings {
-  DCHECK(unified_consent::IsUnifiedConsentFeatureEnabled());
   DCHECK(!self.advancedSigninSettingsCoordinator);
   DCHECK(self.presentingViewController);
   self.advancedSigninSettingsCoordinator =
       [[AdvancedSigninSettingsCoordinator alloc]
           initWithBaseViewController:self.presentingViewController
-                        browserState:self.browserState];
+                             browser:self.browser];
   self.advancedSigninSettingsCoordinator.delegate = self;
   self.advancedSigninSettingsCoordinator.dispatcher = self.dispatcher;
   [self.advancedSigninSettingsCoordinator start];

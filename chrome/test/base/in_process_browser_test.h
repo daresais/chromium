@@ -147,7 +147,16 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   }
 
   // Returns the browser created by BrowserMain().
+  // If no browser is created in BrowserMain(), this will return nullptr unless
+  // another browser instance is created at a later time and
+  // SelectFirstBrowser() is called.
   Browser* browser() const { return browser_; }
+
+  // Set |browser_| to the first browser on the browser list.
+  // Call this when your test subclass wants to access a non-null browser
+  // instance through browser() but browser creation is delayed until after
+  // PreRunTestOnMainThread().
+  void SelectFirstBrowser();
 
  protected:
   // Closes the given browser and waits for it to release all its resources.
@@ -255,6 +264,8 @@ class InProcessBrowserTest : public content::BrowserTestBase {
     open_about_blank_on_browser_launch_ = value;
   }
 
+  virtual std::unique_ptr<storage::QuotaSettings> CreateQuotaSettings();
+
  private:
   void Initialize();
 
@@ -263,7 +274,10 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
   static SetUpBrowserFunction* global_browser_set_up_function_;
 
-  // Browser created in BrowserMain().
+  // Usually references the browser created in BrowserMain().
+  // If no browser is created in BrowserMain(), then |browser_| will remain
+  // nullptr unless SelectFirstBrowser() is called after the creation of the
+  // first browser instance at a later time.
   Browser* browser_ = nullptr;
 
   // Used to run the process until the BrowserProcess signals the test to quit.
@@ -279,8 +293,10 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // True if the about:blank tab should be opened when the browser is launched.
   bool open_about_blank_on_browser_launch_ = true;
 
-  // We use hardcoded quota settings to have a consistent testing environment.
-  storage::QuotaSettings quota_settings_;
+  // We use fake quota settings by default to have a consistent testing
+  // environment.  These can be overridden by subclasses via the
+  // CreateQuotaSettings() method.
+  std::unique_ptr<storage::QuotaSettings> quota_settings_;
 
   // Use a default download directory to make sure downloads don't end up in the
   // system default location.

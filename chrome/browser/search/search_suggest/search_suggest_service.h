@@ -19,17 +19,24 @@
 
 class Profile;
 
-namespace identity {
+namespace signin {
 class IdentityManager;
-}  // namespace identity
+}  // namespace signin
 
 // A service that downloads, caches, and hands out SearchSuggestData. It never
 // initiates a download automatically, only when Refresh is called. When the
 // user signs in or out, the cached value is cleared.
 class SearchSuggestService : public KeyedService {
  public:
+  // Search suggestions should be disabled when on-focus zero-prefix suggestions
+  // are displaying in the NTP. Returns false if omnibox::kZeroSuggestionsOnNTP
+  // or omnibox::kZeroSuggestionsOnNTPRealboxkNtpRealbox are enabled; or
+  // omnibox::kOnFocusSuggestions is enabled and configured to show suggestions
+  // of some type in the NTP Omnibox or Realbox.
+  static bool IsEnabled();
+
   SearchSuggestService(Profile* profile,
-                       identity::IdentityManager* identity_manager,
+                       signin::IdentityManager* identity_manager,
                        std::unique_ptr<SearchSuggestLoader> loader);
   ~SearchSuggestService() override;
 

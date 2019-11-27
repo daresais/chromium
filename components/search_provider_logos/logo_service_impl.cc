@@ -179,7 +179,7 @@ void NotifyAndClear(std::vector<EncodedLogoCallback>* encoded_callbacks,
 
 LogoServiceImpl::LogoServiceImpl(
     const base::FilePath& cache_directory,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     TemplateURLService* template_url_service,
     std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
@@ -192,8 +192,9 @@ LogoServiceImpl::LogoServiceImpl(
       image_decoder_(std::move(image_decoder)),
       is_idle_(true),
       is_cached_logo_valid_(false),
-      cache_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+      cache_task_runner_(base::CreateSequencedTaskRunner(
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
       logo_cache_(new LogoCache(cache_directory_),
                   base::OnTaskRunnerDeleter(cache_task_runner_)) {
@@ -719,9 +720,9 @@ void LogoServiceImpl::OnURLLoadComplete(const network::SimpleURLLoader* source,
   bool from_http_cache = !source->ResponseInfo()->network_accessed;
 
   bool* parsing_failed = new bool(false);
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(parse_logo_response_func_, std::move(response),
                      response_time, parsing_failed),
@@ -731,7 +732,7 @@ void LogoServiceImpl::OnURLLoadComplete(const network::SimpleURLLoader* source,
 }
 
 void LogoServiceImpl::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo&,
+    const signin::AccountsInCookieJarInfo&,
     const GoogleServiceAuthError&) {
   // Clear any cached logo, since it may be personalized (e.g. birthday Doodle).
   if (!clock_) {

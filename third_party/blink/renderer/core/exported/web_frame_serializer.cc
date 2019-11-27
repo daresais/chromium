@@ -64,21 +64,21 @@
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/mhtml/mhtml_archive.h"
 #include "third_party/blink/renderer/platform/mhtml/mhtml_parser.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_concatenate.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -145,9 +145,9 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreElement(const Element& element) {
     return true;
   }
   // Remove <link> for stylesheets that do not load.
-  if (IsHTMLLinkElement(element) &&
-      ToHTMLLinkElement(element).RelAttribute().IsStyleSheet() &&
-      !ToHTMLLinkElement(element).sheet()) {
+  auto* html_link_element = DynamicTo<HTMLLinkElement>(element);
+  if (html_link_element && html_link_element->RelAttribute().IsStyleSheet() &&
+      !html_link_element->sheet()) {
     return true;
   }
   return false;
@@ -159,7 +159,7 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreHiddenElement(
   // being loaded. But if an iframe is injected into the head later, it will
   // stay there and not been displayed. To prevent it from being brought to the
   // saved page and cause it being displayed, we should not include it.
-  if (IsHTMLIFrameElement(element) &&
+  if (IsA<HTMLIFrameElement>(element) &&
       Traversal<HTMLHeadElement>::FirstAncestor(element)) {
     return true;
   }
@@ -181,7 +181,7 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreMetaElement(
   // the saved MHTML page, there is no need to carry the directives. If they
   // are still kept in the MHTML, child frames that are referred to using cid:
   // scheme could be prevented from loading.
-  if (!IsHTMLMetaElement(element))
+  if (!IsA<HTMLMetaElement>(element))
     return false;
   if (!element.FastHasAttribute(html_names::kContentAttr))
     return false;
@@ -204,8 +204,10 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnorePopupOverlayElement(
   int center_x = window->innerWidth() / 2;
   int center_y = window->innerHeight() / 2;
   if (Page* page = element.GetDocument().GetPage()) {
-    center_x = page->GetChromeClient().WindowToViewportScalar(center_x);
-    center_y = page->GetChromeClient().WindowToViewportScalar(center_y);
+    center_x = page->GetChromeClient().WindowToViewportScalar(
+        window->GetFrame(), center_x);
+    center_y = page->GetChromeClient().WindowToViewportScalar(
+        window->GetFrame(), center_y);
   }
   LayoutPoint center_point(center_x, center_y);
   if (!box->FrameRect().Contains(center_point))
@@ -228,13 +230,14 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreAttribute(
   // srcset prevents the problem. Long term we should make sure to MHTML plays
   // nicely with srcset.
   if (IsHTMLImageElement(element) &&
-      attribute.LocalName() == html_names::kSrcsetAttr) {
+      (attribute.LocalName() == html_names::kSrcsetAttr ||
+       attribute.LocalName() == html_names::kSizesAttr)) {
     return true;
   }
 
   // Do not save ping attribute since anyway the ping will be blocked from
   // MHTML.
-  if (IsHTMLAnchorElement(element) &&
+  if (IsA<HTMLAnchorElement>(element) &&
       attribute.LocalName() == html_names::kPingAttr) {
     return true;
   }
@@ -242,7 +245,7 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreAttribute(
   // The special attribute in a template element to denote the shadow DOM
   // should only be generated from MHTML serialization. If it is found in the
   // original page, it should be ignored.
-  if (IsHTMLTemplateElement(element) &&
+  if (IsA<HTMLTemplateElement>(element) &&
       (attribute.LocalName() == kShadowModeAttributeName ||
        attribute.LocalName() == kShadowDelegatesFocusAttributeName) &&
       !shadow_template_elements_.Contains(&element)) {
@@ -259,8 +262,9 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreAttribute(
     return false;
 
   //  Drop integrity attribute for those links with subresource loaded.
+  auto* html_link_element = DynamicTo<HTMLLinkElement>(element);
   if (attribute.LocalName() == html_names::kIntegrityAttr &&
-      IsHTMLLinkElement(element) && ToHTMLLinkElement(element).sheet()) {
+      html_link_element && html_link_element->sheet()) {
     return true;
   }
 

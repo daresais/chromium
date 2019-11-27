@@ -11,7 +11,7 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "chrome/common/pref_names.h"
@@ -145,12 +145,12 @@ class OptimizationHintsComponentInstallerTest : public PlatformTest {
 
  protected:
   void RunUntilIdle() {
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     base::RunLoop().RunUntilIdle();
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   base::ScopedTempDir component_install_dir_;
   std::unique_ptr<TestingPrefServiceSimple> pref_service_;
@@ -173,7 +173,7 @@ TEST_F(OptimizationHintsComponentInstallerTest,
   std::unique_ptr<OptimizationHintsMockComponentUpdateService> cus(
       new OptimizationHintsMockComponentUpdateService());
   EXPECT_CALL(*cus, RegisterComponent(testing::_)).Times(0);
-  RegisterOptimizationHintsComponent(cus.get(), profile_prefs());
+  RegisterOptimizationHintsComponent(cus.get(), false, profile_prefs());
   RunUntilIdle();
 }
 
@@ -186,7 +186,7 @@ TEST_F(OptimizationHintsComponentInstallerTest,
   std::unique_ptr<OptimizationHintsMockComponentUpdateService> cus(
       new OptimizationHintsMockComponentUpdateService());
   EXPECT_CALL(*cus, RegisterComponent(testing::_)).Times(0);
-  RegisterOptimizationHintsComponent(cus.get(), profile_prefs());
+  RegisterOptimizationHintsComponent(cus.get(), false, profile_prefs());
   RunUntilIdle();
 }
 
@@ -198,7 +198,7 @@ TEST_F(OptimizationHintsComponentInstallerTest,
   std::unique_ptr<OptimizationHintsMockComponentUpdateService> cus(
       new OptimizationHintsMockComponentUpdateService());
   EXPECT_CALL(*cus, RegisterComponent(testing::_)).Times(0);
-  RegisterOptimizationHintsComponent(cus.get(), nullptr);
+  RegisterOptimizationHintsComponent(cus.get(), false, nullptr);
   RunUntilIdle();
 }
 
@@ -213,7 +213,7 @@ TEST_F(OptimizationHintsComponentInstallerTest,
   EXPECT_CALL(*cus, RegisterComponent(testing::_))
       .Times(1)
       .WillOnce(testing::Return(true));
-  RegisterOptimizationHintsComponent(cus.get(), profile_prefs());
+  RegisterOptimizationHintsComponent(cus.get(), false, profile_prefs());
   RunUntilIdle();
 }
 

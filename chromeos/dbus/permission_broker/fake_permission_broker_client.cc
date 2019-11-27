@@ -75,12 +75,12 @@ void FakePermissionBrokerClient::CheckPathAccess(const std::string& path,
 void FakePermissionBrokerClient::OpenPath(const std::string& path,
                                           OpenPathCallback callback,
                                           ErrorCallback error_callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::BindOnce(&chromeos::OpenPath, path, std::move(callback),
-                     std::move(error_callback),
-                     base::ThreadTaskRunnerHandle::Get()));
+  base::PostTask(FROM_HERE,
+                 {base::ThreadPool(), base::MayBlock(),
+                  base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+                 base::BindOnce(&chromeos::OpenPath, path, std::move(callback),
+                                std::move(error_callback),
+                                base::ThreadTaskRunnerHandle::Get()));
 }
 
 void FakePermissionBrokerClient::RequestTcpPortAccess(
@@ -133,6 +133,40 @@ bool FakePermissionBrokerClient::HasUdpHole(uint16_t port,
                                             const std::string& interface) {
   auto rule = std::make_pair(port, interface);
   return udp_hole_set_.find(rule) != udp_hole_set_.end();
+}
+
+void FakePermissionBrokerClient::RequestTcpPortForward(
+    uint16_t in_port,
+    const std::string& in_interface,
+    const std::string& dst_ip,
+    uint16_t dst_port,
+    int lifeline_fd,
+    ResultCallback callback) {
+  std::move(callback).Run(false);
+}
+
+void FakePermissionBrokerClient::RequestUdpPortForward(
+    uint16_t in_port,
+    const std::string& in_interface,
+    const std::string& dst_ip,
+    uint16_t dst_port,
+    int lifeline_fd,
+    ResultCallback callback) {
+  std::move(callback).Run(false);
+}
+
+void FakePermissionBrokerClient::ReleaseTcpPortForward(
+    uint16_t in_port,
+    const std::string& in_interface,
+    ResultCallback callback) {
+  std::move(callback).Run(false);
+}
+
+void FakePermissionBrokerClient::ReleaseUdpPortForward(
+    uint16_t in_port,
+    const std::string& in_interface,
+    ResultCallback callback) {
+  std::move(callback).Run(false);
 }
 
 bool FakePermissionBrokerClient::RequestPortImpl(uint16_t port,

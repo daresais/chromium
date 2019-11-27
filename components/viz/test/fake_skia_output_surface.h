@@ -14,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "build/build_config.h"
 #include "components/viz/service/display/skia_output_surface.h"
 #include "components/viz/test/test_context_provider.h"
 #include "gpu/command_buffer/common/sync_token.h"
@@ -49,6 +50,9 @@ class FakeSkiaOutputSurface : public SkiaOutputSurface {
                bool has_alpha,
                bool use_stencil) override;
   void SwapBuffers(OutputSurfaceFrame frame) override;
+  void ScheduleOutputSurfaceAsOverlay(
+      OverlayProcessor::OutputSurfaceOverlayPlane output_surface_plane)
+      override;
   uint32_t GetFramebufferCopyTextureFormat() override;
   bool IsDisplayedAsOverlayPlane() const override;
   unsigned GetOverlayTextureId() const override;
@@ -66,26 +70,31 @@ class FakeSkiaOutputSurface : public SkiaOutputSurface {
   // SkiaOutputSurface implementation:
   SkCanvas* BeginPaintCurrentFrame() override;
   sk_sp<SkImage> MakePromiseSkImageFromYUV(
-      const std::vector<ResourceMetadata>& metadatas,
+      const std::vector<ImageContext*>& contexts,
       SkYUVColorSpace yuv_color_space,
       sk_sp<SkColorSpace> dst_color_space,
       bool has_alpha) override;
-  void SkiaSwapBuffers(OutputSurfaceFrame frame) override;
+  gpu::SyncToken SkiaSwapBuffers(OutputSurfaceFrame frame,
+                                 bool wants_sync_token) override;
   SkCanvas* BeginPaintRenderPass(const RenderPassId& id,
                                  const gfx::Size& surface_size,
                                  ResourceFormat format,
                                  bool mipmap,
                                  sk_sp<SkColorSpace> color_space) override;
   gpu::SyncToken SubmitPaint(base::OnceClosure on_finished) override;
-  sk_sp<SkImage> MakePromiseSkImage(const ResourceMetadata& metadata) override;
+  void MakePromiseSkImage(ImageContext* image_context) override;
   sk_sp<SkImage> MakePromiseSkImageFromRenderPass(
       const RenderPassId& id,
       const gfx::Size& size,
       ResourceFormat format,
       bool mipmap,
       sk_sp<SkColorSpace> color_space) override;
-
   void RemoveRenderPassResource(std::vector<RenderPassId> ids) override;
+#if defined(OS_WIN)
+  void SetEnableDCLayers(bool enable) override {}
+  void ScheduleDCLayers(std::vector<DCLayerOverlay> overlays,
+                        std::vector<gpu::SyncToken> sync_tokens) override {}
+#endif
   void CopyOutput(RenderPassId id,
                   const copy_output::RenderPassGeometry& geometry,
                   const gfx::ColorSpace& color_space,
@@ -94,11 +103,30 @@ class FakeSkiaOutputSurface : public SkiaOutputSurface {
   void RemoveContextLostObserver(ContextLostObserver* observer) override;
 
   // ExternalUseClient implementation:
-  void ReleaseCachedResources(const std::vector<ResourceId>& ids) override;
+  void ReleaseImageContexts(
+      const std::vector<std::unique_ptr<ImageContext>> image_contexts) override;
+  std::unique_ptr<ImageContext> CreateImageContext(
+      const gpu::MailboxHolder& holder,
+      const gfx::Size& size,
+      ResourceFormat format,
+      const base::Optional<gpu::VulkanYCbCrInfo>& ycbcr_info,
+      sk_sp<SkColorSpace> color_space) override;
 
   // If set true, callbacks triggering will be in a reverse order as SignalQuery
   // calls.
   void SetOutOfOrderCallbacks(bool out_of_order_callbacks);
+
+  void ScheduleGpuTaskForTesting(
+      base::OnceClosure callback,
+      std::vector<gpu::SyncToken> sync_tokens) override;
+
+  void SendOverlayPromotionNotification(
+      std::vector<gpu::SyncToken> sync_tokens,
+      base::flat_set<gpu::Mailbox> promotion_denied,
+      base::flat_map<gpu::Mailbox, gfx::Rect> possible_promotions) override;
+  void RenderToOverlay(gpu::SyncToken sync_token,
+                       gpu::Mailbox overlay_candidate_mailbox,
+                       const gfx::Rect& bounds) override;
 
  private:
   explicit FakeSkiaOutputSurface(
@@ -107,7 +135,7 @@ class FakeSkiaOutputSurface : public SkiaOutputSurface {
   ContextProvider* context_provider() { return context_provider_.get(); }
   GrContext* gr_context() { return context_provider()->GrContext(); }
 
-  bool GetGrBackendTexture(const ResourceMetadata& metadata,
+  bool GetGrBackendTexture(const ImageContext& image_context,
                            GrBackendTexture* backend_texture);
   void SwapBuffersAck();
 

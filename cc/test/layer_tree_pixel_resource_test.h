@@ -24,8 +24,7 @@ struct PixelResourceTestCase {
 
 class LayerTreeHostPixelResourceTest : public LayerTreePixelTest {
  public:
-  explicit LayerTreeHostPixelResourceTest(PixelResourceTestCase test_case,
-                                          Layer::LayerMaskType mask_type);
+  explicit LayerTreeHostPixelResourceTest(PixelResourceTestCase test_case);
   LayerTreeHostPixelResourceTest();
 
   RendererType renderer_type() const { return test_case_.renderer_type; }
@@ -33,6 +32,8 @@ class LayerTreeHostPixelResourceTest : public LayerTreePixelTest {
   RasterType raster_type() const { return test_case_.raster_type; }
 
   const char* GetRendererSuffix() const;
+
+  void InitializeSettings(LayerTreeSettings* settings) override;
 
   std::unique_ptr<RasterBufferProvider> CreateRasterBufferProvider(
       LayerTreeHostImpl* host_impl) override;
@@ -42,13 +43,10 @@ class LayerTreeHostPixelResourceTest : public LayerTreePixelTest {
   void RunPixelResourceTest(scoped_refptr<Layer> content_root,
                             const SkBitmap& expected_bitmap);
 
-  void RunPixelResourceTestWithLayerList(scoped_refptr<Layer> root_layer,
-                                         base::FilePath file_name,
-                                         PropertyTrees* property_trees);
+  void RunPixelResourceTestWithLayerList(base::FilePath file_name);
 
  protected:
   PixelResourceTestCase test_case_;
-  Layer::LayerMaskType mask_type_;
   bool initialized_ = false;
 
   void InitializeFromTestCase(PixelResourceTestCase test_case);
@@ -56,8 +54,7 @@ class LayerTreeHostPixelResourceTest : public LayerTreePixelTest {
 
 class ParameterizedPixelResourceTest
     : public LayerTreeHostPixelResourceTest,
-      public ::testing::WithParamInterface<
-          ::testing::tuple<PixelResourceTestCase, Layer::LayerMaskType>> {
+      public ::testing::WithParamInterface<PixelResourceTestCase> {
  public:
   ParameterizedPixelResourceTest();
 };

@@ -57,6 +57,10 @@
 #include "ui/base/test/ui_controls.h"
 #include "ui/views/widget/widget.h"
 
+namespace {
+const double kExpectedPhoneticSpeechAndHintDelayMS = 1000;
+}  // namespace
+
 namespace chromeos {
 
 LoggedInSpokenFeedbackTest::LoggedInSpokenFeedbackTest()
@@ -96,6 +100,12 @@ void LoggedInSpokenFeedbackTest::SendKeyPressWithSearch(ui::KeyboardCode key) {
       nullptr, key, false, false, false, true)));
 }
 
+void LoggedInSpokenFeedbackTest::SendKeyPressWithSearchAndControlAndShift(
+    ui::KeyboardCode key) {
+  ASSERT_NO_FATAL_FAILURE(ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      nullptr, key, true, true, false, true)));
+}
+
 void LoggedInSpokenFeedbackTest::SendMouseMoveTo(const gfx::Point& location) {
   ASSERT_NO_FATAL_FAILURE(
       ASSERT_TRUE(ui_controls::SendMouseMove(location.x(), location.y())));
@@ -129,7 +139,7 @@ void LoggedInSpokenFeedbackTest::DisableEarcons() {
   // (http://crbug.com/396507). Work around this by just telling
   // ChromeVox to not ever play earcons (prerecorded sound effects).
   RunJavaScriptInChromeVoxBackgroundPage(
-      "cvox.ChromeVox.earcons.playEarcon = function() {};");
+      "ChromeVox.earcons.playEarcon = function() {};");
 }
 
 void LoggedInSpokenFeedbackTest::EnableChromeVox() {
@@ -166,7 +176,7 @@ IN_PROC_BROWSER_TEST_F(LoggedInSpokenFeedbackTest, DISABLED_AddBookmark) {
   chrome::ExecuteCommand(browser(), IDC_SHOW_BOOKMARK_BAR);
 
   // Create a bookmark with title "foo".
-  chrome::ExecuteCommand(browser(), IDC_BOOKMARK_PAGE);
+  chrome::ExecuteCommand(browser(), IDC_BOOKMARK_THIS_TAB);
   EXPECT_EQ("Bookmark added! dialog Bookmark name about:blank Edit text",
             speech_monitor_.GetNextUtterance());
   EXPECT_EQ("about:blank", speech_monitor_.GetNextUtterance());
@@ -327,7 +337,8 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, FocusShelf) {
 // Verifies that pressing right arrow button with search button should move
 // focus to the next ShelfItem instead of the last one
 // (see https://crbug.com/947683).
-IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ShelfIconFocusForward) {
+// This test is flaky, see http://crbug.com/997628
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_ShelfIconFocusForward) {
   const std::string title("MockApp");
   ChromeLauncherController* controller = ChromeLauncherController::instance();
 
@@ -450,12 +461,10 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, OpenStatusTray) {
   EXPECT_TRUE(PerformAcceleratorAction(ash::TOGGLE_SYSTEM_TRAY_BUBBLE));
   while (true) {
     std::string utterance = speech_monitor_.GetNextUtterance();
-    if (base::MatchPattern(utterance, "Status tray*"))
+    if (base::MatchPattern(utterance, "Status tray*time*Battery*"))
       break;
   }
-  EXPECT_TRUE(base::MatchPattern(speech_monitor_.GetNextUtterance(), "time *"));
-  EXPECT_TRUE(base::MatchPattern(speech_monitor_.GetNextUtterance(),
-                                 "Battery at * percent."));
+
   EXPECT_EQ("Dialog", speech_monitor_.GetNextUtterance());
   EXPECT_TRUE(
       base::MatchPattern(speech_monitor_.GetNextUtterance(), "*window"));
@@ -554,19 +563,20 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, OverviewMode) {
   EXPECT_TRUE(PerformAcceleratorAction(ash::TOGGLE_OVERVIEW));
   while (true) {
     std::string utterance = speech_monitor_.GetNextUtterance();
-    if (utterance == "Entered window overview mode")
+    if (utterance == "Entered window overview mode. Press tab to navigate.")
       break;
   }
 
-  SendKeyPress(ui::VKEY_TAB);
   // On Chrome OS accessibility title for tabbed browser windows contains app
   // name ("Chrome" or "Chromium") in overview mode.
   while (true) {
+    // Tabbing may select a desk item in the overview desks bar, so we tab
+    // repeatedly until the window is selected.
+    SendKeyPress(ui::VKEY_TAB);
     std::string utterance = speech_monitor_.GetNextUtterance();
-    if (base::MatchPattern(utterance, "Chromium - about:blank"))
+    if (base::MatchPattern(utterance, "Chrom*about:blank, window"))
       break;
   }
-  EXPECT_EQ("Button", speech_monitor_.GetNextUtterance());
 }
 
 #if defined(MEMORY_SANITIZER) || defined(OS_CHROMEOS)
@@ -649,7 +659,7 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_ChromeVoxNextStickyMode) {
 
   // Sticky key has a minimum 100 ms check to prevent key repeat from toggling
   // it.
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&LoggedInSpokenFeedbackTest::SendKeyPress,
                      base::Unretained(this), ui::VKEY_LWIN),
@@ -665,7 +675,7 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_ChromeVoxNextStickyMode) {
 
   // Sticky key has a minimum 100 ms check to prevent key repeat from toggling
   // it.
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&LoggedInSpokenFeedbackTest::SendKeyPress,
                      base::Unretained(this), ui::VKEY_LWIN),
@@ -823,6 +833,124 @@ IN_PROC_BROWSER_TEST_F(OobeSpokenFeedbackTest, DISABLED_SpokenFeedbackInOobe) {
   EXPECT_EQ("English ( United States)", speech_monitor_.GetNextUtterance());
   EXPECT_TRUE(base::MatchPattern(speech_monitor_.GetNextUtterance(),
                                  "Combo box * of *"));
+}
+
+// This test is flaky (https://crbug.com/1013551).
+IN_PROC_BROWSER_TEST_F(OobeSpokenFeedbackTest,
+                       DISABLED_ChromeVoxPanelTabsMenuEmpty) {
+  // The ChromeVox panel should not populate the tabs menu if we are in the
+  // OOBE.
+  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
+  AccessibilityManager::Get()->EnableSpokenFeedback(true);
+  // Included to reduce flakiness.
+  while (speech_monitor_.GetNextUtterance() !=
+         "Press Search plus Space to activate.") {
+  }
+  // Press [search + .] to open ChromeVox Panel
+  ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      nullptr, ui::VKEY_OEM_PERIOD, false, false, false, true));
+  while (speech_monitor_.GetNextUtterance() != "ChromeVox Panel") {
+  }
+  // Go to tabs menu and verify that it has no items.
+  ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      nullptr, ui::VKEY_RIGHT, false, false, false, false));
+  while (speech_monitor_.GetNextUtterance() != "Speech") {
+  }
+  ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      nullptr, ui::VKEY_RIGHT, false, false, false, false));
+  while (speech_monitor_.GetNextUtterance() != "Tabs") {
+  }
+  EXPECT_EQ("Menu", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("No items.", speech_monitor_.GetNextUtterance());
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest,
+                       MoveByCharacterPhoneticSpeechAndHints) {
+  EnableChromeVox();
+
+  ui_test_utils::NavigateToURL(
+      browser(), GURL("data:text/html,<button autofocus>Click me</button>"));
+  EXPECT_EQ("Web Content", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("Click me", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("Button", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("Press Search plus Space to activate.",
+            speech_monitor_.GetNextUtterance());
+
+  // Move by character through the button.
+  // Assert that phonetic speech and hints are delayed.
+  SendKeyPressWithSearchAndShift(ui::VKEY_RIGHT);
+  EXPECT_EQ("L", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("lima", speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  EXPECT_EQ("Press Search plus Space to activate.",
+            speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  SendKeyPressWithSearchAndShift(ui::VKEY_RIGHT);
+  EXPECT_EQ("I", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("india", speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  EXPECT_EQ("Press Search plus Space to activate.",
+            speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  SendKeyPressWithSearchAndShift(ui::VKEY_RIGHT);
+  EXPECT_EQ("C", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("charlie", speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  EXPECT_EQ("Press Search plus Space to activate.",
+            speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  SendKeyPressWithSearchAndShift(ui::VKEY_RIGHT);
+  EXPECT_EQ("K", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("kilo", speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+  EXPECT_EQ("Press Search plus Space to activate.",
+            speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(speech_monitor_.GetDelayForLastUtteranceMS() >=
+              kExpectedPhoneticSpeechAndHintDelayMS);
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ResetTtsSettings) {
+  EnableChromeVox();
+  ui_test_utils::NavigateToURL(
+      browser(), GURL("data:text/html,<button autofocus>Click me</button>"));
+
+  // Included to reduce flakiness.
+  while (speech_monitor_.GetNextUtterance() !=
+         "Press Search plus Space to activate.") {
+  }
+  // Reset Tts settings using hotkey and assert speech output.
+  SendKeyPressWithSearchAndControlAndShift(ui::VKEY_OEM_5);
+  while (speech_monitor_.GetNextUtterance() !=
+         "Reset text to speech settings to default values.") {
+  }
+  // Increase speech rate.
+  SendKeyPressWithSearch(ui::VKEY_OEM_4);
+  while (speech_monitor_.GetNextUtterance() != "Rate 19 percent") {
+  }
+  // Increase speech pitch.
+  SendKeyPressWithSearch(ui::VKEY_OEM_6);
+  while (speech_monitor_.GetNextUtterance() != "Pitch 50 percent") {
+  }
+  // Reset Tts settings again.
+  SendKeyPressWithSearchAndControlAndShift(ui::VKEY_OEM_5);
+  while (speech_monitor_.GetNextUtterance() !=
+         "Reset text to speech settings to default values.") {
+  }
+  // Ensure that increasing speech rate and pitch jump to the same values as
+  // before.
+  SendKeyPressWithSearch(ui::VKEY_OEM_4);
+  while (speech_monitor_.GetNextUtterance() != "Rate 19 percent") {
+  }
+  SendKeyPressWithSearch(ui::VKEY_OEM_6);
+  while (speech_monitor_.GetNextUtterance() != "Pitch 50 percent") {
+  }
 }
 
 }  // namespace chromeos

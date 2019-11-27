@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/ui/appearance/appearance_customization.h"
 
+#import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller.h"
 #import "ios/chrome/common/colors/semantic_color_names.h"
 
@@ -12,8 +13,9 @@
 #endif
 
 void CustomizeUIAppearance() {
-  Class containerClass = [TableViewNavigationController class];
-  UIBarButtonItem* barbuttonItemAppearance = [UIBarButtonItem
-      appearanceWhenContainedInInstancesOfClasses:@[ containerClass ]];
-  barbuttonItemAppearance.tintColor = [UIColor colorNamed:kTintColor];
+  // Set fallback tint color for all windows in the app.
+  for (UIWindow* window in UIApplication.sharedApplication.windows) {
+    window.tintColor = [UIColor colorNamed:kBlueColor];
+  }
+  UISwitch.appearance.onTintColor = [UIColor colorNamed:kBlueColor];
 }

@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
-import android.app.Activity;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 import android.support.v7.preference.Preference;
@@ -19,26 +18,22 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ContentSettingsType;
-import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
-import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreferenceCompat;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
+import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.LocationSettings;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -73,7 +68,7 @@ public class SiteSettingsPreferencesTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -84,9 +79,9 @@ public class SiteSettingsPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SingleCategoryPreferences websitePreferences =
-                    (SingleCategoryPreferences) preferenceActivity.getMainFragmentCompat();
-            ChromeSwitchPreferenceCompat location =
-                    (ChromeSwitchPreferenceCompat) websitePreferences.findPreference(
+                    (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+            ChromeSwitchPreference location =
+                    (ChromeSwitchPreference) websitePreferences.findPreference(
                             SingleCategoryPreferences.BINARY_TOGGLE_KEY);
 
             websitePreferences.onPreferenceChange(location, enabled);
@@ -100,7 +95,7 @@ public class SiteSettingsPreferencesTest {
         return TestThreadUtils.runOnUiThreadBlockingNoException(
                 new Callable<InfoBarTestAnimationListener>() {
                     @Override
-                    public InfoBarTestAnimationListener call() throws Exception {
+                    public InfoBarTestAnimationListener call() {
                         InfoBarContainer container = mActivityTestRule.getInfoBarContainer();
                         InfoBarTestAnimationListener listener = new InfoBarTestAnimationListener();
                         container.addAnimationListener(listener);
@@ -116,9 +111,8 @@ public class SiteSettingsPreferencesTest {
      */
     @Test
     @SmallTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Preferences"})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testSetAllowLocationEnabled() throws Exception {
         setAllowLocation(true);
         InfoBarTestAnimationListener listener = setInfoBarAnimationListener();
@@ -138,10 +132,9 @@ public class SiteSettingsPreferencesTest {
      */
     @Test
     @SmallTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Preferences"})
-    public void testSetAllowLocationNotEnabled() throws Exception {
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
+    public void testSetAllowLocationNotEnabled() {
         setAllowLocation(false);
 
         // Launch a page that uses geolocation.
@@ -157,12 +150,12 @@ public class SiteSettingsPreferencesTest {
             @Override
             public void run() {
                 final SingleCategoryPreferences websitePreferences =
-                        (SingleCategoryPreferences) preferenceActivity.getMainFragmentCompat();
-                final ChromeSwitchPreferenceCompat cookies =
-                        (ChromeSwitchPreferenceCompat) websitePreferences.findPreference(
+                        (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+                final ChromeSwitchPreference cookies =
+                        (ChromeSwitchPreference) websitePreferences.findPreference(
                                 SingleCategoryPreferences.BINARY_TOGGLE_KEY);
-                final ChromeBaseCheckBoxPreferenceCompat thirdPartyCookies =
-                        (ChromeBaseCheckBoxPreferenceCompat) websitePreferences.findPreference(
+                final ChromeBaseCheckBoxPreference thirdPartyCookies =
+                        (ChromeBaseCheckBoxPreference) websitePreferences.findPreference(
                                 SingleCategoryPreferences.THIRD_PARTY_COOKIES_TOGGLE_KEY);
 
                 if (thirdPartyCookies != null) {
@@ -176,8 +169,7 @@ public class SiteSettingsPreferencesTest {
             }
 
             private boolean doesAcceptCookies() {
-                return PrefServiceBridge.getInstance().isCategoryEnabled(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_COOKIES);
+                return WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.COOKIES);
             }
         });
     }
@@ -186,15 +178,16 @@ public class SiteSettingsPreferencesTest {
             final boolean enabled) {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             final SingleCategoryPreferences websitePreferences =
-                    (SingleCategoryPreferences) preferenceActivity.getMainFragmentCompat();
-            final ChromeBaseCheckBoxPreferenceCompat thirdPartyCookies =
-                    (ChromeBaseCheckBoxPreferenceCompat) websitePreferences.findPreference(
+                    (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+            final ChromeBaseCheckBoxPreference thirdPartyCookies =
+                    (ChromeBaseCheckBoxPreference) websitePreferences.findPreference(
                             SingleCategoryPreferences.THIRD_PARTY_COOKIES_TOGGLE_KEY);
 
             websitePreferences.onPreferenceChange(thirdPartyCookies, enabled);
             Assert.assertEquals(
                     "Third-party cookies should be " + (enabled ? "allowed" : "blocked"),
-                    PrefServiceBridge.getInstance().isBlockThirdPartyCookiesEnabled(), enabled);
+                    PrefServiceBridge.getInstance().getBoolean(Pref.BLOCK_THIRD_PARTY_COOKIES),
+                    enabled);
         });
     }
 
@@ -205,10 +198,9 @@ public class SiteSettingsPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SingleCategoryPreferences preferences =
-                    (SingleCategoryPreferences) preferenceActivity.getMainFragmentCompat();
-            ChromeSwitchPreferenceCompat toggle =
-                    (ChromeSwitchPreferenceCompat) preferences.findPreference(
-                            SingleCategoryPreferences.BINARY_TOGGLE_KEY);
+                    (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+            ChromeSwitchPreference toggle = (ChromeSwitchPreference) preferences.findPreference(
+                    SingleCategoryPreferences.BINARY_TOGGLE_KEY);
             preferences.onPreferenceChange(toggle, enabled);
         });
         preferenceActivity.finish();
@@ -219,8 +211,7 @@ public class SiteSettingsPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertEquals("Popups should be " + (enabled ? "allowed" : "blocked"), enabled,
-                    PrefServiceBridge.getInstance().isCategoryEnabled(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS));
+                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.POPUPS));
         });
     }
 
@@ -229,8 +220,8 @@ public class SiteSettingsPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertEquals("Camera should be " + (enabled ? "allowed" : "blocked"), enabled,
-                    PrefServiceBridge.getInstance().isCategoryEnabled(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA));
+                    WebsitePreferenceBridge.isCategoryEnabled(
+                            ContentSettingsType.MEDIASTREAM_CAMERA));
         });
     }
 
@@ -238,8 +229,6 @@ public class SiteSettingsPreferencesTest {
      * Tests that the Preferences designated by keys in |expectedKeys|, and only
      * these preferences, will be shown for the category specified by |type|. The
      * order of Preferences matters.
-     *
-     * @throws Exception
      */
     private void checkPreferencesForCategory(
             final @SiteSettingsCategory.Type int type, String[] expectedKeys) {
@@ -248,7 +237,7 @@ public class SiteSettingsPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             PreferenceFragmentCompat preferenceFragment =
-                    (PreferenceFragmentCompat) preferenceActivity.getMainFragmentCompat();
+                    (PreferenceFragmentCompat) preferenceActivity.getMainFragment();
             PreferenceScreen preferenceScreen = preferenceFragment.getPreferenceScreen();
             int preferenceCount = preferenceScreen.getPreferenceCount();
 
@@ -268,17 +257,13 @@ public class SiteSettingsPreferencesTest {
         preferenceActivity.finish();
     }
 
-    // TODO(finnur): Write test for Autoplay.
-
     /**
      * Tests that disabling cookies turns off the third-party cookie toggle.
-     * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    public void testThirdPartyCookieToggleGetsDisabled() throws Exception {
+    public void testThirdPartyCookieToggleGetsDisabled() {
         Preferences preferenceActivity =
                 SiteSettingsTestUtils.startSiteSettingsCategory(SiteSettingsCategory.Type.COOKIES);
         setCookiesEnabled(preferenceActivity, true);
@@ -392,7 +377,7 @@ public class SiteSettingsPreferencesTest {
                 SiteSettingsTestUtils.startSingleWebsitePreferences(website);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SingleWebsitePreferences websitePreferences =
-                    (SingleWebsitePreferences) preferenceActivity.getMainFragmentCompat();
+                    (SingleWebsitePreferences) preferenceActivity.getMainFragment();
             websitePreferences.resetSite();
         });
         preferenceActivity.finish();
@@ -400,107 +385,54 @@ public class SiteSettingsPreferencesTest {
 
     /**
      * Sets Allow Popups Enabled to be false and make sure it is set correctly.
-     * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    public void testPopupsBlocked() throws Exception {
+    public void testPopupsBlocked() {
         setEnablePopups(false);
 
         // Test that the popup doesn't open.
         mActivityTestRule.loadUrl(mTestServer.getURL("/chrome/test/data/android/popup.html"));
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
 
-        if (FeatureUtilities.isNoTouchModeEnabled()) {
-            // Popups open in a CustomTabActivity in touchless mode.
-            for (Activity activity : ApplicationStatus.getRunningActivities()) {
-                Assert.assertFalse(
-                        "Popup was not blocked, an instance of CustomTabActivity is running",
-                        activity instanceof CustomTabActivity);
-            }
-        } else {
-            Assert.assertEquals(1, getTabCount());
-        }
+        Assert.assertEquals(1, getTabCount());
     }
 
     /**
      * Sets Allow Popups Enabled to be true and make sure it is set correctly.
-     * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    public void testPopupsNotBlocked() throws Exception {
+    public void testPopupsNotBlocked() {
         setEnablePopups(true);
 
         // Test that a popup opens.
         mActivityTestRule.loadUrl(mTestServer.getURL("/chrome/test/data/android/popup.html"));
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
 
-        if (FeatureUtilities.isNoTouchModeEnabled()) {
-            // Popups open in a CustomTabActivity in touchless mode.
-            for (Activity activity : ApplicationStatus.getRunningActivities()) {
-                if (activity instanceof CustomTabActivity) return;
-            }
-            Assert.fail("Popup was blocked, no instance of CustomTabActivity is running");
-        } else {
-            Assert.assertEquals(2, getTabCount());
-        }
+        Assert.assertEquals(2, getTabCount());
     }
 
     /**
      * Test that showing the Site Settings menu doesn't crash (crbug.com/610576).
-     * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    public void testSiteSettingsMenu() throws Exception {
+    public void testSiteSettingsMenu() {
         final Preferences preferenceActivity = SiteSettingsTestUtils.startSiteSettingsMenu("");
         preferenceActivity.finish();
     }
 
     /**
-     * Test the Media Menu.
-     * @throws Exception
-     */
-    @Test
-    @SmallTest
-    @Feature({"Preferences"})
-    public void testMediaMenu() throws Exception {
-        final Preferences preferenceActivity =
-                SiteSettingsTestUtils.startSiteSettingsMenu(SiteSettingsPreferences.MEDIA_KEY);
-        TestThreadUtils.runOnUiThreadBlocking(() -> {
-            SiteSettingsPreferences siteSettings =
-                    (SiteSettingsPreferences) preferenceActivity.getMainFragmentCompat();
-
-            SiteSettingsPreference allSites = (SiteSettingsPreference) siteSettings.findPreference(
-                    SiteSettingsCategory.preferenceKey(SiteSettingsCategory.Type.ALL_SITES));
-            Assert.assertEquals(null, allSites);
-
-            SiteSettingsPreference autoplay = (SiteSettingsPreference) siteSettings.findPreference(
-                    SiteSettingsCategory.preferenceKey(SiteSettingsCategory.Type.AUTOPLAY));
-            Assert.assertFalse(autoplay == null);
-
-            SiteSettingsPreference protectedContent =
-                    (SiteSettingsPreference) siteSettings.findPreference(
-                            SiteSettingsCategory.preferenceKey(
-                                    SiteSettingsCategory.Type.PROTECTED_MEDIA));
-            Assert.assertFalse(protectedContent == null);
-
-            preferenceActivity.finish();
-        });
-    }
-
-    /**
      * Tests that only expected Preferences are shown for a category.
-     * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    public void testOnlyExpectedPreferencesShown() throws Exception {
+    public void testOnlyExpectedPreferencesShown() {
         // If you add a category in the SiteSettings UI, please add a test for it below.
         Assert.assertEquals(19, SiteSettingsCategory.Type.NUM_ENTRIES);
 
@@ -517,8 +449,6 @@ public class SiteSettingsPreferencesTest {
         testCases.put(SiteSettingsCategory.Type.ALL_SITES, new Pair<>(nullArray, nullArray));
         testCases.put(SiteSettingsCategory.Type.AUTOMATIC_DOWNLOADS,
                 new Pair<>(binaryToggleWithException, binaryToggle));
-        testCases.put(SiteSettingsCategory.Type.AUTOPLAY,
-                new Pair<>(binaryToggleWithException, binaryToggle));
         testCases.put(SiteSettingsCategory.Type.BACKGROUND_SYNC,
                 new Pair<>(binaryToggleWithException, binaryToggle));
         testCases.put(SiteSettingsCategory.Type.CAMERA, new Pair<>(binaryToggle, binaryToggle));
@@ -529,6 +459,7 @@ public class SiteSettingsPreferencesTest {
         testCases.put(SiteSettingsCategory.Type.JAVASCRIPT,
                 new Pair<>(binaryToggleWithException, binaryToggleWithException));
         testCases.put(SiteSettingsCategory.Type.MICROPHONE, new Pair<>(binaryToggle, binaryToggle));
+        testCases.put(SiteSettingsCategory.Type.NFC, new Pair<>(binaryToggle, binaryToggle));
         testCases.put(SiteSettingsCategory.Type.NOTIFICATIONS,
                 new Pair<>(binaryToggleWithAllowed, binaryToggleWithAllowed));
         testCases.put(SiteSettingsCategory.Type.POPUPS, new Pair<>(binaryToggle, binaryToggle));
@@ -571,12 +502,11 @@ public class SiteSettingsPreferencesTest {
     /**
      * Tests that {@link SingleWebsitePreferences#resetSite} doesn't crash
      * (see e.g. the crash on host names in issue 600232).
-     * @throws Exception
      */
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    public void testResetDoesntCrash() throws Exception {
+    public void testResetDoesntCrash() {
         WebsiteAddress address = WebsiteAddress.create("example.com");
         resetSite(address);
     }
@@ -611,15 +541,14 @@ public class SiteSettingsPreferencesTest {
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM,
-            "disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS})
+    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testMicBlocked() throws Exception {
         setGlobalToggleForCategory(SiteSettingsCategory.Type.MICROPHONE, false);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertFalse("Mic should be blocked",
-                    PrefServiceBridge.getInstance().isCategoryEnabled(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC));
+                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.MEDIASTREAM_MIC));
         });
 
         // Test that the microphone permission doesn't get requested.
@@ -641,9 +570,8 @@ public class SiteSettingsPreferencesTest {
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM,
-            "disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS})
+    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testCameraNotBlocked() throws Exception {
         setEnableCamera(true);
 
@@ -668,9 +596,8 @@ public class SiteSettingsPreferencesTest {
     @Test
     @SmallTest
     @Feature({"Preferences"})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM,
-            "disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS})
+    @CommandLineFlags.Add({ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testMicNotBlocked() throws Exception {
         setEnableCamera(true);
 
@@ -693,8 +620,7 @@ public class SiteSettingsPreferencesTest {
         setGlobalToggleForCategory(SiteSettingsCategory.Type.BACKGROUND_SYNC, enabled);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertEquals("Background Sync should be " + (enabled ? "enabled" : "disabled"),
-                    PrefServiceBridge.getInstance().isCategoryEnabled(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC),
+                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.BACKGROUND_SYNC),
                     enabled);
         });
     }
@@ -721,8 +647,7 @@ public class SiteSettingsPreferencesTest {
         setGlobalToggleForCategory(SiteSettingsCategory.Type.USB, enabled);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertEquals("USB should be " + (enabled ? "enabled" : "disabled"),
-                    PrefServiceBridge.getInstance().isCategoryEnabled(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_GUARD),
+                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.USB_GUARD),
                     enabled);
         });
     }
@@ -751,8 +676,8 @@ public class SiteSettingsPreferencesTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertEquals(
                     "Automatic Downloads should be " + (enabled ? "enabled" : "disabled"),
-                    PrefServiceBridge.getInstance().isCategoryEnabled(
-                            ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS),
+                    WebsitePreferenceBridge.isCategoryEnabled(
+                            ContentSettingsType.AUTOMATIC_DOWNLOADS),
                     enabled);
         });
     }
@@ -769,6 +694,63 @@ public class SiteSettingsPreferencesTest {
     @Feature({"Preferences"})
     public void testBlockAutomaticDownloads() {
         doTestAutomaticDownloadsPermission(false);
+    }
+
+    /**
+     * Helper function to test allowing and blocking the Bluetooth scanning.
+     * @param enabled true to test enabling the Bluetooth scanning, false to test disabling the
+     *         feature.
+     */
+    private void doTestBluetoothScanningPermission(final boolean enabled) {
+        setGlobalToggleForCategory(SiteSettingsCategory.Type.BLUETOOTH_SCANNING, enabled);
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            Assert.assertEquals(
+                    "Bluetooth scanning should be " + (enabled ? "enabled" : "disabled"),
+                    WebsitePreferenceBridge.isCategoryEnabled(
+                            ContentSettingsType.BLUETOOTH_SCANNING),
+                    enabled);
+        });
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testAllowBluetoothScanning() {
+        doTestBluetoothScanningPermission(true);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testBlockBluetoothScanning() {
+        doTestBluetoothScanningPermission(false);
+    }
+
+    /**
+     * Helper function to test allowing and blocking NFC feature.
+     * @param enabled true to test enabling NFC feature, false to test disabling the
+     *         feature.
+     */
+    private void doTestNfcPermission(final boolean enabled) {
+        setGlobalToggleForCategory(SiteSettingsCategory.Type.NFC, enabled);
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            Assert.assertEquals("NFC should be " + (enabled ? "enabled" : "disabled"),
+                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.NFC), enabled);
+        });
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testAllowNfc() {
+        doTestNfcPermission(true);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testBlockNfc() {
+        doTestNfcPermission(false);
     }
 
     private int getTabCount() {

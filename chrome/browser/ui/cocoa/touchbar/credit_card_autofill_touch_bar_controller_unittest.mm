@@ -30,7 +30,8 @@ class MockAutofillPopupController : public autofill::AutofillPopupController {
  public:
   MockAutofillPopupController() {
     gfx::FontList::SetDefaultFontDescription("Arial, Times New Roman, 15px");
-    layout_model_.reset(new autofill::AutofillPopupLayoutModel(this, false));
+    layout_model_ =
+        std::make_unique<autofill::AutofillPopupLayoutModel>(this, false);
     suggestions_.push_back(
         autofill::Suggestion("bufflehead", "canvasback", "goldeneye", 1));
     suggestions_.push_back(
@@ -55,7 +56,6 @@ class MockAutofillPopupController : public autofill::AutofillPopupController {
   const std::vector<autofill::Suggestion> GetSuggestions() override {
     return suggestions_;
   }
-  MOCK_METHOD1(SetTypesetter, void(gfx::Typesetter typesetter));
   MOCK_METHOD1(GetElidedValueWidthForRow, int(int row));
   MOCK_METHOD1(GetElidedLabelWidthForRow, int(int row));
 

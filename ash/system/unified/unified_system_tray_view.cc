@@ -6,10 +6,11 @@
 
 #include <numeric>
 
-#include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/message_center/ash_message_center_lock_screen_controller.h"
 #include "ash/system/message_center/unified_message_center_view.h"
 #include "ash/system/tray/interacted_by_tap_recorder.h"
@@ -91,7 +92,9 @@ class SystemTrayContainer : public views::View {
     SetLayoutManager(std::make_unique<views::BoxLayout>(
         views::BoxLayout::Orientation::kVertical));
     SetBackground(UnifiedSystemTrayView::CreateBackground());
-    SetBorder(std::make_unique<TopCornerBorder>());
+
+    if (!features::IsUnifiedMessageCenterRefactorEnabled())
+      SetBorder(std::make_unique<TopCornerBorder>());
   }
 
   ~SystemTrayContainer() override = default;
@@ -111,7 +114,9 @@ class DetailedViewContainer : public views::View {
  public:
   DetailedViewContainer() {
     SetBackground(UnifiedSystemTrayView::CreateBackground());
-    SetBorder(std::make_unique<TopCornerBorder>());
+
+    if (!features::IsUnifiedMessageCenterRefactorEnabled())
+      SetBorder(std::make_unique<TopCornerBorder>());
   }
 
   ~DetailedViewContainer() override = default;
@@ -209,7 +214,8 @@ class UnifiedSystemTrayView::FocusSearch : public views::FocusSearch {
     views::View* default_start_view =
         search_direction == FocusSearch::SearchDirection::kForwards
             ? view_->system_tray_container_
-            : view_->notification_hidden_view_;
+            : view_->detailed_view_container_;
+
     return views::FocusSearch::FindNextFocusableView(
         starting_view ? starting_view : default_start_view, search_direction,
         traversal_direction,
@@ -223,6 +229,25 @@ class UnifiedSystemTrayView::FocusSearch : public views::FocusSearch {
 
   DISALLOW_COPY_AND_ASSIGN(FocusSearch);
 };
+
+// static
+SkColor UnifiedSystemTrayView::GetBackgroundColor() {
+  if (features::IsBackgroundBlurEnabled()) {
+    return AshColorProvider::Get()->DeprecatedGetBaseLayerColor(
+        AshColorProvider::BaseLayerType::kTransparent74,
+        kUnifiedMenuBackgroundColorWithBlur);
+  }
+  return AshColorProvider::Get()->DeprecatedGetBaseLayerColor(
+      AshColorProvider::BaseLayerType::kTransparent90,
+      kUnifiedMenuBackgroundColor);
+}
+
+// static
+std::unique_ptr<views::Background> UnifiedSystemTrayView::CreateBackground() {
+  return views::CreateBackgroundFromPainter(
+      views::Painter::CreateSolidRoundRectPainter(GetBackgroundColor(),
+                                                  kUnifiedTrayCornerRadius));
+}
 
 UnifiedSystemTrayView::UnifiedSystemTrayView(
     UnifiedSystemTrayController* controller,
@@ -239,8 +264,6 @@ UnifiedSystemTrayView::UnifiedSystemTrayView(
       system_info_view_(new UnifiedSystemInfoView(controller_)),
       system_tray_container_(new SystemTrayContainer()),
       detailed_view_container_(new DetailedViewContainer()),
-      message_center_view_(
-          new UnifiedMessageCenterView(this, controller->model())),
       focus_search_(std::make_unique<FocusSearch>(this)),
       interacted_by_tap_recorder_(
           std::make_unique<InteractedByTapRecorder>(this)) {
@@ -256,8 +279,12 @@ UnifiedSystemTrayView::UnifiedSystemTrayView(
   SessionControllerImpl* session_controller =
       Shell::Get()->session_controller();
 
-  AddChildView(message_center_view_);
-  layout->SetFlexForView(message_center_view_, 1);
+  if (!features::IsUnifiedMessageCenterRefactorEnabled()) {
+    message_center_view_ = new UnifiedMessageCenterView(
+        this, controller->model(), nullptr /* message_center_bubble */);
+    AddChildView(message_center_view_);
+    layout->SetFlexForView(message_center_view_, 1);
+  }
 
   notification_hidden_view_->SetVisible(
       session_controller->GetUserSession(0) &&
@@ -287,7 +314,9 @@ UnifiedSystemTrayView::UnifiedSystemTrayView(
   // Also, SetNextFocusableView does not support loop as mentioned in the doc,
   // we have to set null to |notification_hidden_view_|.
   notification_hidden_view_->SetNextFocusableView(nullptr);
-  detailed_view_container_->SetNextFocusableView(message_center_view_);
+
+  if (!features::IsUnifiedMessageCenterRefactorEnabled())
+    detailed_view_container_->SetNextFocusableView(message_center_view_);
 
   top_shortcuts_view_->SetExpandedAmount(expanded_amount_);
 }
@@ -296,15 +325,27 @@ UnifiedSystemTrayView::~UnifiedSystemTrayView() = default;
 
 void UnifiedSystemTrayView::SetMaxHeight(int max_height) {
   max_height_ = max_height;
-  message_center_view_->SetMaxHeight(max_height_);
 
-  // Because the message center view requires a certain height to be usable, it
-  // will be hidden if there isn't sufficient remaining height.
-  int system_tray_height = expanded_amount_ > 0.0
-                               ? GetExpandedSystemTrayHeight()
-                               : GetCollapsedSystemTrayHeight();
-  int available_height = max_height_ - system_tray_height;
-  message_center_view_->SetAvailableHeight(available_height);
+  // FeaturePodsContainer can adjust it's height by reducing the number of rows
+  // it uses. It will calculate how many rows to use based on the max height
+  // passed here.
+  feature_pods_container_->SetMaxHeight(
+      max_height - top_shortcuts_view_->GetPreferredSize().height() -
+      page_indicator_view_->GetPreferredSize().height() -
+      sliders_container_->GetExpandedHeight() -
+      system_info_view_->GetPreferredSize().height());
+
+  if (!features::IsUnifiedMessageCenterRefactorEnabled()) {
+    message_center_view_->SetMaxHeight(max_height_);
+
+    // Because the message center view requires a certain height to be usable,
+    // it will be hidden if there isn't sufficient remaining height.
+    int system_tray_height = expanded_amount_ > 0.0
+                                 ? GetExpandedSystemTrayHeight()
+                                 : GetCollapsedSystemTrayHeight();
+    int available_height = max_height_ - system_tray_height;
+    message_center_view_->SetAvailableHeight(available_height);
+  }
 }
 
 void UnifiedSystemTrayView::AddFeaturePodButton(FeaturePodButton* button) {
@@ -355,9 +396,10 @@ void UnifiedSystemTrayView::SetExpandedAmount(double expanded_amount) {
   DCHECK(0.0 <= expanded_amount && expanded_amount <= 1.0);
   expanded_amount_ = expanded_amount;
 
-  message_center_view_->SetAvailableHeight(max_height_ -
-                                           system_tray_container_->height());
-
+  if (!features::IsUnifiedMessageCenterRefactorEnabled()) {
+    message_center_view_->SetAvailableHeight(max_height_ -
+                                             system_tray_container_->height());
+  }
   top_shortcuts_view_->SetExpandedAmount(expanded_amount);
   feature_pods_container_->SetExpandedAmount(expanded_amount);
   page_indicator_view_->SetExpandedAmount(expanded_amount);
@@ -384,7 +426,7 @@ int UnifiedSystemTrayView::GetExpandedSystemTrayHeight() const {
               : 0) +
          top_shortcuts_view_->GetPreferredSize().height() +
          feature_pods_container_->GetExpandedHeight() +
-         page_indicator_view_->GetPreferredSize().height() +
+         page_indicator_view_->GetExpandedHeight() +
          sliders_container_->GetExpandedHeight() +
          system_info_view_->GetPreferredSize().height();
 }
@@ -405,8 +447,12 @@ int UnifiedSystemTrayView::GetCurrentHeight() const {
 bool UnifiedSystemTrayView::IsTransformEnabled() const {
   // TODO(tetsui): Support animation by transform even when
   // UnifiedMessageCenterview is visible.
-  return expanded_amount_ != 0.0 && expanded_amount_ != 1.0 &&
-         !message_center_view_->GetVisible();
+  if (features::IsUnifiedMessageCenterRefactorEnabled()) {
+    return false;
+  } else {
+    return expanded_amount_ != 0.0 && expanded_amount_ != 1.0 &&
+           !message_center_view_->GetVisible();
+  }
 }
 
 void UnifiedSystemTrayView::SetNotificationRectBelowScroll(
@@ -422,14 +468,32 @@ int UnifiedSystemTrayView::GetVisibleFeaturePodCount() const {
   return feature_pods_container_->GetVisibleCount();
 }
 
-// static
-std::unique_ptr<views::Background> UnifiedSystemTrayView::CreateBackground() {
-  return views::CreateBackgroundFromPainter(
-      views::Painter::CreateSolidRoundRectPainter(
-          app_list_features::IsBackgroundBlurEnabled()
-              ? kUnifiedMenuBackgroundColorWithBlur
-              : kUnifiedMenuBackgroundColor,
-          kUnifiedTrayCornerRadius));
+views::View* UnifiedSystemTrayView::GetFirstFocusableChild() {
+  FocusTraversable* focus_traversable = GetFocusTraversable();
+  views::View* focus_traversable_view = this;
+  return focus_search_->FindNextFocusableView(
+      nullptr, FocusSearch::SearchDirection::kForwards,
+      FocusSearch::TraversalDirection::kDown,
+      FocusSearch::StartingViewPolicy::kSkipStartingView,
+      FocusSearch::AnchoredDialogPolicy::kCanGoIntoAnchoredDialog,
+      &focus_traversable, &focus_traversable_view);
+}
+
+views::View* UnifiedSystemTrayView::GetLastFocusableChild() {
+  FocusTraversable* focus_traversable = GetFocusTraversable();
+  views::View* focus_traversable_view = this;
+  return focus_search_->FindNextFocusableView(
+      nullptr, FocusSearch::SearchDirection::kBackwards,
+      FocusSearch::TraversalDirection::kDown,
+      FocusSearch::StartingViewPolicy::kSkipStartingView,
+      FocusSearch::AnchoredDialogPolicy::kCanGoIntoAnchoredDialog,
+      &focus_traversable, &focus_traversable_view);
+}
+
+void UnifiedSystemTrayView::FocusEntered(bool reverse) {
+  views::View* focus_view =
+      reverse ? GetLastFocusableChild() : GetFirstFocusableChild();
+  GetFocusManager()->SetFocusedView(focus_view);
 }
 
 void UnifiedSystemTrayView::OnGestureEvent(ui::GestureEvent* event) {
@@ -467,6 +531,19 @@ const char* UnifiedSystemTrayView::GetClassName() const {
   return "UnifiedSystemTrayView";
 }
 
+void UnifiedSystemTrayView::AddedToWidget() {
+  focus_manager_ = GetFocusManager();
+  if (focus_manager_)
+    focus_manager_->AddFocusChangeListener(this);
+}
+
+void UnifiedSystemTrayView::RemovedFromWidget() {
+  if (!focus_manager_)
+    return;
+  focus_manager_->RemoveFocusChangeListener(this);
+  focus_manager_ = nullptr;
+}
+
 views::FocusTraversable* UnifiedSystemTrayView::GetFocusTraversable() {
   return this;
 }
@@ -481,6 +558,33 @@ views::FocusTraversable* UnifiedSystemTrayView::GetFocusTraversableParent() {
 
 views::View* UnifiedSystemTrayView::GetFocusTraversableParentView() {
   return this;
+}
+
+void UnifiedSystemTrayView::OnWillChangeFocus(views::View* before,
+                                              views::View* now) {}
+
+void UnifiedSystemTrayView::OnDidChangeFocus(views::View* before,
+                                             views::View* now) {
+  if (!features::IsUnifiedMessageCenterRefactorEnabled())
+    return;
+
+  if (feature_pods_container_->Contains(now)) {
+    feature_pods_container_->EnsurePageWithButton(now);
+  }
+
+  views::View* first_view = GetFirstFocusableChild();
+  views::View* last_view = GetLastFocusableChild();
+
+  bool focused_out = false;
+  if (before == last_view && now == first_view)
+    focused_out = controller_->FocusOut(false);
+  else if (before == first_view && now == last_view)
+    focused_out = controller_->FocusOut(true);
+
+  if (focused_out) {
+    GetFocusManager()->ClearFocus();
+    GetFocusManager()->SetStoredFocusView(nullptr);
+  }
 }
 
 }  // namespace ash

@@ -18,7 +18,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
-#include "components/favicon/core/favicon_server_fetcher_params.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon_base/fallback_icon_style.h"
 #include "components/favicon_base/favicon_types.h"
@@ -55,7 +54,7 @@ void RecordFaviconFetchResult(FaviconFetchResult result) {
 
 ContentSuggestionsService::ContentSuggestionsService(
     State state,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     history::HistoryService* history_service,
     favicon::LargeIconService* large_icon_service,
     PrefService* pref_service,
@@ -292,8 +291,7 @@ void ContentSuggestionsService::OnGetFaviconFromCacheFinished(
         })");
   large_icon_service_
       ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-          favicon::FaviconServerFetcherParams::CreateForMobile(
-              publisher_url, desired_size_in_pixel),
+          publisher_url,
           /*may_page_url_be_private=*/false,
           /*should_trim_page_url_path=*/false, traffic_annotation,
           base::Bind(
@@ -517,7 +515,7 @@ void ContentSuggestionsService::OnSuggestionInvalidated(
     observer.OnSuggestionInvalidated(suggestion_id);
   }
 }
-// identity::IdentityManager::Observer implementation
+// signin::IdentityManager::Observer implementation
 void ContentSuggestionsService::OnPrimaryAccountSet(
     const CoreAccountInfo& account_info) {
   OnSignInStateChanged(/*has_signed_in=*/true);

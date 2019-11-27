@@ -10,19 +10,19 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.util.IntentUtils;
 
 /**
@@ -87,9 +87,9 @@ public class IncognitoTabLauncher extends Activity {
      */
     public static void updateComponentEnabledState() {
         // TODO(peconn): Update state in a few more places (eg CustomTabsConnection#warmup).
-        boolean enable = ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.ALLOW_NEW_INCOGNITO_TAB_INTENTS)
-                && PrefServiceBridge.getInstance().isIncognitoModeEnabled();
+        boolean enable =
+                ChromeFeatureList.isEnabled(ChromeFeatureList.ALLOW_NEW_INCOGNITO_TAB_INTENTS)
+                && IncognitoUtils.isIncognitoModeEnabled();
 
         PostTask.postTask(TaskTraits.USER_VISIBLE, () -> setComponentEnabled(enable));
     }

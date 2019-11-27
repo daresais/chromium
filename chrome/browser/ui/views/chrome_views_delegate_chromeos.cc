@@ -7,7 +7,7 @@
 #include "ash/public/cpp/accelerators.h"
 #include "ash/shell.h"
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -55,7 +55,7 @@ void ChromeViewsDelegate::AdjustSavedWindowPlacementChromeOS(
 views::Widget::InitParams::WindowOpacity
 ChromeViewsDelegate::GetOpacityForInitParams(
     const views::Widget::InitParams& params) {
-  return views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  return views::Widget::InitParams::WindowOpacity::kTranslucent;
 }
 
 views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(

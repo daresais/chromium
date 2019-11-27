@@ -9,15 +9,16 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/ios/ios_util.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "build/branding_buildflags.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/unified_consent/feature.h"
 #import "ios/chrome/app/main_controller.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -35,7 +36,6 @@
 #include "ios/web/public/test/http_server/http_server_util.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -74,10 +74,6 @@ enum MetricsServiceType {
   kBreakpadFirstLaunch,
 };
 
-// Matcher for the Send Usage Data cell on the Privacy screen.
-id<GREYMatcher> SendUsageDataButton() {
-  return ButtonWithAccessibilityLabelId(IDS_IOS_OPTIONS_SEND_USAGE_DATA);
-}
 // Matcher for the Clear Browsing Data cell on the Privacy screen.
 id<GREYMatcher> ClearBrowsingDataCell() {
   return ButtonWithAccessibilityLabelId(IDS_IOS_CLEAR_BROWSING_DATA_TITLE);
@@ -393,7 +389,7 @@ id<GREYMatcher> BandwidthSettingsButton() {
 // Split here:  Official build vs. Development build.
 // Official builds allow recording and uploading of data, honoring the
 // metrics prefs.  Development builds should never record or upload data.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Official build.
   // The values of the prefs and the wwan vs wifi state should be honored by
   // the services, turning on and off according to the rules laid out above.
@@ -549,6 +545,34 @@ id<GREYMatcher> BandwidthSettingsButton() {
       performAction:grey_tap()];
 }
 
+// Verifies that the Settings screen can be swiped down to dismiss, and clean up
+// is performed allowing a new presentation.
+- (void)testSettingsSwipeDownDismiss {
+  if (!base::ios::IsRunningOnOrLater(13, 0, 0)) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on iOS 12 and lower.");
+  }
+
+  [ChromeEarlGreyUI openSettingsMenu];
+
+  // Check that Settings is presented.
+  [[EarlGrey selectElementWithMatcher:SettingsCollectionView()]
+      assertWithMatcher:grey_notNil()];
+
+  // Swipe TableView down.
+  [[EarlGrey selectElementWithMatcher:SettingsCollectionView()]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+
+  // Check that Settings has been dismissed.
+  [[EarlGrey selectElementWithMatcher:SettingsCollectionView()]
+      assertWithMatcher:grey_nil()];
+
+  // Re-Open Settings to confirm SwipeDown cleaned up properly and Settings can
+  // be shown again.
+  [ChromeEarlGreyUI openSettingsMenu];
+  [[EarlGrey selectElementWithMatcher:SettingsCollectionView()]
+      assertWithMatcher:grey_notNil()];
+}
+
 // Verifies the UI elements are accessible on the Settings page.
 - (void)testAccessibilityOnSettingsPage {
   [ChromeEarlGreyUI openSettingsMenu];
@@ -692,20 +716,11 @@ id<GREYMatcher> BandwidthSettingsButton() {
   GREYAssertNil(settings.keyCommands,
                 @"Settings should not register key commands when presented.");
 
-  // Dismiss the Sign-in UI.
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    // Cancel the sign-in operation.
-    [[EarlGrey selectElementWithMatcher:
-                   grey_buttonTitle([l10n_util::GetNSString(
-                       IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON)
-                       uppercaseString])] performAction:grey_tap()];
-  } else {
-    // Cancel the add account operation.
-    [[EarlGrey
-        selectElementWithMatcher:grey_allOf(grey_buttonTitle(@"Cancel"),
-                                            grey_sufficientlyVisible(), nil)]
-        performAction:grey_tap()];
-  }
+  // Cancel the sign-in operation.
+  [[EarlGrey selectElementWithMatcher:
+                 grey_buttonTitle([l10n_util::GetNSString(
+                     IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON)
+                     uppercaseString])] performAction:grey_tap()];
 
   // Wait for UI to finish closing the Sign-in screen.
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
@@ -713,22 +728,6 @@ id<GREYMatcher> BandwidthSettingsButton() {
   // Verify that the Settings register keyboard commands.
   GREYAssertNotNil(settings.keyCommands,
                    @"Settings should register key commands when presented.");
-}
-
-// Verifies the UI elements are accessible on the Send Usage Data page.
-- (void)testAccessibilityOnSendUsageData {
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    EARL_GREY_TEST_DISABLED(
-        @"Privacy switch for ContentSuggestion was moved to the Sync and "
-         "Google services settings screen, so it is no longer present in the "
-         "privacy section. This test is now covered by "
-         "-[GoogleServicesSettingsTestCase testOpeningServices].");
-  }
-  [ChromeEarlGreyUI openSettingsMenu];
-  [ChromeEarlGreyUI tapSettingsMenuButton:SettingsMenuPrivacyButton()];
-  [ChromeEarlGreyUI tapPrivacyMenuButton:SendUsageDataButton()];
-  [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
-  [self closeSubSettingsMenu];
 }
 
 @end

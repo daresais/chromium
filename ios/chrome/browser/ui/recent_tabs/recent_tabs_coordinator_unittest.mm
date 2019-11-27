@@ -26,7 +26,7 @@
 #import "ios/chrome/browser/ui/recent_tabs/sessions_sync_user_state.h"
 #include "ios/chrome/test/block_cleanup_test.h"
 #include "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
@@ -157,7 +157,7 @@ class RecentTabsTableCoordinatorTest : public BlockCleanupTest {
       // GetPrimaryAccountMutator() returns nullptr on ChromeOS only.
       DCHECK(account_mutator);
       account_mutator->ClearPrimaryAccount(
-          identity::PrimaryAccountMutator::ClearAccountsAction::kDefault,
+          signin::PrimaryAccountMutator::ClearAccountsAction::kDefault,
           signin_metrics::SIGNOUT_TEST,
           signin_metrics::SignoutDelete::IGNORE_METRIC);
     }
@@ -200,10 +200,10 @@ class RecentTabsTableCoordinatorTest : public BlockCleanupTest {
   }
 
  protected:
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   GoogleServiceAuthError no_error_;
   IOSChromeScopedTestingLocalState local_state_;
-  identity::IdentityTestEnvironment identity_test_env_;
+  signin::IdentityTestEnvironment identity_test_env_;
 
   syncer::FakeModelTypeControllerDelegate fake_controller_delegate_;
   testing::NiceMock<OpenTabsUIDelegateMock> open_tabs_ui_delegate_;

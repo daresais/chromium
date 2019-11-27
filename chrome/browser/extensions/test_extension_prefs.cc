@@ -173,7 +173,7 @@ scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(
       path, location, manifest, extra_flags, &errors);
   EXPECT_TRUE(extension.get()) << errors;
   if (!extension.get())
-    return NULL;
+    return nullptr;
 
   EXPECT_TRUE(crx_file::id_util::IdIsValid(extension->id()));
   prefs()->OnExtensionInstalled(extension.get(),
@@ -200,7 +200,7 @@ std::unique_ptr<PrefService> TestExtensionPrefs::CreateIncognitoPrefService()
     const {
   return CreateIncognitoPrefServiceSyncable(
       pref_service_.get(),
-      new ExtensionPrefStore(extension_pref_value_map_.get(), true), nullptr);
+      new ExtensionPrefStore(extension_pref_value_map_.get(), true));
 }
 
 void TestExtensionPrefs::set_extensions_disabled(bool extensions_disabled) {

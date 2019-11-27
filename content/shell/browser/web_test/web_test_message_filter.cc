@@ -12,33 +12,57 @@
 #include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/content_index_context.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/permission_type.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/test/web_test_support.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_content_browser_client.h"
-#include "content/shell/browser/shell_network_delegate.h"
 #include "content/shell/browser/web_test/blink_test_controller.h"
 #include "content/shell/browser/web_test/web_test_browser_context.h"
 #include "content/shell/browser/web_test/web_test_content_browser_client.h"
+#include "content/shell/browser/web_test/web_test_content_index_provider.h"
 #include "content/shell/browser/web_test/web_test_permission_manager.h"
 #include "content/shell/common/web_test/web_test_messages.h"
 #include "content/shell/test_runner/web_test_delegate.h"
 #include "content/test/mock_platform_notification_service.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_errors.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 #include "storage/browser/database/database_tracker.h"
-#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/file_system/isolated_context.h"
 #include "storage/browser/quota/quota_manager.h"
+#include "url/origin.h"
 
 namespace content {
 
-static MockPlatformNotificationService* GetMockPlatformNotificationService() {
+namespace {
+
+MockPlatformNotificationService* GetMockPlatformNotificationService() {
   auto* client = WebTestContentBrowserClient::Get();
   auto* context = client->GetWebTestBrowserContext();
   auto* service = client->GetPlatformNotificationService(context);
 
   return static_cast<MockPlatformNotificationService*>(service);
 }
+
+WebTestContentIndexProvider* GetWebTestContentIndexProvider() {
+  auto* client = WebTestContentBrowserClient::Get();
+  auto* context = client->GetWebTestBrowserContext();
+  return static_cast<WebTestContentIndexProvider*>(
+      context->GetContentIndexProvider());
+}
+
+ContentIndexContext* GetContentIndexContext(const url::Origin& origin) {
+  auto* client = WebTestContentBrowserClient::Get();
+  auto* context = client->GetWebTestBrowserContext();
+  auto* storage_partition = BrowserContext::GetStoragePartitionForSite(
+      context, origin.GetURL(), /* can_create= */ false);
+  return storage_partition->GetContentIndexContext();
+}
+
+}  // namespace
 
 WebTestMessageFilter::WebTestMessageFilter(
     int render_process_id,
@@ -50,7 +74,8 @@ WebTestMessageFilter::WebTestMessageFilter(
       database_tracker_(database_tracker),
       quota_manager_(quota_manager) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  network_context->GetCookieManager(mojo::MakeRequest(&cookie_manager_));
+  network_context->GetCookieManager(
+      cookie_manager_.BindNewPipeAndPassReceiver());
 }
 
 WebTestMessageFilter::~WebTestMessageFilter() {}
@@ -67,6 +92,7 @@ WebTestMessageFilter::OverrideTaskRunnerForMessage(
       return database_tracker_->task_runner();
     case WebTestHostMsg_SimulateWebNotificationClick::ID:
     case WebTestHostMsg_SimulateWebNotificationClose::ID:
+    case WebTestHostMsg_SimulateWebContentIndexDelete::ID:
     case WebTestHostMsg_SetPermission::ID:
     case WebTestHostMsg_ResetPermissions::ID:
     case WebTestHostMsg_WebTestRuntimeFlagsChanged::ID:
@@ -74,7 +100,7 @@ WebTestMessageFilter::OverrideTaskRunnerForMessage(
     case WebTestHostMsg_InitiateCaptureDump::ID:
     case WebTestHostMsg_InspectSecondaryWindow::ID:
     case WebTestHostMsg_DeleteAllCookies::ID:
-      return base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI});
+      return base::CreateSingleThreadTaskRunner({BrowserThread::UI});
   }
   return nullptr;
 }
@@ -91,6 +117,8 @@ bool WebTestMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnSimulateWebNotificationClick)
     IPC_MESSAGE_HANDLER(WebTestHostMsg_SimulateWebNotificationClose,
                         OnSimulateWebNotificationClose)
+    IPC_MESSAGE_HANDLER(WebTestHostMsg_SimulateWebContentIndexDelete,
+                        OnSimulateWebContentIndexDelete)
     IPC_MESSAGE_HANDLER(WebTestHostMsg_DeleteAllCookies, OnDeleteAllCookies)
     IPC_MESSAGE_HANDLER(WebTestHostMsg_SetPermission, OnSetPermission)
     IPC_MESSAGE_HANDLER(WebTestHostMsg_ResetPermissions, OnResetPermissions)
@@ -165,6 +193,20 @@ void WebTestMessageFilter::OnSimulateWebNotificationClose(
   GetMockPlatformNotificationService()->SimulateClose(title, by_user);
 }
 
+void WebTestMessageFilter::OnSimulateWebContentIndexDelete(
+    const std::string& id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  auto* provider = GetWebTestContentIndexProvider();
+
+  std::pair<int64_t, url::Origin> registration_data =
+      provider->GetRegistrationDataFromId(id);
+
+  auto* context = GetContentIndexContext(registration_data.second);
+  context->OnUserDeletedItem(registration_data.first, registration_data.second,
+                             id);
+}
+
 void WebTestMessageFilter::OnDeleteAllCookies() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   cookie_manager_->DeleteCookies(network::mojom::CookieDeletionFilter::New(),
@@ -210,6 +252,8 @@ void WebTestMessageFilter::OnSetPermission(
     type = PermissionType::WAKE_LOCK_SCREEN;
   } else if (name == "wake-lock-system") {
     type = PermissionType::WAKE_LOCK_SYSTEM;
+  } else if (name == "nfc") {
+    type = PermissionType::NFC;
   } else {
     NOTREACHED();
     type = PermissionType::NOTIFICATIONS;

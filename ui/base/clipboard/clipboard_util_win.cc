@@ -182,6 +182,8 @@ base::FilePath CreateTemporaryFileWithSuggestedName(
 
   // Make filename unique.
   temp_path2 = base::GetUniquePath(temp_path2);
+  if (temp_path2.empty())
+    return base::FilePath();  // Failed to make a unique path.
 
   base::File::Error replace_file_error = base::File::FILE_OK;
   if (!ReplaceFile(temp_path1, temp_path2, &replace_file_error))
@@ -623,8 +625,9 @@ bool ClipboardUtil::GetVirtualFilesAsTempFiles(
   }
 
   // Queue a task to actually write the temp files on a worker thread.
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(&WriteAllFileContentsToTempFiles, display_names,
                      memory_backed_contents),
       std::move(callback));  // callback on the UI thread
@@ -855,8 +858,8 @@ void ClipboardUtil::CFHtmlToHtml(const std::string& cf_html,
   size_t fragment_start = std::string::npos;
   size_t fragment_end = std::string::npos;
 
-  ClipboardUtil::CFHtmlExtractMetadata(
-      cf_html, base_url, NULL, &fragment_start, &fragment_end);
+  ClipboardUtil::CFHtmlExtractMetadata(cf_html, base_url, nullptr,
+                                       &fragment_start, &fragment_end);
 
   if (html &&
       fragment_start != std::string::npos &&

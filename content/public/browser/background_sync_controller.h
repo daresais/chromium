@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <set>
+
 #include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/background_sync_registration.h"
@@ -74,23 +76,38 @@ class CONTENT_EXPORT BackgroundSyncController {
       int num_attempts,
       int max_attempts) {}
 
-  // Calculates the soonest wakeup delta across all storage partitions and
-  // schedules a background task to wake up the browser to process
-  // Background Sync registrations.
-  virtual void ScheduleBrowserWakeUp(
-      blink::mojom::BackgroundSyncType sync_type) {}
+  // Schedules a background task with delay |delay| to wake up the browser to
+  // process Background Sync registrations of type |sync_type|.
+  virtual void ScheduleBrowserWakeUpWithDelay(
+      blink::mojom::BackgroundSyncType sync_type,
+      base::TimeDelta delay) {}
+
+  // Cancel the background task that wakes the browser up to process Background
+  // Sync registrations of type |sync_type|.
+  virtual void CancelBrowserWakeup(blink::mojom::BackgroundSyncType sync_type) {
+  }
 
   // Calculates the delay after which the next sync event should be fired
   // for a BackgroundSync registration. The delay is based on the sync_type of
-  // the |registration|.
+  // the |registration|, the |parameters| for the feature, the soonest time
+  // a (periodic)sync event is scheduled to fire for this origin, and other
+  // browser-specific considerations.
   virtual base::TimeDelta GetNextEventDelay(
       const BackgroundSyncRegistration& registration,
-      content::BackgroundSyncParameters* parameters) = 0;
+      content::BackgroundSyncParameters* parameters,
+      base::TimeDelta time_till_soonest_scheduled_event_for_origin) = 0;
 
   // Keeps the browser alive to allow a one-shot Background Sync registration
   // to finish firing one sync event.
   virtual std::unique_ptr<BackgroundSyncEventKeepAlive>
   CreateBackgroundSyncEventKeepAlive() = 0;
+
+  // Updates its internal list of origins for which we have suspended periodic
+  // Background Sync registrations. This is compiled from each
+  // BackgroundSyncManager when they are initialized. This list used to ignore
+  // changes concerning origins we don't care about.
+  virtual void NoteSuspendedPeriodicSyncOrigins(
+      std::set<url::Origin> suspended_origins) = 0;
 };
 
 }  // namespace content

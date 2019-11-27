@@ -6,13 +6,15 @@
 
 #include "base/memory/ref_counted_memory.h"
 #include "base/stl_util.h"
+#include "base/strings/strcat.h"
 #include "build/build_config.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/layout.h"
 
 namespace {
 
@@ -34,7 +36,7 @@ class FileIconSourceTest : public testing::Test {
   FileIconSourceTest() = default;
 
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 const struct FetchFileIconExpectation {
@@ -119,8 +121,8 @@ TEST_F(FileIconSourceTest, FileIconSource_Parse) {
                     kBasicExpectations[i].scale_factor,
                     kBasicExpectations[i].size, CallbackIsNull()));
     source->StartDataRequest(
-        kBasicExpectations[i].request_path,
-        content::ResourceRequestInfo::WebContentsGetter(),
-        callback);
+        GURL(base::StrCat(
+            {"chrome://any-host/", kBasicExpectations[i].request_path})),
+        content::WebContents::Getter(), callback);
   }
 }

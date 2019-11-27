@@ -19,13 +19,16 @@
 #include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
 #include "chrome/browser/ui/autofill/popup_controller_common.h"
 #include "components/autofill/core/browser/ui/popup_types.h"
-#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace content {
 struct NativeWebKeyboardEvent;
 class WebContents;
+}
+
+namespace ui {
+class AXPlatformNode;
 }
 
 namespace autofill {
@@ -68,9 +71,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
 
   bool HandleKeyPressEvent(const content::NativeWebKeyboardEvent& event);
 
-  // Tells the view to capture mouse events. Must be called before |Show()|.
-  void set_hide_on_outside_click(bool hide_on_outside_click);
-
  protected:
   FRIEND_TEST_ALL_PREFIXES(AutofillPopupControllerUnitTest,
                            ProperlyResetController);
@@ -94,7 +94,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   bool IsRTL() const override;
   const std::vector<Suggestion> GetSuggestions() override;
 #if !defined(OS_ANDROID)
-  void SetTypesetter(gfx::Typesetter typesetter) override;
   int GetElidedValueWidthForRow(int row) override;
   int GetElidedLabelWidthForRow(int row) override;
 #endif
@@ -139,6 +138,15 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
 
   AutofillPopupLayoutModel& LayoutModelForTesting() { return layout_model_; }
 
+  // Raise an accessibility event to indicate the controls relation of the
+  // form control of the popup and popup itself has changed based on the popup's
+  // show or hide action.
+  void FireControlsChangedEvent(bool is_show);
+
+  // Gets the root AXPlatformNode for our web_contents_, which can be used
+  // to find the AXPlatformNode specifically for the autofill text field.
+  virtual ui::AXPlatformNode* GetRootAXPlatformNodeForWebContents();
+
  private:
 #if !defined(OS_ANDROID)
   FRIEND_TEST_ALL_PREFIXES(AutofillPopupControllerUnitTest, ElideText);
@@ -155,12 +163,8 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   // Hides |view_| unless it is null and then deletes |this|.
   void HideViewAndDie();
 
-  // Raise an accessibility event to indicate the controls relation of the
-  // form control of the popup and popup itself has changed based on the popup's
-  // show or hide action.
-  void FireControlsChangedEvent(bool is_show);
-
   friend class AutofillPopupControllerUnitTest;
+  friend class AutofillPopupControllerAccessibilityUnitTest;
   void SetViewForTesting(AutofillPopupView* view) { view_ = view; }
 
   PopupControllerCommon controller_common_;
@@ -168,9 +172,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   AutofillPopupView* view_ = nullptr;  // Weak reference.
   AutofillPopupLayoutModel layout_model_;
   base::WeakPtr<AutofillPopupDelegate> delegate_;
-
-  // The text direction of the popup.
-  base::i18n::TextDirection text_direction_;
 
   // The current Autofill query values.
   std::vector<Suggestion> suggestions_;
@@ -183,10 +184,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   // The line that is currently selected by the user, null indicates that no
   // line is currently selected.
   base::Optional<int> selected_line_;
-
-  // The typesetter to use when eliding text. This must be BROWSER when the UI
-  // is drawn by Cocoa on macOS.
-  gfx::Typesetter typesetter_ = gfx::Typesetter::HARFBUZZ;
 
   base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_{this};
 

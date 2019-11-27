@@ -130,6 +130,7 @@ class BrowserSwitcherService : public KeyedService {
   AlternativeBrowserDriver* driver();
   BrowserSwitcherSitelist* sitelist();
   BrowserSwitcherPrefs& prefs();
+  Profile* profile();
 
   base::TimeDelta fetch_delay();
   base::TimeDelta refresh_delay();
@@ -148,6 +149,8 @@ class BrowserSwitcherService : public KeyedService {
   // happens.
   virtual void LoadRulesFromPrefs();
 
+  void Init();
+
  protected:
   virtual void OnAllRulesetsParsed();
   virtual void OnBrowserSwitcherPrefsChanged(
@@ -162,8 +165,6 @@ class BrowserSwitcherService : public KeyedService {
   // implementation-specific methods to query this object's state, listen for
   // events and trigger a re-download immediately.
   friend class ::BrowserSwitchHandler;
-
-  void Init();
 
   void OnExternalSitelistParsed(ParsedXml xml);
   void OnExternalGreylistParsed(ParsedXml xml);

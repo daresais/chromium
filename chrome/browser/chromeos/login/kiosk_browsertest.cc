@@ -40,7 +40,6 @@
 #include "chrome/browser/chromeos/login/test/test_condition_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
-#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
@@ -72,7 +71,6 @@
 #include "components/crx_file/crx_verifier.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
-#include "components/user_manager/scoped_user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -83,6 +81,7 @@
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/app_window/native_app_window.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/sandboxed_unpacker.h"
 #include "extensions/common/manifest.h"
@@ -113,10 +112,6 @@ namespace {
 //   chrome/test/data/chromeos/app_mode/webstore/inlineinstall/
 //       detail/ggaeimfdpnmlhdhpcikgoblffmkckdmn
 const char kTestKioskApp[] = "ggaeimfdpnmlhdhpcikgoblffmkckdmn";
-
-// This is the same as above, but packed in deprecated CRX2. It should work
-// before full deprecation of CRX2.
-const char kTestKioskCrx2App[] = "ggbflgnkafappblpkiflbgpmkfdpnhhe";
 
 // This app creates a window and declares usage of the identity API in its
 // manifest, so we can test device robot token minting via the identity API.
@@ -252,8 +247,7 @@ bool IsAppInstalled(const std::string& app_id, const std::string& version) {
   Profile* app_profile = ProfileManager::GetPrimaryUserProfile();
   DCHECK(app_profile);
   const extensions::Extension* app =
-      extensions::ExtensionSystem::Get(app_profile)
-          ->extension_service()
+      extensions::ExtensionRegistry::Get(app_profile)
           ->GetInstalledExtension(app_id);
   return app != nullptr && version == app->version().GetString();
 }
@@ -262,8 +256,7 @@ extensions::Manifest::Type GetAppType(const std::string& app_id) {
   Profile* app_profile = ProfileManager::GetPrimaryUserProfile();
   DCHECK(app_profile);
   const extensions::Extension* app =
-      extensions::ExtensionSystem::Get(app_profile)
-          ->extension_service()
+      extensions::ExtensionRegistry::Get(app_profile)
           ->GetInstalledExtension(app_id);
   DCHECK(app);
   return app->GetType();
@@ -277,7 +270,7 @@ void SetPlatformVersion(const std::string& platform_version) {
 
 class KioskSessionInitializedWaiter : public KioskAppManagerObserver {
  public:
-  KioskSessionInitializedWaiter() : scoped_observer_(this) {
+  KioskSessionInitializedWaiter() {
     scoped_observer_.Add(KioskAppManager::Get());
   }
   ~KioskSessionInitializedWaiter() override = default;
@@ -293,7 +286,8 @@ class KioskSessionInitializedWaiter : public KioskAppManagerObserver {
   void OnKioskSessionInitialized() override { run_loop_.Quit(); }
 
  private:
-  ScopedObserver<KioskAppManager, KioskAppManagerObserver> scoped_observer_;
+  ScopedObserver<KioskAppManagerBase, KioskAppManagerObserver> scoped_observer_{
+      this};
   base::RunLoop run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(KioskSessionInitializedWaiter);
@@ -317,9 +311,9 @@ class ScopedCanConfigureNetwork {
         &needs_owner_auth_callback_);
   }
   ~ScopedCanConfigureNetwork() {
-    AppLaunchController::SetCanConfigureNetworkCallbackForTesting(NULL);
+    AppLaunchController::SetCanConfigureNetworkCallbackForTesting(nullptr);
     AppLaunchController::SetNeedOwnerAuthToConfigureNetworkCallbackForTesting(
-        NULL);
+        nullptr);
   }
 
   bool CanConfigureNetwork() { return can_configure_; }
@@ -352,7 +346,7 @@ class KioskFakeDiskMountManager : public file_manager::FakeDiskMountManager {
 
   void UnMountUsbStick() {
     DCHECK(!usb_mount_path_.empty());
-    UnmountPath(usb_mount_path_, UNMOUNT_OPTIONS_NONE,
+    UnmountPath(usb_mount_path_,
                 disks::DiskMountManager::UnmountPathCallback());
   }
 
@@ -367,7 +361,7 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
   AppDataLoadWaiter(KioskAppManager* manager,
                     const std::string& app_id,
                     const std::string& version)
-      : runner_(NULL),
+      : runner_(nullptr),
         manager_(manager),
         wait_type_(WAIT_FOR_CRX_CACHE),
         loaded_(false),
@@ -527,9 +521,10 @@ class KioskTest : public OobeBaseTest {
   }
 
   void TearDownOnMainThread() override {
+    owner_settings_service_.reset();
     settings_helper_.RestoreRealDeviceSettingsProvider();
-    AppLaunchController::SetNetworkTimeoutCallbackForTesting(NULL);
-    AppLaunchSigninScreen::SetUserManagerForTesting(NULL);
+    AppLaunchController::SetNetworkTimeoutCallbackForTesting(nullptr);
+    AppLaunchSigninScreen::SetUserManagerForTesting(nullptr);
 
     OobeBaseTest::TearDownOnMainThread();
 
@@ -563,7 +558,7 @@ class KioskTest : public OobeBaseTest {
   }
 
   void FireKioskAppSettingsChanged() {
-    KioskAppManager::Get()->UpdateAppData();
+    KioskAppManager::Get()->UpdateAppsFromPolicy();
   }
 
   void SetupTestAppUpdateCheck() {
@@ -617,8 +612,7 @@ class KioskTest : public OobeBaseTest {
 
   const extensions::Extension* GetInstalledApp() {
     Profile* app_profile = ProfileManager::GetPrimaryUserProfile();
-    return extensions::ExtensionSystem::Get(app_profile)
-        ->extension_service()
+    return extensions::ExtensionRegistry::Get(app_profile)
         ->GetInstalledExtension(test_app_id_);
   }
 
@@ -650,8 +644,7 @@ class KioskTest : public OobeBaseTest {
 
     // Check if the kiosk webapp is really installed for the default profile.
     const extensions::Extension* app =
-        extensions::ExtensionSystem::Get(app_profile)
-            ->extension_service()
+        extensions::ExtensionRegistry::Get(app_profile)
             ->GetInstalledExtension(test_app_id_);
     EXPECT_TRUE(app);
 
@@ -697,7 +690,7 @@ class KioskTest : public OobeBaseTest {
     runner->Run();
 
     CHECK(GetAppLaunchController()->network_wait_timedout());
-    AppLaunchController::SetNetworkTimeoutCallbackForTesting(NULL);
+    AppLaunchController::SetNetworkTimeoutCallbackForTesting(nullptr);
   }
 
   void EnableConsumerKioskMode() {
@@ -1360,39 +1353,6 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NoEnterpriseAutoLaunchWhenUntrusted) {
   EXPECT_FALSE(login_display_host->GetAppLaunchController());
 }
 
-class KioskCrx2Test : public KioskTest {
- public:
-  KioskCrx2Test()
-      : KioskTest(),
-        test_install_attributes_(
-            chromeos::StubInstallAttributes::CreateCloudManaged("example.com",
-                                                                "fake-id")) {}
-
- private:
-  // Set up fake install attributes to make the device appeared as
-  // enterprise-managed. This is needed because CRX2 is only allowed for
-  // policy-based kiosk apps.
-  chromeos::ScopedStubInstallAttributes test_install_attributes_;
-
-  DISALLOW_COPY_AND_ASSIGN(KioskCrx2Test);
-};
-
-// Test that CRX2-packed apps still work for kiosk. This is a regression for
-// crbug.com/960428. TODO(crbug.com/740715): This test should fail in M78 after
-// full deprecation of CRX2.
-IN_PROC_BROWSER_TEST_F(KioskCrx2Test, InstallAndLaunchCrx2App) {
-  set_test_app_id(kTestKioskCrx2App);
-  set_test_crx_file(test_app_id() + ".crx");
-  set_use_consumer_kiosk_mode(false);
-  StartAppLaunchFromLoginScreen(
-      NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE);
-  WaitForAppLaunchSuccess();
-  KioskAppManager::App app;
-  ASSERT_TRUE(KioskAppManager::Get()->GetApp(test_app_id(), &app));
-  EXPECT_FALSE(app.was_auto_launched_with_zero_delay);
-  EXPECT_EQ(extensions::Manifest::EXTERNAL_POLICY, GetInstalledAppLocation());
-}
-
 class KioskUpdateTest : public KioskTest {
  public:
   KioskUpdateTest() {}
@@ -1624,7 +1584,7 @@ class KioskUpdateTest : public KioskTest {
    public:
     KioskAppExternalUpdateWaiter(KioskAppManager* manager,
                                  const std::string& app_id)
-        : runner_(NULL),
+        : runner_(nullptr),
           manager_(manager),
           app_id_(app_id),
           quit_(false),
@@ -1700,8 +1660,16 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
               /*wait_for_app_data=*/true);
 }
 
+// crbug.com/949490
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_LaunchCachedOfflineEnabledAppNoNetwork \
+  DISABLED_LaunchCachedOfflineEnabledAppNoNetwork
+#else
+#define MAYBE_LaunchCachedOfflineEnabledAppNoNetwork \
+  LaunchCachedOfflineEnabledAppNoNetwork
+#endif
 IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
-                       LaunchCachedOfflineEnabledAppNoNetwork) {
+                       MAYBE_LaunchCachedOfflineEnabledAppNoNetwork) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   EXPECT_TRUE(
       KioskAppManager::Get()->HasCachedCrx(kTestOfflineEnabledKioskApp));
@@ -1821,7 +1789,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_UsbStickUpdateAppNoNetwork) {
 }
 
 // Restart the device, verify the app has been updated to v2.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppNoNetwork) {
+IN_PROC_BROWSER_TEST_F(KioskUpdateTest, DISABLED_UsbStickUpdateAppNoNetwork) {
   // Verify the kiosk app has been updated to v2.
   set_test_app_id(kTestOfflineEnabledKioskApp);
   StartUIForAppLaunch();
@@ -1959,7 +1927,16 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PermissionChange) {
   EXPECT_EQ("2.0.0", GetInstalledAppVersion().GetString());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_PreserveLocalData) {
+// TODO(crbug.com/949490): PreserveLocalData is flaky ChromeOS rel (timeout).
+#if defined(OS_CHROMEOS) && defined(NDEBUG)
+#define MAYBE_PRE_PreserveLocalData DISABLED_PRE_PreserveLocalData
+#define MAYBE_PreserveLocalData DISABLED_PreserveLocalData
+#else
+#define MAYBE_PRE_PreserveLocalData PRE_PreserveLocalData
+#define MAYBE_PreserveLocalData PreserveLocalData
+#endif
+
+IN_PROC_BROWSER_TEST_F(KioskUpdateTest, MAYBE_PRE_PreserveLocalData) {
   // Installs v1 app and writes some local data.
   set_test_app_id(kTestLocalFsKioskApp);
   set_test_app_version("1.0.0");
@@ -1973,7 +1950,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_PreserveLocalData) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PreserveLocalData) {
+IN_PROC_BROWSER_TEST_F(KioskUpdateTest, MAYBE_PreserveLocalData) {
   // Update existing v1 app installed in PRE_PreserveLocalData to v2
   // that reads and verifies the local data.
   set_test_app_id(kTestLocalFsKioskApp);
@@ -2079,13 +2056,27 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
   LaunchTestKioskAppWithTwoSecondaryApps();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_UpdateMultiAppKioskRemoveOneApp) {
+// TODO(crbug.com/949490): UpdateMultiAppKioskRemoveOneApp is flaky ChromeOS rel
+// (timeout).
+#if defined(OS_CHROMEOS) && defined(NDEBUG)
+#define MAYBE_PRE_UpdateMultiAppKioskRemoveOneApp \
+  DISABLED_PRE_UpdateMultiAppKioskRemoveOneApp
+#define MAYBE_UpdateMultiAppKioskRemoveOneApp \
+  DISABLED_UpdateMultiAppKioskRemoveOneApp
+#else
+#define MAYBE_PRE_UpdateMultiAppKioskRemoveOneApp \
+  PRE_UpdateMultiAppKioskRemoveOneApp
+#define MAYBE_UpdateMultiAppKioskRemoveOneApp UpdateMultiAppKioskRemoveOneApp
+#endif
+
+IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
+                       MAYBE_PRE_UpdateMultiAppKioskRemoveOneApp) {
   LaunchTestKioskAppWithTwoSecondaryApps();
 }
 
 // Update the primary app to version 2 which removes one of the secondary app
 // from its manifest.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UpdateMultiAppKioskRemoveOneApp) {
+IN_PROC_BROWSER_TEST_F(KioskUpdateTest, MAYBE_UpdateMultiAppKioskRemoveOneApp) {
   set_test_app_id(kTestPrimaryKioskApp);
   fake_cws()->SetUpdateCrx(kTestPrimaryKioskApp,
                            std::string(kTestPrimaryKioskApp) + "-2.0.0.crx",
@@ -2104,13 +2095,19 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UpdateMultiAppKioskRemoveOneApp) {
   EXPECT_TRUE(IsAppInstalled(kTestSecondaryApp2, "1.0.0"));
 }
 
+// crbug/1028606 Fails on linux-chromeos-dbg.
+#if defined(OS_CHROMEOS)
+#define MAYBE_UpdateMultiAppKioskAddOneApp DISABLED_UpdateMultiAppKioskAddOneApp
+#else
+#define MAYBE_UpdateMultiAppKioskAddOneApp UpdateMultiAppKioskAddOneApp
+#endif
 IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_UpdateMultiAppKioskAddOneApp) {
   LaunchTestKioskAppWithTwoSecondaryApps();
 }
 
 // Update the primary app to version 3 which adds a new secondary app in its
 // manifest.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UpdateMultiAppKioskAddOneApp) {
+IN_PROC_BROWSER_TEST_F(KioskUpdateTest, MAYBE_UpdateMultiAppKioskAddOneApp) {
   set_test_app_id(kTestPrimaryKioskApp);
   fake_cws()->SetUpdateCrx(kTestPrimaryKioskApp,
                            std::string(kTestPrimaryKioskApp) + "-3.0.0.crx",
@@ -2540,9 +2537,7 @@ class KioskHiddenWebUITest : public KioskTest,
 
 IN_PROC_BROWSER_TEST_F(KioskHiddenWebUITest, AutolaunchWarning) {
   // Add a device owner.
-  FakeChromeUserManager* user_manager = new FakeChromeUserManager();
-  user_manager->AddUser(test_owner_account_id_);
-  user_manager::ScopedUserManager enabler(base::WrapUnique(user_manager));
+  mock_user_manager()->AddUser(test_owner_account_id_);
 
   // Set kiosk app to autolaunch.
   EnableConsumerKioskMode();

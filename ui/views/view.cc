@@ -10,6 +10,7 @@
 
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
@@ -46,12 +47,14 @@
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
+#include "ui/views/buildflags.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/drag_controller.h"
 #include "ui/views/layout/layout_manager.h"
 #include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/view_observer.h"
 #include "ui/views/view_tracker.h"
+#include "ui/views/views_features.h"
 #include "ui/views/views_switches.h"
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/root_view.h"
@@ -141,6 +144,12 @@ View::~View() {
 
   for (ui::Layer* layer_beneath : layers_beneath_)
     layer_beneath->RemoveObserver(this);
+
+  // Clearing properties explicitly here lets us guarantee that properties
+  // outlive |this| (at least the View part of |this|). This is intentionally
+  // called at the end so observers can examine properties inside
+  // OnViewIsDeleting(), for instance.
+  ClearProperties();
 }
 
 // Tree operations -------------------------------------------------------------
@@ -421,16 +430,11 @@ bool View::GetVisible() const {
 }
 
 void View::SetVisible(bool visible) {
-  if (parent_) {
-    LayoutManager* const layout_manager = parent_->GetLayoutManager();
-    if (layout_manager && layout_manager->view_setting_visibility_on_ != this)
-      layout_manager->ViewVisibilitySet(parent_, this, visible);
-  }
-
-  if (visible_ != visible) {
-    // If the View is currently visible, schedule paint to refresh parent.
+  const bool was_visible = visible_;
+  if (was_visible != visible) {
+    // If the View was visible, schedule paint to refresh parent.
     // TODO(beng): not sure we should be doing this if we have a layer.
-    if (visible_)
+    if (was_visible)
       SchedulePaint();
 
     visible_ = visible;
@@ -449,6 +453,12 @@ void View::SetVisible(bool visible) {
 
     // Notify all other subscriptions of the change.
     OnPropertyChanged(&visible_, kPropertyEffectsPaint);
+  }
+
+  if (parent_) {
+    LayoutManager* const layout_manager = parent_->GetLayoutManager();
+    if (layout_manager && layout_manager->view_setting_visibility_on_ != this)
+      layout_manager->ViewVisibilitySet(parent_, this, was_visible, visible);
   }
 }
 
@@ -480,6 +490,11 @@ PropertyChangedSubscription View::AddEnabledChangedCallback(
 }
 
 View::Views View::GetChildrenInZOrder() {
+  if (layout_manager_) {
+    const auto result = layout_manager_->GetChildViewsInPaintOrder(this);
+    DCHECK_EQ(children_.size(), result.size());
+    return result;
+  }
   return children_;
 }
 
@@ -552,7 +567,9 @@ void View::AddLayerBeneathView(ui::Layer* new_layer) {
   // correctly. If not, this will happen on layer creation.
   if (layer()) {
     ui::Layer* parent_layer = layer()->parent();
-    if (parent_layer)
+    // Note that |new_layer| may have already been added to the parent, for
+    // example when the layer of a LayerOwner is recreated.
+    if (parent_layer && parent_layer != new_layer->parent())
       parent_layer->Add(new_layer);
     new_layer->SetBounds(gfx::Rect(new_layer->size()) +
                          layer()->bounds().OffsetFromOrigin());
@@ -566,18 +583,23 @@ void View::AddLayerBeneathView(ui::Layer* new_layer) {
 }
 
 void View::RemoveLayerBeneathView(ui::Layer* old_layer) {
+  RemoveLayerBeneathViewKeepInLayerTree(old_layer);
+
+  // Note that |old_layer| may have already been removed from its parent.
+  ui::Layer* parent_layer = layer()->parent();
+  if (parent_layer && parent_layer == old_layer->parent())
+    parent_layer->Remove(old_layer);
+
+  CreateOrDestroyLayer();
+}
+
+void View::RemoveLayerBeneathViewKeepInLayerTree(ui::Layer* old_layer) {
   auto layer_pos =
       std::find(layers_beneath_.begin(), layers_beneath_.end(), old_layer);
   DCHECK(layer_pos != layers_beneath_.end())
       << "Attempted to remove a layer that was never added.";
   layers_beneath_.erase(layer_pos);
   old_layer->RemoveObserver(this);
-
-  ui::Layer* parent_layer = layer()->parent();
-  if (parent_layer)
-    parent_layer->Remove(old_layer);
-
-  CreateOrDestroyLayer();
 }
 
 std::vector<ui::Layer*> View::GetLayersInOrder() {
@@ -692,19 +714,6 @@ void View::SetLayoutManager(std::nullptr_t) {
 }
 
 // Attributes ------------------------------------------------------------------
-
-const View* View::GetAncestorWithClassName(const std::string& name) const {
-  for (const View* view = this; view; view = view->parent_) {
-    if (!strcmp(view->GetClassName(), name.c_str()))
-      return view;
-  }
-  return nullptr;
-}
-
-View* View::GetAncestorWithClassName(const std::string& name) {
-  return const_cast<View*>(const_cast<const View*>(this)->
-      GetAncestorWithClassName(name));
-}
 
 const View* View::GetViewByID(int id) const {
   if (id == id_)
@@ -887,16 +896,8 @@ void View::SchedulePaint() {
 }
 
 void View::SchedulePaintInRect(const gfx::Rect& rect) {
-  if (!visible_)
-    return;
-
-  if (layer()) {
-    layer()->SchedulePaint(rect);
-  } else if (parent_) {
-    // Translate the requested paint rect to the parent's coordinate system
-    // then pass this notification up to the parent.
-    parent_->SchedulePaintInRect(ConvertRectToParent(rect));
-  }
+  needs_paint_ = true;
+  SchedulePaintInRectImpl(rect);
 }
 
 void View::Paint(const PaintInfo& parent_paint_info) {
@@ -908,11 +909,17 @@ void View::Paint(const PaintInfo& parent_paint_info) {
 
   PaintInfo paint_info = PaintInfo::CreateChildPaintInfo(
       parent_paint_info, GetMirroredBounds(), parent_bounds.size(),
-      GetPaintScaleType(), !!layer());
+      GetPaintScaleType(), !!layer(), needs_paint_);
+
+  needs_paint_ = false;
 
   const ui::PaintContext& context = paint_info.context();
   bool is_invalidated = true;
-  if (paint_info.context().CanCheckInvalid()) {
+  if (paint_info.context().CanCheckInvalid() ||
+      base::FeatureList::IsEnabled(features::kEnableViewPaintOptimization)) {
+    // For View paint optimization, do not default to repainting every View in
+    // the View hierarchy if the invalidation rect is empty. Repainting does not
+    // depend on the invalidation rect for View paint optimization.
 #if DCHECK_IS_ON()
     if (!context.is_pixel_canvas()) {
       gfx::Vector2d offset;
@@ -936,8 +943,7 @@ void View::Paint(const PaintInfo& parent_paint_info) {
 
     // If the View wasn't invalidated, don't waste time painting it, the output
     // would be culled.
-    is_invalidated =
-        context.IsRectInvalid(gfx::Rect(paint_info.paint_recording_size()));
+    is_invalidated = paint_info.ShouldPaint();
   }
 
   TRACE_EVENT1("views", "View::Paint", "class", GetClassName());
@@ -1036,7 +1042,7 @@ const ui::NativeTheme* View::GetNativeTheme() const {
   return ui::NativeTheme::GetInstanceForNativeUi();
 }
 
-void View::SetNativeTheme(ui::NativeTheme* theme) {
+void View::SetNativeThemeForTesting(ui::NativeTheme* theme) {
   ui::NativeTheme* original_native_theme = GetNativeTheme();
   native_theme_ = theme;
   if (native_theme_ != original_native_theme)
@@ -1326,7 +1332,7 @@ bool View::CanHandleAccelerators() const {
   const Widget* widget = GetWidget();
   if (!GetEnabled() || !IsDrawn() || !widget || !widget->IsVisible())
     return false;
-#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#if BUILDFLAG(ENABLE_DESKTOP_AURA)
   // Non-ChromeOS aura windows have an associated FocusManagerEventHandler which
   // adds currently focused view as an event PreTarget (see
   // DesktopNativeWidgetAura::InitNativeWidget). However, the focused view isn't
@@ -1568,16 +1574,6 @@ void View::ScrollViewToVisible() {
   ScrollRectToVisible(GetLocalBounds());
 }
 
-int View::GetPageScrollIncrement(ScrollView* scroll_view,
-                                 bool is_horizontal, bool is_positive) {
-  return 0;
-}
-
-int View::GetLineScrollIncrement(ScrollView* scroll_view,
-                                 bool is_horizontal, bool is_positive) {
-  return 0;
-}
-
 void View::AddObserver(ViewObserver* observer) {
   CHECK(observer);
   observers_.AddObserver(observer);
@@ -1602,13 +1598,15 @@ gfx::Size View::CalculatePreferredSize() const {
   return gfx::Size();
 }
 
-void View::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-}
-
 void View::PreferredSizeChanged() {
-  InvalidateLayout();
   if (parent_)
     parent_->ChildPreferredSizeChanged(this);
+  // Since some layout managers (specifically AnimatingLayoutManager) can react
+  // to InvalidateLayout() by doing calculations and since the parent can
+  // potentially change preferred size, etc. as a result of calling
+  // ChildPreferredSizeChanged(), postpone invalidation until the events have
+  // run all the way up the hierarchy.
+  InvalidateLayout();
   for (ViewObserver& observer : observers_)
     observer.OnViewPreferredSizeChanged(this);
 }
@@ -1643,6 +1641,8 @@ void View::AddedToWidget() {}
 void View::RemovedFromWidget() {}
 
 // Painting --------------------------------------------------------------------
+
+void View::OnDidSchedulePaint(const gfx::Rect& rect) {}
 
 void View::PaintChildren(const PaintInfo& paint_info) {
   TRACE_EVENT1("views", "View::PaintChildren", "class", GetClassName());
@@ -1692,14 +1692,11 @@ void View::UpdateParentLayer() {
     return;
 
   ui::Layer* parent_layer = nullptr;
-  gfx::Vector2d offset(GetMirroredX(), y());
 
-  if (parent_) {
-    offset +=
-        parent_->CalculateOffsetToAncestorWithLayer(&parent_layer).offset();
-  }
+  if (parent_)
+    parent_->CalculateOffsetToAncestorWithLayer(&parent_layer);
 
-  ReparentLayer(offset, parent_layer);
+  ReparentLayer(parent_layer);
 }
 
 void View::MoveLayerToParent(ui::Layer* parent_layer,
@@ -2026,6 +2023,19 @@ void View::DragInfo::PossibleDrag(const gfx::Point& p) {
 }
 
 // Painting --------------------------------------------------------------------
+
+void View::SchedulePaintInRectImpl(const gfx::Rect& rect) {
+  OnDidSchedulePaint(rect);
+  if (!visible_)
+    return;
+  if (layer()) {
+    layer()->SchedulePaint(rect);
+  } else if (parent_) {
+    // Translate the requested paint rect to the parent's coordinate system
+    // then pass this notification up to the parent.
+    parent_->SchedulePaintInRectImpl(ConvertRectToParent(rect));
+  }
+}
 
 void View::SchedulePaintBoundsChanged(bool size_changed) {
   if (!visible_)
@@ -2368,19 +2378,13 @@ void View::SnapLayerToPixelBoundary(const LayerOffsetData& offset_data) {
     DCHECK_EQ(layer()->parent(), layer_beneath->parent());
 #endif  // DCHECK_IS_ON()
 
-  if (snap_layer_to_pixel_boundary_ && layer()->parent() &&
-      layer()->GetCompositor()) {
-    if (layer()->GetCompositor()->is_pixel_canvas()) {
-      layer()->SetSubpixelPositionOffset(offset_data.GetSubpixelOffset());
-      for (ui::Layer* layer_beneath : layers_beneath_)
-        layer_beneath->SetSubpixelPositionOffset(
-            offset_data.GetSubpixelOffset());
-    }
-  } else {
-    // Reset the offset.
-    layer()->SetSubpixelPositionOffset(gfx::Vector2dF());
+  if (layer()->GetCompositor() && layer()->GetCompositor()->is_pixel_canvas()) {
+    gfx::Vector2dF offset = snap_layer_to_pixel_boundary_ && layer()->parent()
+                                ? offset_data.GetSubpixelOffset()
+                                : gfx::Vector2dF();
+    layer()->SetSubpixelPositionOffset(offset);
     for (ui::Layer* layer_beneath : layers_beneath_)
-      layer_beneath->SetSubpixelPositionOffset(gfx::Vector2dF());
+      layer_beneath->SetSubpixelPositionOffset(offset);
   }
 }
 
@@ -2450,12 +2454,17 @@ void View::SetLayoutManagerImpl(std::unique_ptr<LayoutManager> layout_manager) {
 void View::SetLayerBounds(const gfx::Size& size,
                           const LayerOffsetData& offset_data) {
   const gfx::Rect bounds = gfx::Rect(size) + offset_data.offset();
+  const bool bounds_changed = (bounds != layer()->GetTargetBounds());
   layer()->SetBounds(bounds);
   for (ui::Layer* layer_beneath : layers_beneath_) {
     layer_beneath->SetBounds(gfx::Rect(layer_beneath->size()) +
                              bounds.OffsetFromOrigin());
   }
   SnapLayerToPixelBoundary(offset_data);
+  if (bounds_changed) {
+    for (ViewObserver& observer : observers_)
+      observer.OnLayerTargetBoundsChanged(this);
+  }
 }
 
 // Transformations -------------------------------------------------------------
@@ -2590,11 +2599,7 @@ void View::OrphanLayers() {
     child->OrphanLayers();
 }
 
-void View::ReparentLayer(const gfx::Vector2d& offset, ui::Layer* parent_layer) {
-  layer()->SetBounds(GetLocalBounds() + offset);
-  for (ui::Layer* layer_beneath : layers_beneath_)
-    layer_beneath->SetBounds(gfx::Rect(layer_beneath->size()) + offset);
-
+void View::ReparentLayer(ui::Layer* parent_layer) {
   DCHECK_NE(layer(), parent_layer);
   if (parent_layer) {
     // Adding the main layer can trigger a call to |SnapLayerToPixelBoundary()|.
@@ -2604,6 +2609,13 @@ void View::ReparentLayer(const gfx::Vector2d& offset, ui::Layer* parent_layer) {
       parent_layer->Add(layer_beneath);
     parent_layer->Add(layer());
   }
+  // Update the layer bounds; this needs to be called after this layer is added
+  // to the new parent layer since snapping to pixel boundary will be affected
+  // by the layer hierarchy.
+  LayerOffsetData offset =
+      parent_ ? parent_->CalculateOffsetToAncestorWithLayer(nullptr)
+              : LayerOffsetData(layer()->device_scale_factor());
+  SetLayerBounds(size(), offset + GetMirroredBounds().OffsetFromOrigin());
   layer()->SchedulePaint(GetLocalBounds());
   MoveLayerToParent(layer(), LayerOffsetData(layer()->device_scale_factor()));
 }

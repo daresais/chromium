@@ -38,7 +38,7 @@
 #include "cc/layers/texture_layer_client.h"
 #include "components/viz/common/resources/transferable_resource.h"
 #include "gpu/GLES2/gl2extchromium.h"
-#include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/command_buffer/client/raster_interface.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
@@ -112,7 +112,7 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
   virtual void DidRestoreCanvasMatrixClipStack(cc::PaintCanvas*) {}
   virtual bool IsAccelerated() const;
 
-  cc::PaintCanvas* Canvas();
+  cc::PaintCanvas* DrawingCanvas();
   bool IsValid();
   bool WritePixels(const SkImageInfo&,
                    const void* pixels,
@@ -146,11 +146,12 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
     kHibernationAbortedDueGpuContextLoss = 4,
     kHibernationAbortedDueToSwitchToUnacceleratedRendering = 5,
     kHibernationAbortedDueToAllocationFailure = 6,
-    kHibernationEndedNormally = 7,
-    kHibernationEndedWithSwitchToBackgroundRendering = 8,
-    kHibernationEndedWithFallbackToSW = 9,
-    kHibernationEndedWithTeardown = 10,
-    kHibernationAbortedBecauseNoSurface = 11,
+    kHibernationAbortedDueSnapshotFailure = 7,
+    kHibernationEndedNormally = 8,
+    kHibernationEndedWithSwitchToBackgroundRendering = 9,
+    kHibernationEndedWithFallbackToSW = 10,
+    kHibernationEndedWithTeardown = 11,
+    kHibernationAbortedBecauseNoSurface = 12,
     kMaxValue = kHibernationAbortedBecauseNoSurface,
   };
 
@@ -169,8 +170,12 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
   CanvasResourceProvider* ResourceProvider() const;
   void FlushRecording();
 
-  PaintRecorder* getRecorder() { return recorder_.get(); }
   sk_sp<cc::PaintRecord> getLastRecord() { return last_recording_; }
+
+  // This is called when the Canvas element has cleared the frame, so the 2D
+  // bridge knows that there's no previous content on the resource.
+  void ClearFrame() { clear_frame_ = true; }
+  bool IsDeferralEnabled() const { return is_deferral_enabled_; }
 
  private:
   friend class Canvas2DLayerBridgeTest;
@@ -194,17 +199,16 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
   int frames_since_last_commit_ = 0;
   bool have_recorded_draw_commands_;
   bool is_hidden_;
-  // See the implementation of DisableDeferral() for more information.
   bool is_deferral_enabled_;
   bool software_rendering_while_hidden_;
   bool hibernation_scheduled_ = false;
   bool dont_use_idle_scheduling_for_testing_ = false;
   bool context_lost_ = false;
+  bool clear_frame_ = true;
 
   const AccelerationMode acceleration_mode_;
   const CanvasColorParams color_params_;
   const IntSize size_;
-  base::CheckedNumeric<int> recording_pixel_count_;
 
   enum SnapshotState {
     kInitialSnapshotState,
@@ -213,7 +217,7 @@ class PLATFORM_EXPORT Canvas2DLayerBridge : public cc::TextureLayerClient {
   mutable SnapshotState snapshot_state_;
 
   void ClearPendingRasterTimers();
-  void FinishRasterTimers(gpu::gles2::GLES2Interface*);
+  void FinishRasterTimers(gpu::raster::RasterInterface*);
   struct RasterTimer {
     // The id for querying the duration of the gpu-side of the draw
     GLuint gl_query_id = 0u;

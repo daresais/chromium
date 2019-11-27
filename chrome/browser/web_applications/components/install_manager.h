@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/observer_list.h"
+#include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/components/web_app_install_utils.h"
 #include "chrome/browser/web_applications/components/web_app_url_loader.h"
@@ -25,17 +25,19 @@ class Profile;
 namespace web_app {
 
 enum class InstallResultCode;
-class InstallManagerObserver;
 class InstallFinalizer;
 class AppRegistrar;
-struct InstallOptions;
+class AppShortcutManager;
 
-// TODO(loyso): Rework this interface once BookmarkAppHelper erased. Unify the
-// API and merge similar InstallWebAppZZZZ functions. crbug.com/915043.
+// TODO(loyso): Rework this interface. Unify the API and merge similar
+// InstallWebAppZZZZ functions.
 class InstallManager {
  public:
+  // |app_id| may be empty on failure.
   using OnceInstallCallback =
       base::OnceCallback<void(const AppId& app_id, InstallResultCode code)>;
+  using OnceUninstallCallback =
+      base::OnceCallback<void(const AppId& app_id, bool uninstalled)>;
 
   // Callback used to indicate whether a user has accepted the installation of a
   // web app.
@@ -51,9 +53,18 @@ class InstallManager {
       ForInstallableSite for_installable_site,
       WebAppInstallationAcceptanceCallback acceptance_callback)>;
 
-  using WebAppInstallabilityCheckCallback =
-      base::OnceCallback<void(std::unique_ptr<content::WebContents>,
-                              bool is_installable)>;
+  enum class InstallableCheckResult {
+    kNotInstallable,
+    kInstallable,
+    kAlreadyInstalled,
+  };
+  // Callback with the result of an installability check.
+  // |web_contents| owns the WebContents that was used to check installability.
+  // |app_id| will be present iff already installed.
+  using WebAppInstallabilityCheckCallback = base::OnceCallback<void(
+      std::unique_ptr<content::WebContents> web_contents,
+      InstallableCheckResult result,
+      base::Optional<AppId> app_id)>;
 
   // Returns true if a web app can be installed for a given |web_contents|.
   virtual bool CanInstallWebApp(content::WebContents* web_contents) = 0;
@@ -80,64 +91,79 @@ class InstallManager {
 
   // Starts a web app installation process using prefilled
   // |web_application_info| which holds all the data needed for installation.
-  // InstallManager doesn't fetch a manifest. If |no_network_install| is true,
-  // the app will not be synced, since if the data is locally available we
-  // assume there is an external sync mechanism.
+  // InstallManager doesn't fetch a manifest.
   virtual void InstallWebAppFromInfo(
       std::unique_ptr<WebApplicationInfo> web_application_info,
-      bool no_network_install,
+      ForInstallableSite for_installable_site,
       WebappInstallSource install_source,
       OnceInstallCallback callback) = 0;
 
+  // These params are a subset of ExternalInstallOptions.
+  struct InstallParams {
+    DisplayMode user_display_mode = DisplayMode::kUndefined;
+
+    // URL to be used as start_url if manifest is unavailable.
+    GURL fallback_start_url;
+
+    bool add_to_applications_menu = true;
+    bool add_to_desktop = true;
+    bool add_to_quick_launch_bar = true;
+
+    bool bypass_service_worker_check = false;
+    bool require_manifest = false;
+  };
   // Starts a background web app installation process for a given
   // |web_contents|.
-  virtual void InstallWebAppWithOptions(content::WebContents* web_contents,
-                                        const InstallOptions& install_options,
-                                        OnceInstallCallback callback) = 0;
+  virtual void InstallWebAppWithParams(content::WebContents* web_contents,
+                                       const InstallParams& install_params,
+                                       WebappInstallSource install_source,
+                                       OnceInstallCallback callback) = 0;
 
+  // For the old ExtensionSyncService-based system only:
   // Starts background installation or an update of a web app from the sync
   // system. |web_application_info| contains received sync data. Icons will be
   // downloaded from the icon URLs provided in |web_application_info|.
-  virtual void InstallOrUpdateWebAppFromSync(
+  virtual void InstallWebAppFromSync(
       const AppId& app_id,
       std::unique_ptr<WebApplicationInfo> web_application_info,
       OnceInstallCallback callback) = 0;
 
-  // Starts background installation of a web app from the given
-  // |web_application_info|.
-  virtual void InstallWebAppForTesting(
+  // Reinstall an existing web app, will redownload icons and update them on
+  // disk.
+  virtual void UpdateWebAppFromInfo(
+      const AppId& app_id,
       std::unique_ptr<WebApplicationInfo> web_application_info,
       OnceInstallCallback callback) = 0;
+
+  virtual void Shutdown() = 0;
 
   explicit InstallManager(Profile* profile);
   virtual ~InstallManager();
 
-  void SetSubsystems(AppRegistrar* registrar, InstallFinalizer* finalizer);
+  void SetSubsystems(AppRegistrar* registrar,
+                     AppShortcutManager* shortcut_manager,
+                     InstallFinalizer* finalizer);
 
-  virtual void Shutdown();
-
-  // Loads |web_app_url| in a new WebContents and determines if it is
-  // installable. Returns the WebContents and whether the app is installable or
-  // not.
-  void LoadWebAppAndCheckInstallability(const GURL& web_app_url,
-                                        WebAppInstallabilityCheckCallback);
-
-  void AddObserver(InstallManagerObserver* observer);
-  void RemoveObserver(InstallManagerObserver* observer);
+  // Loads |web_app_url| in a new WebContents and determines whether it is
+  // installable. Calls |callback| with results.
+  virtual void LoadWebAppAndCheckInstallability(
+      const GURL& web_app_url,
+      WebappInstallSource install_source,
+      WebAppInstallabilityCheckCallback callback) = 0;
 
  protected:
   Profile* profile() { return profile_; }
   AppRegistrar* registrar() { return registrar_; }
+  AppShortcutManager* shortcut_manager() { return shortcut_manager_; }
   InstallFinalizer* finalizer() { return finalizer_; }
 
  private:
-  Profile* profile_;
+  Profile* const profile_;
   WebAppUrlLoader url_loader_;
 
   AppRegistrar* registrar_ = nullptr;
+  AppShortcutManager* shortcut_manager_ = nullptr;
   InstallFinalizer* finalizer_ = nullptr;
-
-  base::ObserverList<InstallManagerObserver, true /*check_empty*/> observers_;
 };
 
 }  // namespace web_app

@@ -84,10 +84,12 @@ void NetworkChangeManagerClient::DefaultNetworkChanged(
 }
 
 void NetworkChangeManagerClient::ConnectToNetworkChangeManager() {
-  network::mojom::NetworkChangeManagerRequest request(
-      mojo::MakeRequest(&network_change_manager_));
-  content::GetNetworkService()->GetNetworkChangeManager(std::move(request));
-  network_change_manager_.set_connection_error_handler(base::BindOnce(
+  if (network_change_manager_.is_bound())
+    network_change_manager_.reset();
+
+  content::GetNetworkService()->GetNetworkChangeManager(
+      network_change_manager_.BindNewPipeAndPassReceiver());
+  network_change_manager_.set_disconnect_handler(base::BindOnce(
       &NetworkChangeManagerClient::ReconnectToNetworkChangeManager,
       base::Unretained(this)));
 }
@@ -207,8 +209,6 @@ NetworkChangeManagerClient::ConnectionTypeFromShill(
     return net::NetworkChangeNotifier::CONNECTION_ETHERNET;
   if (type == shill::kTypeWifi)
     return net::NetworkChangeNotifier::CONNECTION_WIFI;
-  if (type == shill::kTypeWimax)
-    return net::NetworkChangeNotifier::CONNECTION_4G;
   if (type == shill::kTypeBluetooth)
     return net::NetworkChangeNotifier::CONNECTION_BLUETOOTH;
 

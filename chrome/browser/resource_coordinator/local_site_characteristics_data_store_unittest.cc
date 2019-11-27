@@ -10,12 +10,11 @@
 #include "chrome/browser/resource_coordinator/local_site_characteristics_data_impl.h"
 #include "chrome/browser/resource_coordinator/local_site_characteristics_data_store_inspector.h"
 #include "chrome/browser/resource_coordinator/local_site_characteristics_data_unittest_utils.h"
-#include "chrome/browser/resource_coordinator/tab_manager_features.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/url_row.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -50,8 +49,6 @@ class LocalSiteCharacteristicsDataStoreTest : public ::testing::Test {
  protected:
   LocalSiteCharacteristicsDataStoreTest()
       : scoped_set_tick_clock_for_testing_(&test_clock_) {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kSiteCharacteristicsDatabase);
     data_store_ =
         std::make_unique<LocalSiteCharacteristicsDataStore>(&profile_);
     mock_db_ =
@@ -64,9 +61,7 @@ class LocalSiteCharacteristicsDataStoreTest : public ::testing::Test {
 
   void TearDown() override { WaitForAsyncOperationsToComplete(); }
 
-  void WaitForAsyncOperationsToComplete() {
-    test_browser_thread_bundle_.RunUntilIdle();
-  }
+  void WaitForAsyncOperationsToComplete() { task_environment_.RunUntilIdle(); }
 
   // Populates |writer_|, |reader_| and |data_| to refer to a tab navigated to
   // |kTestOrigin| that updated its title in background. Populates |writer2_|,
@@ -122,8 +117,7 @@ class LocalSiteCharacteristicsDataStoreTest : public ::testing::Test {
 
   base::SimpleTestTickClock test_clock_;
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
-  base::test::ScopedFeatureList scoped_feature_list_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
 
   // Owned by |data_store_|.

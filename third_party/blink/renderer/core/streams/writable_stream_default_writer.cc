@@ -66,7 +66,6 @@ WritableStreamDefaultWriter* WritableStreamDefaultWriter::Create(
     ScriptState* script_state,
     WritableStream* stream,
     ExceptionState& exception_state) {
-  DCHECK(RuntimeEnabledFeatures::StreamsNativeEnabled());
   auto* writer = MakeGarbageCollected<WritableStreamDefaultWriter>(
       script_state, static_cast<WritableStreamNative*>(stream),
       exception_state);
@@ -87,7 +86,8 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter(
   // https://streams.spec.whatwg.org/#default-writer-constructor 2. If !
   //  IsWritableStreamLocked(stream) is true, throw a TypeError exception.
   if (WritableStreamNative::IsLocked(stream)) {
-    exception_state.ThrowTypeError("Illegal constructor");
+    exception_state.ThrowTypeError(
+        "Cannot create writer when WritableStream is locked");
     return;
   }
   //  4. Set stream.[[writer]] to this.
@@ -199,7 +199,7 @@ ScriptValue WritableStreamDefaultWriter::desiredSize(
   }
 
   //  3. Return ! WritableStreamDefaultWriterGetDesiredSize(this).
-  return ScriptValue(script_state, GetDesiredSize(isolate, this));
+  return ScriptValue(isolate, GetDesiredSize(isolate, this));
 }
 
 ScriptPromise WritableStreamDefaultWriter::ready(
@@ -210,9 +210,9 @@ ScriptPromise WritableStreamDefaultWriter::ready(
 }
 
 ScriptPromise WritableStreamDefaultWriter::abort(ScriptState* script_state) {
-  return abort(
-      script_state,
-      ScriptValue(script_state, v8::Undefined(script_state->GetIsolate())));
+  return abort(script_state,
+               ScriptValue(script_state->GetIsolate(),
+                           v8::Undefined(script_state->GetIsolate())));
 }
 
 ScriptPromise WritableStreamDefaultWriter::abort(ScriptState* script_state,
@@ -276,9 +276,9 @@ void WritableStreamDefaultWriter::releaseLock(ScriptState* script_state) {
 }
 
 ScriptPromise WritableStreamDefaultWriter::write(ScriptState* script_state) {
-  return write(
-      script_state,
-      ScriptValue(script_state, v8::Undefined(script_state->GetIsolate())));
+  return write(script_state,
+               ScriptValue(script_state->GetIsolate(),
+                           v8::Undefined(script_state->GetIsolate())));
 }
 
 ScriptPromise WritableStreamDefaultWriter::write(ScriptState* script_state,

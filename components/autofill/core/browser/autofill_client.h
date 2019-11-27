@@ -6,6 +6,7 @@
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_CLIENT_H_
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "base/strings/string16.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/payments/risk_data_loader.h"
 #include "components/autofill/core/browser/ui/popup_types.h"
 #include "components/security_state/core/security_state.h"
@@ -32,7 +34,7 @@ namespace gfx {
 class RectF;
 }
 
-namespace identity {
+namespace signin {
 class IdentityManager;
 }
 
@@ -213,6 +215,11 @@ class AutofillClient : public RiskDataLoader {
   typedef base::RepeatingCallback<void(const std::string&)>
       MigrationDeleteCardCallback;
 
+  // Callback to run if the OK button or the cancel button in the
+  // WebauthnOfferDialog is clicked. Will pass to CreditCardFIDOAuthenticator a
+  // bool indicating if offer was accepted or declined.
+  typedef base::RepeatingCallback<void(bool)> WebauthnOfferDialogCallback;
+
   ~AutofillClient() override {}
 
   // Returns the channel for the installation. In branded builds, this will be
@@ -234,7 +241,7 @@ class AutofillClient : public RiskDataLoader {
   virtual syncer::SyncService* GetSyncService() = 0;
 
   // Gets the IdentityManager associated with the client.
-  virtual identity::IdentityManager* GetIdentityManager() = 0;
+  virtual signin::IdentityManager* GetIdentityManager() = 0;
 
   // Gets the FormDataImporter instance owned by the client.
   virtual FormDataImporter* GetFormDataImporter() = 0;
@@ -277,11 +284,11 @@ class AutofillClient : public RiskDataLoader {
   virtual void ShowLocalCardMigrationDialog(
       base::OnceClosure show_migration_dialog_closure) = 0;
 
-  // Shows a dialog with the given |legal_message| and the |user_email|. Runs
-  // |start_migrating_cards_callback| if the user would like the selected cards
-  // in the |migratable_credit_cards| to be uploaded to cloud.
+  // Shows a dialog with the given |legal_message_lines| and the |user_email|.
+  // Runs |start_migrating_cards_callback| if the user would like the selected
+  // cards in the |migratable_credit_cards| to be uploaded to cloud.
   virtual void ConfirmMigrateLocalCardToCloud(
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const LegalMessageLines& legal_message_lines,
       const std::string& user_email,
       const std::vector<MigratableCreditCard>& migratable_credit_cards,
       LocalCardMigrationCallback start_migrating_cards_callback) = 0;
@@ -299,6 +306,35 @@ class AutofillClient : public RiskDataLoader {
       const std::vector<MigratableCreditCard>& migratable_credit_cards,
       MigrationDeleteCardCallback delete_local_card_callback) = 0;
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // Will show a dialog offering the option to use device's platform
+  // authenticator in the future instead of CVC to verify the card being
+  // unmasked. Runs |offer_dialog_callback| if the OK button or the cancel
+  // button in the dialog is clicked. This is only implemented on desktop.
+  virtual void ShowWebauthnOfferDialog(
+      WebauthnOfferDialogCallback offer_dialog_callback) = 0;
+
+  // Will update the WebAuthn offer dialog content to the error state.
+  // Implemented only on desktop.
+  virtual void UpdateWebauthnOfferDialogWithError() = 0;
+
+  // TODO(crbug.com/949269): Merge CloseWebauthnOfferDialog() and
+  // CloseWebauthnVerifyPendingDialog() into one function.
+  // Will close the WebAuthn offer dialog. Returns true if dialog was visible
+  // and has been closed. Implemented only on desktop.
+  virtual bool CloseWebauthnOfferDialog() = 0;
+
+  // Will show a dialog indicating the card verification is in progress. It is
+  // shown after verification starts only if the WebAuthn is enabled.
+  // Implemented only on desktop.
+  virtual void ShowWebauthnVerifyPendingDialog(
+      base::OnceClosure cancel_card_verification_callback) = 0;
+
+  // Close the verify pending dialog once the card verificiation is completed or
+  // verification falls back to CVC.
+  virtual void CloseWebauthnVerifyPendingDialog() = 0;
+#endif
+
   // Runs |callback| if the |profile| should be imported as personal data.
   virtual void ConfirmSaveAutofillProfile(const AutofillProfile& profile,
                                           base::OnceClosure callback) = 0;
@@ -314,11 +350,12 @@ class AutofillClient : public RiskDataLoader {
       AutofillClient::SaveCreditCardOptions options,
       LocalSaveCardPromptCallback callback) = 0;
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
   // Display the cardholder name fix flow prompt and run the |callback| if
   // the card should be uploaded to payments with updated name from the user.
   virtual void ConfirmAccountNameFixFlow(
       base::OnceCallback<void(const base::string16&)> callback) = 0;
+
   // Display the expiration date fix flow prompt with the |card| details
   // and run the |callback| if the card should be uploaded to payments with
   // updated expiration date from the user.
@@ -326,11 +363,11 @@ class AutofillClient : public RiskDataLoader {
       const CreditCard& card,
       base::OnceCallback<void(const base::string16&, const base::string16&)>
           callback) = 0;
-#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
   // Runs |callback| once the user makes a decision with respect to the
-  // offer-to-save prompt. Displays the contents of |legal_message| to the user.
-  // Displays a cardholder name textfield in the bubble if
+  // offer-to-save prompt. Displays the contents of |legal_message_lines|
+  // to the user. Displays a cardholder name textfield in the bubble if
   // |options.should_request_name_from_user| is true. Displays
   // a pair of expiration date dropdowns in the bubble if
   // |should_request_expiration_date_from_user| is true. On desktop, shows the
@@ -340,7 +377,7 @@ class AutofillClient : public RiskDataLoader {
   // not offer to save at all.
   virtual void ConfirmSaveCreditCardToCloud(
       const CreditCard& card,
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const LegalMessageLines& legal_message_lines,
       SaveCreditCardOptions options,
       UploadSaveCardPromptCallback callback) = 0;
 

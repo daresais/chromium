@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/scoped_observer.h"
-#include "chrome/browser/extensions/extension_browsertest.h"
+#include "build/build_config.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
+#include "chrome/browser/ui/web_applications/web_app_controller_browsertest.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/web_application_info.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -23,6 +25,7 @@
 #include "content/public/test/content_mock_cert_verifier.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
+#include "ui/base/clipboard/clipboard.h"
 
 namespace {
 
@@ -33,11 +36,9 @@ class TestTitleObserver : public TabStripModelObserver {
   // Create a new TitleObserver for the browser of |contents|, waiting for
   // |target_title|.
   TestTitleObserver(content::WebContents* contents, base::string16 target_title)
-      : contents_(contents),
-        target_title_(target_title),
-        tab_strip_model_observer_(this) {
+      : contents_(contents), target_title_(target_title) {
     browser_ = chrome::FindBrowserWithWebContents(contents_);
-    tab_strip_model_observer_.Add(browser_->tab_strip_model());
+    browser_->tab_strip_model()->AddObserver(this);
   }
 
   // Run a loop, blocking until a tab has the title |target_title|.
@@ -70,7 +71,6 @@ class TestTitleObserver : public TabStripModelObserver {
   Browser* browser_;
   base::string16 target_title_;
   base::RunLoop awaiter_;
-  ScopedObserver<TabStripModel, TestTitleObserver> tab_strip_model_observer_;
 };
 
 // Opens a new popup window from |web_contents| on |target_url| and returns
@@ -163,7 +163,8 @@ class UrlHidingWebContentsObserver : public content::WebContentsObserver {
 
 }  // namespace
 
-class CustomTabBarViewBrowserTest : public extensions::ExtensionBrowserTest {
+class CustomTabBarViewBrowserTest
+    : public web_app::WebAppControllerBrowserTest {
  public:
   CustomTabBarViewBrowserTest()
       : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
@@ -171,17 +172,17 @@ class CustomTabBarViewBrowserTest : public extensions::ExtensionBrowserTest {
 
  protected:
   void SetUpInProcessBrowserTestFixture() override {
-    extensions::ExtensionBrowserTest::SetUpInProcessBrowserTestFixture();
+    web_app::WebAppControllerBrowserTest::SetUpInProcessBrowserTestFixture();
     cert_verifier_.SetUpInProcessBrowserTestFixture();
   }
 
   void TearDownInProcessBrowserTestFixture() override {
-    extensions::ExtensionBrowserTest::TearDownInProcessBrowserTestFixture();
+    web_app::WebAppControllerBrowserTest::TearDownInProcessBrowserTestFixture();
     cert_verifier_.TearDownInProcessBrowserTestFixture();
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
+    web_app::WebAppControllerBrowserTest::SetUpCommandLine(command_line);
     // Browser will both run and display insecure content.
     command_line->AppendSwitch(switches::kAllowRunningInsecureContent);
     cert_verifier_.SetUpCommandLine(command_line);
@@ -202,18 +203,19 @@ class CustomTabBarViewBrowserTest : public extensions::ExtensionBrowserTest {
   }
 
   void InstallPWA(const GURL& app_url) {
-    WebApplicationInfo web_app_info;
-    web_app_info.app_url = app_url;
-    web_app_info.scope = app_url.GetWithoutFilename();
-    web_app_info.open_as_window = true;
-    Install(web_app_info);
+    auto web_app_info = std::make_unique<WebApplicationInfo>();
+    web_app_info->app_url = app_url;
+    web_app_info->scope = app_url.GetWithoutFilename();
+    web_app_info->open_as_window = true;
+    Install(std::move(web_app_info));
   }
 
   void InstallBookmark(const GURL& app_url) {
-    WebApplicationInfo web_app_info;
-    web_app_info.app_url = app_url;
-    web_app_info.open_as_window = true;
-    Install(web_app_info);
+    auto web_app_info = std::make_unique<WebApplicationInfo>();
+    web_app_info->app_url = app_url;
+    web_app_info->scope = app_url.GetOrigin();
+    web_app_info->open_as_window = true;
+    Install(std::move(web_app_info));
   }
 
   Browser* app_browser_;
@@ -225,12 +227,13 @@ class CustomTabBarViewBrowserTest : public extensions::ExtensionBrowserTest {
   net::EmbeddedTestServer* https_server() { return &https_server_; }
 
  private:
-  void Install(const WebApplicationInfo& web_app_info) {
-    auto* app = InstallBookmarkApp(web_app_info);
+  void Install(std::unique_ptr<WebApplicationInfo> web_app_info) {
+    const GURL app_url = web_app_info->app_url;
+    web_app::AppId app_id = InstallWebApp(std::move(web_app_info));
 
     ui_test_utils::UrlLoadObserver url_observer(
-        web_app_info.app_url, content::NotificationService::AllSources());
-    app_browser_ = LaunchAppBrowser(app);
+        app_url, content::NotificationService::AllSources());
+    app_browser_ = LaunchWebAppBrowser(app_id);
     url_observer.Wait();
 
     DCHECK(app_browser_);
@@ -249,14 +252,14 @@ class CustomTabBarViewBrowserTest : public extensions::ExtensionBrowserTest {
 };
 
 // Check the custom tab bar is not instantiated for a tabbed browser window.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        IsNotCreatedInTabbedBrowser) {
   EXPECT_TRUE(browser_view_->IsBrowserTypeNormal());
   EXPECT_FALSE(custom_tab_bar_);
 }
 
 // Check the custom tab bar is not instantiated for a popup window.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, IsNotCreatedInPopup) {
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest, IsNotCreatedInPopup) {
   Browser* popup = OpenPopup(browser_view_->GetActiveWebContents(),
                              GURL("http://example.com"));
   EXPECT_TRUE(popup);
@@ -272,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, IsNotCreatedInPopup) {
   EXPECT_FALSE(popup_view->toolbar()->custom_tab_bar());
 }
 
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        BackToAppButtonIsNotVisibleInOutOfScopePopups) {
   ASSERT_TRUE(https_server()->Start());
 
@@ -287,7 +290,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
       OpenPopup(app_view->GetActiveWebContents(), out_of_scope_url);
 
   // Out of scope, so custom tab bar should be shown.
-  EXPECT_TRUE(popup_browser->app_controller()->ShouldShowToolbar());
+  EXPECT_TRUE(popup_browser->app_controller()->ShouldShowCustomTabBar());
 
   // As the popup was opened out of scope the close button should not be shown.
   EXPECT_FALSE(BrowserView::GetBrowserViewForBrowser(popup_browser)
@@ -298,7 +301,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
 }
 
 // Check the custom tab will be used for a Desktop PWA.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, IsUsedForDesktopPWA) {
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest, IsUsedForDesktopPWA) {
   ASSERT_TRUE(https_server()->Start());
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -318,7 +321,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, IsUsedForDesktopPWA) {
 
 // The custom tab bar should update with the title and location of the current
 // page.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, TitleAndLocationUpdate) {
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest, TitleAndLocationUpdate) {
   ASSERT_TRUE(https_server()->Start());
 
   const GURL& app_url = https_server()->GetURL("app.com", "/ssl/google.html");
@@ -346,7 +349,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, TitleAndLocationUpdate) {
 }
 
 // If the page doesn't specify a title, we should use the origin.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        UsesLocationInsteadOfEmptyTitles) {
   ASSERT_TRUE(https_server()->Start());
 
@@ -368,7 +371,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
 }
 
 // Closing the CCT should take you back to the last in scope url.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        OutOfScopeUrlShouldBeClosable) {
   ASSERT_TRUE(https_server()->Start());
 
@@ -385,11 +388,11 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
   const GURL& other_app_url =
       https_server()->GetURL("app.com", "/ssl/blank_page.html");
   NavigateAndWait(web_contents, other_app_url);
-  EXPECT_FALSE(app_controller_->ShouldShowToolbar());
+  EXPECT_FALSE(app_controller_->ShouldShowCustomTabBar());
 
   // Navigate out of scope.
   NavigateAndWait(web_contents, GURL("http://example.test/"));
-  EXPECT_TRUE(app_controller_->ShouldShowToolbar());
+  EXPECT_TRUE(app_controller_->ShouldShowCustomTabBar());
 
   // Simulate clicking the close button and wait for navigation to finish.
   content::TestNavigationObserver nav_observer(web_contents);
@@ -400,9 +403,47 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
   EXPECT_EQ(other_app_url, web_contents->GetLastCommittedURL());
 }
 
+// Right-click menu on CustomTabBar should have Copy URL option.
+// TODO(crbug.com/988323): Times out on Mac.
+#if defined(OS_MACOSX)
+#define MAYBE_RightClickMenuShowsCopyUrl DISABLED_RightClickMenuShowsCopyUrl
+#else
+#define MAYBE_RightClickMenuShowsCopyUrl RightClickMenuShowsCopyUrl
+#endif
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
+                       MAYBE_RightClickMenuShowsCopyUrl) {
+  ASSERT_TRUE(https_server()->Start());
+
+  const GURL& app_url = https_server()->GetURL("app.com", "/ssl/google.html");
+  InstallPWA(app_url);
+
+  BrowserView* app_view = BrowserView::GetBrowserViewForBrowser(app_browser_);
+  auto* web_contents = app_view->GetActiveWebContents();
+
+  // Navigate out of scope.
+  NavigateAndWait(web_contents, GURL("http://example.test/"));
+  EXPECT_TRUE(app_controller_->ShouldShowCustomTabBar());
+
+  // Show the right-click context menu.
+  app_view->toolbar()->custom_tab_bar()->ShowContextMenu(gfx::Point(),
+                                                         ui::MENU_SOURCE_MOUSE);
+
+  content::BrowserTestClipboardScope test_clipboard_scope;
+  // Activate the first and only context menu item: IDC_COPY_URL.
+  app_view->toolbar()
+      ->custom_tab_bar()
+      ->context_menu_for_testing()
+      ->ActivatedAt(0);
+
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  base::string16 result;
+  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, &result);
+  EXPECT_EQ(result, base::UTF8ToUTF16("http://example.test/"));
+}
+
 // Paths above the launch url should be out of scope and should be closable from
 // the CustomTabBar.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        ScopeAboveLaunchURLShouldBeOutOfScopeAndClosable) {
   ASSERT_TRUE(https_server()->Start());
 
@@ -420,12 +461,12 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
   const GURL& other_app_url =
       https_server()->GetURL("app.com", "/ssl/blank_page.html");
   NavigateAndWait(web_contents, other_app_url);
-  EXPECT_FALSE(app_controller_->ShouldShowToolbar());
+  EXPECT_FALSE(app_controller_->ShouldShowCustomTabBar());
 
   // Navigate above the scope of the app, on the same origin.
   NavigateAndWait(web_contents, https_server()->GetURL(
                                     "app.com", "/accessibility_fail.html"));
-  EXPECT_TRUE(app_controller_->ShouldShowToolbar());
+  EXPECT_TRUE(app_controller_->ShouldShowCustomTabBar());
 
   // Simulate clicking the close button and wait for navigation to finish.
   content::TestNavigationObserver nav_observer(web_contents);
@@ -438,7 +479,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
 
 // When there are no in scope urls to navigate back to, closing the custom tab
 // bar should navigate to the app's launch url.
-IN_PROC_BROWSER_TEST_F(
+IN_PROC_BROWSER_TEST_P(
     CustomTabBarViewBrowserTest,
     WhenNoHistoryIsInScopeCloseShouldNavigateToAppLaunchURL) {
   ASSERT_TRUE(https_server()->Start());
@@ -459,7 +500,7 @@ IN_PROC_BROWSER_TEST_F(
     EXPECT_TRUE(content::ExecuteScript(
         web_contents, "window.location.replace('http://example.com');"));
     nav_observer.Wait();
-    EXPECT_TRUE(app_controller_->ShouldShowToolbar());
+    EXPECT_TRUE(app_controller_->ShouldShowCustomTabBar());
   }
   {
     // Simulate clicking the close button and wait for navigation to finish.
@@ -471,7 +512,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(app_url, web_contents->GetLastCommittedURL());
 }
 
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        OriginsWithEmojiArePunyCoded) {
   ASSERT_TRUE(https_server()->Start());
 
@@ -494,7 +535,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
             app_view->toolbar()->custom_tab_bar()->title_for_testing());
 }
 
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        OriginsWithNonASCIICharactersDisplayNormally) {
   ASSERT_TRUE(https_server()->Start());
 
@@ -517,7 +558,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
             app_view->toolbar()->custom_tab_bar()->title_for_testing());
 }
 
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        BackToAppButtonIsNotVisibleInScope) {
   ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_TRUE(https_server()->Start());
@@ -569,7 +610,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
                    ->GetVisible());
 }
 
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest,
                        BackToAppButtonIsNotVisibleInBookmarkAppOnOrigin) {
   ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_TRUE(https_server()->Start());
@@ -603,7 +644,7 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest,
 }
 
 // Verify that interstitials that hide origin have their preference respected.
-IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, InterstitialCanHideOrigin) {
+IN_PROC_BROWSER_TEST_P(CustomTabBarViewBrowserTest, InterstitialCanHideOrigin) {
   ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_TRUE(https_server()->Start());
 
@@ -635,3 +676,12 @@ IN_PROC_BROWSER_TEST_F(CustomTabBarViewBrowserTest, InterstitialCanHideOrigin) {
   EXPECT_TRUE(
       app_view->toolbar()->custom_tab_bar()->IsShowingOriginForTesting());
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    /* no prefix */,
+    CustomTabBarViewBrowserTest,
+    ::testing::Values(
+        web_app::ControllerType::kHostedAppController,
+        web_app::ControllerType::kUnifiedControllerWithBookmarkApp,
+        web_app::ControllerType::kUnifiedControllerWithWebApp),
+    web_app::ControllerTypeParamToString);

@@ -57,7 +57,8 @@ constexpr net::BackoffEntry::Policy kRetryBackoffPolicy = {
 
 }  // namespace
 
-ArcAuthContext::ArcAuthContext(Profile* profile, const std::string& account_id)
+ArcAuthContext::ArcAuthContext(Profile* profile,
+                               const CoreAccountId& account_id)
     : profile_(profile),
       account_id_(account_id),
       identity_manager_(IdentityManagerFactory::GetForProfile(profile)),
@@ -92,15 +93,15 @@ void ArcAuthContext::Prepare(const PrepareCallback& callback) {
   StartFetchers();
 }
 
-std::unique_ptr<identity::AccessTokenFetcher>
+std::unique_ptr<signin::AccessTokenFetcher>
 ArcAuthContext::CreateAccessTokenFetcher(
     const std::string& consumer_name,
     const identity::ScopeSet& scopes,
-    identity::AccessTokenFetcher::TokenCallback callback) {
+    signin::AccessTokenFetcher::TokenCallback callback) {
   DCHECK(identity_manager_->HasAccountWithRefreshToken(account_id_));
   return identity_manager_->CreateAccessTokenFetcherForAccount(
       account_id_, consumer_name, scopes, std::move(callback),
-      identity::AccessTokenFetcher::Mode::kImmediate);
+      signin::AccessTokenFetcher::Mode::kImmediate);
 }
 
 void ArcAuthContext::OnRefreshTokenUpdatedForAccount(

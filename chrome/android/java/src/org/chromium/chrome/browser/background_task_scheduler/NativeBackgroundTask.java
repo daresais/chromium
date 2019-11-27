@@ -5,17 +5,19 @@
 package org.chromium.chrome.browser.background_task_scheduler;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.EmptyBrowserParts;
+import org.chromium.chrome.browser.metrics.BackgroundTaskMemoryMetricsEmitter;
 import org.chromium.components.background_task_scheduler.BackgroundTask;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerExternalUma;
 import org.chromium.components.background_task_scheduler.TaskParameters;
@@ -24,6 +26,7 @@ import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.Random;
 
 /**
  * Base class implementing {@link BackgroundTask} that adds native initialization, ensuring that
@@ -31,6 +34,7 @@ import java.lang.annotation.RetentionPolicy;
  */
 public abstract class NativeBackgroundTask implements BackgroundTask {
     private static final String TAG = "BTS_NativeBkgrdTask";
+    private static final int MAX_MEMORY_MEASUREMENT_DELAY_MS = 60 * 1000;
 
     /** Specifies which action to take following onStartTaskBeforeNativeLoaded. */
     @IntDef({StartBeforeNativeResult.LOAD_NATIVE, StartBeforeNativeResult.RESCHEDULE,
@@ -44,8 +48,6 @@ public abstract class NativeBackgroundTask implements BackgroundTask {
         /** Task should neither load native parts of browser nor reschedule. */
         int DONE = 2;
     }
-
-    protected NativeBackgroundTask() {}
 
     /** Indicates that the task has already been stopped. Should only be accessed on UI Thread. */
     private boolean mTaskStopped;
@@ -61,6 +63,17 @@ public abstract class NativeBackgroundTask implements BackgroundTask {
 
     /** Make sure that we do not double record task finished metric */
     private boolean mFinishMetricRecorded;
+
+    private BackgroundTaskSchedulerExternalUma mExternalUma;
+
+    protected NativeBackgroundTask() {
+        this(BackgroundTaskSchedulerExternalUma.getInstance());
+    }
+
+    @VisibleForTesting
+    NativeBackgroundTask(BackgroundTaskSchedulerExternalUma externalUma) {
+        mExternalUma = externalUma;
+    }
 
     @Override
     public final boolean onStartTask(
@@ -125,21 +138,21 @@ public abstract class NativeBackgroundTask implements BackgroundTask {
             final Runnable rescheduleRunnable) {
         if (isNativeLoadedInFullBrowserMode()) {
             mRunningInServiceManagerOnlyMode = false;
-            BackgroundTaskSchedulerExternalUma.reportNativeTaskStarted(
-                    mTaskId, mRunningInServiceManagerOnlyMode);
+            mExternalUma.reportNativeTaskStarted(mTaskId, mRunningInServiceManagerOnlyMode);
+            recordMemoryUsageWithRandomDelay(mRunningInServiceManagerOnlyMode);
             PostTask.postTask(UiThreadTaskTraits.DEFAULT, startWithNativeRunnable);
             return;
         }
 
         boolean wasInServiceManagerOnlyMode = isNativeLoadedInServiceManagerOnlyMode();
         mRunningInServiceManagerOnlyMode = supportsServiceManagerOnly();
-        BackgroundTaskSchedulerExternalUma.reportNativeTaskStarted(
-                mTaskId, mRunningInServiceManagerOnlyMode);
+        mExternalUma.reportNativeTaskStarted(mTaskId, mRunningInServiceManagerOnlyMode);
 
         final BrowserParts parts = new EmptyBrowserParts() {
             @Override
             public void finishNativeInitialization() {
                 PostTask.postTask(UiThreadTaskTraits.DEFAULT, startWithNativeRunnable);
+                recordMemoryUsageWithRandomDelay(mRunningInServiceManagerOnlyMode);
             }
             @Override
             public boolean startServiceManagerOnly() {
@@ -160,9 +173,9 @@ public abstract class NativeBackgroundTask implements BackgroundTask {
                 // Record transitions from No Native to Service Manager Only Mode and from No Native
                 // to Full Browser mode, but not cases in which Service Manager Only Mode was
                 // already started.
-                if (!wasInServiceManagerOnlyMode)
-                    BackgroundTaskSchedulerExternalUma.reportTaskStartedNative(
-                            mTaskId, mRunningInServiceManagerOnlyMode);
+                if (!wasInServiceManagerOnlyMode) {
+                    mExternalUma.reportTaskStartedNative(mTaskId, mRunningInServiceManagerOnlyMode);
+                }
 
                 try {
                     ChromeBrowserInitializer.getInstance(context).handlePreNativeStartup(parts);
@@ -170,9 +183,8 @@ public abstract class NativeBackgroundTask implements BackgroundTask {
                     ChromeBrowserInitializer.getInstance(context).handlePostNativeStartup(
                             true /* isAsync */, parts);
                 } catch (ProcessInitException e) {
-                    Log.e(TAG, "ProcessInitException while starting the browser process.");
+                    Log.e(TAG, "Background Launch Error", e);
                     rescheduleRunnable.run();
-                    return;
                 }
             }
         });
@@ -264,8 +276,20 @@ public abstract class NativeBackgroundTask implements BackgroundTask {
       ThreadUtils.assertOnUiThread();
       if (!mFinishMetricRecorded) {
         mFinishMetricRecorded = true;
-        BackgroundTaskSchedulerExternalUma.reportNativeTaskFinished(
-                mTaskId, mRunningInServiceManagerOnlyMode);
+        mExternalUma.reportNativeTaskFinished(mTaskId, mRunningInServiceManagerOnlyMode);
       }
+    }
+
+    private void recordMemoryUsageWithRandomDelay(boolean serviceManagerOnlyMode) {
+        // The metrics are emitted only once so that the average does not converge towards the
+        // memory usage after the task is executed, but reflects the task being executed.
+        // The statistical distribution of the delay is uniform between 0s and 60s. The Offline
+        // Prefetch background task, for example, starts downloads ~25s after the start of the task.
+        final int delay = (int) (new Random().nextFloat() * MAX_MEMORY_MEASUREMENT_DELAY_MS);
+
+        PostTask.postDelayedTask(UiThreadTaskTraits.DEFAULT, () -> {
+            BackgroundTaskMemoryMetricsEmitter.reportMemoryUsage(serviceManagerOnlyMode,
+                    BackgroundTaskSchedulerExternalUma.toMemoryHistogramAffixFromTaskId(mTaskId));
+        }, delay);
     }
 }

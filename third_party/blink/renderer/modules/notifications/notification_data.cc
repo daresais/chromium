@@ -13,9 +13,9 @@
 #include "third_party/blink/renderer/modules/notifications/timestamp_trigger.h"
 #include "third_party/blink/renderer/modules/vibration/vibration_controller.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 namespace {
@@ -83,7 +83,7 @@ mojom::blink::NotificationDataPtr CreateNotificationData(
                                                vibration_pattern.size());
   notification_data->timestamp = options->hasTimestamp()
                                      ? static_cast<double>(options->timestamp())
-                                     : WTF::CurrentTimeMS();
+                                     : base::Time::Now().ToDoubleT() * 1000.0;
   notification_data->renotify = options->renotify();
   notification_data->silent = options->silent();
   notification_data->require_interaction = options->requireInteraction();
@@ -143,6 +143,8 @@ mojom::blink::NotificationDataPtr CreateNotificationData(
   notification_data->actions = std::move(actions);
 
   if (options->hasShowTrigger()) {
+    UseCounter::Count(context, WebFeature::kNotificationShowTrigger);
+
     auto* timestamp_trigger = options->showTrigger();
     auto timestamp = base::Time::FromJsTime(timestamp_trigger->timestamp());
 

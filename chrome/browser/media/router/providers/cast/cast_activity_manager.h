@@ -19,8 +19,10 @@
 #include "chrome/browser/media/router/providers/cast/cast_internal_message_util.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_tracker.h"
 #include "chrome/common/media_router/discovery/media_sink_internal.h"
-#include "chrome/common/media_router/mojo/media_router.mojom.h"
+#include "chrome/common/media_router/mojom/media_router.mojom.h"
 #include "chrome/common/media_router/providers/cast/cast_media_source.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "url/origin.h"
 
 namespace cast_channel {
@@ -33,7 +35,6 @@ class ActivityRecord;
 class CastActivityRecord;
 class CastActivityRecordFactoryForTest;
 class CastSession;
-class DataDecoder;
 class MediaSinkServiceBase;
 
 // Base class for CastActivityManager including only functionality needed by
@@ -64,15 +65,12 @@ class CastActivityManager : public CastActivityManagerBase,
   // |message_handler|: Used for sending and receiving messages to Cast
   // receivers.
   // |media_router|: Mojo ptr to MediaRouter.
-  // |data_decoder|: Used for parsing JSON messages from Cast SDK and Cast
-  // receivers.
   // |hash_token|: Used for hashing receiver IDs in messages sent to the Cast
   // SDK.
   CastActivityManager(MediaSinkServiceBase* media_sink_service,
                       CastSessionTracker* session_tracker,
                       cast_channel::CastMessageHandler* message_handler,
                       mojom::MediaRouter* media_router,
-                      std::unique_ptr<DataDecoder> data_decoder,
                       const std::string& hash_token);
   ~CastActivityManager() override;
 
@@ -104,6 +102,11 @@ class CastActivityManager : public CastActivityManagerBase,
   void TerminateSession(
       const MediaRoute::Id& route_id,
       mojom::MediaRouteProvider::TerminateRouteCallback callback);
+
+  bool CreateMediaController(
+      const std::string& route_id,
+      mojo::PendingReceiver<mojom::MediaController> media_controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer);
 
   const MediaRoute* GetRoute(const MediaRoute::Id& route_id) const;
   std::vector<MediaRoute> GetRoutes() const;
@@ -240,6 +243,10 @@ class CastActivityManager : public CastActivityManagerBase,
       int tab_id,
       const CastSinkExtraData& cast_data);
 
+  // Returns a sink used to convert a mirroring activity to a cast activity.  If
+  // no conversion should occur, returns base::nullopt.
+  base::Optional<MediaSinkInternal> ConvertMirrorToCast(int tab_id);
+
   static CastActivityRecordFactoryForTest* activity_record_factory_;
 
   base::flat_set<MediaSource::Id> route_queries_;
@@ -251,7 +258,6 @@ class CastActivityManager : public CastActivityManagerBase,
   cast_channel::CastMessageHandler* const message_handler_;
   mojom::MediaRouter* const media_router_;
 
-  const std::unique_ptr<DataDecoder> data_decoder_;
   const std::string hash_token_;
 
   SEQUENCE_CHECKER(sequence_checker_);

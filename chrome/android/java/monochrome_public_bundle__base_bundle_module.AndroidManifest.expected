@@ -1,12 +1,12 @@
 <?xml version="1.0" ?>
 <manifest
     package="org.chromium.chrome"
-    platformBuildVersionCode="28"
-    platformBuildVersionName="9"
+    platformBuildVersionCode="29"
+    platformBuildVersionName="10"
     tools:ignore="MissingVersion"
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-  <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="28"/>
+  <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="29"/>
   <uses-permission-sdk-23 android:name="android.permission.USE_FINGERPRINT"/>
   <uses-permission-sdk-23 android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
   <uses-permission-sdk-23 android:name="android.permission.REORDER_TASKS"/>
@@ -51,6 +51,8 @@
       android:required="false"
       android:version="1"/>
   <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+  <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false"/>
+  <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false"/>
   <uses-feature android:name="android.hardware.screen.landscape" android:required="false"/>
   <uses-feature android:name="android.hardware.microphone" android:required="false"/>
   <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
@@ -77,6 +79,7 @@
       android:protectionLevel="signature"/>
   <application
       android:allowBackup="false"
+      android:appComponentFactory="android.support.v4.app.CoreComponentFactory"
       android:extractNativeLibs="false"
       android:icon="@drawable/ic_launcher"
       android:label="@string/app_name"
@@ -161,6 +164,38 @@
         android:enabled="false"
         android:excludeFromRecents="true"
         android:exported="true"
+        android:icon="@drawable/ic_devices_48dp"
+        android:label="@string/shared_clipboard_share_activity_title"
+        android:name="org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardShareActivity"
+        android:noHistory="true"
+        android:theme="@style/Theme.Chromium.Activity.TranslucentNoAnimations">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="text/plain"/>
+      </intent-filter>
+    </activity>
+    <activity
+        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
+        android:enabled="false"
+        android:excludeFromRecents="true"
+        android:exported="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/qr_code_share_icon_label"
+        android:name="org.chromium.chrome.browser.share.qrcode.QrCodeShareActivity"
+        android:noHistory="true"
+        android:theme="@android:style/Theme.NoDisplay">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="text/plain"/>
+      </intent-filter>
+    </activity>
+    <activity
+        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
+        android:enabled="false"
+        android:excludeFromRecents="true"
+        android:exported="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/send_tab_to_self_share_activity_title"
         android:name="org.chromium.chrome.browser.send_tab_to_self.SendTabToSelfShareActivity"
@@ -193,12 +228,30 @@
     <activity
         android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
         android:excludeFromRecents="true"
+        android:exported="true"
+        android:name="org.chromium.chrome.features.test_dummy.TestDummyActivity"
+        android:noHistory="true"
+        android:theme="@style/Theme.AppCompat"/>
+    <activity
+        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
+        android:excludeFromRecents="true"
         android:hardwareAccelerated="true"
         android:label="Chrome.CafExpandedControllerActivity"
         android:launchMode="singleTask"
         android:name="org.chromium.chrome.browser.media.router.caf.remoting.CafExpandedControllerActivity"
         android:noHistory="true"
         android:theme="@style/Theme.Chromium.Activity"/>
+    <activity
+        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
+        android:excludeFromRecents="true"
+        android:name="org.chromium.chrome.browser.bookmarks.BookmarkAddActivity"
+        android:theme="@android:style/Theme.NoDisplay"
+        android:windowSoftInputMode="stateHidden">
+      <intent-filter>
+        <action android:name="org.chromium.chrome.ADDBOOKMARK"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+      </intent-filter>
+    </activity>
     <activity
         android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
         android:exported="false"
@@ -253,16 +306,6 @@
         android:exported="false"
         android:name="org.chromium.chrome.browser.signin.SigninActivity"
         android:theme="@style/Theme.Chromium.DialogWhenLarge"/>
-    <activity
-        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
-        android:name="org.chromium.chrome.browser.bookmarks.BookmarkAddActivity"
-        android:theme="@style/Theme.Chromium.DialogWhenLarge"
-        android:windowSoftInputMode="stateHidden">
-      <intent-filter>
-        <action android:name="org.chromium.chrome.ADDBOOKMARK"/>
-        <category android:name="android.intent.category.DEFAULT"/>
-      </intent-filter>
-    </activity>
     <activity
         android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize|uiMode"
         android:enableVrMode="@string/gvr_vr_mode_component"
@@ -878,6 +921,13 @@
         android:process=":playcore_missing_splits_activity"
         android:stateNotNeeded="true"/>
     <activity
+        android:enabled="false"
+        android:exported="false"
+        android:name="com.google.android.play.core.common.PlayCoreDialogWrapperActivity"
+        android:process=":playcore_dialog_wrapper_activity"
+        android:stateNotNeeded="true"
+        android:theme="@style/Theme.PlayCore.Transparent"/>
+    <activity
         android:excludeFromRecents="true"
         android:exported="false"
         android:launchMode="singleInstance"
@@ -920,10 +970,6 @@
         android:name="org.chromium.chrome.browser.browserservices.ClearDataDialogActivity"
         android:theme="@style/Theme.Chromium.ClearDataDialogActivity"/>
     <activity
-        android:exported="false"
-        android:name="org.chromium.chrome.browser.incognito.IncognitoDisclosureActivity"
-        android:theme="@style/Theme.Chromium.Activity.Fullscreen.Transparent"/>
-    <activity
         android:exported="true"
         android:name="org.chromium.chrome.browser.browserservices.ManageTrustedWebActivityDataActivity"
         android:theme="@style/Theme.Chromium.Activity.Fullscreen.Transparent">
@@ -932,6 +978,11 @@
             android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <data android:scheme="https"/>
+      </intent-filter>
+      <intent-filter>
+        <action
+            android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA"/>
+        <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>
     </activity>
     <activity
@@ -945,7 +996,7 @@
     </activity>
     <activity
         android:label="@string/license_activity_title"
-        android:name="com.android.webview.chromium.LicenseActivity"
+        android:name="org.chromium.android_webview.nonembedded.LicenseActivity"
         android:process=":webview_apk">
       <intent-filter>
         <action android:name="android.settings.WEBVIEW_LICENSE"/>
@@ -955,6 +1006,32 @@
           android:name="com.android.settings.PRIMARY_PROFILE_CONTROLLED"
           android:value="true"/>
     </activity>
+    <activity
+        android:label="WebView
+        Crashes"
+        android:launchMode="singleTop"
+        android:name="org.chromium.android_webview.devui.CrashesListActivity"
+        android:process=":webview_apk"
+        android:theme="@style/Theme.DevUi.DayNight"/>
+    <activity
+        android:label="WebView
+        DevTools"
+        android:launchMode="singleTask"
+        android:name="org.chromium.android_webview.devui.MainActivity"
+        android:process=":webview_apk"
+        android:theme="@style/Theme.DevUi.DayNight">
+      <intent-filter>
+        <action android:name="com.android.webview.SHOW_DEV_UI"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+      </intent-filter>
+    </activity>
+    <activity
+        android:label="WebView
+        Flags"
+        android:launchMode="singleTop"
+        android:name="org.chromium.android_webview.devui.FlagsActivity"
+        android:process=":webview_apk"
+        android:theme="@style/Theme.DevUi.DayNight"/>
     <activity
         android:enabled="false"
         android:excludeFromRecents="true"
@@ -1193,9 +1270,6 @@
         android:name="ipc.invalidation.ticl.gcm_upstream_service_class"
         android:value="org.chromium.chrome.browser.services.gcm.InvalidationGcmUpstreamSender"/>
     <meta-data
-        android:name="ipc.invalidation.ticl.listener_service_class"
-        android:value="org.chromium.chrome.browser.invalidation.ChromeInvalidationClientService"/>
-    <meta-data
         android:name="org.chromium.chrome:privileged_process0.ignore_multidex"
         android:value="true"/>
     <meta-data
@@ -1251,7 +1325,7 @@
     <provider
         android:authorities="org.chromium.chrome.LicenseContentProvider"
         android:exported="true"
-        android:name="com.android.webview.chromium.LicenseContentProvider"
+        android:name="org.chromium.android_webview.nonembedded.LicenseContentProvider"
         android:process=":webview_apk"/>
     <receiver
         android:exported="false"
@@ -1315,6 +1389,12 @@
         android:name="org.chromium.chrome.browser.sharing.click_to_call.ClickToCallMessageHandler$TapReceiver"/>
     <receiver
         android:exported="false"
+        android:name="org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardMessageHandler$TapReceiver"/>
+    <receiver
+        android:exported="false"
+        android:name="org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardMessageHandler$TryAgainReceiver"/>
+    <receiver
+        android:exported="false"
         android:name="org.chromium.chrome.browser.upgrade.PackageReplacedBroadcastReceiver">
       <intent-filter>
         <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
@@ -1337,6 +1417,13 @@
         <action android:name="android.intent.action.PACKAGE_DATA_CLEARED"/>
         <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED"/>
         <data android:scheme="package"/>
+      </intent-filter>
+    </receiver>
+    <receiver
+        android:exported="true"
+        android:name="org.chromium.chrome.browser.sharing.click_to_call.ClickToCallMessageHandler$PhoneUnlockedReceiver">
+      <intent-filter>
+        <action android:name="android.intent.action.USER_PRESENT"/>
       </intent-filter>
     </receiver>
     <receiver
@@ -1398,6 +1485,11 @@
         android:isolatedProcess="true"
         android:name="org.chromium.chrome.browser.photo_picker.DecoderService"
         android:process=":decoder_service"/>
+    <service
+        android:enabled="false"
+        android:exported="true"
+        android:name="org.chromium.android_webview.services.DeveloperUiService"
+        android:process=":webview_service"/>
     <service
         android:exported="false"
         android:isolatedProcess="false"
@@ -1482,13 +1574,6 @@
     </service>
     <service
         android:exported="false"
-        android:name="org.chromium.chrome.browser.invalidation.ChromeInvalidationClientService">
-      <intent-filter>
-        <action android:name="com.google.ipc.invalidation.AUTH_TOKEN_REQUEST"/>
-      </intent-filter>
-    </service>
-    <service
-        android:exported="false"
         android:name="org.chromium.chrome.browser.media.MediaCaptureNotificationService"/>
     <service
         android:exported="false"
@@ -1526,6 +1611,9 @@
         <action android:name="com.google.android.c2dm.intent.RECEIVE"/>
       </intent-filter>
     </service>
+    <service
+        android:exported="false"
+        android:name="org.chromium.chrome.browser.services.gcm.GCMBackgroundService"/>
     <service
         android:exported="false"
         android:name="org.chromium.chrome.browser.services.gcm.InvalidationGcmUpstreamSender"/>
@@ -1573,7 +1661,7 @@
         <action android:name="com.google.android.gms.gcm.ACTION_TASK_READY"/>
       </intent-filter>
     </service>
-    <service android:name="android.support.customtabs.PostMessageService"/>
+    <service android:name="androidx.browser.customtabs.PostMessageService"/>
     <service
         android:exported="true"
         android:externalService="true"
@@ -1945,6 +2033,7 @@
         <category android:name="androidx.browser.trusted.category.TrustedWebActivities"/>
         <category
             android:name="androidx.browser.trusted.category.TrustedWebActivitySplashScreensV1"/>
+        <category android:name="androidx.browser.trusted.category.WebShareTargetV2"/>
       </intent-filter>
     </service>
     <service

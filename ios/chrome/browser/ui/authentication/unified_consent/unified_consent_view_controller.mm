@@ -9,11 +9,13 @@
 #include "ios/chrome/browser/application_context.h"
 #import "ios/chrome/browser/ui/authentication/authentication_constants.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_picker_view.h"
+#import "ios/chrome/browser/ui/authentication/unified_consent/unified_consent_constants.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/unified_consent_view_controller_delegate.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/util/label_link_controller.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/common/string_util.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
@@ -24,9 +26,6 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-NSString* const kUnifiedConsentScrollViewIdentifier =
-    @"kUnifiedConsentScrollViewIdentifier";
 
 namespace {
 
@@ -390,9 +389,11 @@ const char* const kSettingsSyncURL = "internal://settings-sync";
                                             action:^(const GURL& URL) {
                                               [weakSelf openSettings];
                                             }];
+    [self.settingsLinkController setLinkColor:[UIColor colorNamed:kBlueColor]];
     [self.settingsLinkController
-        setLinkColor:[[MDCPalette cr_bluePalette] tint500]];
-    [self.settingsLinkController addLinkWithRange:range url:URL];
+        addLinkWithRange:range
+                     url:URL
+         accessibilityID:kAdvancedSigninSettingsLinkIdentifier];
   }
 }
 

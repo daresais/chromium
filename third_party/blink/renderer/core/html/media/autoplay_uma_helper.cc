@@ -7,7 +7,6 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/blink/public/platform/interface_provider.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -17,7 +16,7 @@
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer_entry.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 
@@ -38,7 +37,7 @@ int64_t GetUserGestureStatusForUkmMetric(LocalFrame* frame) {
 
   int64_t result = 0;
 
-  if (LocalFrame::HasTransientUserActivation(frame, false))
+  if (LocalFrame::HasTransientUserActivation(frame))
     result |= 0x01;
   if (frame->HasBeenActivated())
     result |= 0x02;
@@ -99,26 +98,6 @@ void AutoplayUmaHelper::OnAutoplayInitiated(AutoplaySource source) {
             static_cast<int>(AutoplaySource::kDualSource));
     } else {
       audio_histogram.Count(static_cast<int>(AutoplaySource::kDualSource));
-    }
-  }
-
-  // Record the child frame and top-level frame URLs for autoplay muted videos
-  // by attribute.
-  if (element_->IsHTMLVideoElement() && element_->muted()) {
-    if (sources_.size() ==
-        static_cast<size_t>(AutoplaySource::kNumberOfSources)) {
-      Platform::Current()->RecordRapporURL(
-          "Media.Video.Autoplay.Muted.DualSource.Frame",
-          element_->GetDocument().Url());
-    } else if (source == AutoplaySource::kAttribute) {
-      Platform::Current()->RecordRapporURL(
-          "Media.Video.Autoplay.Muted.Attribute.Frame",
-          element_->GetDocument().Url());
-    } else {
-      DCHECK(source == AutoplaySource::kMethod);
-      Platform::Current()->RecordRapporURL(
-          "Media.Video.Autoplay.Muted.PlayMethod.Frame",
-          element_->GetDocument().Url());
     }
   }
 

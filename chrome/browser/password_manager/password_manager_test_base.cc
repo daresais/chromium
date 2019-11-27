@@ -25,6 +25,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/password_manager/core/browser/mock_password_feature_manager.h"
+#include "components/password_manager/core/browser/password_feature_manager.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/browser/test_password_store.h"
 #include "content/public/browser/browser_thread.h"
@@ -39,6 +41,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "testing/gmock/include/gmock/gmock.h"
 
 namespace {
 
@@ -60,6 +63,37 @@ class PasswordStoreResultsObserver
   base::RunLoop run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreResultsObserver);
+};
+
+// Custom class is required to enable password generation.
+class CustomPasswordManagerClient : public ChromePasswordManagerClient {
+ public:
+  using ChromePasswordManagerClient::ChromePasswordManagerClient;
+  CustomPasswordManagerClient(content::WebContents* contents,
+                              autofill::AutofillClient* autofill_client)
+      : ChromePasswordManagerClient(contents, autofill_client) {
+    ON_CALL(password_feature_manager_, IsGenerationEnabled())
+        .WillByDefault(testing::Return(true));
+  }
+
+  static void CreateForWebContentsWithAutofillClient(
+      content::WebContents* contents,
+      autofill::AutofillClient* autofill_client) {
+    ASSERT_FALSE(FromWebContents(contents));
+    contents->SetUserData(UserDataKey(),
+                          std::make_unique<CustomPasswordManagerClient>(
+                              contents, autofill_client));
+  }
+
+  // PasswordManagerClient:
+  const password_manager::PasswordFeatureManager* GetPasswordFeatureManager()
+      const override {
+    return &password_feature_manager_;
+  }
+
+ private:
+  testing::NiceMock<password_manager::MockPasswordFeatureManager>
+      password_feature_manager_;
 };
 
 // ManagePasswordsUIController subclass to capture the UI events.
@@ -96,8 +130,7 @@ class CustomManagePasswordsUIController : public ManagePasswordsUIController {
       const GURL& origin,
       const ManagePasswordsState::CredentialsCallback& callback) override;
   void OnPasswordAutofilled(
-      const std::map<base::string16, const autofill::PasswordForm*>&
-          password_form_map,
+      const std::vector<const autofill::PasswordForm*>& password_forms,
       const GURL& origin,
       const std::vector<const autofill::PasswordForm*>* federated_matches)
       override;
@@ -226,13 +259,12 @@ bool CustomManagePasswordsUIController::OnChooseCredentials(
 }
 
 void CustomManagePasswordsUIController::OnPasswordAutofilled(
-    const std::map<base::string16, const autofill::PasswordForm*>&
-        password_form_map,
+    const std::vector<const autofill::PasswordForm*>& password_forms,
     const GURL& origin,
     const std::vector<const autofill::PasswordForm*>* federated_matches) {
   ProcessStateExpectations(password_manager::ui::MANAGE_STATE);
   return ManagePasswordsUIController::OnPasswordAutofilled(
-      password_form_map, origin, federated_matches);
+      password_forms, origin, federated_matches);
 }
 
 void CustomManagePasswordsUIController::DidFinishNavigation(
@@ -283,25 +315,6 @@ enum ReturnCodes {  // Possible results of the JavaScript code.
 };
 
 }  // namespace
-void CustomPasswordManagerClient::CreateForWebContentsWithAutofillClient(
-    content::WebContents* contents,
-    autofill::AutofillClient* autofill_client) {
-  ASSERT_FALSE(FromWebContents(contents));
-  contents->SetUserData(UserDataKey(),
-                        base::WrapUnique(new CustomPasswordManagerClient(
-                            contents, autofill_client)));
-}
-
-// PasswordManagerClient:
-password_manager::SyncState CustomPasswordManagerClient::GetPasswordSyncState()
-    const {
-  return password_manager::SYNCING_NORMAL_ENCRYPTION;
-}
-
-void CustomPasswordManagerClient::OnPaste() {
-  pasted_value_ = ChromePasswordManagerClient::GetTextFromClipboard();
-  ChromePasswordManagerClient::OnPaste();
-}
 
 NavigationObserver::NavigationObserver(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),

@@ -9,11 +9,12 @@
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/public/interfaces/constants.mojom.h"
+#include "ash/public/mojom/constants.mojom.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/night_light/night_light_client.h"
 #include "chrome/browser/chromeos/policy/display_resolution_handler.h"
@@ -41,12 +42,12 @@
 #include "chrome/browser/ui/ash/session_controller_client_impl.h"
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/browser/ui/ash/tab_scrubber.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
+#include "chrome/browser/ui/ash/tablet_mode_page_behavior.h"
 #include "chrome/browser/ui/ash/vpn_list_forwarder.h"
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/browser/ui/views/select_file_dialog_extension.h"
 #include "chrome/browser/ui/views/select_file_dialog_extension_factory.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/network/network_connect.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/session_manager/core/session_manager.h"
@@ -109,12 +110,7 @@ class ChromeLauncherControllerInitializer
 ChromeBrowserMainExtraPartsAsh::ChromeBrowserMainExtraPartsAsh()
     : notification_observer_(std::make_unique<NotificationObserver>()) {}
 
-ChromeBrowserMainExtraPartsAsh::~ChromeBrowserMainExtraPartsAsh() {
-  // Views code observes TabletModeClient and may not be destroyed until
-  // ash::Shell is, so destroy |tablet_mode_client_| after ash::Shell.
-  // Also extensions need to remove observers after PostMainMessageLoopRun().
-  tablet_mode_client_.reset();
-}
+ChromeBrowserMainExtraPartsAsh::~ChromeBrowserMainExtraPartsAsh() = default;
 
 void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
   // NetworkConnect handles the network connection state machine for the UI.
@@ -142,19 +138,20 @@ void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
       chromeos::input_method::InputMethodManager::Get());
   ime_controller_client_->Init();
 
+  // NOTE: The WallpaperControllerClient must be initialized before the
+  // session controller, because the session controller triggers the loading
+  // of users, which itself calls a code path which eventually reaches the
+  // WallpaperControllerClient singleton instance via
+  // chromeos::ChromeUserManagerImpl.
+  wallpaper_controller_client_ = std::make_unique<WallpaperControllerClient>();
+  wallpaper_controller_client_->Init();
+
   session_controller_client_ = std::make_unique<SessionControllerClientImpl>();
   session_controller_client_->Init();
 
   system_tray_client_ = std::make_unique<SystemTrayClient>();
-
-  // Makes mojo request to TabletModeController in ash.
-  tablet_mode_client_ = std::make_unique<TabletModeClient>();
-  tablet_mode_client_->Init();
-
+  tablet_mode_page_behavior_ = std::make_unique<TabletModePageBehavior>();
   vpn_list_forwarder_ = std::make_unique<VpnListForwarder>();
-
-  wallpaper_controller_client_ = std::make_unique<WallpaperControllerClient>();
-  wallpaper_controller_client_->Init();
 
   chrome_launcher_controller_initializer_ =
       std::make_unique<internal::ChromeLauncherControllerInitializer>();
@@ -210,7 +207,7 @@ void ChromeBrowserMainExtraPartsAsh::PostBrowserStart() {
       g_browser_process->shared_url_loader_factory());
   night_light_client_->Start();
 
-  if (chromeos::switches::IsAmbientModeEnabled())
+  if (chromeos::features::IsAmbientModeEnabled())
     photo_controller_ = std::make_unique<PhotoControllerImpl>();
 }
 
@@ -221,7 +218,7 @@ void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {
   exo_parts_.reset();
 #endif
 
-  if (chromeos::switches::IsAmbientModeEnabled())
+  if (chromeos::features::IsAmbientModeEnabled())
     photo_controller_.reset();
 
   night_light_client_.reset();
@@ -231,13 +228,13 @@ void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {
   wallpaper_controller_client_.reset();
   vpn_list_forwarder_.reset();
 
-  // Initialized in PostProfileInit:
+  // Initialized in PostProfileInit (which may not get called in some tests).
   network_portal_notification_controller_.reset();
   display_settings_handler_.reset();
   media_client_.reset();
   login_screen_client_.reset();
 
-  // Initialized in PreProfileInit:
+  // Initialized in PreProfileInit (which may not get called in some tests).
   system_tray_client_.reset();
   session_controller_client_.reset();
   ime_controller_client_.reset();
@@ -248,8 +245,8 @@ void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {
   app_list_client_.reset();
   ash_shell_init_.reset();
   cast_config_controller_media_router_.reset();
-
-  chromeos::NetworkConnect::Shutdown();
+  if (chromeos::NetworkConnect::IsInitialized())
+    chromeos::NetworkConnect::Shutdown();
   network_connect_delegate_.reset();
 }
 

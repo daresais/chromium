@@ -8,14 +8,17 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
-import android.preference.Preference;
-import android.preference.PreferenceFragment;
 import android.provider.Settings;
+import android.support.v7.preference.Preference;
+import android.support.v7.preference.PreferenceFragmentCompat;
+import android.view.View;
+
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.night_mode.NightModeUtils;
 import org.chromium.chrome.browser.offlinepages.prefetch.PrefetchConfiguration;
@@ -30,7 +33,6 @@ import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 
@@ -40,7 +42,7 @@ import java.util.Map;
 /**
  * The main settings screen, shown when the user first opens Settings.
  */
-public class MainPreferences extends PreferenceFragment
+public class MainPreferences extends PreferenceFragmentCompat
         implements TemplateUrlService.LoadListener, ProfileSyncService.SyncStateChangedListener,
                    SigninManager.SignInStateObserver {
     public static final String PREF_ACCOUNT_SECTION = "account_section";
@@ -72,9 +74,16 @@ public class MainPreferences extends PreferenceFragment
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         createPreferences();
+    }
+
+    @Override
+    public void onViewCreated(View view, Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+
+        // Disable animations of preference changes.
+        getListView().setItemAnimator(null);
     }
 
     @Override
@@ -198,15 +207,8 @@ public class MainPreferences extends PreferenceFragment
         updateSyncAndServicesPreference();
         updateSearchEnginePreference();
 
-        if (HomepageManager.shouldShowHomepageSetting()) {
-            Preference homepagePref = addPreferenceIfAbsent(PREF_HOMEPAGE);
-            if (FeatureUtilities.isNewTabPageButtonEnabled()) {
-                homepagePref.setTitle(R.string.options_startup_page_title);
-            }
-            setOnOffSummary(homepagePref, HomepageManager.getInstance().getPrefHomepageEnabled());
-        } else {
-            removePreferenceIfPresent(PREF_HOMEPAGE);
-        }
+        Preference homepagePref = addPreferenceIfAbsent(PREF_HOMEPAGE);
+        setOnOffSummary(homepagePref, HomepageManager.getInstance().getPrefHomepageEnabled());
 
         if (NightModeUtils.isNightModeSupported() && FeatureUtilities.isNightModeAvailable()) {
             addPreferenceIfAbsent(PREF_UI_THEME);
@@ -271,7 +273,7 @@ public class MainPreferences extends PreferenceFragment
     }
 
     private void setOnOffSummary(Preference pref, boolean isOn) {
-        pref.setSummary(getResources().getString(isOn ? R.string.text_on : R.string.text_off));
+        pref.setSummary(isOn ? R.string.text_on : R.string.text_off);
     }
 
     // SigninManager.SignInStateObserver implementation.

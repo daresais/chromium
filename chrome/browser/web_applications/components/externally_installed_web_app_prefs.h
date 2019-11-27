@@ -10,7 +10,7 @@
 
 #include "base/macros.h"
 #include "base/optional.h"
-#include "chrome/browser/web_applications/components/pending_app_manager.h"
+#include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 
 class GURL;
@@ -57,9 +57,10 @@ class ExternallyInstalledWebAppPrefs {
   // *placeholder app*.
   base::Optional<AppId> LookupPlaceholderAppId(const GURL& url) const;
   void SetIsPlaceholder(const GURL& url, bool is_placeholder);
+  bool IsPlaceholderApp(const AppId& app_id) const;
 
  private:
-  PrefService* pref_service_;
+  PrefService* const pref_service_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternallyInstalledWebAppPrefs);
 };

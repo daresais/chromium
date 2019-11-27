@@ -8,7 +8,8 @@
 
 #include "ash/assistant/assistant_controller.h"
 #include "ash/assistant/assistant_ui_controller.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
+#include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -30,10 +31,11 @@ class AssistantContainerViewTest : public AshTestBase {
   ~AssistantContainerViewTest() override = default;
 
   void SetUp() override {
-    AshTestBase::SetUp();
+    // Disable the launcher UI feature flag to test the container view.
+    feature_list_.InitAndDisableFeature(
+        app_list_features::kEnableAssistantLauncherUI);
 
-    // Enable Assistant in settings.
-    VoiceInteractionController::Get()->NotifySettingsEnabled(true);
+    AshTestBase::SetUp();
 
     // Cache controller.
     controller_ = Shell::Get()->assistant_controller();
@@ -43,15 +45,19 @@ class AssistantContainerViewTest : public AshTestBase {
     ui_controller_ = controller_->ui_controller();
     DCHECK(ui_controller_);
 
+    // Enable Assistant in settings.
+    Shell::Get()->session_controller()->GetPrimaryUserPrefService()->SetBoolean(
+        chromeos::assistant::prefs::kAssistantEnabled, true);
+
     // After mocks are set up our Assistant service is ready for use. Indicate
     // this by changing status from NOT_READY to STOPPED.
-    VoiceInteractionController::Get()->NotifyStatusChanged(
-        mojom::VoiceInteractionState::STOPPED);
+    AssistantState::Get()->NotifyStatusChanged(mojom::AssistantState::READY);
   }
 
   AssistantUiController* ui_controller() { return ui_controller_; }
 
  private:
+  base::test::ScopedFeatureList feature_list_;
   AssistantController* controller_ = nullptr;
   AssistantUiController* ui_controller_ = nullptr;
 
@@ -71,10 +77,7 @@ TEST_F(AssistantContainerViewTest, InitialAnchoring) {
 
   // We expect the view to appear in the work area where new windows will open.
   gfx::Rect expected_work_area =
-      display::Screen::GetScreen()
-          ->GetDisplayMatching(
-              Shell::Get()->GetRootWindowForNewWindows()->GetBoundsInScreen())
-          .work_area();
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
 
   // We expect the view to be horizontally centered and bottom aligned.
   gfx::Rect expected_bounds = gfx::Rect(expected_work_area);

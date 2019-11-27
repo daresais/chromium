@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 /**
  * Java counterpart to C++ ContentSetting enum.
@@ -17,7 +17,7 @@ import android.support.annotation.Nullable;
  */
 public class ContentSetting {
     // Indexed by {@link ContentSettingValues}.
-    private final static String[] STRING_VALUES = {
+    private static final String[] STRING_VALUES = {
             "DEFAULT", // ContentSettingValues.DEFAULT
             "ALLOW", // ContentSettingValues.ALLOW
             "BLOCK", // ContentSettingValues.BLOCK

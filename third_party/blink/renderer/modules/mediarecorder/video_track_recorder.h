@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIARECORDER_VIDEO_TRACK_RECORDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIARECORDER_VIDEO_TRACK_RECORDER_H_
 
+#include <atomic>
 #include <memory>
 
 #include "base/macros.h"
@@ -58,13 +59,6 @@ struct CrossThreadCopier<media::WebmMuxer::VideoParameters> {
   static Type Copy(Type pointer) { return pointer; }
 };
 
-template <>
-struct CrossThreadCopier<std::string> {
-  STATIC_ONLY(CrossThreadCopier);
-  using Type = std::string;
-  static Type Copy(Type&& value) { return std::move(value); }
-};
-
 }  // namespace WTF
 
 namespace blink {
@@ -79,7 +73,7 @@ class Thread;
 // thread but that pass frames on Render IO thread. It has an internal Encoder
 // with its own threading subtleties, see the implementation file.
 class MODULES_EXPORT VideoTrackRecorder
-    : public GarbageCollectedFinalized<VideoTrackRecorder>,
+    : public GarbageCollected<VideoTrackRecorder>,
       public WebMediaStreamSink {
   USING_PRE_FINALIZER(VideoTrackRecorder, Prefinalize);
 
@@ -190,6 +184,13 @@ class MODULES_EXPORT VideoTrackRecorder
     // Called when the frame reference is released after encode.
     void FrameReleased(scoped_refptr<media::VideoFrame> frame);
 
+    // A helper function to convert the given |frame| to an I420 video frame.
+    // Used mainly by the software encoders since I420 is the only supported
+    // pixel format.  The function is best-effort.  If for any reason the
+    // conversion fails, the original |frame| will be returned.
+    static scoped_refptr<media::VideoFrame> ConvertToI420ForSoftwareEncoder(
+        scoped_refptr<media::VideoFrame> frame);
+
     // Used to shutdown properly on the same thread we were created.
     const scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
@@ -204,7 +205,9 @@ class MODULES_EXPORT VideoTrackRecorder
 
     // While |paused_|, frames are not encoded. Used only from
     // |encoding_thread_|.
-    bool paused_;
+    // Use an atomic variable since it can be set on the main thread and read
+    // on the io thread at the same time.
+    std::atomic_bool paused_;
 
     // This callback should be exercised on IO thread.
     const OnEncodedVideoCB on_encoded_video_callback_;
@@ -316,8 +319,6 @@ class MODULES_EXPORT VideoTrackRecorder
   bool should_pause_encoder_on_initialization_;
 
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
-
-  base::WeakPtrFactory<VideoTrackRecorder> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(VideoTrackRecorder);
 };

@@ -105,7 +105,7 @@ public class ContentTextSelectionTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.launchContentShellWithUrl(DATA_URL);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
 
@@ -195,8 +195,7 @@ public class ContentTextSelectionTest {
     @Test
     @SmallTest
     @Feature({"TextSelection"})
-    @DisableIf.
-    Build(sdk_is_less_than = Build.VERSION_CODES.N, message = "Drag and drop not enabled pre-N")
+    @DisabledTest(message = "https://crbug.com/980733")
     public void testSelectionPreservedAfterDragAndDrop() throws Throwable {
         DOMUtils.longPressNode(mWebContents, "plain_text_1");
         waitForSelectActionBarVisible(true);
@@ -665,7 +664,7 @@ public class ContentTextSelectionTest {
         return ImeTestUtils.runBlockingOnHandlerNoException(
                 connection.getHandler(), new Callable<CharSequence>() {
                     @Override
-                    public CharSequence call() throws Exception {
+                    public CharSequence call() {
                         return connection.getTextBeforeCursor(length, flags);
                     }
                 });

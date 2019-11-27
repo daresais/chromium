@@ -8,6 +8,8 @@
 
 #include "ash/animation/animation_change_type.h"
 #include "ash/app_list/app_list_controller_impl.h"
+#include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/keyboard/keyboard_controller_observer.h"
 #include "ash/public/cpp/shelf_item_delegate.h"
 #include "ash/public/cpp/shelf_model.h"
@@ -17,6 +19,7 @@
 #include "ash/shelf/shelf_focus_cycler.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_observer.h"
+#include "ash/shelf/shelf_tooltip_manager.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/system/status_area_widget.h"
@@ -36,6 +39,7 @@ class Shelf::AutoHideEventHandler : public ui::EventHandler {
   explicit AutoHideEventHandler(Shelf* shelf) : shelf_(shelf) {
     Shell::Get()->AddPreTargetHandler(this);
   }
+
   ~AutoHideEventHandler() override {
     Shell::Get()->RemovePreTargetHandler(this);
   }
@@ -53,10 +57,11 @@ class Shelf::AutoHideEventHandler : public ui::EventHandler {
     if (shelf_->auto_hide_behavior() != SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS)
       return;
 
-    // The event target should be the shelf widget.
-    aura::Window* target = static_cast<aura::Window*>(event->target());
-    if (target != Shelf::ForWindow(target)->shelf_widget()->GetNativeView())
+    // The event target should be the shelf widget or the hotseat widget.
+    if (!shelf_->shelf_layout_manager()->IsShelfWindow(
+            static_cast<aura::Window*>(event->target()))) {
       return;
+    }
 
     // The touch-pressing event may hide the shelf. Lock the shelf's auto hide
     // state to give the shelf a chance to handle the touch event before it
@@ -75,11 +80,64 @@ class Shelf::AutoHideEventHandler : public ui::EventHandler {
   DISALLOW_COPY_AND_ASSIGN(AutoHideEventHandler);
 };
 
+// Shelf::AutoDimEventHandler -----------------------------------------------
+
+// Handles mouse and touch events and determines whether ShelfLayoutManager
+// should update shelf opacity for auto-dimming.
+class Shelf::AutoDimEventHandler : public ui::EventHandler {
+ public:
+  explicit AutoDimEventHandler(Shelf* shelf) : shelf_(shelf) {
+    Shell::Get()->AddPreTargetHandler(this);
+    UndimShelf();
+  }
+
+  ~AutoDimEventHandler() override {
+    Shell::Get()->RemovePreTargetHandler(this);
+  }
+
+  // ui::EventHandler:
+  void OnMouseEvent(ui::MouseEvent* event) override {
+    if (shelf_->shelf_layout_manager()->IsShelfWindow(
+            static_cast<aura::Window*>(event->target()))) {
+      UndimShelf();
+    }
+  }
+
+  void OnTouchEvent(ui::TouchEvent* event) override {
+    if (shelf_->shelf_layout_manager()->IsShelfWindow(
+            static_cast<aura::Window*>(event->target()))) {
+      UndimShelf();
+    }
+  }
+
+ private:
+  void DimShelf() { shelf_->shelf_layout_manager()->SetDimmed(true); }
+
+  // Sets shelf as active and sets timer to mark shelf as inactive.
+  void UndimShelf() {
+    shelf_->shelf_layout_manager()->SetDimmed(false);
+    update_shelf_dim_state_timer_.Start(
+        FROM_HERE, kDimDelay,
+        base::BindOnce(&AutoDimEventHandler::DimShelf, base::Unretained(this)));
+  }
+
+  // Unowned pointer to the shelf that owns this event handler.
+  Shelf* shelf_;
+  // OneShotTimer that dims shelf due to inactivity.
+  base::OneShotTimer update_shelf_dim_state_timer_;
+
+  // Delay before dimming the shelf.
+  const base::TimeDelta kDimDelay = base::TimeDelta::FromSeconds(5);
+
+  DISALLOW_COPY_AND_ASSIGN(AutoDimEventHandler);
+};
+
 // Shelf ---------------------------------------------------------------------
 
 Shelf::Shelf()
     : shelf_locking_manager_(this),
-      shelf_focus_cycler_(std::make_unique<ShelfFocusCycler>(this)) {}
+      shelf_focus_cycler_(std::make_unique<ShelfFocusCycler>(this)),
+      tooltip_(std::make_unique<ShelfTooltipManager>(this)) {}
 
 Shelf::~Shelf() = default;
 
@@ -124,12 +182,19 @@ void Shelf::CreateShelfWidget(aura::Window* root) {
   DCHECK(!shelf_widget_);
   aura::Window* shelf_container =
       root->GetChildById(kShellWindowId_ShelfContainer);
-  shelf_widget_.reset(new ShelfWidget(shelf_container, this));
-  shelf_widget_->Initialize();
+  shelf_widget_.reset(new ShelfWidget(this));
 
   DCHECK(!shelf_layout_manager_);
   shelf_layout_manager_ = shelf_widget_->shelf_layout_manager();
   shelf_layout_manager_->AddObserver(this);
+
+  DCHECK(!shelf_widget_->hotseat_widget());
+  aura::Window* control_container =
+      root->GetChildById(kShellWindowId_ShelfControlContainer);
+  shelf_widget_->CreateHotseatWidget(control_container);
+
+  DCHECK(!shelf_widget_->navigation_widget());
+  shelf_widget_->CreateNavigationWidget(control_container);
 
   // Must occur after |shelf_widget_| is constructed because the system tray
   // constructors call back into Shelf::shelf_widget().
@@ -137,6 +202,10 @@ void Shelf::CreateShelfWidget(aura::Window* root) {
   aura::Window* status_container =
       root->GetChildById(kShellWindowId_StatusContainer);
   shelf_widget_->CreateStatusAreaWidget(status_container);
+  shelf_widget_->Initialize(shelf_container);
+
+  // The Hotseat should be above everything in the shelf.
+  shelf_widget_->hotseat_widget()->StackAtTop();
 }
 
 void Shelf::ShutdownShelfWidget() {
@@ -176,6 +245,7 @@ void Shelf::SetAlignment(ShelfAlignment alignment) {
   alignment_ = alignment;
   // The ShelfWidget notifies the ShelfView of the alignment change.
   shelf_widget_->OnShelfAlignmentChanged();
+  tooltip_->Close();
   shelf_layout_manager_->LayoutShelf();
   Shell::Get()->NotifyShelfAlignmentChanged(GetWindow()->GetRootWindow());
 }
@@ -240,11 +310,6 @@ void Shelf::UpdateVisibilityState() {
     shelf_layout_manager_->UpdateVisibilityState();
 }
 
-void Shelf::SetSuspendVisibilityUpdate(bool value) {
-  if (shelf_layout_manager_)
-    shelf_layout_manager_->set_suspend_visibility_update(value);
-}
-
 void Shelf::MaybeUpdateShelfBackground() {
   if (!shelf_layout_manager_)
     return;
@@ -260,6 +325,10 @@ ShelfVisibilityState Shelf::GetVisibilityState() const {
 
 gfx::Rect Shelf::GetIdealBounds() const {
   return shelf_layout_manager_->GetIdealBounds();
+}
+
+gfx::Rect Shelf::GetIdealBoundsForWorkAreaCalculation() {
+  return shelf_layout_manager_->GetIdealBoundsForWorkAreaCalculation();
 }
 
 gfx::Rect Shelf::GetScreenBoundsOfItemIconForWindow(aura::Window* window) {
@@ -280,9 +349,18 @@ void Shelf::ProcessMouseEvent(const ui::MouseEvent& event) {
     shelf_layout_manager_->ProcessMouseEventFromShelf(event);
 }
 
-void Shelf::ProcessMouseWheelEvent(const ui::MouseWheelEvent& event) {
-  if (Shell::Get()->app_list_controller())
-    Shell::Get()->app_list_controller()->ProcessMouseWheelEvent(event);
+void Shelf::ProcessMouseWheelEvent(ui::MouseWheelEvent* event) {
+  event->SetHandled();
+  if (!IsHorizontalAlignment())
+    return;
+  auto* app_list_controller = Shell::Get()->app_list_controller();
+  DCHECK(app_list_controller);
+  // If the App List is not visible, send MouseWheel events to the
+  // |shelf_layout_manager_| because these events are used to show the App List.
+  if (app_list_controller->IsVisible())
+    app_list_controller->ProcessMouseWheelEvent(*event);
+  else
+    shelf_layout_manager_->ProcessMouseWheelEventFromShelf(event);
 }
 
 void Shelf::AddObserver(ShelfObserver* observer) {
@@ -357,6 +435,7 @@ ShelfView* Shelf::GetShelfViewForTesting() {
 void Shelf::WillDeleteShelfLayoutManager() {
   // Clear event handlers that might forward events to the destroyed instance.
   auto_hide_event_handler_.reset();
+  auto_dim_event_handler_.reset();
 
   DCHECK(shelf_layout_manager_);
   shelf_layout_manager_->RemoveObserver(this);
@@ -371,6 +450,10 @@ void Shelf::WillChangeVisibilityState(ShelfVisibilityState new_state) {
   } else if (!auto_hide_event_handler_) {
     auto_hide_event_handler_ = std::make_unique<AutoHideEventHandler>(this);
   }
+
+  if (!auto_dim_event_handler_ && ash::switches::IsUsingShelfAutoDim()) {
+    auto_dim_event_handler_ = std::make_unique<AutoDimEventHandler>(this);
+  }
 }
 
 void Shelf::OnAutoHideStateChanged(ShelfAutoHideState new_state) {
@@ -384,6 +467,11 @@ void Shelf::OnBackgroundUpdated(ShelfBackgroundType background_type,
     return;
   for (auto& observer : observers_)
     observer.OnBackgroundTypeChanged(background_type, change_type);
+}
+
+void Shelf::OnWorkAreaInsetsChanged() {
+  for (auto& observer : observers_)
+    observer.OnShelfWorkAreaInsetsChanged();
 }
 
 WorkAreaInsets* Shelf::GetWorkAreaInsets() const {

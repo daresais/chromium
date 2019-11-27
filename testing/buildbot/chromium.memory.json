@@ -397,7 +397,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
-          "shards": 2
+          "shards": 4
         },
         "test": "blink_unittests"
       },
@@ -720,6 +720,50 @@
             "--bucket",
             "chromium-result-details",
             "--test-name",
+            "chrome_public_smoke_test"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_os_type": "userdebug",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ]
+        },
+        "test": "chrome_public_smoke_test"
+      },
+      {
+        "args": [
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
             "chrome_public_test_apk"
           ],
           "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
@@ -758,7 +802,6 @@
       {
         "args": [
           "--disable-features=NetworkServiceInProcess",
-          "--gtest_filter=-org.chromium.chrome.browser.FeaturesAnnotationsTest#testFeaturesSetExistingFlags",
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
         ],
@@ -1079,100 +1122,6 @@
       },
       {
         "args": [
-          "--disable-features=NetworkService",
-          "--gs-results-bucket=chromium-result-details",
-          "--recover-devices"
-        ],
-        "merge": {
-          "args": [
-            "--bucket",
-            "chromium-result-details",
-            "--test-name",
-            "non_network_service_content_browsertests"
-          ],
-          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
-        },
-        "name": "non_network_service_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "cipd_packages": [
-            {
-              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
-              "location": "bin",
-              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
-            }
-          ],
-          "dimension_sets": [
-            {
-              "device_os": "MMB29Q",
-              "device_os_type": "userdebug",
-              "device_type": "bullhead",
-              "os": "Android"
-            }
-          ],
-          "output_links": [
-            {
-              "link": [
-                "https://luci-logdog.appspot.com/v/?s",
-                "=android%2Fswarming%2Flogcats%2F",
-                "${TASK_ID}%2F%2B%2Funified_logcats"
-              ],
-              "name": "shard #${SHARD_INDEX} logcats"
-            }
-          ],
-          "shards": 5
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
-          "--gs-results-bucket=chromium-result-details",
-          "--recover-devices"
-        ],
-        "merge": {
-          "args": [
-            "--bucket",
-            "chromium-result-details",
-            "--test-name",
-            "nonperfetto_content_browsertests"
-          ],
-          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "cipd_packages": [
-            {
-              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
-              "location": "bin",
-              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
-            }
-          ],
-          "dimension_sets": [
-            {
-              "device_os": "MMB29Q",
-              "device_os_type": "userdebug",
-              "device_type": "bullhead",
-              "os": "Android"
-            }
-          ],
-          "output_links": [
-            {
-              "link": [
-                "https://luci-logdog.appspot.com/v/?s",
-                "=android%2Fswarming%2Flogcats%2F",
-                "${TASK_ID}%2F%2B%2Funified_logcats"
-              ],
-              "name": "shard #${SHARD_INDEX} logcats"
-            }
-          ]
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
           "--gs-results-bucket=chromium-result-details",
           "--recover-devices"
         ],
@@ -1232,53 +1181,6 @@
           "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
         },
         "name": "network_service_out_of_process_content_shell_test_apk",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "cipd_packages": [
-            {
-              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
-              "location": "bin",
-              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
-            }
-          ],
-          "dimension_sets": [
-            {
-              "device_os": "MMB29Q",
-              "device_os_type": "userdebug",
-              "device_type": "bullhead",
-              "os": "Android"
-            }
-          ],
-          "output_links": [
-            {
-              "link": [
-                "https://luci-logdog.appspot.com/v/?s",
-                "=android%2Fswarming%2Flogcats%2F",
-                "${TASK_ID}%2F%2B%2Funified_logcats"
-              ],
-              "name": "shard #${SHARD_INDEX} logcats"
-            }
-          ],
-          "shards": 5
-        },
-        "test": "content_shell_test_apk"
-      },
-      {
-        "args": [
-          "--disable-features=NetworkService",
-          "--gs-results-bucket=chromium-result-details",
-          "--recover-devices"
-        ],
-        "merge": {
-          "args": [
-            "--bucket",
-            "chromium-result-details",
-            "--test-name",
-            "non_network_service_content_shell_test_apk"
-          ],
-          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
-        },
-        "name": "non_network_service_content_shell_test_apk",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "cipd_packages": [
@@ -1838,6 +1740,50 @@
           ]
         },
         "test": "gpu_unittests"
+      },
+      {
+        "args": [
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "gwp_asan_unittests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "MMB29Q",
+              "device_os_type": "userdebug",
+              "device_type": "bullhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ]
+        },
+        "test": "gwp_asan_unittests"
       },
       {
         "args": [
@@ -3330,28 +3276,7 @@
               "os": "Ubuntu-16.04"
             }
           ],
-          "shards": 30
-        },
-        "test": "browser_tests"
-      },
-      {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
+          "shards": 40
         },
         "test": "browser_tests"
       },
@@ -3480,6 +3405,24 @@
             }
           ]
         },
+        "test": "color_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
         "test": "components_browsertests"
       },
       {
@@ -3534,28 +3477,7 @@
               "os": "Ubuntu-16.04"
             }
           ],
-          "shards": 6
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
+          "shards": 12
         },
         "test": "content_browsertests"
       },
@@ -3577,6 +3499,24 @@
           "shards": 2
         },
         "test": "content_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "crashpad_tests"
       },
       {
         "args": [
@@ -3887,6 +3827,24 @@
             }
           ]
         },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
         "test": "headless_browsertests"
       },
       {
@@ -3923,27 +3881,6 @@
             }
           ],
           "shards": 6
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
         },
         "test": "interactive_ui_tests"
       },
@@ -4000,24 +3937,6 @@
           ]
         },
         "test": "latency_unittests"
-      },
-      {
-        "args": [
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
       },
       {
         "args": [
@@ -4484,7 +4403,8 @@
             {
               "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "shards": 4
         },
         "test": "sync_integration_tests"
       },
@@ -4779,7 +4699,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4794,7 +4714,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4809,7 +4729,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4824,7 +4744,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4839,7 +4759,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4854,7 +4774,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4869,7 +4789,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4884,7 +4804,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4899,7 +4819,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4914,7 +4834,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4930,7 +4850,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4945,7 +4865,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4960,7 +4880,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -4975,7 +4895,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 10
@@ -4983,26 +4903,6 @@
         "test": "browser_tests"
       },
       {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "browser_tests"
-      },
-      {
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
@@ -5011,7 +4911,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5029,7 +4929,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5044,7 +4944,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5059,7 +4959,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5074,7 +4974,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5089,7 +4989,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5104,7 +5004,22 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "color_unittests"
+      },
+      {
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5119,7 +5034,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5134,7 +5049,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5149,7 +5064,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 6
@@ -5157,26 +5072,6 @@
         "test": "content_browsertests"
       },
       {
-        "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "content_browsertests"
-      },
-      {
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
@@ -5185,7 +5080,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5200,7 +5095,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5215,7 +5110,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5230,7 +5125,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5245,7 +5140,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5260,7 +5155,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5275,7 +5170,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5290,7 +5185,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5305,7 +5200,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5320,7 +5215,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5335,7 +5230,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5350,7 +5245,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5365,7 +5260,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5380,7 +5275,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5439,7 +5334,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5454,7 +5349,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5469,7 +5364,22 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5484,7 +5394,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5499,7 +5409,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 3
@@ -5507,26 +5417,6 @@
         "test": "interactive_ui_tests"
       },
       {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
@@ -5535,7 +5425,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5550,7 +5440,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5565,7 +5455,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5580,22 +5470,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
-      },
-      {
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5610,7 +5485,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5625,7 +5500,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5640,7 +5515,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5655,7 +5530,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5670,7 +5545,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5685,7 +5560,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5700,7 +5575,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5715,7 +5590,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5730,7 +5605,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5745,7 +5620,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5760,7 +5635,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5775,7 +5650,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5790,7 +5665,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5805,7 +5680,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5820,7 +5695,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5835,7 +5710,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5850,7 +5725,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5865,7 +5740,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5880,7 +5755,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5895,7 +5770,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5910,7 +5785,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5925,7 +5800,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5940,7 +5815,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5955,7 +5830,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5970,7 +5845,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -5985,7 +5860,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6000,7 +5875,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6015,7 +5890,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6030,7 +5905,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6045,7 +5920,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6060,7 +5935,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6075,7 +5950,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6090,7 +5965,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6105,7 +5980,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6120,7 +5995,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6135,7 +6010,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6157,7 +6032,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6175,7 +6050,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6193,7 +6068,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6211,7 +6086,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6229,7 +6104,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6247,7 +6122,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6265,7 +6140,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6283,7 +6158,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6301,7 +6176,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6319,7 +6194,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6337,7 +6212,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6355,7 +6230,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6374,7 +6249,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6392,7 +6267,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6410,7 +6285,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6428,7 +6303,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 31
@@ -6449,7 +6324,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 30
@@ -6458,27 +6333,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "browser_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -6489,7 +6343,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6508,7 +6362,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6526,7 +6380,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6544,7 +6398,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6562,7 +6416,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6580,7 +6434,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6598,7 +6452,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6616,7 +6470,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6634,7 +6488,25 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "color_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6652,7 +6524,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 5
@@ -6671,7 +6543,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6689,7 +6561,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 6
@@ -6710,7 +6582,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 4
@@ -6719,27 +6591,6 @@
       },
       {
         "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -6750,7 +6601,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6770,7 +6621,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6788,7 +6639,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6806,7 +6657,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6824,7 +6675,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6842,7 +6693,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6860,7 +6711,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6878,7 +6729,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6896,7 +6747,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6914,7 +6765,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6932,7 +6783,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6950,7 +6801,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6968,7 +6819,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -6986,7 +6837,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7004,7 +6855,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7022,7 +6873,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7040,7 +6891,25 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 3
@@ -7049,27 +6918,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -7080,7 +6928,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7098,7 +6946,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7116,7 +6964,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7134,7 +6982,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7152,25 +7000,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
-      },
-      {
-        "args": [
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7188,7 +7018,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7206,7 +7036,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7224,7 +7054,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7242,7 +7072,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7260,7 +7090,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7278,7 +7108,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7296,7 +7126,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7314,7 +7144,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7332,7 +7162,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7350,7 +7180,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7368,7 +7198,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 8
@@ -7388,7 +7218,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7406,7 +7236,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7424,7 +7254,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7442,7 +7272,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7460,7 +7290,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7478,7 +7308,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7496,7 +7326,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7514,7 +7344,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7532,7 +7362,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7550,7 +7380,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7568,7 +7398,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7586,7 +7416,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7604,7 +7434,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7622,7 +7452,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7640,7 +7470,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7658,7 +7488,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7676,7 +7506,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7694,7 +7524,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7712,7 +7542,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7730,7 +7560,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7748,7 +7578,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7766,7 +7596,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 2
@@ -7785,7 +7615,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7804,7 +7634,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7822,7 +7652,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7840,7 +7670,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7858,7 +7688,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7876,7 +7706,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7894,7 +7724,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7917,7 +7747,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7936,7 +7766,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7955,7 +7785,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7974,7 +7804,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -7993,7 +7823,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8012,7 +7842,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8031,7 +7861,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8050,7 +7880,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8069,7 +7899,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8088,7 +7918,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8107,7 +7937,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8126,7 +7956,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8146,7 +7976,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8165,7 +7995,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8184,7 +8014,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8203,10 +8033,10 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
-          "shards": 25
+          "shards": 30
         },
         "test": "browser_tests"
       },
@@ -8225,7 +8055,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 30
@@ -8234,28 +8064,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "browser_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -8267,7 +8075,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8287,7 +8095,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8306,7 +8114,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8325,7 +8133,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8344,7 +8152,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8363,7 +8171,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8382,7 +8190,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8401,7 +8209,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8420,7 +8228,26 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "color_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8439,7 +8266,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8458,7 +8285,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8477,7 +8304,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 6
@@ -8499,7 +8326,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 2
@@ -8508,28 +8335,6 @@
       },
       {
         "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -8541,7 +8346,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 2
@@ -8563,7 +8368,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8582,7 +8387,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8601,7 +8406,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8620,7 +8425,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8639,7 +8444,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8658,7 +8463,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8677,7 +8482,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8696,7 +8501,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8715,7 +8520,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8734,7 +8539,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8753,7 +8558,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8772,7 +8577,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8791,7 +8596,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8810,7 +8615,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8829,7 +8634,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8848,7 +8653,26 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 5
@@ -8857,28 +8681,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -8890,7 +8692,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8909,7 +8711,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8928,7 +8730,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8947,7 +8749,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -8966,26 +8768,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
-      },
-      {
-        "args": [
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9004,7 +8787,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9023,7 +8806,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9042,7 +8825,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9061,7 +8844,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9080,7 +8863,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9099,7 +8882,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9118,7 +8901,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9137,7 +8920,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9156,7 +8939,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9175,7 +8958,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9194,7 +8977,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 2
@@ -9215,7 +8998,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9234,7 +9017,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9253,7 +9036,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9272,7 +9055,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9291,7 +9074,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9310,7 +9093,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9329,7 +9112,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9348,7 +9131,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9367,7 +9150,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9386,7 +9169,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9405,7 +9188,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9424,7 +9207,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9443,7 +9226,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9462,7 +9245,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9481,7 +9264,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9500,7 +9283,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9519,7 +9302,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9538,7 +9321,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9557,7 +9340,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9576,7 +9359,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9595,7 +9378,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 2
@@ -9615,7 +9398,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9635,7 +9418,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9654,7 +9437,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9673,7 +9456,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9692,7 +9475,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9711,7 +9494,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9730,7 +9513,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9753,7 +9536,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9772,7 +9555,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9791,7 +9574,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9810,7 +9593,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9829,7 +9612,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9848,7 +9631,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9867,7 +9650,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9886,7 +9669,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9905,7 +9688,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9924,7 +9707,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9944,7 +9727,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9963,7 +9746,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -9982,7 +9765,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10001,7 +9784,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 10
@@ -10010,28 +9793,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "browser_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -10043,7 +9804,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10063,7 +9824,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10082,7 +9843,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10101,7 +9862,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10120,7 +9881,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10139,7 +9900,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10158,7 +9919,26 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "color_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10177,7 +9957,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10196,7 +9976,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10215,7 +9995,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 6
@@ -10224,28 +10004,6 @@
       },
       {
         "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -10257,7 +10015,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10276,7 +10034,26 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "crashpad_tests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10295,7 +10072,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10314,7 +10091,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10333,7 +10110,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10352,7 +10129,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10371,7 +10148,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10390,7 +10167,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10409,7 +10186,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10428,7 +10205,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10447,7 +10224,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10466,7 +10243,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10485,7 +10262,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10504,7 +10281,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10523,7 +10300,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10542,7 +10319,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10561,7 +10338,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10580,7 +10357,26 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "cpu": "x86-64",
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10599,7 +10395,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10618,7 +10414,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "shards": 3
@@ -10627,28 +10423,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -10660,7 +10434,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10679,7 +10453,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10698,7 +10472,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10717,26 +10491,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
-      },
-      {
-        "args": [
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10755,7 +10510,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10774,7 +10529,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10793,7 +10548,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10812,7 +10567,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10831,7 +10586,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10850,7 +10605,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10869,7 +10624,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10888,7 +10643,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10907,7 +10662,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10926,7 +10681,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10945,7 +10700,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10964,7 +10719,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -10983,7 +10738,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11002,7 +10757,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11021,7 +10776,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11040,7 +10795,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11059,7 +10814,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11078,7 +10833,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11097,7 +10852,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11116,7 +10871,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11135,7 +10890,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11154,7 +10909,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11173,7 +10928,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11192,7 +10947,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11211,7 +10966,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11230,7 +10985,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11249,7 +11004,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11268,7 +11023,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11287,7 +11042,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11306,7 +11061,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11325,7 +11080,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11344,7 +11099,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11363,7 +11118,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11382,7 +11137,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11401,7 +11156,7 @@
           "dimension_sets": [
             {
               "cpu": "x86-64",
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ]
         },
@@ -11606,7 +11361,8 @@
             {
               "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "shards": 2
         },
         "test": "blink_unittests"
       },
@@ -11645,27 +11401,6 @@
           ]
         },
         "test": "boringssl_ssl_tests"
-      },
-      {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
-        },
-        "test": "browser_tests"
       },
       {
         "args": [
@@ -11736,7 +11471,8 @@
             {
               "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "shards": 3
         },
         "test": "cc_unittests"
       },
@@ -11792,7 +11528,7 @@
             }
           ]
         },
-        "test": "components_browsertests"
+        "test": "color_unittests"
       },
       {
         "args": [
@@ -11809,6 +11545,25 @@
               "os": "Ubuntu-16.04"
             }
           ]
+        },
+        "test": "components_browsertests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
+            }
+          ],
+          "shards": 2
         },
         "test": "components_unittests"
       },
@@ -11845,21 +11600,32 @@
               "os": "Ubuntu-16.04"
             }
           ],
-          "shards": 6
+          "shards": 15
         },
         "test": "content_browsertests"
       },
       {
         "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
+          "--enable-gpu",
+          "--test-launcher-bot-mode",
+          "--test-launcher-jobs=1",
+          "--test-launcher-filter-file=../../testing/buildbot/filters/vulkan.content_browsertests.filter",
+          "--enable-features=UseSkiaRenderer,UiGpuRasterization",
+          "--gr-context-type=vulkan",
+          "--use-vulkan=swiftshader",
+          "--enable-oop-rasterization",
+          "--enable-gpu-rasterization",
+          "--force-gpu-rasterization",
+          "--disable-software-compositing-fallback",
+          "--disable-vulkan-fallback-to-gl-for-testing",
+          "--disable-headless-mode",
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
-        "name": "nonperfetto_content_browsertests",
+        "name": "vulkan_swiftshader_content_browsertests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
@@ -12215,6 +11981,24 @@
             }
           ]
         },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Ubuntu-16.04"
+            }
+          ]
+        },
         "test": "headless_browsertests"
       },
       {
@@ -12250,28 +12034,7 @@
               "os": "Ubuntu-16.04"
             }
           ],
-          "shards": 6
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
+          "shards": 20
         },
         "test": "interactive_ui_tests"
       },
@@ -12328,24 +12091,6 @@
           ]
         },
         "test": "latency_unittests"
-      },
-      {
-        "args": [
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Ubuntu-16.04"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
       },
       {
         "args": [
@@ -13159,22 +12904,6 @@
       },
       {
         "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_browser_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "browser_tests"
-      },
-      {
-        "args": [
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
@@ -13263,6 +12992,19 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "color_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "components_browsertests"
       },
       {
@@ -13294,19 +13036,16 @@
       },
       {
         "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*",
           "--test-launcher-print-test-stdio=always"
         ],
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
-        "name": "nonperfetto_content_browsertests",
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "content_browsertests"
+        "test": "content_nocompile_tests"
       },
       {
         "args": [
@@ -13527,6 +13266,19 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "headless_browsertests"
       },
       {
@@ -13553,22 +13305,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 3
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter",
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true
         },
         "test": "interactive_ui_tests"
       },
@@ -13610,19 +13346,6 @@
           "can_use_on_swarming_builders": true
         },
         "test": "latency_unittests"
-      },
-      {
-        "args": [
-          "--test-launcher-print-test-stdio=always"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "leveldb_service_unittests"
       },
       {
         "args": [
@@ -13973,6 +13696,19 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
+        "test": "updater_tests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "url_unittests"
       },
       {
@@ -14013,6 +13749,20 @@
           "can_use_on_swarming_builders": true
         },
         "test": "wtf_unittests"
+      },
+      {
+        "args": [
+          "--test-launcher-print-test-stdio=always"
+        ],
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "name": "xr_browser_tests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "xr_browser_tests"
       }
     ]
   },
@@ -14104,7 +13854,7 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
           ],
           "expiration": 36000,
@@ -14511,7 +14261,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
-          "shards": 2
+          "shards": 4
         },
         "test": "blink_unittests"
       },
@@ -14824,6 +14574,50 @@
           ]
         },
         "test": "cc_unittests"
+      },
+      {
+        "args": [
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
+            "chrome_public_smoke_test"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "KTU84P",
+              "device_os_type": "userdebug",
+              "device_type": "hammerhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ]
+        },
+        "test": "chrome_public_smoke_test"
       },
       {
         "args": [
@@ -15499,6 +15293,50 @@
             "--bucket",
             "chromium-result-details",
             "--test-name",
+            "gwp_asan_unittests"
+          ],
+          "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "cipd_packages": [
+            {
+              "cipd_package": "infra/tools/luci/logdog/butler/${platform}",
+              "location": "bin",
+              "revision": "git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c"
+            }
+          ],
+          "dimension_sets": [
+            {
+              "device_os": "KTU84P",
+              "device_os_type": "userdebug",
+              "device_type": "hammerhead",
+              "os": "Android"
+            }
+          ],
+          "output_links": [
+            {
+              "link": [
+                "https://luci-logdog.appspot.com/v/?s",
+                "=android%2Fswarming%2Flogcats%2F",
+                "${TASK_ID}%2F%2B%2Funified_logcats"
+              ],
+              "name": "shard #${SHARD_INDEX} logcats"
+            }
+          ]
+        },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "args": [
+          "--gs-results-bucket=chromium-result-details",
+          "--recover-devices"
+        ],
+        "merge": {
+          "args": [
+            "--bucket",
+            "chromium-result-details",
+            "--test-name",
             "ipc_tests"
           ],
           "script": "//build/android/pylib/results/presentation/test_results_presentation.py"
@@ -15927,7 +15765,7 @@
               "name": "shard #${SHARD_INDEX} logcats"
             }
           ],
-          "shards": 2
+          "shards": 5
         },
         "test": "mojo_unittests"
       },
@@ -16850,28 +16688,23 @@
             {
               "os": "Windows-10-15063"
             }
-          ],
-          "shards": 10
+          ]
         },
-        "test": "browser_tests"
+        "test": "browser_switcher_bho_unittests"
       },
       {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_browser_tests.filter"
-        ],
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
-        "name": "webui_html_imports_polyfill_browser_tests",
         "swarming": {
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
               "os": "Windows-10-15063"
             }
-          ]
+          ],
+          "shards": 10
         },
         "test": "browser_tests"
       },
@@ -17011,6 +16844,21 @@
             }
           ]
         },
+        "test": "color_unittests"
+      },
+      {
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Windows-10-15063"
+            }
+          ]
+        },
         "test": "components_browsertests"
       },
       {
@@ -17056,26 +16904,6 @@
             }
           ],
           "shards": 6
-        },
-        "test": "content_browsertests"
-      },
-      {
-        "args": [
-          "--disable-perfetto",
-          "--gtest_filter=TracingControllerTest.*:BackgroundTracingManagerBrowserTest.*"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "nonperfetto_content_browsertests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Windows-10-15063"
-            }
-          ]
         },
         "test": "content_browsertests"
       },
@@ -17392,6 +17220,21 @@
             }
           ]
         },
+        "test": "gwp_asan_unittests"
+      },
+      {
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Windows-10-15063"
+            }
+          ]
+        },
         "test": "headless_browsertests"
       },
       {
@@ -17457,26 +17300,6 @@
         "test": "interactive_ui_tests"
       },
       {
-        "args": [
-          "--disable-blink-features=HTMLImports,ShadowDOMV0,CustomElementsV0",
-          "--test-launcher-filter-file=../../testing/buildbot/filters/webui_html_imports_polyfill_interactive_ui_tests.filter"
-        ],
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "name": "webui_html_imports_polyfill_interactive_ui_tests",
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Windows-10-15063"
-            }
-          ]
-        },
-        "test": "interactive_ui_tests"
-      },
-      {
         "merge": {
           "args": [],
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
@@ -17520,21 +17343,6 @@
           ]
         },
         "test": "latency_unittests"
-      },
-      {
-        "merge": {
-          "args": [],
-          "script": "//testing/merge_scripts/standard_gtest_merge.py"
-        },
-        "swarming": {
-          "can_use_on_swarming_builders": true,
-          "dimension_sets": [
-            {
-              "os": "Windows-10-15063"
-            }
-          ]
-        },
-        "test": "leveldb_service_unittests"
       },
       {
         "merge": {
@@ -18046,6 +17854,21 @@
             }
           ]
         },
+        "test": "updater_tests"
+      },
+      {
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Windows-10-15063"
+            }
+          ]
+        },
         "test": "url_unittests"
       },
       {
@@ -18107,6 +17930,21 @@
           ]
         },
         "test": "vr_pixeltests"
+      },
+      {
+        "merge": {
+          "args": [],
+          "script": "//testing/merge_scripts/standard_gtest_merge.py"
+        },
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "os": "Windows-10-15063"
+            }
+          ]
+        },
+        "test": "weblayer_browsertests"
       },
       {
         "merge": {

@@ -14,7 +14,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/json/json_parser.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
@@ -256,7 +256,8 @@ ExtractionStatus ExtractMetadata(const Element& root,
                                  Vector<EntityPtr>& entities) {
   for (Element& element : ElementTraversal::DescendantsOf(root)) {
     if (element.HasTagName(html_names::kScriptTag) &&
-        element.getAttribute(html_names::kTypeAttr) == "application/ld+json") {
+        element.FastGetAttribute(html_names::kTypeAttr) ==
+            "application/ld+json") {
       std::unique_ptr<JSONValue> json = ParseJSON(element.textContent());
       if (!json) {
         LOG(ERROR) << "Failed to parse json.";

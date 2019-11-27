@@ -24,11 +24,12 @@ class ArcLauncherContextMenu : public LauncherContextMenu {
 
   // LauncherContextMenu:
   void GetMenuModel(GetMenuModelCallback callback) override;
+  bool IsCommandIdEnabled(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
-  void BuildMenu(std::unique_ptr<ui::SimpleMenuModel> menu_model,
-                 GetMenuModelCallback callback);
+  // Launches App Info UI for ARC apps.
+  void ShowPackageInfo();
 
   std::unique_ptr<arc::ArcAppShortcutsMenuBuilder> app_shortcuts_menu_builder_;
 

@@ -73,6 +73,9 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
   // Returns the default Kerberos configuration (krb5.conf).
   static const char* GetDefaultKerberosConfig();
 
+  // Returns true if the Kerberos feature is enabled.
+  bool IsKerberosEnabled();
+
   // PolicyService:
   void OnPolicyUpdated(const policy::PolicyNamespace& ns,
                        const policy::PolicyMap& previous,
@@ -85,7 +88,7 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
   void AddObserver(Observer* observer);
 
   // Stop observing this object. |observer| is not owned.
-  void RemoveObserver(const Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // Adds an account for the given |principal_name| (user@example.com). If
   // |is_managed| is true, the account is assumed to be managed by an admin and
@@ -144,8 +147,19 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
     return GetActivePrincipalName();
   }
 
+  // Getter for the GetKerberosFiles() callback, used on tests to build a mock
+  // KerberosFilesHandler.
+  base::RepeatingClosure GetGetKerberosFilesCallbackForTesting();
+
+  // Used on tests to replace the KerberosFilesHandler created on the
+  // constructor with a mock KerberosFilesHandler.
+  void SetKerberosFilesHandlerForTesting(
+      std::unique_ptr<KerberosFilesHandler> kerberos_files_handler);
+
  private:
   friend class KerberosAddAccountRunner;
+  using RepeatedAccountField =
+      google::protobuf::RepeatedPtrField<kerberos::Account>;
 
   // Callback on KerberosAddAccountRunner::Done.
   void OnAddAccountRunnerDone(KerberosAddAccountRunner* runner,
@@ -160,7 +174,8 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
                        const kerberos::RemoveAccountResponse& response);
 
   // Callback for ClearAccounts().
-  void OnClearAccounts(ResultCallback callback,
+  void OnClearAccounts(kerberos::ClearMode mode,
+                       ResultCallback callback,
                        const kerberos::ClearAccountsResponse& response);
 
   // Callback for RemoveAccount().
@@ -201,11 +216,11 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
   void SetActivePrincipalName(const std::string& principal_name);
   void ClearActivePrincipalName();
 
-  // Checks whether the active principal is contained in the given |response|.
+  // Checks whether the active principal is contained in the given |accounts|.
   // If not, resets it to the first principal or clears it if the list is empty.
-  // It's not expected that this ever triggers, but it provides a fail safe if
-  // the active principal should ever break for whatever reason.
-  void ValidateActivePrincipal(const kerberos::ListAccountsResponse& response);
+  // It's expected to trigger if the active account is removed by
+  // |RemoveAccount()| or |ClearAccounts()|.
+  void ValidateActivePrincipal(const RepeatedAccountField& accounts);
 
   // Notification shown when the Kerberos ticket is about to expire.
   void ShowTicketExpiryNotification();
@@ -215,6 +230,12 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
   void UpdateRememberPasswordEnabledFromPref();
   void UpdateAddAccountsAllowedFromPref();
   void UpdateAccountsFromPref();
+
+  // Does the main work for UpdateAccountsFromPref(). To clean up stale managed
+  // accounts, an up-to-date accounts list is needed. UpdateAccountsFromPref()
+  // first gets a list of accounts (asynchronously) and calls into this method
+  // to set new accounts and clean up old ones.
+  void RemoveAllManagedAccountsExcept(std::vector<std::string> keep_list);
 
   // Informs session manager whether it needs to store the login password in the
   // kernel keyring. That's the case when '${PASSWORD}' is used as password in
@@ -235,7 +256,7 @@ class KerberosCredentialsManager : public policy::PolicyService::Observer {
   policy::PolicyService* policy_service_ = nullptr;
 
   // Called by OnSignalConnected(), puts Kerberos files where GSSAPI finds them.
-  KerberosFilesHandler kerberos_files_handler_;
+  std::unique_ptr<KerberosFilesHandler> kerberos_files_handler_;
 
   // Observer for Kerberos-related prefs.
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;

@@ -1,53 +1,49 @@
-Tests that audits panel works when only performance category is selected.
+Tests that audits panel works when only the pwa category is selected.
 
 
 ========== Audits Start Audit State ==========
-[x] Performance
-[ ] Progressive Web App
+[ ] Performance
+[x] Progressive Web App
 [ ] Best practices
 [ ] Accessibility
 [ ] SEO
-[x] Clear storage
-Run audits: enabled visible
+[x] Publisher Ads
+Generate report: enabled visible
 
 =============== Audits run ===============
-bootup-time
-critical-request-chains
-diagnostics
-dom-size
-efficient-animated-content
-estimated-input-latency
-final-screenshot
-first-contentful-paint
-first-cpu-idle
-first-meaningful-paint
-font-display
-interactive
-main-thread-tasks
-mainthread-work-breakdown
-max-potential-fid
-metrics
-network-requests
-network-rtt
-network-server-latency
-offscreen-images
-performance-budget
-redirects
-render-blocking-resources
-resource-summary
-screenshot-thumbnails
-speed-index
-time-to-first-byte
-total-byte-weight
-unminified-css
-unminified-javascript
-unused-css-rules
-user-timings
-uses-long-cache-ttl
-uses-optimized-images
-uses-rel-preconnect
-uses-rel-preload
-uses-responsive-images
-uses-text-compression
-uses-webp-images
+ad-blocking-tasks
+ad-render-blocking-resources
+ad-request-critical-path
+ad-request-from-page-start
+ad-top-of-viewport
+ads-in-viewport
+apple-touch-icon
+async-ad-tags
+bid-request-from-page-start
+blocking-load-events
+bottleneck-requests
+content-width
+duplicate-tags
+first-ad-render
+gpt-bids-parallel
+installable-manifest
+is-on-https
+load-fast-enough-for-pwa
+loads-ad-tag-over-https
+loads-gpt-from-sgdn
+offline-start-url
+pwa-cross-browser
+pwa-each-page-has-url
+pwa-page-transitions
+redirects-http
+script-injected-tags
+serial-header-bidding
+service-worker
+splash-screen
+tag-load-time
+themed-omnibox
+viewport
+viewport-ad-density
+without-javascript
+works-offline
 

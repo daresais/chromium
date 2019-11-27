@@ -78,19 +78,19 @@ class CORE_EXPORT WindowPerformance final : public Performance,
                         const String& url,
                         const FloatRect& rect,
                         base::TimeTicks start_time,
-                        base::TimeTicks response_end,
+                        base::TimeTicks load_time,
                         const AtomicString& identifier,
                         const IntSize& intrinsic_size,
                         const AtomicString& id,
                         Element*);
 
-  void AddLayoutJankFraction(double jank_fraction,
-                             bool input_detected,
-                             base::TimeTicks input_timestamp);
+  void AddLayoutShiftValue(double value,
+                           bool input_detected,
+                           base::TimeTicks input_timestamp);
 
   void OnLargestContentfulPaintUpdated(base::TimeTicks paint_time,
                                        uint64_t paint_size,
-                                       base::TimeTicks response_end,
+                                       base::TimeTicks load_time,
                                        const AtomicString& id,
                                        const String& url,
                                        Element*);
@@ -106,12 +106,10 @@ class CORE_EXPORT WindowPerformance final : public Performance,
       LocalFrame* observer_frame);
 
   // PerformanceMonitor::Client implementation.
-  void ReportLongTask(
-      base::TimeTicks start_time,
-      base::TimeTicks end_time,
-      ExecutionContext* task_context,
-      bool has_multiple_contexts,
-      const SubTaskAttribution::EntriesVector& sub_task_attributions) override;
+  void ReportLongTask(base::TimeTicks start_time,
+                      base::TimeTicks end_time,
+                      ExecutionContext* task_context,
+                      bool has_multiple_contexts) override;
 
   void BuildJSONValue(V8ObjectBuilder&) const override;
 

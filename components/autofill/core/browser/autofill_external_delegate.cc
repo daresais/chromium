@@ -132,6 +132,7 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
   InsertDataListValues(&suggestions);
 
   if (suggestions.empty()) {
+    OnAutofillAvailabilityEvent(mojom::AutofillState::kNoSuggestions);
     // No suggestions, any popup currently showing is obsolete.
     manager_->client()->HideAutofillPopup();
     return;
@@ -153,19 +154,10 @@ bool AutofillExternalDelegate::HasActiveScreenReader() const {
 }
 
 void AutofillExternalDelegate::OnAutofillAvailabilityEvent(
-    bool has_suggestions) {
-#if defined(OS_CHROMEOS)
-  // If the platform is ChromeOS, then the (un)availability of suggestions must
-  // be communicated via Blink because ChromeOS uses accessibility objects that
-  // live on both sides of the renderer-browser divide.
-  driver_->RendererShouldSetSuggestionAvailability(has_suggestions);
-#else
-  // On non-ChromeOS platforms, a static bool in AXPlatformNode is (un)set to
-  // communicate suggestions' (un)availability. This works because
-  // AXPlatformNodes reside on only the browser side.
-  has_suggestions ? ui::AXPlatformNode::OnInputSuggestionsAvailable()
-                  : ui::AXPlatformNode::OnInputSuggestionsUnavailable();
-#endif  // defined(OS_CHROMEOS)
+    const mojom::AutofillState state) {
+  // Availability of suggestions should be communicated to Blink because
+  // accessibility objects live in both the renderer and browser processes.
+  driver_->RendererShouldSetSuggestionAvailability(state);
 }
 
 void AutofillExternalDelegate::SetCurrentDataListValues(
@@ -179,6 +171,10 @@ void AutofillExternalDelegate::SetCurrentDataListValues(
 }
 
 void AutofillExternalDelegate::OnPopupShown() {
+  // If a popup was shown, then we showed either autofill or autocomplete.
+  OnAutofillAvailabilityEvent(
+      has_autofill_suggestions_ ? mojom::AutofillState::kAutofillAvailable
+                                : mojom::AutofillState::kAutocompleteAvailable);
   manager_->DidShowSuggestions(has_autofill_suggestions_, query_form_,
                                query_field_);
 
@@ -295,6 +291,10 @@ AutofillDriver* AutofillExternalDelegate::GetAutofillDriver() {
   return driver_;
 }
 
+int32_t AutofillExternalDelegate::GetWebContentsPopupControllerAxId() const {
+  return query_field_.form_control_ax_id;
+}
+
 void AutofillExternalDelegate::RegisterDeletionCallback(
     base::OnceClosure deletion_callback) {
   deletion_callback_ = std::move(deletion_callback);
@@ -302,10 +302,6 @@ void AutofillExternalDelegate::RegisterDeletionCallback(
 
 void AutofillExternalDelegate::Reset() {
   manager_->client()->HideAutofillPopup();
-}
-
-int32_t AutofillExternalDelegate::GetWebContentsPopupControllerAxId() const {
-  return query_field_.form_control_ax_id;
 }
 
 base::WeakPtr<AutofillExternalDelegate> AutofillExternalDelegate::GetWeakPtr() {
@@ -376,23 +372,11 @@ void AutofillExternalDelegate::ApplyAutofillOptions(
     suggestions->back().icon = "googlePay";
 #else
     suggestions->back().icon =
-        ui::NativeTheme::GetInstanceForNativeUi()->SystemDarkModeEnabled()
+        ui::NativeTheme::GetInstanceForNativeUi()->ShouldUseDarkColors()
             ? "googlePayDark"
             : "googlePay";
 #endif
   }
-
-// On iOS, GooglePayIcon comes at the begining and hence prepended to the list.
-#if defined(OS_IOS)
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillDownstreamUseGooglePayBrandingOniOS) &&
-      is_all_server_suggestions) {
-    Suggestion googlepay_icon;
-    googlepay_icon.icon = "googlePay";
-    googlepay_icon.frontend_id = POPUP_ITEM_ID_GOOGLE_PAY_BRANDING;
-    suggestions->insert(suggestions->begin(), googlepay_icon);
-  }
-#endif
 
 #if defined(OS_ANDROID)
   if (IsKeyboardAccessoryEnabled()) {

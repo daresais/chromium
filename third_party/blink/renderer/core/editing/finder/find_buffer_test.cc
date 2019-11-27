@@ -400,7 +400,6 @@ INSTANTIATE_TEST_SUITE_P(Separators,
                          FindBufferSeparatorTest,
                          testing::Values("br",
                                          "hr",
-                                         "legend",
                                          "meter",
                                          "object",
                                          "progress",
@@ -438,7 +437,7 @@ TEST_F(FindBufferTest, WhiteSpaceCollapsingPre) {
             buffer.FindMatches("a\n b", kCaseInsensitive)->CountForTesting());
   EXPECT_EQ(0u,
             buffer.FindMatches("a \nb", kCaseInsensitive)->CountForTesting());
-  EXPECT_EQ(0u,
+  EXPECT_EQ(1u,
             buffer.FindMatches("a \n b", kCaseInsensitive)->CountForTesting());
 }
 
@@ -459,7 +458,7 @@ TEST_F(FindBufferTest, WhiteSpaceCollapsingPreLine) {
             buffer.FindMatches("a\n b", kCaseInsensitive)->CountForTesting());
   EXPECT_EQ(0u,
             buffer.FindMatches("a \nb", kCaseInsensitive)->CountForTesting());
-  EXPECT_EQ(0u,
+  EXPECT_EQ(1u,
             buffer.FindMatches("a\nb", kCaseInsensitive)->CountForTesting());
 }
 
@@ -650,4 +649,32 @@ TEST_F(FindBufferTest, NullRange) {
   EXPECT_EQ(0u, buffer.FindMatches("find", 0)->CountForTesting());
 }
 
+TEST_F(FindBufferTest, FindObjectReplacementCharacter) {
+  SetBodyContent(
+      "some text with <br> and \uFFFC (object replacement character)");
+  FindBuffer buffer(WholeDocumentRange());
+  const auto results = buffer.FindMatches("\uFFFC", 0);
+  ASSERT_EQ(1u, results->CountForTesting());
+}
+
+TEST_F(FindBufferTest, FindMaxCodepointWithReplacedElementAndMaxCodepoint) {
+  SetBodyContent("some text with <img/> <br> and \U0010FFFF (max codepoint)");
+  FindBuffer buffer(WholeDocumentRange());
+  const auto results = buffer.FindMatches("\U0010FFFF", 0);
+  ASSERT_EQ(1u, results->CountForTesting());
+}
+
+TEST_F(FindBufferTest, FindMaxCodepointNormalText) {
+  SetBodyContent("some text");
+  FindBuffer buffer(WholeDocumentRange());
+  const auto results = buffer.FindMatches("\U0010FFFF", 0);
+  ASSERT_EQ(0u, results->CountForTesting());
+}
+
+TEST_F(FindBufferTest, FindMaxCodepointWithReplacedElement) {
+  SetBodyContent("some text with <img/> <br>");
+  FindBuffer buffer(WholeDocumentRange());
+  const auto results = buffer.FindMatches("\U0010FFFF", 0);
+  ASSERT_EQ(0u, results->CountForTesting());
+}
 }  // namespace blink

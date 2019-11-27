@@ -24,9 +24,10 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -35,8 +36,8 @@ import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.EmptyBrowserParts;
 import org.chromium.chrome.browser.notifications.channels.SiteChannelsManager;
-import org.chromium.chrome.browser.preferences.AboutChromePreferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
+import org.chromium.chrome.browser.preferences.about.AboutChromePreferences;
 import org.chromium.chrome.browser.preferences.website.Website.StoredDataClearedCallback;
 import org.chromium.chrome.browser.searchwidget.SearchWidgetProvider;
 import org.chromium.chrome.browser.util.ConversionUtils;
@@ -242,7 +243,7 @@ public class ManageSpaceActivity extends AppCompatActivity implements View.OnCli
                     getString(R.string.website_settings_storage));
             RecordHistogram.recordEnumeratedHistogram(
                     "Android.ManageSpace.ActionTaken", OPTION_MANAGE_STORAGE, OPTION_MAX);
-            PreferencesLauncher.launchSettingsPageCompat(
+            PreferencesLauncher.launchSettingsPage(
                     this, SingleCategoryPreferences.class, initialArguments);
         } else if (view == mClearAllDataButton) {
             final ActivityManager activityManager =

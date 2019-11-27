@@ -24,7 +24,6 @@
 #include "components/consent_auditor/consent_auditor.h"
 #include "components/signin/public/base/avatar_icon_util.h"
 #include "components/signin/public/identity_manager/account_info.h"
-#include "components/unified_consent/feature.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "url/gurl.h"
@@ -104,7 +103,7 @@ void SyncConfirmationHandler::HandleAccountImageRequest(
     const base::ListValue* args) {
   DCHECK(profile_->IsSyncAllowed());
   base::Optional<AccountInfo> primary_account_info =
-      identity_manager_->FindExtendedAccountInfoForAccount(
+      identity_manager_->FindExtendedAccountInfoForAccountWithRefreshToken(
           identity_manager_->GetPrimaryAccountInfo());
 
   // Fire the "account-image-changed" listener from |SetUserImageURL()|.
@@ -117,7 +116,7 @@ void SyncConfirmationHandler::HandleAccountImageRequest(
 
 void SyncConfirmationHandler::RecordConsent(const base::ListValue* args) {
   CHECK_EQ(2U, args->GetSize());
-  const std::vector<base::Value>& consent_description =
+  base::span<const base::Value> consent_description =
       args->GetList()[0].GetList();
   const std::string& consent_confirmation = args->GetList()[1].GetString();
 
@@ -211,11 +210,13 @@ void SyncConfirmationHandler::CloseModalSigninWindow(
 
 void SyncConfirmationHandler::HandleInitializedWithSize(
     const base::ListValue* args) {
+  AllowJavascript();
+
   if (!browser_)
     return;
 
   base::Optional<AccountInfo> primary_account_info =
-      identity_manager_->FindExtendedAccountInfoForAccount(
+      identity_manager_->FindExtendedAccountInfoForAccountWithRefreshToken(
           identity_manager_->GetPrimaryAccountInfo());
   if (!primary_account_info) {
     // No account is signed in, so there is nothing to be displayed in the sync
@@ -237,5 +238,5 @@ void SyncConfirmationHandler::HandleInitializedWithSize(
   // TODO(anthonyvd): Figure out why this is needed on Mac and not other
   // platforms and if there's a way to start unfocused while avoiding this
   // workaround.
-  web_ui()->CallJavascriptFunctionUnsafe("sync.confirmation.clearFocus");
+  FireWebUIListener("clear-focus");
 }

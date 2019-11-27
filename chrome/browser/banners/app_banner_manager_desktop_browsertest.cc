@@ -21,7 +21,6 @@
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/page_action/page_action_icon_container.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/web_app_dialog_utils.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
@@ -64,7 +63,7 @@ class FakeAppBannerManagerDesktop : public banners::AppBannerManagerDesktop {
   }
 
  protected:
-  void OnInstall(blink::WebDisplayMode display) override {
+  void OnInstall(blink::mojom::DisplayMode display) override {
     AppBannerManager::OnInstall(display);
     if (on_install_)
       std::move(on_install_).Run();
@@ -156,8 +155,9 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   EXPECT_EQ(title, watcher.WaitAndGetTitle());
 }
 
+// TODO(crbug.com/988292): Flakes on most platforms.
 IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
-                       WebAppBannerFiresAppInstalled) {
+                       DISABLED_WebAppBannerFiresAppInstalled) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   auto* manager =
@@ -184,7 +184,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
     web_app::SetInstalledCallbackForTesting(
         base::BindLambdaForTesting([&](const web_app::AppId& installed_app_id,
                                        web_app::InstallResultCode code) {
-          EXPECT_EQ(web_app::InstallResultCode::kSuccess, code);
+          EXPECT_EQ(web_app::InstallResultCode::kSuccessNewInstall, code);
           EXPECT_EQ(installed_app_id, web_app::GenerateAppIdFromURL(url));
           callback_called = true;
         }));
@@ -291,7 +291,6 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   chrome::SetAutoAcceptPWAInstallConfirmationForTesting(true);
   browser()
       ->window()
-      ->GetOmniboxPageActionIconContainer()
       ->ExecutePageActionIconForTesting(PageActionIconType::kPwaInstall);
   manager->AwaitAppInstall();
   chrome::SetAutoAcceptPWAInstallConfirmationForTesting(false);

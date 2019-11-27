@@ -28,15 +28,12 @@
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/distiller.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
-#include "components/dom_distiller/core/dom_distiller_store.h"
 #include "components/dom_distiller/core/dom_distiller_switches.h"
-#include "components/dom_distiller/core/dom_distiller_test_util.h"
 #include "components/dom_distiller/core/fake_distiller.h"
 #include "components/dom_distiller/core/fake_distiller_page.h"
 #include "components/dom_distiller/core/task_tracker.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/core/url_utils.h"
-#include "components/leveldb_proto/testing/fake_db.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/url_data_source.h"
@@ -51,12 +48,10 @@
 
 namespace dom_distiller {
 
-using leveldb_proto::test::FakeDB;
 using test::FakeDistiller;
 using test::MockDistillerFactory;
 using test::MockDistillerPage;
 using test::MockDistillerPageFactory;
-using test::util::CreateStoreWithFakeDB;
 using testing::HasSubstr;
 using testing::Not;
 
@@ -88,21 +83,6 @@ const char kTestDistillerObject[] =
     "window.domAutomationController.send("
     "typeof distiller == 'object')";
 
-void AddEntry(const ArticleEntry& e, FakeDB<ArticleEntry>::EntryMap* map) {
-  (*map)[e.entry_id()] = e;
-}
-
-ArticleEntry CreateEntry(const std::string& entry_id,
-                         const std::string& page_url) {
-  ArticleEntry entry;
-  entry.set_entry_id(entry_id);
-  if (!page_url.empty()) {
-    ArticleEntryPage* page = entry.add_pages();
-    page->set_url(page_url);
-  }
-  return entry;
-}
-
 void ExpectBodyHasThemeAndFont(content::WebContents* contents,
                                const std::string& expected_theme,
                                const std::string& expected_font) {
@@ -124,30 +104,22 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
     if (!DistillerJavaScriptWorldIdIsSet()) {
       SetDistillerJavaScriptWorldId(content::ISOLATED_WORLD_ID_CONTENT_END);
     }
-    database_model_ = new FakeDB<ArticleEntry>::EntryMap;
   }
-
-  void TearDownOnMainThread() override { delete database_model_; }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableDomDistiller);
   }
 
-  static std::unique_ptr<KeyedService> Build(content::BrowserContext* context) {
-    FakeDB<ArticleEntry>* fake_db = new FakeDB<ArticleEntry>(database_model_);
-    distiller_factory_ = new MockDistillerFactory();
-    MockDistillerPageFactory* distiller_page_factory_ =
-        new MockDistillerPageFactory();
-    std::unique_ptr<DomDistillerContextKeyedService> service(
-        new DomDistillerContextKeyedService(
-            std::unique_ptr<DomDistillerStoreInterface>(CreateStoreWithFakeDB(
-                fake_db, FakeDB<ArticleEntry>::EntryMap())),
-            std::unique_ptr<DistillerFactory>(distiller_factory_),
-            std::unique_ptr<DistillerPageFactory>(distiller_page_factory_),
-            std::unique_ptr<DistilledPagePrefs>(new DistilledPagePrefs(
-                Profile::FromBrowserContext(context)->GetPrefs()))));
-    fake_db->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
-    fake_db->LoadCallback(true);
+  std::unique_ptr<KeyedService> Build(content::BrowserContext* context) {
+    auto distiller_factory = std::make_unique<MockDistillerFactory>();
+    distiller_factory_ = distiller_factory.get();
+    auto distiller_page_factory = std::make_unique<MockDistillerPageFactory>();
+    auto* distiller_page_factory_raw = distiller_page_factory.get();
+    auto service = std::make_unique<DomDistillerContextKeyedService>(
+        std::move(distiller_factory), std::move(distiller_page_factory),
+        std::make_unique<DistilledPagePrefs>(
+            Profile::FromBrowserContext(context)->GetPrefs()),
+        /* distiller_ui_handle */ nullptr);
     if (expect_distillation_) {
       // There will only be destillation of an article if the database contains
       // the article.
@@ -157,7 +129,7 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
     }
     if (expect_distiller_page_) {
       MockDistillerPage* distiller_page = new MockDistillerPage();
-      EXPECT_CALL(*distiller_page_factory_, CreateDistillerPageImpl())
+      EXPECT_CALL(*distiller_page_factory_raw, CreateDistillerPageImpl())
           .WillOnce(testing::Return(distiller_page));
     }
     return std::move(service);
@@ -165,34 +137,14 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
 
   void ViewSingleDistilledPage(const GURL& url,
                                const std::string& expected_mime_type);
+  void ViewSingleDistilledPageAndExpectErrorPage(const GURL& url);
   void PrefTest(bool is_error_page);
+
   // Database entries.
-  static FakeDB<ArticleEntry>::EntryMap* database_model_;
-  static bool expect_distillation_;
-  static bool expect_distiller_page_;
-  static MockDistillerFactory* distiller_factory_;
+  bool expect_distillation_ = false;
+  bool expect_distiller_page_ = false;
+  MockDistillerFactory* distiller_factory_ = nullptr;
 };
-
-FakeDB<ArticleEntry>::EntryMap*
-    DomDistillerViewerSourceBrowserTest::database_model_;
-bool DomDistillerViewerSourceBrowserTest::expect_distillation_ = false;
-bool DomDistillerViewerSourceBrowserTest::expect_distiller_page_ = false;
-MockDistillerFactory* DomDistillerViewerSourceBrowserTest::distiller_factory_ =
-    NULL;
-
-// The DomDistillerViewerSource renders untrusted content, so ensure no bindings
-// are enabled when the article exists in the database.
-IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       NoWebUIBindingsArticleExists) {
-  // Ensure there is one item in the database, which will trigger distillation.
-  const ArticleEntry entry = CreateEntry("DISTILLED", "http://example.com/1");
-  AddEntry(entry, database_model_);
-  expect_distillation_ = true;
-  expect_distiller_page_ = true;
-  const GURL url = url_utils::GetDistillerViewUrlFromEntryId(
-      kDomDistillerScheme, entry.entry_id());
-  ViewSingleDistilledPage(url, "text/html");
-}
 
 // The DomDistillerViewerSource renders untrusted content, so ensure no bindings
 // are enabled when the article is not found.
@@ -208,21 +160,15 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
 
 // The DomDistillerViewerSource renders untrusted content, so ensure no bindings
 // are enabled when requesting to view an arbitrary URL.
-// Flaky on Linux: see http://crbug.com/606040.
-#if defined(OS_LINUX)
-#define MAYBE_NoWebUIBindingsViewUrl DISABLED_NoWebUIBindingsViewUrl
-#else
-#define MAYBE_NoWebUIBindingsViewUrl NoWebUIBindingsViewUrl
-#endif
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       MAYBE_NoWebUIBindingsViewUrl) {
+                       NoWebUIBindingsViewUrl) {
   // We should expect distillation for any valid URL.
   expect_distillation_ = true;
   expect_distiller_page_ = true;
-  GURL view_url("http://www.example.com/1");
-  const GURL url =
-      url_utils::GetDistillerViewUrlFromUrl(kDomDistillerScheme, view_url);
-  ViewSingleDistilledPage(url, "text/html");
+  GURL original_url("http://www.example.com/1");
+  const GURL view_url =
+      url_utils::GetDistillerViewUrlFromUrl(kDomDistillerScheme, original_url);
+  ViewSingleDistilledPage(view_url, "text/html");
 }
 
 void DomDistillerViewerSourceBrowserTest::ViewSingleDistilledPage(
@@ -230,8 +176,10 @@ void DomDistillerViewerSourceBrowserTest::ViewSingleDistilledPage(
     const std::string& expected_mime_type) {
   // Ensure the correct factory is used for the DomDistillerService.
   dom_distiller::DomDistillerServiceFactory::GetInstance()
-      ->SetTestingFactoryAndUse(browser()->profile(),
-                                base::BindRepeating(&Build));
+      ->SetTestingFactoryAndUse(
+          browser()->profile(),
+          base::BindRepeating(&DomDistillerViewerSourceBrowserTest::Build,
+                              base::Unretained(this)));
 
   // Navigate to a URL which the source should respond to.
   ui_test_utils::NavigateToURL(browser(), url);
@@ -247,18 +195,16 @@ void DomDistillerViewerSourceBrowserTest::ViewSingleDistilledPage(
   EXPECT_EQ(expected_mime_type, contents_after_nav->GetContentsMimeType());
 }
 
-#if defined(OS_LINUX)
-// Flaky on Ubuntu-12.04 bots: https://crbug.com/604362
-#define MAYBE_TestBadUrlErrorPage DISABLED_TestBadUrlErrorPage
-#else
-#define MAYBE_TestBadUrlErrorPage TestBadUrlErrorPage
-#endif
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       MAYBE_TestBadUrlErrorPage) {
+                       TestBadUrlErrorPage) {
   GURL url("chrome-distiller://bad");
+  ViewSingleDistilledPageAndExpectErrorPage(url);
+}
 
+void DomDistillerViewerSourceBrowserTest::
+    ViewSingleDistilledPageAndExpectErrorPage(const GURL& url) {
   // Navigate to a distiller URL.
-  ui_test_utils::NavigateToURL(browser(), url);
+  ViewSingleDistilledPage(url, "text/html");
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
@@ -295,14 +241,8 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
   ViewSingleDistilledPage(url, "text/css");
 }
 
-#if defined(OS_LINUX)
-// Flaky on Ubuntu-12.04 bots: https://crbug.com/604362
-#define MAYBE_EmptyURLShouldNotCrash DISABLED_EmptyURLShouldNotCrash
-#else
-#define MAYBE_EmptyURLShouldNotCrash EmptyURLShouldNotCrash
-#endif
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       MAYBE_EmptyURLShouldNotCrash) {
+                       EmptyURLShouldNotCrash) {
   // This is a bogus URL, so no distillation will happen.
   expect_distillation_ = false;
   expect_distiller_page_ = false;
@@ -319,10 +259,25 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
   ViewSingleDistilledPage(url, "text/html");
 }
 
+IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
+                       InvalidURLShouldGetErrorPage) {
+  const GURL original_url("http://www.example.com/1");
+  const GURL different_url("http://www.example.com/2");
+  const GURL view_url =
+      url_utils::GetDistillerViewUrlFromUrl(kDomDistillerScheme, original_url);
+  // This is a bogus URL, so no distillation will happen.
+  const GURL bad_view_url = net::AppendOrReplaceQueryParameter(
+      view_url, kUrlKey, different_url.spec());
+
+  ViewSingleDistilledPageAndExpectErrorPage(bad_view_url);
+}
+
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, EarlyTemplateLoad) {
   dom_distiller::DomDistillerServiceFactory::GetInstance()
-      ->SetTestingFactoryAndUse(browser()->profile(),
-                                base::BindRepeating(&Build));
+      ->SetTestingFactoryAndUse(
+          browser()->profile(),
+          base::BindRepeating(&DomDistillerViewerSourceBrowserTest::Build,
+                              base::Unretained(this)));
 
   scoped_refptr<content::MessageLoopRunner> distillation_done_runner =
       new content::MessageLoopRunner;
@@ -377,7 +332,7 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, EarlyTemplateLoad) {
 }
 
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       DistillerJavaScriptExposed) {
+                       DISABLED_DistillerJavaScriptExposed) {
   // Navigate to a distiller URL.
   GURL url(std::string(kDomDistillerScheme) + "://url");
   NavigateParams params(browser(), url, ui::PAGE_TRANSITION_TYPED);
@@ -439,8 +394,10 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, MultiPageArticle) {
   expect_distillation_ = false;
   expect_distiller_page_ = true;
   dom_distiller::DomDistillerServiceFactory::GetInstance()
-      ->SetTestingFactoryAndUse(browser()->profile(),
-                                base::BindRepeating(&Build));
+      ->SetTestingFactoryAndUse(
+          browser()->profile(),
+          base::BindRepeating(&DomDistillerViewerSourceBrowserTest::Build,
+                              base::Unretained(this)));
 
   scoped_refptr<content::MessageLoopRunner> distillation_done_runner =
       new content::MessageLoopRunner;
@@ -531,42 +488,30 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, MultiPageArticle) {
   EXPECT_THAT(result, HasSubstr("Page 2 content"));
 }
 
-// Flaky on Ubuntu-12.04 bots: https://crbug.com/606037
-#if defined(OS_LINUX)
-#define MAYBE_PrefChange DISABLED_PrefChange
-#else
-#define MAYBE_PrefChange PrefChange
-#endif
-IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, MAYBE_PrefChange) {
+IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, PrefChange) {
   PrefTest(false);
 }
 
-#if defined(OS_LINUX)
-// Flaky on Ubuntu-12.04 bots: https://crbug.com/604362
-#define MAYBE_PrefChangeError DISABLED_PrefChangeError
-#else
-#define MAYBE_PrefChangeError PrefChangeError
-#endif
-IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       MAYBE_PrefChangeError) {
+IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, PrefChangeError) {
   PrefTest(true);
 }
 
 void DomDistillerViewerSourceBrowserTest::PrefTest(bool is_error_page) {
-  GURL url;
+  GURL view_url;
   if (is_error_page) {
     expect_distillation_ = false;
     expect_distiller_page_ = false;
-    url = GURL("chrome-distiller://bad");
+    view_url = GURL("chrome-distiller://bad");
   } else {
     expect_distillation_ = true;
     expect_distiller_page_ = true;
-    GURL view_url("http://www.example.com/1");
-    url = url_utils::GetDistillerViewUrlFromUrl(kDomDistillerScheme, view_url);
+    GURL original_url("http://www.example.com/1");
+    view_url = url_utils::GetDistillerViewUrlFromUrl(kDomDistillerScheme,
+                                                     original_url);
   }
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  ViewSingleDistilledPage(url, "text/html");
+  ViewSingleDistilledPage(view_url, "text/html");
   content::WaitForLoadStop(contents);
   ExpectBodyHasThemeAndFont(contents, "light", "sans-serif");
 

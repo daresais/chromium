@@ -173,7 +173,9 @@
           <div class="flex text-elide settings-box-text" id="user-info">
             <span>
               [[getAvatarRowTitle_(shownAccount_.fullName,
-                  '$i18nPolymer{syncNotWorking}', '$i18nPolymer{syncPaused}',
+                  '$i18nPolymer{syncNotWorking}',
+                  '$i18nPolymer{syncPasswordsNotWorking}',
+                  '$i18nPolymer{syncPaused}',
                   '$i18nPolymer{syncDisabled}', syncStatus.hasError,
                   syncStatus.statusAction, syncStatus.disabled)]]
             </span>
@@ -181,8 +183,7 @@
               [[getAccountLabel_(
                   '$i18nPolymer{syncingTo}', shownAccount_.email,
                   syncStatus.hasError, syncStatus.signedIn,
-                  syncStatus.disabled, syncStatus.firstSetupInProgress,
-                  unifiedConsentEnabled)]]
+                  syncStatus.disabled, syncStatus.firstSetupInProgress)]]
             </div>
           </div>
         </div>
@@ -218,7 +219,8 @@
         </div>
       </div>
       <template is="dom-if" if="[[!syncStatus.signedIn]]" restamp>
-        <cr-action-menu id="menu" auto-reposition>
+        <cr-action-menu id="menu" auto-reposition
+            role-description="$i18n{menu}">
           <template is="dom-repeat" items="[[storedAccounts_]]">
             <button class="dropdown-item" on-click="onAccountTap_">
               <img class="account-icon small" alt=""

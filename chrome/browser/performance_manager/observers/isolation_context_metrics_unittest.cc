@@ -6,12 +6,10 @@
 
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/simple_test_tick_clock.h"
-#include "chrome/browser/performance_manager/graph/frame_node_impl.h"
-#include "chrome/browser/performance_manager/graph/graph_test_harness.h"
-#include "chrome/browser/performance_manager/graph/page_node_impl.h"
-#include "chrome/browser/performance_manager/graph/process_node_impl.h"
-#include "chrome/browser/performance_manager/performance_manager_clock.h"
+#include "components/performance_manager/graph/frame_node_impl.h"
+#include "components/performance_manager/graph/page_node_impl.h"
+#include "components/performance_manager/graph/process_node_impl.h"
+#include "components/performance_manager/test_support/graph_test_harness.h"
 
 namespace performance_manager {
 
@@ -51,8 +49,8 @@ class IsolationContextMetricsTest : public GraphTestHarness {
  public:
   IsolationContextMetricsTest()
       : GraphTestHarness(
-            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED,
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW) {}
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED,
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   ~IsolationContextMetricsTest() override = default;
 
@@ -76,15 +74,10 @@ class IsolationContextMetricsTest : public GraphTestHarness {
 
   void SetUp() override {
     metrics_ = new TestIsolationContextMetrics();
-    PerformanceManagerClock::SetClockForTesting(task_env().GetMockTickClock());
 
     // Sets a valid starting time.
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
     graph()->PassToGraph(base::WrapUnique(metrics_));
-  }
-
-  void TearDown() override {
-    PerformanceManagerClock::ResetClockForTesting();
   }
 
   void ExpectBrowsingInstanceData(int32_t browsing_instance_id,
@@ -110,10 +103,10 @@ class IsolationContextMetricsTest : public GraphTestHarness {
       int32_t browsing_instance_id,
       int32_t site_instance_id,
       FrameNodeImpl* parent_frame_node = nullptr) {
-    return CreateNode<FrameNodeImpl>(process_node, page_node, parent_frame_node,
-                                     0 /* frame_tree_node_id */,
-                                     base::UnguessableToken::Create(),
-                                     browsing_instance_id, site_instance_id);
+    return CreateNode<FrameNodeImpl>(
+        process_node, page_node, parent_frame_node, 0 /* frame_tree_node_id */,
+        ++next_render_frame_id_, base::UnguessableToken::Create(),
+        browsing_instance_id, site_instance_id);
   }
 
   // Advance time until the timer fires.
@@ -126,6 +119,7 @@ class IsolationContextMetricsTest : public GraphTestHarness {
 
   base::HistogramTester histogram_tester_;
   TestIsolationContextMetrics* metrics_;
+  int next_render_frame_id_ = 0;
 };
 
 // static
@@ -247,7 +241,7 @@ TEST_F(IsolationContextMetricsTest, ProcessDataReporting) {
   {
     // Advance time and add another frame to a new site instance, as a child
     // of |frame1|.
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
     auto frame2 =
         CreateFrameNode(process.get(), page.get(), kBID1, kSID2, frame1.get());
     EXPECT_EQ(2u, data1->site_instance_frame_count.size());
@@ -278,7 +272,7 @@ TEST_F(IsolationContextMetricsTest, ProcessDataReporting) {
         metrics_->kSiteInstancesPerRendererByTimeHistogram, 2, 1);
 
     // Advance time.
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
   }
 
   // The second frame will be destroyed as it goes out of scope. Expect another
@@ -310,7 +304,7 @@ TEST_F(IsolationContextMetricsTest, ProcessDataReporting) {
   {
     // Advance time and add another frame to the same site instance, as a child
     // of |frame1|.
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
     auto frame2 =
         CreateFrameNode(process.get(), page.get(), kBID1, kSID1, frame1.get());
     EXPECT_EQ(1u, data1->site_instance_frame_count.size());
@@ -347,7 +341,7 @@ TEST_F(IsolationContextMetricsTest, ProcessDataReporting) {
         metrics_->kSiteInstancesPerRendererByTimeHistogram, 2, 1);
 
     // Advance time.
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
   }
 
   // The second frame will be destroyed as it goes out of scope. Expect another
@@ -458,7 +452,7 @@ TEST_F(IsolationContextMetricsTest, BrowsingInstanceDataReporting) {
 
   // Advance time and add another page with 1 frame in a different browsing
   // instance, but in the same process.
-  task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+  AdvanceClock(base::TimeDelta::FromSeconds(1));
   auto page2 = CreateNode<PageNodeImpl>();
   auto frame2 = CreateFrameNode(process.get(), page2.get(), kBID2, kSID2);
   frame2->SetIsCurrent(true);
@@ -475,7 +469,7 @@ TEST_F(IsolationContextMetricsTest, BrowsingInstanceDataReporting) {
   // seconds has passed for the first browsing instance, and 1 second for the
   // second browsing instance.
   {
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
 
     base::HistogramTester tester;
     page1->SetIsVisible(true);
@@ -520,7 +514,7 @@ TEST_F(IsolationContextMetricsTest, BrowsingInstanceDataReporting) {
   // Destroy the foreground page. This should trigger one more second worth
   // of reports for both pages.
   {
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
 
     base::HistogramTester tester;
     frame2.reset();
@@ -551,7 +545,7 @@ TEST_F(IsolationContextMetricsTest, BrowsingInstanceDataReporting) {
   // emitted. There was 1 second of the first page being visible in its own
   // browsing instance.
   {
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
     base::HistogramTester tester;
     frame2 = CreateFrameNode(process.get(), page2.get(), kBID1, kSID2);
     frame2->SetIsCurrent(true);
@@ -568,7 +562,7 @@ TEST_F(IsolationContextMetricsTest, BrowsingInstanceDataReporting) {
   // Make the first page invisible again, and expect a transition. There was
   // 1 second of the two pages being in a visible multi-page browsing instance.
   {
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
     base::HistogramTester tester;
     page1->SetIsVisible(false);
     ExpectBrowsingInstanceData(kBID1, 2, 0);
@@ -583,7 +577,7 @@ TEST_F(IsolationContextMetricsTest, BrowsingInstanceDataReporting) {
   // Tear down all of the pages and expect the metrics to flush. There was 1
   // more second of a multi-page browsing instance in the background.
   {
-    task_env().FastForwardBy(base::TimeDelta::FromSeconds(1));
+    AdvanceClock(base::TimeDelta::FromSeconds(1));
     base::HistogramTester tester;
     frame1.reset();
     frame2.reset();

@@ -25,6 +25,9 @@ CryptoModulePasswordDialogView::CryptoModulePasswordDialogView(
     const std::string& hostname,
     const CryptoModulePasswordCallback& callback)
     : callback_(callback) {
+  DialogDelegate::set_button_label(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_CRYPTO_MODULE_AUTH_DIALOG_OK_BUTTON_LABEL));
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::CONTROL));
   Init(hostname, slot_name, reason);
@@ -49,12 +52,6 @@ base::string16 CryptoModulePasswordDialogView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_CRYPTO_MODULE_AUTH_DIALOG_TITLE);
 }
 
-base::string16 CryptoModulePasswordDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK ?
-      IDS_CRYPTO_MODULE_AUTH_DIALOG_OK_BUTTON_LABEL : IDS_CANCEL);
-}
-
 bool CryptoModulePasswordDialogView::Cancel() {
   callback_.Run(std::string());
   const base::string16 empty;
@@ -63,7 +60,7 @@ bool CryptoModulePasswordDialogView::Cancel() {
 }
 
 bool CryptoModulePasswordDialogView::Accept() {
-  callback_.Run(base::UTF16ToUTF8(password_entry_->text()));
+  callback_.Run(base::UTF16ToUTF8(password_entry_->GetText()));
   const base::string16 empty;
   password_entry_->SetText(empty);
   return true;

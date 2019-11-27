@@ -25,7 +25,7 @@ CHROME_SPECIFIC = BuildFileMatchRegex(
     r'lib/.*/libchrome\.\d{4}\.\d{2,3}\.so', # libchrome placeholders
     r'lib/.*/libchromium_android_linker\.so',
     r'lib/.*/libchromeview\.so', # placeholder library
-    r'lib/.*/libcrashpad_handler\.so',
+    r'lib/.*/libchrome_crashpad_handler\.so',
     r'lib/.*/crazy\.libchrome\.so',
     r'lib/.*/crazy\.libchrome\.align',
     r'lib/.*/gdbserver',
@@ -41,7 +41,7 @@ CHROME_SPECIFIC = BuildFileMatchRegex(
 WEBVIEW_SPECIFIC = BuildFileMatchRegex(
     r'lib/.*/libwebviewchromium\.so',
     r'assets/webview_licenses.notice',
-    r'res/.*/icon_webview.webp',
+    r'res/.*/icon_webview(.webp)?',
     r'META-INF/.*',
      # Monochrome doesn't have any res directories
      # whose api level is less than v24.

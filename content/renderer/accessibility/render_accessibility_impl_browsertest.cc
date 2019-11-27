@@ -14,16 +14,22 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/accessibility_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/fake_pepper_plugin_instance.h"
 #include "content/public/test/render_view_test.h"
+#include "content/renderer/accessibility/ax_action_target_factory.h"
 #include "content/renderer/accessibility/ax_image_annotator.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_view_impl.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "ppapi/c/private/ppp_pdf.h"
 #include "services/image_annotation/public/cpp/image_processor.h"
 #include "services/image_annotation/public/mojom/image_annotation.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -35,8 +41,11 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_node.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "ui/accessibility/ax_action_target.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/null_ax_action_target.h"
+#include "ui/native_theme/native_theme_features.h"
 
 namespace content {
 
@@ -62,11 +71,12 @@ class TestRenderAccessibilityImpl : public RenderAccessibilityImpl {
 
 class TestAXImageAnnotator : public AXImageAnnotator {
  public:
-  TestAXImageAnnotator(TestRenderAccessibilityImpl* const render_accessibility,
-                       image_annotation::mojom::AnnotatorPtr annotator_ptr)
+  TestAXImageAnnotator(
+      TestRenderAccessibilityImpl* const render_accessibility,
+      mojo::PendingRemote<image_annotation::mojom::Annotator> annotator)
       : AXImageAnnotator(render_accessibility,
                          std::string() /* preferred_language */,
-                         std::move(annotator_ptr)) {}
+                         std::move(annotator)) {}
   ~TestAXImageAnnotator() override = default;
 
  private:
@@ -92,19 +102,23 @@ class MockAnnotationService : public image_annotation::mojom::Annotator {
   MockAnnotationService() = default;
   ~MockAnnotationService() override = default;
 
-  image_annotation::mojom::AnnotatorPtr GetPtr() {
-    image_annotation::mojom::AnnotatorPtr ptr;
-    bindings_.AddBinding(this, mojo::MakeRequest(&ptr));
-    return ptr;
+  mojo::PendingRemote<image_annotation::mojom::Annotator> GetRemote() {
+    mojo::PendingRemote<image_annotation::mojom::Annotator> remote;
+    receivers_.Add(this, remote.InitWithNewPipeAndPassReceiver());
+    return remote;
   }
 
-  void AnnotateImage(const std::string& image_id,
-                     const std::string& /* description_language_tag */,
-                     image_annotation::mojom::ImageProcessorPtr image_processor,
-                     AnnotateImageCallback callback) override {
+  void AnnotateImage(
+      const std::string& image_id,
+      const std::string& /* description_language_tag */,
+      mojo::PendingRemote<image_annotation::mojom::ImageProcessor>
+          image_processor,
+      AnnotateImageCallback callback) override {
     image_ids_.push_back(image_id);
-    image_processors_.push_back(std::move(image_processor));
-    image_processors_.back().set_connection_error_handler(
+    image_processors_.push_back(
+        mojo::Remote<image_annotation::mojom::ImageProcessor>(
+            std::move(image_processor)));
+    image_processors_.back().set_disconnect_handler(
         base::BindOnce(&MockAnnotationService::ResetImageProcessor,
                        base::Unretained(this), image_processors_.size() - 1));
     callbacks_.push_back(std::move(callback));
@@ -112,7 +126,8 @@ class MockAnnotationService : public image_annotation::mojom::Annotator {
 
   // Tests should not delete entries in these lists.
   std::vector<std::string> image_ids_;
-  std::vector<image_annotation::mojom::ImageProcessorPtr> image_processors_;
+  std::vector<mojo::Remote<image_annotation::mojom::ImageProcessor>>
+      image_processors_;
   std::vector<AnnotateImageCallback> callbacks_;
 
  private:
@@ -120,7 +135,7 @@ class MockAnnotationService : public image_annotation::mojom::Annotator {
     image_processors_[index].reset();
   }
 
-  mojo::BindingSet<image_annotation::mojom::Annotator> bindings_;
+  mojo::ReceiverSet<image_annotation::mojom::Annotator> receivers_;
 
   DISALLOW_COPY_AND_ASSIGN(MockAnnotationService);
 };
@@ -364,6 +379,276 @@ TEST_F(RenderAccessibilityImplTest, ShowAccessibilityObject) {
   EXPECT_EQ(2, CountAccessibilityNodesSentToBrowser());
 }
 
+class MockPluginAccessibilityTreeSource : public content::PluginAXTreeSource {
+ public:
+  MockPluginAccessibilityTreeSource(ui::AXNode::AXID root_node_id) {
+    ax_tree_ = std::make_unique<ui::AXTree>();
+    root_node_ =
+        std::make_unique<ui::AXNode>(ax_tree_.get(), nullptr, root_node_id, 0);
+  }
+  ~MockPluginAccessibilityTreeSource() override {}
+  bool GetTreeData(ui::AXTreeData* data) const override { return true; }
+  ui::AXNode* GetRoot() const override { return root_node_.get(); }
+  ui::AXNode* GetFromId(ui::AXNode::AXID id) const override {
+    return (root_node_->data().id == id) ? root_node_.get() : nullptr;
+  }
+  int32_t GetId(const ui::AXNode* node) const override {
+    return root_node_->data().id;
+  }
+  void GetChildren(
+      const ui::AXNode* node,
+      std::vector<const ui::AXNode*>* out_children) const override {
+    DCHECK(node);
+    *out_children = std::vector<const ui::AXNode*>(node->children().cbegin(),
+                                                   node->children().cend());
+  }
+  ui::AXNode* GetParent(const ui::AXNode* node) const override {
+    return nullptr;
+  }
+  bool IsValid(const ui::AXNode* node) const override { return true; }
+  bool IsEqual(const ui::AXNode* node1,
+               const ui::AXNode* node2) const override {
+    return (node1 == node2);
+  }
+  const ui::AXNode* GetNull() const override { return nullptr; }
+  void SerializeNode(const ui::AXNode* node,
+                     ui::AXNodeData* out_data) const override {
+    DCHECK(node);
+    *out_data = node->data();
+  }
+  void HandleAction(const ui::AXActionData& action_data) {}
+  void ResetAccActionStatus() {}
+  bool IsIgnored(const ui::AXNode* node) const override { return false; }
+  std::unique_ptr<ui::AXActionTarget> CreateActionTarget(
+      const ui::AXNode& target_node) override {
+    action_target_called_ = true;
+    return std::make_unique<ui::NullAXActionTarget>();
+  }
+  bool GetActionTargetCalled() { return action_target_called_; }
+  void ResetActionTargetCalled() { action_target_called_ = false; }
+
+ private:
+  std::unique_ptr<ui::AXTree> ax_tree_;
+  std::unique_ptr<ui::AXNode> root_node_;
+  bool action_target_called_ = false;
+  DISALLOW_COPY_AND_ASSIGN(MockPluginAccessibilityTreeSource);
+};
+
+TEST_F(RenderAccessibilityImplTest, TestAXActionTargetFromNodeId) {
+  // Validate that we create the correct type of AXActionTarget for a given
+  // node id.
+  constexpr char html[] = R"HTML(
+      <body>
+      </body>
+      )HTML";
+  LoadHTMLAndRefreshAccessibilityTree(html);
+
+  WebDocument document = GetMainFrame()->GetDocument();
+  WebAXObject root_obj = WebAXObject::FromWebDocument(document);
+  WebAXObject body = root_obj.ChildAt(0);
+
+  // An AxID for an HTML node should produce a Blink action target.
+  std::unique_ptr<ui::AXActionTarget> body_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr, body.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink, body_action_target->GetType());
+
+  // An AxID for a Plugin node should produce a Plugin action target.
+  ui::AXNode::AXID root_node_id = render_accessibility().GenerateAXID();
+  MockPluginAccessibilityTreeSource pdf_acc_tree(root_node_id);
+  render_accessibility().SetPluginTreeSource(&pdf_acc_tree);
+
+  // An AxId from Pdf, should call PdfAccessibilityTree::CreateActionTarget.
+  std::unique_ptr<ui::AXActionTarget> pdf_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, &pdf_acc_tree,
+                                              root_node_id);
+  EXPECT_TRUE(pdf_acc_tree.GetActionTargetCalled());
+  pdf_acc_tree.ResetActionTargetCalled();
+
+  // An invalid AxID should produce a null action target.
+  std::unique_ptr<ui::AXActionTarget> null_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, &pdf_acc_tree, -1);
+  EXPECT_EQ(ui::AXActionTarget::Type::kNull, null_action_target->GetType());
+}
+
+class BlinkAXActionTargetTest : public RenderAccessibilityImplTest {
+ protected:
+  void SetUp() override {
+    // Disable overlay scrollbars to avoid DCHECK on ChromeOS.
+    feature_list_.InitAndDisableFeature(features::kOverlayScrollbar);
+
+    RenderAccessibilityImplTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+TEST_F(BlinkAXActionTargetTest, TestMethods) {
+  // Exercise the methods on BlinkAXActionTarget to ensure they have the
+  // expected effects.
+  constexpr char html[] = R"HTML(
+      <body>
+        <input type=checkbox>
+        <input type=range min=1 value=2 max=3 step=1>
+        <input type=text>
+        <select size=2>
+          <option>One</option>
+          <option>Two</option>
+        </select>
+        <div style='width:100px; height: 100px; overflow:scroll'>
+          <div style='width:1000px; height:900px'></div>
+          <div style='width:1000px; height:100px'></div>
+        </div>
+        <div>Text Node One</div>
+        <div>Text Node Two</div>
+      </body>
+      )HTML";
+  LoadHTMLAndRefreshAccessibilityTree(html);
+
+  WebDocument document = GetMainFrame()->GetDocument();
+  WebAXObject root_obj = WebAXObject::FromWebDocument(document);
+  WebAXObject body = root_obj.ChildAt(0);
+  WebAXObject input_checkbox = body.ChildAt(0);
+  WebAXObject input_range = body.ChildAt(1);
+  WebAXObject input_text = body.ChildAt(2);
+  WebAXObject option = body.ChildAt(3).ChildAt(0);
+  WebAXObject scroller = body.ChildAt(4);
+  WebAXObject scroller_child = body.ChildAt(4).ChildAt(1);
+  WebAXObject text_one = body.ChildAt(5).ChildAt(0);
+  WebAXObject text_two = body.ChildAt(6).ChildAt(0);
+
+  std::unique_ptr<ui::AXActionTarget> input_checkbox_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              input_checkbox.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            input_checkbox_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> input_range_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              input_range.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            input_range_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> input_text_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              input_text.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            input_text_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> option_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr, option.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink, option_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> scroller_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              scroller.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            scroller_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> scroller_child_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              scroller_child.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            scroller_child_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> text_one_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              text_one.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            text_one_action_target->GetType());
+
+  std::unique_ptr<ui::AXActionTarget> text_two_action_target =
+      AXActionTargetFactory::CreateFromNodeId(document, nullptr,
+                                              text_two.AxID());
+  EXPECT_EQ(ui::AXActionTarget::Type::kBlink,
+            text_two_action_target->GetType());
+
+  EXPECT_EQ(ax::mojom::CheckedState::kFalse, input_checkbox.CheckedState());
+  EXPECT_TRUE(input_checkbox_action_target->Click());
+  EXPECT_EQ(ax::mojom::CheckedState::kTrue, input_checkbox.CheckedState());
+
+  float value = 0.0f;
+  EXPECT_TRUE(input_range.ValueForRange(&value));
+  EXPECT_EQ(2.0f, value);
+  EXPECT_TRUE(input_range_action_target->Decrement());
+  EXPECT_TRUE(input_range.ValueForRange(&value));
+  EXPECT_EQ(1.0f, value);
+  EXPECT_TRUE(input_range_action_target->Increment());
+  EXPECT_TRUE(input_range.ValueForRange(&value));
+  EXPECT_EQ(2.0f, value);
+
+  EXPECT_FALSE(input_range.IsFocused());
+  EXPECT_TRUE(input_range_action_target->Focus());
+  EXPECT_TRUE(input_range.IsFocused());
+
+  blink::WebFloatRect expected_bounds;
+  blink::WebAXObject offset_container;
+  SkMatrix44 container_transform;
+  input_checkbox.GetRelativeBounds(offset_container, expected_bounds,
+                                   container_transform);
+  gfx::Rect actual_bounds = input_checkbox_action_target->GetRelativeBounds();
+  EXPECT_EQ(static_cast<int>(expected_bounds.x), actual_bounds.x());
+  EXPECT_EQ(static_cast<int>(expected_bounds.y), actual_bounds.y());
+  EXPECT_EQ(static_cast<int>(expected_bounds.width), actual_bounds.width());
+  EXPECT_EQ(static_cast<int>(expected_bounds.height), actual_bounds.height());
+
+  gfx::Point offset_to_set(500, 500);
+  scroller_action_target->SetScrollOffset(gfx::Point(500, 500));
+  EXPECT_EQ(offset_to_set, scroller_action_target->GetScrollOffset());
+  EXPECT_EQ(gfx::Point(0, 0), scroller_action_target->MinimumScrollOffset());
+  EXPECT_GE(scroller_action_target->MaximumScrollOffset().y(), 900);
+
+  // Android does not produce accessible items for option elements.
+#if !defined(OS_ANDROID)
+  EXPECT_EQ(blink::kWebAXSelectedStateFalse, option.IsSelected());
+  EXPECT_TRUE(option_action_target->SetSelected(true));
+  EXPECT_EQ(blink::kWebAXSelectedStateTrue, option.IsSelected());
+#endif
+
+  std::string value_to_set("test-value");
+  input_text_action_target->SetValue(value_to_set);
+  EXPECT_EQ(value_to_set, input_text.StringValue().Utf8());
+
+  // Setting selection requires layout to be clean.
+  ASSERT_TRUE(root_obj.UpdateLayoutAndCheckValidity());
+
+  EXPECT_TRUE(text_one_action_target->SetSelection(
+      text_one_action_target.get(), 3, text_two_action_target.get(), 4));
+  bool is_selection_backward;
+  blink::WebAXObject anchor_object;
+  int anchor_offset;
+  ax::mojom::TextAffinity anchor_affinity;
+  blink::WebAXObject focus_object;
+  int focus_offset;
+  ax::mojom::TextAffinity focus_affinity;
+  root_obj.Selection(is_selection_backward, anchor_object, anchor_offset,
+                     anchor_affinity, focus_object, focus_offset,
+                     focus_affinity);
+  EXPECT_EQ(text_one, anchor_object);
+  EXPECT_EQ(3, anchor_offset);
+  EXPECT_EQ(text_two, focus_object);
+  EXPECT_EQ(4, focus_offset);
+
+  scroller_action_target->SetScrollOffset(gfx::Point(0, 0));
+  EXPECT_EQ(gfx::Point(0, 0), scroller_action_target->GetScrollOffset());
+  EXPECT_TRUE(scroller_child_action_target->ScrollToMakeVisible());
+  EXPECT_GE(scroller_action_target->GetScrollOffset().y(), 900);
+
+  scroller_action_target->SetScrollOffset(gfx::Point(0, 0));
+  EXPECT_EQ(gfx::Point(0, 0), scroller_action_target->GetScrollOffset());
+  EXPECT_TRUE(scroller_child_action_target->ScrollToMakeVisibleWithSubFocus(
+      gfx::Rect(0, 0, 50, 50), ax::mojom::ScrollAlignment::kScrollAlignmentLeft,
+      ax::mojom::ScrollAlignment::kScrollAlignmentTop,
+      ax::mojom::ScrollBehavior::kDoNotScrollIfVisible));
+  EXPECT_GE(scroller_action_target->GetScrollOffset().y(), 900);
+
+  scroller_action_target->SetScrollOffset(gfx::Point(0, 0));
+  EXPECT_EQ(gfx::Point(0, 0), scroller_action_target->GetScrollOffset());
+  EXPECT_TRUE(
+      scroller_child_action_target->ScrollToGlobalPoint(gfx::Point(0, 0)));
+  EXPECT_GE(scroller_action_target->GetScrollOffset().y(), 900);
+}
+
 //
 // AXImageAnnotatorTest
 //
@@ -385,7 +670,7 @@ class AXImageAnnotatorTest : public RenderAccessibilityImplTest {
     SetMode(mode);
     render_accessibility().ax_image_annotator_ =
         std::make_unique<TestAXImageAnnotator>(&render_accessibility(),
-                                               mock_annotator().GetPtr());
+                                               mock_annotator().GetRemote());
     render_accessibility().tree_source_.RemoveImageAnnotator();
     render_accessibility().tree_source_.AddImageAnnotator(
         render_accessibility().ax_image_annotator_.get());
@@ -419,7 +704,7 @@ TEST_F(AXImageAnnotatorTest, OnImageAdded) {
   // Every time we call a method on a Mojo interface, a message is posted to the
   // current task queue. We need to ask the queue to drain itself before we
   // check test expectations.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_THAT(mock_annotator().image_ids_, ElementsAre("test1.jpg"));
   ASSERT_EQ(1u, mock_annotator().image_processors_.size());
@@ -440,7 +725,7 @@ TEST_F(AXImageAnnotatorTest, OnImageAdded) {
   // already visible one.
   render_accessibility().MarkWebAXObjectDirty(root_obj, true /* subtree */);
   render_accessibility().SendPendingAccessibilityEvents();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_THAT(mock_annotator().image_ids_,
               ElementsAre("test1.jpg", "test1.jpg", "test2.jpg"));
@@ -463,7 +748,7 @@ TEST_F(AXImageAnnotatorTest, OnImageUpdated) {
   // Every time we call a method on a Mojo interface, a message is posted to the
   // current task queue. We need to ask the queue to drain itself before we
   // check test expectations.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_THAT(mock_annotator().image_ids_, ElementsAre("test1.jpg"));
   ASSERT_EQ(1u, mock_annotator().image_processors_.size());
@@ -477,7 +762,7 @@ TEST_F(AXImageAnnotatorTest, OnImageUpdated) {
   // This should update the annotations of all images on the page.
   render_accessibility().MarkWebAXObjectDirty(root_obj, true /* subtree */);
   render_accessibility().SendPendingAccessibilityEvents();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_THAT(mock_annotator().image_ids_,
               ElementsAre("test1.jpg", "test1.jpg"));
@@ -494,7 +779,7 @@ TEST_F(AXImageAnnotatorTest, OnImageUpdated) {
   // now updated image src.
   render_accessibility().MarkWebAXObjectDirty(root_obj, true /* subtree */);
   render_accessibility().SendPendingAccessibilityEvents();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_THAT(mock_annotator().image_ids_,
               ElementsAre("test1.jpg", "test1.jpg", "test2.jpg"));

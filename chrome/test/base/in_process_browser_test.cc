@@ -20,6 +20,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
+#include "base/test/test_switches.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/after_startup_task_utils.h"
@@ -57,6 +58,7 @@
 #include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/google/core/common/google_util.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -106,10 +108,6 @@
 #include "ui/views/test/test_desktop_screen_x11.h"
 #endif
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "extensions/browser/extension_api_frame_id_map.h"
-#endif
-
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/test/views/accessibility_checker.h"
 #include "ui/views/views_delegate.h"
@@ -126,9 +124,9 @@ class FakeDeviceSyncImplFactory
 
   // chromeos::device_sync::DeviceSyncImpl::Factory:
   std::unique_ptr<chromeos::device_sync::DeviceSyncBase> BuildInstance(
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       gcm::GCMDriver* gcm_driver,
-      service_manager::Connector* connector,
+      PrefService* profile_prefs,
       const chromeos::device_sync::GcmDeviceInfoProvider*
           gcm_device_info_provider,
       chromeos::device_sync::ClientAppMetadataProvider*
@@ -165,6 +163,14 @@ InProcessBrowserTest::InProcessBrowserTest(
   views_delegate_ = std::move(views_delegate);
 }
 #endif
+
+std::unique_ptr<storage::QuotaSettings>
+InProcessBrowserTest::CreateQuotaSettings() {
+  // By default use hardcoded quota settings to have a consistent testing
+  // environment.
+  const int kQuota = 5 * 1024 * 1024;
+  return std::make_unique<storage::QuotaSettings>(kQuota * 5, kQuota, 0, 0);
+}
 
 void InProcessBrowserTest::Initialize() {
   CreateTestServer(GetChromeTestDataDir());
@@ -250,10 +256,14 @@ void InProcessBrowserTest::SetUp() {
 
   SetScreenInstance();
 
-  // Always use a mocked password storage if OS encryption is used (which is
-  // when anything sensitive gets stored, including Cookies). Without this on
-  // Mac, many tests will hang waiting for a user to approve KeyChain access.
+  // Use a mocked password storage if OS encryption is used that might block or
+  // prompt the user (which is when anything sensitive gets stored, including
+  // Cookies). Without this on Mac and Linux, many tests will hang waiting for a
+  // user to approve KeyChain/kwallet access. On Windows this is not needed as
+  // OS APIs never block.
+#if defined(OS_MACOSX) || defined(OS_LINUX)
   OSCryptMocker::SetUp();
+#endif
 
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
   CaptivePortalService::set_state_for_testing(
@@ -279,11 +289,9 @@ void InProcessBrowserTest::SetUp() {
   ash::ShellTestApi::SetTabletControllerUseScreenshotForTest(false);
 #endif  // defined(OS_CHROMEOS)
 
-  // Use hardcoded quota settings to have a consistent testing environment.
-  const int kQuota = 5 * 1024 * 1024;
-  quota_settings_ = storage::QuotaSettings(kQuota * 5, kQuota, 0, 0);
+  quota_settings_ = CreateQuotaSettings();
   ChromeContentBrowserClient::SetDefaultQuotaSettingsForTesting(
-      &quota_settings_);
+      quota_settings_.get());
 
   // Redirect the default download directory to a temporary directory.
   ASSERT_TRUE(default_download_dir_.CreateUniqueTempDir());
@@ -311,18 +319,11 @@ void InProcessBrowserTest::TearDown() {
 #if defined(OS_WIN)
   com_initializer_.reset();
 #endif
-
   BrowserTestBase::TearDown();
+#if defined(OS_MACOSX) || defined(OS_LINUX)
   OSCryptMocker::TearDown();
-  ChromeContentBrowserClient::SetDefaultQuotaSettingsForTesting(nullptr);
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // By now, all the WebContents should be destroyed, Ensure that we are not
-  // leaking memory in ExtensionAPIFrameIdMap. crbug.com/817205.
-  EXPECT_EQ(
-      0u,
-      extensions::ExtensionApiFrameIdMap::Get()->GetFrameDataCountForTesting());
 #endif
+  ChromeContentBrowserClient::SetDefaultQuotaSettingsForTesting(nullptr);
 
 #if defined(OS_CHROMEOS)
   chromeos::device_sync::DeviceSyncImpl::Factory::SetInstanceForTesting(
@@ -330,11 +331,15 @@ void InProcessBrowserTest::TearDown() {
 #endif
 }
 
+void InProcessBrowserTest::SelectFirstBrowser() {
+  const BrowserList* browser_list = BrowserList::GetInstance();
+  if (!browser_list->empty())
+    browser_ = browser_list->get(0);
+}
+
 void InProcessBrowserTest::CloseBrowserSynchronously(Browser* browser) {
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_BROWSER_CLOSED, content::Source<Browser>(browser));
   CloseBrowserAsynchronously(browser);
-  observer.Wait();
+  ui_test_utils::WaitForBrowserToClose(browser);
 }
 
 void InProcessBrowserTest::CloseBrowserAsynchronously(Browser* browser) {
@@ -471,9 +476,9 @@ base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
   base::CommandLine::SwitchMap switches =
       base::CommandLine::ForCurrentProcess()->GetSwitches();
   switches.erase(switches::kUserDataDir);
-  switches.erase(content::kSingleProcessTestsFlag);
+  switches.erase(switches::kSingleProcessTests);
   switches.erase(switches::kSingleProcess);
-  new_command_line.AppendSwitch(content::kLaunchAsBrowser);
+  new_command_line.AppendSwitch(switches::kLaunchAsBrowser);
 
   base::FilePath user_data_dir;
   base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
@@ -501,9 +506,8 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
   // Pump startup related events.
   content::RunAllPendingInMessageLoop();
 
-  const BrowserList* active_browser_list = BrowserList::GetInstance();
-  if (!active_browser_list->empty()) {
-    browser_ = active_browser_list->get(0);
+  SelectFirstBrowser();
+  if (browser_) {
 #if defined(OS_CHROMEOS)
     // There are cases where windows get created maximized by default.
     if (browser_->window()->IsMaximized())

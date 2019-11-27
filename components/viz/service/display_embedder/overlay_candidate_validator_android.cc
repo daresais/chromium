@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "components/viz/service/display/overlay_candidate_list.h"
 #include "components/viz/service/display/overlay_processor.h"
 #include "components/viz/service/display/overlay_strategy_underlay.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -30,6 +31,7 @@ void OverlayCandidateValidatorAndroid::InitializeStrategies() {
 }
 
 void OverlayCandidateValidatorAndroid::CheckOverlaySupport(
+    const PrimaryPlane* primary_plane,
     OverlayCandidateList* candidates) {
   // There should only be at most a single overlay candidate: the video quad.
   // There's no check that the presented candidate is really a video frame for

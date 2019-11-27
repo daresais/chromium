@@ -19,6 +19,7 @@
 #include "chromeos/network/onc/onc_utils.h"
 #include "chromeos/network/shill_property_util.h"
 #include "chromeos/network/tether_constants.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"
 #include "components/device_event_log/device_event_log.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -216,6 +217,12 @@ bool NetworkState::PropertyChanged(const std::string& key,
       return false;
     onc_source_ = ui_data->onc_source();
     return true;
+  } else if (key == shill::kProbeUrlProperty) {
+    std::string probe_url_string;
+    if (!GetStringValue(key, value, &probe_url_string))
+      return false;
+    probe_url_ = GURL(probe_url_string);
+    return true;
   }
   return false;
 }
@@ -231,10 +238,8 @@ bool NetworkState::InitialPropertiesReceived(const base::Value& properties) {
     return false;
   }
 
-  // By convention, all visible WiFi and WiMAX networks have a
-  // SignalStrength > 0.
-  if ((type() == shill::kTypeWifi || type() == shill::kTypeWimax) &&
-      visible() && signal_strength_ <= 0) {
+  // By convention, all visible WiFi networks have a SignalStrength > 0.
+  if (type() == shill::kTypeWifi && visible() && signal_strength_ <= 0) {
     signal_strength_ = 1;
   }
 
@@ -284,6 +289,9 @@ void NetworkState::GetStateProperties(base::Value* dictionary) const {
     dictionary->SetKey(kTetherHasConnectedToHost,
                        base::Value(tether_has_connected_to_host()));
     dictionary->SetKey(kTetherSignalStrength, base::Value(signal_strength()));
+
+    // All Tether networks are connectable.
+    dictionary->SetKey(shill::kConnectableProperty, base::Value(connectable()));
 
     // Tether networks do not share some of the wireless/mobile properties added
     // below; exit early to avoid having these properties applied.
@@ -404,6 +412,7 @@ std::string NetworkState::connection_state() const {
          connection_state_ == shill::kStateOffline ||
          connection_state_ == shill::kStateOnline ||
          connection_state_ == shill::kStateFailure ||
+         connection_state_ == shill::kStateDisconnect ||
          // TODO(https://crbug.com/552190): Remove kStateActivationFailure from
          // this list when occurrences in chromium code have been eliminated.
          connection_state_ == shill::kStateActivationFailure ||

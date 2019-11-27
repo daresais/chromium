@@ -106,7 +106,14 @@ void BrowserAccessibilityManagerAuraLinux::FireBlinkEvent(
     ax::mojom::Event event_type,
     BrowserAccessibility* node) {
   BrowserAccessibilityManager::FireBlinkEvent(event_type, node);
-  // Need to implement.
+
+  switch (event_type) {
+    case ax::mojom::Event::kScrolledToAnchor:
+      ToBrowserAccessibilityAuraLinux(node)->GetNode()->OnScrolledToAnchor();
+      break;
+    default:
+      break;
+  }
 }
 
 void BrowserAccessibilityManagerAuraLinux::FireNameChangedEvent(
@@ -133,7 +140,7 @@ void BrowserAccessibilityManagerAuraLinux::FireGeneratedEvent(
 
   switch (event_type) {
     case ui::AXEventGenerator::Event::DOCUMENT_SELECTION_CHANGED: {
-      int32_t focus_id = GetTreeData().sel_focus_object_id;
+      int32_t focus_id = ax_tree()->GetUnignoredSelection().focus_object_id;
       BrowserAccessibility* focus_object = GetFromID(focus_id);
       if (focus_object)
         FireEvent(focus_object, ax::mojom::Event::kTextSelectionChanged);
@@ -158,7 +165,7 @@ void BrowserAccessibilityManagerAuraLinux::FireGeneratedEvent(
       // Since AuraLinux needs to send the children-changed::add event with the
       // index in parent, the event must be fired after the node is unignored.
       // children-changed:remove is handled in |OnStateChanged|
-      if (!node->HasState(ax::mojom::State::kIgnored)) {
+      if (!node->IsIgnored()) {
         if (node->IsNative() && node->GetParent()) {
           g_signal_emit_by_name(node->GetParent(), "children-changed::add",
                                 node->GetIndexInParent(),
@@ -201,53 +208,20 @@ void BrowserAccessibilityManagerAuraLinux::FireGeneratedEvent(
   }
 }
 
-static AtkObject* GetParentFrameIfToplevelDocument(AtkObject* object) {
-  while (object) {
-    if (atk_object_get_role(object) == ATK_ROLE_DOCUMENT_WEB)
-      return nullptr;
-    if (atk_object_get_role(object) == ATK_ROLE_FRAME)
-      return object;
-    object = atk_object_get_parent(object);
-  }
-  return nullptr;
-}
-
-static void EstablishEmbeddedRelationship(AtkObject* document_object) {
-  if (!document_object)
-    return;
-
-  AtkObject* window =
-      GetParentFrameIfToplevelDocument(atk_object_get_parent(document_object));
-  if (!window)
-    return;
-
-  ui::AXPlatformNodeAuraLinux* window_platform_node =
-      static_cast<ui::AXPlatformNodeAuraLinux*>(
-          ui::AXPlatformNode::FromNativeViewAccessible(window));
-  ui::AXPlatformNodeAuraLinux* document_platform_node =
-      static_cast<ui::AXPlatformNodeAuraLinux*>(
-          ui::AXPlatformNode::FromNativeViewAccessible(document_object));
-  if (!window_platform_node || !document_platform_node)
-    return;
-
-  window_platform_node->SetEmbeddedDocument(document_object);
-  document_platform_node->SetEmbeddingWindow(window);
-}
-
-void BrowserAccessibilityManagerAuraLinux::OnStateChanged(
+void BrowserAccessibilityManagerAuraLinux::OnNodeDataWillChange(
     ui::AXTree* tree,
-    ui::AXNode* node,
-    ax::mojom::State state,
-    bool new_value) {
+    const ui::AXNodeData& old_node_data,
+    const ui::AXNodeData& new_node_data) {
   DCHECK_EQ(ax_tree(), tree);
 
   // Since AuraLinux needs to send the children-changed::remove event with the
   // index in parent, the event must be fired before the node becomes ignored.
   // children-changed:add is handled with the generated Event::IGNORED_CHANGED.
-  if (state == ax::mojom::State::kIgnored && new_value) {
-    DCHECK(!node->data().HasState(ax::mojom::State::kIgnored));
-    BrowserAccessibility* obj = GetFromAXNode(node);
+  if (!old_node_data.HasState(ax::mojom::State::kIgnored) &&
+      new_node_data.HasState(ax::mojom::State::kIgnored)) {
+    BrowserAccessibility* obj = GetFromID(old_node_data.id);
     if (obj && obj->IsNative() && obj->GetParent()) {
+      DCHECK(!obj->HasState(ax::mojom::State::kIgnored));
       g_signal_emit_by_name(obj->GetParent(), "children-changed::remove",
                             obj->GetIndexInParent(),
                             obj->GetNativeViewAccessible());
@@ -258,7 +232,6 @@ void BrowserAccessibilityManagerAuraLinux::OnStateChanged(
 void BrowserAccessibilityManagerAuraLinux::OnSubtreeWillBeDeleted(
     ui::AXTree* tree,
     ui::AXNode* node) {
-  BrowserAccessibilityManager::OnSubtreeWillBeDeleted(tree, node);
   // Sending events on load/destruction would create a lot of spam, avoid that.
   if (!GetTreeData().loaded)
     return;
@@ -275,14 +248,6 @@ void BrowserAccessibilityManagerAuraLinux::OnAtomicUpdateFinished(
   BrowserAccessibilityManager::OnAtomicUpdateFinished(tree, root_changed,
                                                       changes);
 
-  // Ideally we would like to do this only when `root_changed` is true, but it
-  // seems that our parent ATK frame can switch between multiple
-  // BrowserAccessibilityManagers with no way to detect that here. Instead
-  // whenever an update happens we reestablish the relationship to our parent
-  // frame.
-  if (GetRoot() && GetRoot()->IsNative() && IsRootTree())
-    EstablishEmbeddedRelationship(GetRoot()->GetNativeViewAccessible());
-
   // This is the second step in what will be a three step process mirroring that
   // used in BrowserAccessibilityManagerWin.
   for (const auto& change : changes) {
@@ -292,6 +257,33 @@ void BrowserAccessibilityManagerAuraLinux::OnAtomicUpdateFinished(
     if (obj && obj->IsNative())
       ToBrowserAccessibilityAuraLinux(obj)->GetNode()->UpdateHypertext();
   }
+}
+
+void BrowserAccessibilityManagerAuraLinux::OnFindInPageResult(int request_id,
+                                                              int match_index,
+                                                              int start_id,
+                                                              int start_offset,
+                                                              int end_id,
+                                                              int end_offset) {
+  BrowserAccessibility* node = GetFromID(start_id);
+  if (!node)
+    return;
+  ui::AXPlatformNodeAuraLinux* platform_node =
+      ToBrowserAccessibilityAuraLinux(node)->GetNode();
+
+  // TODO(accessibility): We should support selections that span multiple
+  // elements, but for now if we see a result that spans multiple elements,
+  // just activate until the end of the node.
+  if (end_id != start_id)
+    end_offset = platform_node->GetHypertext().size();
+
+  platform_node->ActivateFindInPageResult(start_offset, end_offset);
+}
+
+void BrowserAccessibilityManagerAuraLinux::OnFindInPageTermination() {
+  static_cast<BrowserAccessibilityAuraLinux*>(GetRoot())
+      ->GetNode()
+      ->TerminateFindInPage();
 }
 
 }  // namespace content

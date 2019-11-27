@@ -75,19 +75,6 @@ HWND BrowserAccessibilityManagerWin::GetParentHWND() {
   return delegate->AccessibilityGetAcceleratedWidget();
 }
 
-void BrowserAccessibilityManagerWin::OnSubtreeWillBeDeleted(ui::AXTree* tree,
-                                                            ui::AXNode* node) {
-  BrowserAccessibilityManager::OnSubtreeWillBeDeleted(tree, node);
-
-  BrowserAccessibility* obj = GetFromAXNode(node);
-  FireWinAccessibilityEvent(EVENT_OBJECT_HIDE, obj);
-  FireUiaStructureChangedEvent(StructureChangeType_ChildRemoved, obj);
-  if (obj && obj->GetRole() == ax::mojom::Role::kMenu) {
-    FireWinAccessibilityEvent(EVENT_SYSTEM_MENUPOPUPEND, obj);
-    FireUiaAccessibilityEvent(UIA_MenuClosedEventId, obj);
-  }
-}
-
 void BrowserAccessibilityManagerWin::UserIsReloading() {
   if (GetRoot())
     FireWinAccessibilityEvent(IA2_EVENT_DOCUMENT_RELOAD, GetRoot());
@@ -194,9 +181,7 @@ void BrowserAccessibilityManagerWin::FireGeneratedEvent(
       // If this node is ignored, notify from the platform parent if available,
       // since it will be unignored.
       BrowserAccessibility* target_node =
-          node->GetData().HasState(ax::mojom::State::kIgnored)
-              ? node->PlatformGetParent()
-              : node;
+          node->IsIgnored() ? node->PlatformGetParent() : node;
       if (target_node) {
         FireWinAccessibilityEvent(EVENT_OBJECT_REORDER, target_node);
         FireUiaStructureChangedEvent(StructureChangeType_ChildrenReordered,
@@ -224,7 +209,7 @@ void BrowserAccessibilityManagerWin::FireGeneratedEvent(
       break;
     case ui::AXEventGenerator::Event::DOCUMENT_SELECTION_CHANGED: {
       // Fire the event on the object where the focus of the selection is.
-      int32_t focus_id = GetTreeData().sel_focus_object_id;
+      int32_t focus_id = ax_tree()->GetUnignoredSelection().focus_object_id;
       BrowserAccessibility* focus_object = GetFromID(focus_id);
       if (focus_object && focus_object->HasVisibleCaretOrSelection())
         FireWinAccessibilityEvent(IA2_EVENT_TEXT_CARET_MOVED, focus_object);
@@ -254,13 +239,22 @@ void BrowserAccessibilityManagerWin::FireGeneratedEvent(
       aria_properties_events_.insert(node);
       break;
     case ui::AXEventGenerator::Event::IGNORED_CHANGED:
-      if (node->HasState(ax::mojom::State::kIgnored)) {
+      if (node->IsIgnored()) {
         FireWinAccessibilityEvent(EVENT_OBJECT_HIDE, node);
         FireUiaStructureChangedEvent(StructureChangeType_ChildRemoved, node);
+        if (node->GetRole() == ax::mojom::Role::kMenu) {
+          FireWinAccessibilityEvent(EVENT_SYSTEM_MENUPOPUPEND, node);
+          FireUiaAccessibilityEvent(UIA_MenuClosedEventId, node);
+        }
       } else {
         FireWinAccessibilityEvent(EVENT_OBJECT_SHOW, node);
         FireUiaStructureChangedEvent(StructureChangeType_ChildAdded, node);
+        if (node->GetRole() == ax::mojom::Role::kMenu) {
+          FireWinAccessibilityEvent(EVENT_SYSTEM_MENUPOPUPSTART, node);
+          FireUiaAccessibilityEvent(UIA_MenuOpenedEventId, node);
+        }
       }
+      aria_properties_events_.insert(node);
       break;
     case ui::AXEventGenerator::Event::IMAGE_ANNOTATION_CHANGED:
       FireWinAccessibilityEvent(EVENT_OBJECT_NAMECHANGE, node);
@@ -421,20 +415,22 @@ void BrowserAccessibilityManagerWin::FireGeneratedEvent(
 void BrowserAccessibilityManagerWin::FireWinAccessibilityEvent(
     LONG win_event_type,
     BrowserAccessibility* node) {
-  if (::switches::IsExperimentalAccessibilityPlatformUIAEnabled())
-    return;
   if (!ShouldFireEventForNode(node))
     return;
-  // Suppress events when |IGNORED_CHANGED| except for related SHOW / HIDE
+  // Suppress events when |IGNORED_CHANGED| except for related SHOW / HIDE.
+  // Also include MENUPOPUPSTART / MENUPOPUPEND since a change in the ignored
+  // state may show / hide a popup by exposing it to the tree or not.
   if (base::Contains(ignored_changed_nodes_, node)) {
     switch (win_event_type) {
       case EVENT_OBJECT_HIDE:
       case EVENT_OBJECT_SHOW:
+      case EVENT_SYSTEM_MENUPOPUPEND:
+      case EVENT_SYSTEM_MENUPOPUPSTART:
         break;
       default:
         return;
     }
-  } else if (node->HasState(ax::mojom::State::kIgnored)) {
+  } else if (node->IsIgnored()) {
     return;
   }
 
@@ -457,10 +453,20 @@ void BrowserAccessibilityManagerWin::FireUiaAccessibilityEvent(
     return;
   if (!ShouldFireEventForNode(node))
     return;
-  // Suppress events when |IGNORED_CHANGED|
-  if (node->HasState(ax::mojom::State::kIgnored) ||
-      base::Contains(ignored_changed_nodes_, node))
+  // Suppress events when |IGNORED_CHANGED| except for MenuClosed / MenuOpen
+  // since a change in the ignored state may show / hide a popup by exposing
+  // it to the tree or not.
+  if (base::Contains(ignored_changed_nodes_, node)) {
+    switch (uia_event) {
+      case UIA_MenuClosedEventId:
+      case UIA_MenuOpenedEventId:
+        break;
+      default:
+        return;
+    }
+  } else if (node->IsIgnored()) {
     return;
+  }
 
   ::UiaRaiseAutomationEvent(ToBrowserAccessibilityWin(node)->GetCOM(),
                             uia_event);
@@ -473,10 +479,14 @@ void BrowserAccessibilityManagerWin::FireUiaPropertyChangedEvent(
     return;
   if (!ShouldFireEventForNode(node))
     return;
-  // Suppress events when |IGNORED_CHANGED|
-  if (node->HasState(ax::mojom::State::kIgnored) ||
-      base::Contains(ignored_changed_nodes_, node))
-    return;
+  // Suppress events when |IGNORED_CHANGED| with the exception for firing
+  // UIA_AriaPropertiesPropertyId-hidden event on non-text node marked as
+  // ignored.
+  if (node->IsIgnored() || base::Contains(ignored_changed_nodes_, node)) {
+    if (uia_property != UIA_AriaPropertiesPropertyId ||
+        node->IsTextOnlyObject())
+      return;
+  }
 
   // The old value is not used by the system
   VARIANT old_value = {};
@@ -507,7 +517,7 @@ void BrowserAccessibilityManagerWin::FireUiaStructureChangedEvent(
       default:
         return;
     }
-  } else if (node->HasState(ax::mojom::State::kIgnored)) {
+  } else if (node->IsIgnored()) {
     return;
   }
 
@@ -574,6 +584,20 @@ gfx::Rect BrowserAccessibilityManagerWin::GetViewBounds() {
     return bounds;
   }
   return gfx::Rect();
+}
+
+void BrowserAccessibilityManagerWin::OnSubtreeWillBeDeleted(ui::AXTree* tree,
+                                                            ui::AXNode* node) {
+  BrowserAccessibility* obj = GetFromAXNode(node);
+  DCHECK(obj);
+  if (obj) {
+    FireWinAccessibilityEvent(EVENT_OBJECT_HIDE, obj);
+    FireUiaStructureChangedEvent(StructureChangeType_ChildRemoved, obj);
+    if (obj->GetRole() == ax::mojom::Role::kMenu) {
+      FireWinAccessibilityEvent(EVENT_SYSTEM_MENUPOPUPEND, obj);
+      FireUiaAccessibilityEvent(UIA_MenuClosedEventId, obj);
+    }
+  }
 }
 
 void BrowserAccessibilityManagerWin::OnAtomicUpdateFinished(

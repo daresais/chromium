@@ -9,29 +9,18 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/message_loop/message_pump_type.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "base/time/time.h"
-#include "base/timer/timer.h"
-#include "chromecast/media/audio/capture_service/capture_service_buildflags.h"
 #include "chromecast/media/audio/capture_service/constants.h"
 #include "chromecast/media/audio/capture_service/message_parsing_util.h"
+#include "chromecast/media/audio/mixer_service/audio_socket_service.h"
 #include "chromecast/net/small_message_socket.h"
 #include "media/base/limits.h"
 #include "net/base/io_buffer.h"
 #include "net/socket/stream_socket.h"
-
-#if BUILDFLAG(USE_UNIX_SOCKETS)
-#include "net/socket/unix_domain_client_socket_posix.h"
-#else
-#include "net/base/address_list.h"
-#include "net/base/ip_address.h"
-#include "net/base/ip_endpoint.h"
-#include "net/log/net_log_source.h"
-#include "net/socket/tcp_client_socket.h"
-#endif  // BUILDFLAG(USE_UNIX_SOCKETS)
 
 // Helper macro to post tasks to the io thread. It is safe to use unretained
 // |this|, since |this| owns the thread.
@@ -46,14 +35,7 @@
 namespace chromecast {
 namespace media {
 
-namespace {
-
-constexpr base::TimeDelta kConnectTimeout = base::TimeDelta::FromSeconds(1);
-constexpr base::TimeDelta kInactivityTimeout = base::TimeDelta::FromSeconds(5);
-
-}  // namespace
-
-class CaptureServiceReceiver::Socket : public SmallMessageSocket {
+class CaptureServiceReceiver::Socket : public SmallMessageSocket::Delegate {
  public:
   Socket(std::unique_ptr<net::StreamSocket> socket, int channels);
   ~Socket() override;
@@ -61,7 +43,7 @@ class CaptureServiceReceiver::Socket : public SmallMessageSocket {
   void Start(::media::AudioInputStream::AudioInputCallback* input_callback);
 
  private:
-  // SmallMessageSocket implementation:
+  // SmallMessageSocket::Delegate implementation:
   void OnError(int error) override;
   void OnEndOfStream() override;
   bool OnMessage(char* data, int size) override;
@@ -70,11 +52,12 @@ class CaptureServiceReceiver::Socket : public SmallMessageSocket {
   bool HandleAudio(std::unique_ptr<::media::AudioBus> audio, int64_t timestamp);
   void ReportErrorAndStop();
 
+  SmallMessageSocket socket_;
+
   // Number of audio capture channels that audio manager defines.
   const int channels_;
 
   ::media::AudioInputStream::AudioInputCallback* input_callback_;
-  base::OneShotTimer inactivity_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(Socket);
 };
@@ -82,7 +65,7 @@ class CaptureServiceReceiver::Socket : public SmallMessageSocket {
 CaptureServiceReceiver::Socket::Socket(
     std::unique_ptr<net::StreamSocket> socket,
     int channels)
-    : SmallMessageSocket(std::move(socket)),
+    : socket_(this, std::move(socket)),
       channels_(channels),
       input_callback_(nullptr) {
   DCHECK_GT(channels_, 0);
@@ -94,22 +77,14 @@ CaptureServiceReceiver::Socket::~Socket() = default;
 void CaptureServiceReceiver::Socket::Start(
     ::media::AudioInputStream::AudioInputCallback* input_callback) {
   input_callback_ = input_callback;
-  inactivity_timer_.Start(FROM_HERE, kInactivityTimeout, this,
-                          &CaptureServiceReceiver::Socket::OnInactivityTimeout);
-  ReceiveMessages();
+  socket_.ReceiveMessages();
 }
 
 void CaptureServiceReceiver::Socket::ReportErrorAndStop() {
-  inactivity_timer_.Stop();
   if (input_callback_) {
     input_callback_->OnError();
   }
   input_callback_ = nullptr;
-}
-
-void CaptureServiceReceiver::Socket::OnInactivityTimeout() {
-  LOG(ERROR) << "Timed out " << this << " due to inactivity";
-  ReportErrorAndStop();
 }
 
 void CaptureServiceReceiver::Socket::OnError(int error) {
@@ -132,11 +107,6 @@ bool CaptureServiceReceiver::Socket::OnMessage(char* data, int size) {
     ReportErrorAndStop();
     return false;
   }
-
-  if (input_callback_) {
-    inactivity_timer_.Reset();
-  }
-
   return HandleAudio(std::move(audio.value()), timestamp);
 }
 
@@ -157,11 +127,14 @@ bool CaptureServiceReceiver::Socket::HandleAudio(
   return true;
 }
 
+// static
+constexpr base::TimeDelta CaptureServiceReceiver::kConnectTimeout;
+
 CaptureServiceReceiver::CaptureServiceReceiver(
     const ::media::AudioParameters& audio_params)
     : audio_params_(audio_params), io_thread_(__func__) {
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
+  options.message_pump_type = base::MessagePumpType::IO;
   // TODO(b/137106361): Tweak the thread priority once the thread priority for
   // speech processing gets fixed.
   options.priority = base::ThreadPriority::DISPLAY;
@@ -179,20 +152,10 @@ void CaptureServiceReceiver::Start(
     ::media::AudioInputStream::AudioInputCallback* input_callback) {
   ENSURE_ON_IO_THREAD(Start, input_callback);
 
-#if BUILDFLAG(USE_UNIX_SOCKETS)
   std::string path = capture_service::kDefaultUnixDomainSocketPath;
-  std::unique_ptr<net::StreamSocket> connecting_socket =
-      std::make_unique<net::UnixDomainClientSocket>(
-          path, true /* use_abstract_namespace */);
-#else   // BUILDFLAG(USE_UNIX_SOCKETS)
   int port = capture_service::kDefaultTcpPort;
-  net::IPEndPoint endpoint(net::IPAddress::IPv4Localhost(), port);
-  std::unique_ptr<net::StreamSocket> connecting_socket =
-      std::make_unique<net::TCPClientSocket>(
-          net::AddressList(endpoint), nullptr, nullptr, net::NetLogSource());
-#endif  // BUILDFLAG(USE_UNIX_SOCKETS)
 
-  StartWithSocket(input_callback, std::move(connecting_socket));
+  StartWithSocket(input_callback, AudioSocketService::Connect(path, port));
 }
 
 void CaptureServiceReceiver::StartWithSocket(
@@ -240,10 +203,6 @@ void CaptureServiceReceiver::OnConnected(
     input_callback->OnError();
     connecting_socket_.reset();
   }
-
-  if (!connected_cb_.is_null()) {
-    std::move(connected_cb_).Run();
-  }
 }
 
 void CaptureServiceReceiver::OnConnectTimeout(
@@ -258,14 +217,16 @@ void CaptureServiceReceiver::OnConnectTimeout(
 }
 
 void CaptureServiceReceiver::Stop() {
-  ENSURE_ON_IO_THREAD(Stop);
-  connecting_socket_.reset();
-  socket_.reset();
+  base::WaitableEvent finished;
+  StopOnTaskRunner(&finished);
+  finished.Wait();
 }
 
-void CaptureServiceReceiver::SetConnectClosureForTest(
-    base::OnceClosure connected_cb) {
-  connected_cb_ = std::move(connected_cb);
+void CaptureServiceReceiver::StopOnTaskRunner(base::WaitableEvent* finished) {
+  ENSURE_ON_IO_THREAD(StopOnTaskRunner, finished);
+  connecting_socket_.reset();
+  socket_.reset();
+  finished->Signal();
 }
 
 void CaptureServiceReceiver::SetTaskRunnerForTest(

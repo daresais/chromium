@@ -20,9 +20,8 @@
 #include "third_party/blink/renderer/core/layout/hit_test_canvas_result.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -245,6 +244,10 @@ WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
     event.touches[event.touches_length++] =
         CreateWebTouchPointFromWebPointerEvent(touch_pointer_event,
                                                touch_point_attribute->stale_);
+    if (!touch_point_attribute->stale_) {
+      event.SetTimeStamp(std::max(event.TimeStamp(),
+                                  touch_point_attribute->event_.TimeStamp()));
+    }
 
     // Only change the touch event type from move. So if we have two pointers
     // in up and down state we just set the touch event type to the first one
@@ -536,7 +539,7 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
       Node* node = result.InnerNode();
       if (!node)
         return;
-      if (auto* canvas = ToHTMLCanvasElementOrNull(node)) {
+      if (auto* canvas = DynamicTo<HTMLCanvasElement>(node)) {
         HitTestCanvasResult* hit_test_canvas_result =
             canvas->GetControlAndIdIfHitRegionExists(
                 result.PointInInnerNodeFrame());

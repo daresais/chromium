@@ -22,18 +22,19 @@
 #import "ios/web/public/deprecated/crw_native_content_holder.h"
 #import "ios/web/public/deprecated/test_native_content.h"
 #import "ios/web/public/deprecated/test_native_content_provider.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/navigation/web_state_policy_decider.h"
 #import "ios/web/public/session/crw_navigation_item_storage.h"
 #import "ios/web/public/session/crw_session_storage.h"
+#import "ios/web/public/test/error_test_util.h"
 #include "ios/web/public/test/fakes/test_web_state_observer.h"
 #import "ios/web/public/test/navigation_test_util.h"
 #import "ios/web/public/test/web_view_content_test_util.h"
 #import "ios/web/public/test/web_view_interaction_test_util.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/navigation_context.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_policy_decider.h"
+#include "ios/web/public/web_state_observer.h"
 #include "ios/web/test/test_url_constants.h"
 #import "ios/web/test/web_int_test.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
@@ -65,6 +66,22 @@ using wk_navigation_util::CreateRedirectUrl;
 const char kExpectedMimeType[] = "text/html";
 
 const char kFailedTitle[] = "failed_title";
+
+// Location of a test page.
+const char kTestPageURL[] = "/pony.html";
+
+// A text string from the test HTML page at |kTestPageURL|.
+const char kTestSessionStoragePageText[] = "pony";
+
+// Returns a session storage with a single committed entry of a test HTML page.
+CRWSessionStorage* GetTestSessionStorage(const GURL& testUrl) {
+  CRWSessionStorage* result = [[CRWSessionStorage alloc] init];
+  result.lastCommittedItemIndex = 0;
+  CRWNavigationItemStorage* item = [[CRWNavigationItemStorage alloc] init];
+  [item setVirtualURL:testUrl];
+  [result setItemStorages:@[ item ]];
+  return result;
+}
 
 // WebStateObserverTest is parameterized on this enum to test both
 // LegacyNavigationManagerImpl and WKBasedNavigationManagerImpl.
@@ -183,7 +200,11 @@ ACTION_P5(VerifyDataStartedContext,
   EXPECT_FALSE((*context)->GetError());
   EXPECT_FALSE((*context)->IsRendererInitiated());
   ASSERT_FALSE((*context)->GetResponseHeaders());
-  ASSERT_FALSE(web_state->IsLoading());
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_TRUE(web_state->IsLoading());
+  } else {
+    EXPECT_FALSE(web_state->IsLoading());
+  }
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   NavigationItem* item = navigation_manager->GetLastCommittedItem();
   EXPECT_EQ(url, item->GetURL());
@@ -319,7 +340,11 @@ ACTION_P5(VerifyDataFinishedContext,
   EXPECT_FALSE((*context)->GetResponseHeaders());
   EXPECT_TRUE(web_state->ContentIsHTML());
   EXPECT_EQ(mime_type, web_state->GetContentsMimeType());
-  EXPECT_FALSE(web_state->IsLoading());
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_TRUE(web_state->IsLoading());
+  } else {
+    EXPECT_FALSE(web_state->IsLoading());
+  }
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   NavigationItem* item = navigation_manager->GetLastCommittedItem();
   EXPECT_TRUE(!item->GetTimestamp().is_null());
@@ -355,7 +380,11 @@ ACTION_P6(VerifyErrorFinishedContext,
   EXPECT_EQ(error_code, actual_error_code);
   EXPECT_FALSE((*context)->IsRendererInitiated());
   EXPECT_FALSE((*context)->GetResponseHeaders());
-  ASSERT_TRUE(web_state->IsLoading());
+  if (web::features::UseWKWebViewLoading()) {
+    ASSERT_TRUE(!web_state->IsLoading());
+  } else {
+    ASSERT_TRUE(web_state->IsLoading());
+  }
   ASSERT_FALSE(web_state->ContentIsHTML());
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   NavigationItem* item = navigation_manager->GetLastCommittedItem();
@@ -696,16 +725,9 @@ ACTION_P4(VerifyRestorationStartedContext, web_state, url, context, nav_id) {
     EXPECT_TRUE((*context)->HasUserGesture());
   }
   ui::PageTransition actual_transition = (*context)->GetPageTransition();
-  if (GetWebClient()->IsSlimNavigationManagerEnabled()) {
-    // TODO(crbug.com/877671): restoration navigation should be reload.
-    EXPECT_TRUE(PageTransitionTypeIncludingQualifiersIs(
-        ui::PageTransition::PAGE_TRANSITION_CLIENT_REDIRECT, actual_transition))
-        << "Got unexpected transition: " << actual_transition;
-  } else {
-    EXPECT_TRUE(PageTransitionCoreTypeIs(
-        ui::PageTransition::PAGE_TRANSITION_RELOAD, actual_transition))
-        << "Got unexpected transition: " << actual_transition;
-  }
+  EXPECT_TRUE(PageTransitionCoreTypeIs(
+      ui::PageTransition::PAGE_TRANSITION_RELOAD, actual_transition))
+      << "Got unexpected transition: " << actual_transition;
   EXPECT_FALSE((*context)->IsSameDocument());
   EXPECT_FALSE((*context)->HasCommitted());
   EXPECT_FALSE((*context)->IsDownload());
@@ -749,16 +771,9 @@ ACTION_P5(VerifyRestorationFinishedContext,
     EXPECT_TRUE((*context)->HasUserGesture());
   }
   ui::PageTransition actual_transition = (*context)->GetPageTransition();
-  if (GetWebClient()->IsSlimNavigationManagerEnabled()) {
-    // TODO(crbug.com/877671): restoration navigation should be reload.
-    EXPECT_TRUE(PageTransitionTypeIncludingQualifiersIs(
-        ui::PageTransition::PAGE_TRANSITION_CLIENT_REDIRECT, actual_transition))
-        << "Got unexpected transition: " << actual_transition;
-  } else {
-    EXPECT_TRUE(PageTransitionCoreTypeIs(
-        ui::PageTransition::PAGE_TRANSITION_RELOAD, actual_transition))
-        << "Got unexpected transition: " << actual_transition;
-  }
+  EXPECT_TRUE(PageTransitionCoreTypeIs(
+      ui::PageTransition::PAGE_TRANSITION_RELOAD, actual_transition))
+      << "Got unexpected transition: " << actual_transition;
   EXPECT_FALSE((*context)->IsSameDocument());
   EXPECT_TRUE((*context)->HasCommitted());
   EXPECT_FALSE((*context)->IsDownload());
@@ -842,9 +857,9 @@ class PolicyDeciderMock : public WebStatePolicyDecider {
 }  // namespace
 
 using net::test_server::EmbeddedTestServer;
-using testing::Return;
-using testing::StrictMock;
-using testing::_;
+using ::testing::Return;
+using ::testing::StrictMock;
+using ::testing::_;
 using base::test::ios::kWaitForPageLoadTimeout;
 using base::test::ios::WaitUntilConditionOrTimeout;
 using test::WaitForWebViewContainingText;
@@ -882,10 +897,10 @@ class WebStateObserverTest
     test_server_ = std::make_unique<EmbeddedTestServer>();
     test_server_->RegisterRequestHandler(
         base::BindRepeating(&net::test_server::HandlePrefixedRequest, "/form",
-                            base::BindRepeating(&testing::HandleForm)));
+                            base::BindRepeating(::testing::HandleForm)));
     test_server_->RegisterRequestHandler(base::BindRepeating(
         &net::test_server::HandlePrefixedRequest, "/download",
-        base::BindRepeating(&testing::HandleDownload)));
+        base::BindRepeating(::testing::HandleDownload)));
     RegisterDefaultHandlers(test_server_.get());
     test_server_->ServeFilesFromSourceDirectory(
         base::FilePath("ios/testing/data/http_server_files/"));
@@ -907,7 +922,7 @@ class WebStateObserverTest
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
   ScopedObserver<WebState, WebStateObserver> scoped_observer_;
-  testing::InSequence callbacks_sequence_checker_;
+  ::testing::InSequence callbacks_sequence_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(WebStateObserverTest);
 };
@@ -954,11 +969,16 @@ TEST_P(WebStateObserverTest, AboutNewTabNavigation) {
 
   // Perform about://newtab navigation and immediately perform the second
   // navigation without waiting until the first navigation finishes.
+
+  // Load |first_url|.
   NavigationContext* context = nullptr;
   int32_t nav_id = 0;
   EXPECT_CALL(observer_, DidStartLoading(web_state()));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
 
+  // WKWebView.URL will change from |first_url| to |second_url|, then to nil
+  // while WKWebView.loading changing to false and back to true immediately,
+  // then to |first_url| again and the first navigation will finish.
+  EXPECT_CALL(observer_, DidStopLoading(web_state()));
   EXPECT_CALL(observer_, DidStartLoading(web_state()));
 
   WebStatePolicyDecider::RequestInfo expected_request_info(
@@ -967,19 +987,34 @@ TEST_P(WebStateObserverTest, AboutNewTabNavigation) {
   EXPECT_CALL(*decider_,
               ShouldAllowRequest(_, RequestInfoMatch(expected_request_info)))
       .WillOnce(Return(true));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
       .WillOnce(VerifyPageConcurrentlyStartedContext(
           web_state(), first_url, second_url,
           ui::PageTransition::PAGE_TRANSITION_TYPED, &context, &nav_id));
+
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
       .WillOnce(VerifyNewPageFinishedContext(
           web_state(), first_url, /*mime_type=*/std::string(),
           /*content_is_html=*/false, &context, &nav_id));
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
+
+  // Load |second_url|.
   EXPECT_CALL(*decider_,
               ShouldAllowRequest(_, RequestInfoMatch(expected_request_info)))
       .WillOnce(Return(true));
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
       .WillOnce(VerifyPageStartedContext(
           web_state(), second_url, ui::PageTransition::PAGE_TRANSITION_TYPED,
@@ -998,13 +1033,17 @@ TEST_P(WebStateObserverTest, AboutNewTabNavigation) {
   EXPECT_CALL(observer_, TitleWasSet(web_state()))
       .WillOnce(VerifyTitle("EmbeddedTestServer - EchoAll"));
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  // Finish loading |second_url|.
+  __block bool page_loaded = false;
   EXPECT_CALL(observer_,
-              PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
+              PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS))
+      .WillOnce(::testing::Assign(&page_loaded, true));
 
   test::LoadUrl(web_state(), first_url);
   test::LoadUrl(web_state(), second_url);
   EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
-    return !web_state()->IsLoading();
+    return page_loaded;
   }));
 }
 
@@ -1065,13 +1104,32 @@ TEST_P(WebStateObserverTest, FailedNavigation) {
       .WillOnce(VerifyPageStartedContext(
           web_state(), url, ui::PageTransition::PAGE_TRANSITION_TYPED, &context,
           &nav_id));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+    // Load placeholder by [WKWebView loadRequest].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
       .WillOnce(VerifyErrorFinishedContext(web_state(), url, &context, &nav_id,
                                            /*committed=*/true,
                                            NSURLErrorNetworkConnectionLost));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
+
+  if (web::features::UseWKWebViewLoading()) {
+    // Load error page HTML by [WKWebView loadHTMLString:baseURL:].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   test::LoadUrl(web_state(), url);
 
   // Ensure that title is not overridden by a placeholder navigation.
@@ -1079,7 +1137,10 @@ TEST_P(WebStateObserverTest, FailedNavigation) {
   web::NavigationItem* item = manager->GetPendingItem();
   item->SetTitle(base::UTF8ToUTF16(kFailedTitle));
   ASSERT_TRUE(test::WaitForWebViewContainingText(
-      web_state(), "The network connection was lost."));
+      web_state(), testing::GetErrorText(web_state(), url, "NSURLErrorDomain",
+                                         /*error_code=*/-1005,
+                                         /*is_post=*/false, /*is_otr=*/false,
+                                         /*has_ssl_info=*/false)));
   DCHECK_EQ(item->GetTitle(), base::UTF8ToUTF16(kFailedTitle));
 }
 
@@ -1115,10 +1176,11 @@ TEST_P(WebStateObserverTest, UrlWithSpecialSuffixNavigation) {
     EXPECT_CALL(observer_, TitleWasSet(web_state()))
         .WillOnce(VerifyTitle(url.GetContent()));
     EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
     EXPECT_CALL(observer_,
                 PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
-    test::LoadUrl(web_state(), url);
-    ASSERT_TRUE(test::WaitForPageToFinishLoading(web_state()));
+
+    ASSERT_TRUE(LoadUrl(url));
     EXPECT_EQ(url, web_state()->GetVisibleURL());
   } else {
     // Perform a navigation to a url, which will be rewritten by WebKit to
@@ -1138,19 +1200,35 @@ TEST_P(WebStateObserverTest, UrlWithSpecialSuffixNavigation) {
     EXPECT_CALL(*decider_,
                 ShouldAllowRequest(_, RequestInfoMatch(expected_request_info)))
         .WillOnce(Return(true));
+
+    // WKWebView.URL changes from |url| nil and then to rewritten URL, while
+    // WKWebView.loading changes from true to false and then back to true.
+    if (web::features::UseWKWebViewLoading()) {
+      EXPECT_CALL(observer_, DidStopLoading(web_state()));
+      EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    }
+
     EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
         .WillOnce(VerifyPageStartedContext(
             web_state(), GURL(webkit_rewritten_url_spec),
             ui::PageTransition::PAGE_TRANSITION_TYPED, &context, &nav_id));
+
+    if (web::features::UseWKWebViewLoading()) {
+      EXPECT_CALL(observer_, DidStopLoading(web_state()));
+    }
+
     EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
         .WillOnce(VerifyErrorFinishedContext(
             web_state(), GURL(webkit_rewritten_url_spec), &context, &nav_id,
             /*committed=*/false, kWebKitErrorCannotShowUrl));
-    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+    if (!web::features::UseWKWebViewLoading()) {
+      EXPECT_CALL(observer_, DidStopLoading(web_state()));
+    }
     EXPECT_CALL(observer_,
                 PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
-    test::LoadUrl(web_state(), url);
-    ASSERT_TRUE(test::WaitForPageToFinishLoading(web_state()));
+
+    ASSERT_TRUE(LoadUrl(url));
     EXPECT_EQ("", web_state()->GetVisibleURL());
   }
 }
@@ -1173,15 +1251,38 @@ TEST_P(WebStateObserverTest, WebViewUnsupportedSchemeNavigation) {
       .WillOnce(VerifyPageStartedContext(
           web_state(), url, ui::PageTransition::PAGE_TRANSITION_TYPED, &context,
           &nav_id));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+    // Load placeholder by [WKWebView loadRequest].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
       .WillOnce(VerifyErrorFinishedContext(web_state(), url, &context, &nav_id,
                                            /*committed=*/true,
                                            NSURLErrorUnsupportedURL));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
+
+  if (web::features::UseWKWebViewLoading()) {
+    // Load error page HTML by [WKWebView loadHTMLString:baseURL:].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   test::LoadUrl(web_state(), url);
-  ASSERT_TRUE(test::WaitForPageToFinishLoading(web_state()));
+  ASSERT_TRUE(test::WaitForWebViewContainingText(
+      web_state(), testing::GetErrorText(web_state(), url, "NSURLErrorDomain",
+                                         /*error_code=*/-1002,
+                                         /*is_post=*/false, /*is_otr=*/false,
+                                         /*has_ssl_info=*/false)));
 }
 
 // Tests failed navigation because URL with a space is not supported by
@@ -1203,15 +1304,38 @@ TEST_P(WebStateObserverTest, WebViewUnsupportedUrlNavigation) {
       .WillOnce(VerifyPageStartedContext(
           web_state(), url, ui::PageTransition::PAGE_TRANSITION_TYPED, &context,
           &nav_id));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+    // Load placeholder by [WKWebView loadRequest].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
       .WillOnce(VerifyErrorFinishedContext(web_state(), url, &context, &nav_id,
                                            /*committed=*/true,
                                            web::kWebKitErrorCannotShowUrl));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
+
+  if (web::features::UseWKWebViewLoading()) {
+    // Load error page HTML by [WKWebView loadHTMLString:baseURL:].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   test::LoadUrl(web_state(), url);
-  ASSERT_TRUE(test::WaitForPageToFinishLoading(web_state()));
+  ASSERT_TRUE(test::WaitForWebViewContainingText(
+      web_state(), testing::GetErrorText(web_state(), url, "WebKitErrorDomain",
+                                         /*error_code=*/101,
+                                         /*is_post=*/false, /*is_otr=*/false,
+                                         /*has_ssl_info=*/false)));
 }
 
 // Tests failed navigation because URL scheme is not supported by WebState.
@@ -1397,21 +1521,34 @@ TEST_P(WebStateObserverTest, UserInitiatedHashChangeNavigation) {
   if (GetWebClient()->IsSlimNavigationManagerEnabled()) {
     EXPECT_CALL(observer_, DidChangeBackForwardState(web_state()));
   }
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
       .WillOnce(VerifySameDocumentStartedContext(
           web_state(), hash_url, /*has_user_gesture=*/true, &context, &nav_id,
           ui::PageTransition::PAGE_TRANSITION_TYPED,
           /*renderer_initiated=*/false));
+
   // No ShouldAllowResponse callback for same-document navigations.
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
       .WillOnce(VerifySameDocumentFinishedContext(
           web_state(), hash_url, /*has_user_gesture=*/true, &context, &nav_id,
           ui::PageTransition::PAGE_TRANSITION_TYPED,
           /*renderer_initiated=*/false));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ASSERT_TRUE(LoadUrl(hash_url));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
 
   // Perform same-document navigation by going back.
   // No ShouldAllowRequest callback for same-document back-forward navigations.
@@ -1423,6 +1560,9 @@ TEST_P(WebStateObserverTest, UserInitiatedHashChangeNavigation) {
     // Count metric relies on it DidStartLoading.
     EXPECT_CALL(observer_, DidStartLoading(web_state()));
   }
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
   ui::PageTransition expected_transition = static_cast<ui::PageTransition>(
       ui::PageTransition::PAGE_TRANSITION_FORWARD_BACK |
       ui::PageTransition::PAGE_TRANSITION_TYPED);
@@ -1430,12 +1570,14 @@ TEST_P(WebStateObserverTest, UserInitiatedHashChangeNavigation) {
       .WillOnce(VerifySameDocumentStartedContext(
           web_state(), url, /*has_user_gesture=*/true, &context, &nav_id,
           expected_transition, /*renderer_initiated=*/false));
+
   // No ShouldAllowResponse callbacks for same-document back-forward
   // navigations.
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _))
       .WillOnce(VerifySameDocumentFinishedContext(
           web_state(), url, /*has_user_gesture=*/true, &context, &nav_id,
           expected_transition, /*renderer_initiated=*/false));
+
   if (!GetWebClient()->IsSlimNavigationManagerEnabled()) {
     // TODO(crbug.com/913813): This callback is not really needed, but Page Load
     // Count metric relies on it DidStartLoading.
@@ -1492,7 +1634,11 @@ TEST_P(WebStateObserverTest, RendererInitiatedHashChangeNavigation) {
   if (GetWebClient()->IsSlimNavigationManagerEnabled()) {
     EXPECT_CALL(observer_, DidChangeBackForwardState(web_state()));
   }
-  EXPECT_CALL(observer_, DidStartLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
       .WillOnce(VerifySameDocumentStartedContext(
           web_state(), hash_url, /*has_user_gesture=*/false, &context, &nav_id,
@@ -1504,7 +1650,11 @@ TEST_P(WebStateObserverTest, RendererInitiatedHashChangeNavigation) {
           web_state(), hash_url, /*has_user_gesture=*/false, &context, &nav_id,
           ui::PageTransition::PAGE_TRANSITION_CLIENT_REDIRECT,
           /*renderer_initiated=*/true));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ExecuteJavaScript(@"window.location.hash = '#1'");
@@ -1581,6 +1731,12 @@ TEST_P(WebStateObserverTest, StateNavigation) {
 
 // Tests native content navigation.
 TEST_P(WebStateObserverTest, NativeContentNavigation) {
+  // UseWKWebViewLoading should be shipped with slim-nav, and native content
+  // will be deprecated after slim-nav.
+  if (web::features::UseWKWebViewLoading()) {
+    return;
+  }
+
   GURL url(url::SchemeHostPort(kTestNativeContentScheme, "ui", 0).Serialize());
   NavigationContext* context = nullptr;
   int32_t nav_id = 0;
@@ -1604,6 +1760,12 @@ TEST_P(WebStateObserverTest, NativeContentNavigation) {
 
 // Tests native content reload navigation.
 TEST_P(WebStateObserverTest, NativeContentReload) {
+  // UseWKWebViewLoading should be shipped after slim-nav, and native content
+  // will be deprecated after slim-nav.
+  if (web::features::UseWKWebViewLoading()) {
+    return;
+  }
+
   GURL url(url::SchemeHostPort(kTestNativeContentScheme, "ui", 0).Serialize());
   EXPECT_CALL(observer_, DidStartLoading(web_state()));
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
@@ -1640,6 +1802,12 @@ TEST_P(WebStateObserverTest, NativeContentReload) {
 // Tests WasTitleSet callback triggered when navigating back to native content
 // from web content.
 TEST_P(WebStateObserverTest, GoBackToNativeContent) {
+  // UseWKWebViewLoading should be shipped after slim-nav, and native content
+  // will be deprecated after slim-nav.
+  if (web::features::UseWKWebViewLoading()) {
+    return;
+  }
+
   // Load a native content URL.
   GURL url(url::SchemeHostPort(kTestNativeContentScheme, "ui", 0).Serialize());
   EXPECT_CALL(observer_, DidStartLoading(web_state()));
@@ -1779,7 +1947,7 @@ TEST_P(WebStateObserverTest, RendererInitiatedPostNavigation) {
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ASSERT_TRUE(LoadUrl(url));
   ASSERT_TRUE(
-      WaitForWebViewContainingText(web_state(), testing::kTestFormPage));
+      WaitForWebViewContainingText(web_state(), ::testing::kTestFormPage));
 
   // Submit the form using JavaScript.
   NavigationContext* context = nullptr;
@@ -1812,8 +1980,8 @@ TEST_P(WebStateObserverTest, RendererInitiatedPostNavigation) {
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ExecuteJavaScript(@"document.getElementById('form').submit();");
-  ASSERT_TRUE(
-      WaitForWebViewContainingText(web_state(), testing::kTestFormFieldValue));
+  ASSERT_TRUE(WaitForWebViewContainingText(web_state(),
+                                           ::testing::kTestFormFieldValue));
 }
 
 // Tests successful reload of a page returned for post request.
@@ -1840,7 +2008,7 @@ TEST_P(WebStateObserverTest, ReloadPostNavigation) {
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ASSERT_TRUE(LoadUrl(url));
   ASSERT_TRUE(
-      WaitForWebViewContainingText(web_state(), testing::kTestFormPage));
+      WaitForWebViewContainingText(web_state(), ::testing::kTestFormPage));
 
   // Submit the form using JavaScript.
   WebStatePolicyDecider::RequestInfo form_request_info(
@@ -1865,8 +2033,8 @@ TEST_P(WebStateObserverTest, ReloadPostNavigation) {
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ExecuteJavaScript(@"window.document.getElementById('form').submit();");
-  ASSERT_TRUE(
-      WaitForWebViewContainingText(web_state(), testing::kTestFormFieldValue));
+  ASSERT_TRUE(WaitForWebViewContainingText(web_state(),
+                                           ::testing::kTestFormFieldValue));
 
   // Reload the page.
   NavigationContext* context = nullptr;
@@ -1937,7 +2105,7 @@ TEST_P(WebStateObserverTest, ForwardPostNavigation) {
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ASSERT_TRUE(LoadUrl(url));
   ASSERT_TRUE(
-      WaitForWebViewContainingText(web_state(), testing::kTestFormPage));
+      WaitForWebViewContainingText(web_state(), ::testing::kTestFormPage));
 
   // Submit the form using JavaScript.
   WebStatePolicyDecider::RequestInfo form_request_info(
@@ -1960,8 +2128,8 @@ TEST_P(WebStateObserverTest, ForwardPostNavigation) {
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ExecuteJavaScript(@"window.document.getElementById('form').submit();");
-  ASSERT_TRUE(
-      WaitForWebViewContainingText(web_state(), testing::kTestFormFieldValue));
+  ASSERT_TRUE(WaitForWebViewContainingText(web_state(),
+                                           ::testing::kTestFormFieldValue));
 
   // Go Back.
   WebStatePolicyDecider::RequestInfo back_request_info(
@@ -2142,8 +2310,16 @@ TEST_P(WebStateObserverTest, MAYBE_FailedLoad) {
   EXPECT_CALL(observer_, TitleWasSet(web_state()))
       .WillOnce(VerifyTitle(url.GetContent()));
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
+
+  if (web::features::UseWKWebViewLoading()) {
+    // Load error page HTML by [WKWebView loadHTMLString:baseURL:].
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   test::LoadUrl(web_state(), url);
 
   // Server will never stop responding. Wait until the navigation is committed.
@@ -2230,6 +2406,7 @@ TEST_P(WebStateObserverTest, DisallowResponse) {
                                                       &context, &nav_id));
   test::LoadUrl(web_state(), test_server_->GetURL("/echo"));
   ASSERT_TRUE(test::WaitForPageToFinishLoading(web_state()));
+  EXPECT_EQ("", web_state()->GetVisibleURL());
 }
 
 // Tests stopping a navigation. Did FinishLoading and PageLoaded are never
@@ -2398,9 +2575,18 @@ TEST_P(WebStateObserverTest, IframeNavigation) {
   EXPECT_CALL(*decider_, ShouldAllowRequest(
                              _, RequestInfoMatch(forward_back_request_info)))
       .WillOnce(Return(true));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(*decider_, ShouldAllowResponse(_, /*for_main_frame=*/false))
       .WillOnce(Return(true));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   web_state()->GetNavigationManager()->GoBack();
   EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^bool {
     id URL = ExecuteJavaScript(@"window.frames[0].location.pathname;");
@@ -2447,13 +2633,22 @@ TEST_P(WebStateObserverTest, NewPageLoadDestroysForwardItems) {
   if (GetWebClient()->IsSlimNavigationManagerEnabled()) {
     EXPECT_CALL(observer_, DidChangeBackForwardState(web_state()));
   }
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
   // No ShouldAllowResponse callback for same-document navigations.
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
-  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  if (!web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ASSERT_TRUE(LoadUrl(hash_url));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
 
   // Go back to create forward navigation items.
   if (GetWebClient()->IsSlimNavigationManagerEnabled()) {
@@ -2464,15 +2659,22 @@ TEST_P(WebStateObserverTest, NewPageLoadDestroysForwardItems) {
     // Count metric relies on it DidStartLoading.
     EXPECT_CALL(observer_, DidStartLoading(web_state()));
   }
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
   // No ShouldAllowResponse callbacks for same-document back-forward
   // navigations.
+
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
   if (!GetWebClient()->IsSlimNavigationManagerEnabled()) {
     // TODO(crbug.com/913813): This callback is not really needed, but Page Load
     // Count metric relies on it DidStartLoading.
     EXPECT_CALL(observer_, DidStopLoading(web_state()));
   }
+
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   ASSERT_TRUE(ExecuteBlockAndWaitForLoad(first_url, ^{
@@ -2528,18 +2730,32 @@ TEST_P(WebStateObserverTest, RestoreSession) {
 
   NavigationContext* context = nullptr;
   int32_t nav_id = 0;
+  // Load restore_session.html with session history.
   EXPECT_CALL(observer, DidStartLoading(web_state.get()));
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer, DidStopLoading(web_state.get()));
+    // Load restore_session.html with targetUrl=|url|.
+    EXPECT_CALL(observer, DidStartLoading(web_state.get()));
+    EXPECT_CALL(observer, DidStopLoading(web_state.get()));
+    // Load restored |url|.
+    EXPECT_CALL(observer, DidStartLoading(web_state.get()));
+  }
+
   EXPECT_CALL(observer, DidStartNavigation(web_state.get(), _))
       .WillOnce(VerifyRestorationStartedContext(web_state.get(), url, &context,
                                                 &nav_id));
+
   EXPECT_CALL(observer, DidFinishNavigation(web_state.get(), _))
       .WillOnce(VerifyRestorationFinishedContext(
           web_state.get(), url, kExpectedMimeType, &context, &nav_id));
   EXPECT_CALL(observer, TitleWasSet(web_state.get()))
       .WillOnce(VerifyTitle(url.GetContent()));
   EXPECT_CALL(observer, DidStopLoading(web_state.get()));
+
+  __block bool page_loaded = false;
   EXPECT_CALL(observer,
-              PageLoaded(web_state.get(), PageLoadCompletionStatus::SUCCESS));
+              PageLoaded(web_state.get(), PageLoadCompletionStatus::SUCCESS))
+      .WillOnce(::testing::Assign(&page_loaded, true));
 
   // Trigger the session restoration.
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
@@ -2557,8 +2773,9 @@ TEST_P(WebStateObserverTest, RestoreSession) {
     return item && item->GetURL() == url;
   }));
 
-  // Wait until the page finishes loading.
-  ASSERT_TRUE(test::WaitForPageToFinishLoading(web_state.get()));
+  ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
+    return page_loaded;
+  }));
 }
 
 // Tests callbacks for restoring session and subsequently going back to
@@ -2589,30 +2806,51 @@ TEST_P(WebStateObserverTest, RestoreSessionOnline) {
 
   // Initiate session restoration.
 
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
+
   EXPECT_CALL(*decider_, ShouldAllowRequest(_, _)).WillOnce(Return(true));
   EXPECT_CALL(*decider_, ShouldAllowResponse(_, /*for_main_frame=*/true))
       .WillOnce(Return(true));
 
   // Back/forward state changes due to History API calls during session
   // restoration. Called once each for CanGoBack and CanGoForward.
-  EXPECT_CALL(observer_, DidChangeBackForwardState(web_state())).Times(2);
+  EXPECT_CALL(observer_, DidChangeBackForwardState(web_state()));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
+  EXPECT_CALL(observer_, DidChangeBackForwardState(web_state()));
 
   // Client-side redirect to restore_session.html?targetUrl=url1.
   EXPECT_CALL(*decider_,
               ShouldAllowRequest(URLMatch(CreateRedirectUrl(url1)), _))
       .WillOnce(Return(true));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
+
   EXPECT_CALL(*decider_, ShouldAllowResponse(URLMatch(CreateRedirectUrl(url1)),
                                              /*for_main_frame=*/true))
       .WillOnce(Return(true));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
 
   // Client-side redirect to |url1|.
   EXPECT_CALL(*decider_, ShouldAllowRequest(URLMatch(url1), _))
       .WillOnce(Return(true));
   EXPECT_CALL(observer_, DidStartLoading(web_state()));
+
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
   EXPECT_CALL(*decider_,
               ShouldAllowResponse(URLMatch(url1), /*for_main_frame=*/true))
       .WillOnce(Return(true));
+
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
   EXPECT_CALL(observer_, TitleWasSet(web_state()));
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
@@ -2643,9 +2881,18 @@ TEST_P(WebStateObserverTest, RestoreSessionOnline) {
                                              /*for_main_frame=*/true))
       .WillOnce(Return(true));
 
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
+
   // Client-side redirect to |url0|.
   EXPECT_CALL(*decider_, ShouldAllowRequest(URLMatch(url0), _))
       .WillOnce(Return(true));
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
+
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
   // No ShouldAllowResponse call because about:blank has no response.
   EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
@@ -2660,6 +2907,41 @@ TEST_P(WebStateObserverTest, RestoreSessionOnline) {
   EXPECT_EQ(0, navigation_manager()->GetLastCommittedItemIndex());
   ASSERT_TRUE(navigation_manager()->CanGoForward());
   ASSERT_FALSE(navigation_manager()->CanGoBack());
+}
+
+// Tests that if a saved session is provided when creating a new WebState, it is
+// restored after the first NavigationManager::LoadIfNecessary() call.
+TEST_P(WebStateObserverTest, RestoredFromHistory) {
+  auto web_state = WebState::CreateWithStorageSession(
+      WebState::CreateParams(GetBrowserState()),
+      GetTestSessionStorage(test_server_->GetURL(kTestPageURL)));
+
+  ASSERT_FALSE(test::IsWebViewContainingText(web_state.get(),
+                                             kTestSessionStoragePageText));
+  web_state->GetNavigationManager()->LoadIfNecessary();
+  EXPECT_TRUE(test::WaitForWebViewContainingText(web_state.get(),
+                                                 kTestSessionStoragePageText));
+}
+
+// Tests that NavigationManager::LoadIfNecessary() restores the page after
+// disabling and re-enabling web usage.
+TEST_P(WebStateObserverTest, DisableAndReenableWebUsage) {
+  auto web_state = WebState::CreateWithStorageSession(
+      WebState::CreateParams(GetBrowserState()),
+      GetTestSessionStorage(test_server_->GetURL(kTestPageURL)));
+  web_state->GetNavigationManager()->LoadIfNecessary();
+  ASSERT_TRUE(test::WaitForWebViewContainingText(web_state.get(),
+                                                 kTestSessionStoragePageText));
+
+  web_state->SetWebUsageEnabled(false);
+  web_state->SetWebUsageEnabled(true);
+
+  // NavigationManager::LoadIfNecessary() should restore the page.
+  ASSERT_FALSE(test::IsWebViewContainingText(web_state.get(),
+                                             kTestSessionStoragePageText));
+  web_state->GetNavigationManager()->LoadIfNecessary();
+  EXPECT_TRUE(test::WaitForWebViewContainingText(web_state.get(),
+                                                 kTestSessionStoragePageText));
 }
 
 // Tests successful navigation to a PDF file:// URL.
@@ -2742,6 +3024,10 @@ TEST_P(WebStateObserverTest, LoadData) {
 
   NSString* html = @"<html><body>foo</body></html>";
   GURL data_url("https://www.chromium.test");
+
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  }
   EXPECT_CALL(*decider_, ShouldAllowRequest(_, _)).WillOnce(Return(true));
   // ShouldAllowResponse is not called on loadData navigation.
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
@@ -2753,6 +3039,9 @@ TEST_P(WebStateObserverTest, LoadData) {
                                           &context, &nav_id));
   EXPECT_CALL(observer_, TitleWasSet(web_state()))
       .WillOnce(VerifyTitle("https://www.chromium.test"));
+  if (web::features::UseWKWebViewLoading()) {
+    EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  }
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
   web_state()->LoadData([html dataUsingEncoding:NSUTF8StringEncoding],

@@ -302,6 +302,7 @@
       <hr id="volume-space-info-separator">
       <cr-menu-item id="gear-menu-newservice" command="#new-service"
           sub-menu="#add-new-services-menu"></cr-menu-item>
+      <cr-menu-item id="gear-menu-format" command="#format"></cr-menu-item>
       <cr-menu-item id="volume-space-info" command="#volume-storage">
         <div id="volume-space-info-contents">
           <span id="volume-space-info-label"></span>
@@ -436,6 +437,7 @@
         </button>
         <button id="sort-button" class="icon-button menu-button" tabindex="18"
                 menu="#sort-menu"
+                aria-haspopup="true"
                 aria-label="$i18n{SORT_BUTTON_TOOLTIP}"
                 aria-activedescendant="sort-menu"
                 has-tooltip>
@@ -445,6 +447,7 @@
         <button id="gear-button" class="icon-button menu-button" tabindex="19"
                 menu="#gear-menu"
                 aria-label="$i18n{GEAR_BUTTON_TOOLTIP}"
+                aria-haspopup="true"
                 aria-activedescendant="gear-menu"
                 has-tooltip>
           <files-toggle-ripple></files-toggle-ripple>
@@ -529,7 +532,7 @@
                   <div class="image"></div>
                   <span id="empty-folder-label" class="label">$i18n{EMPTY_FOLDER}</span>
                 </div>
-                <div class="detail-table" id="detail-table" tabindex="1" autofocus>
+                <div class="detail-table" id="detail-table" tabindex="1">
                 </div>
                 <grid class="thumbnail-grid" tabindex="2" hidden></grid>
                 <paper-progress class="loading-indicator" indeterminate hidden></paper-progress>
@@ -543,14 +546,12 @@
             <button id="format-button" command="#format"></button>
           </div>
         </div>
+        <div class="files-feedback-panels" visibleif="full-page">
+          <xf-display-panel id="progress-panel" role="complementary"
+                            aria-label="$i18n{FILES_FEEDBACK_WINDOW}">
+          </xf-display-panel>
+        </div>
       </div>
-    </div>
-    <div class="files-feedback-panels">
-      <xf-display-panel id="completed-panel">
-      </xf-display-panel>
-      <div class="files-vertical-padder-8"></div>
-      <xf-display-panel id="progress-panel">
-      </xf-display-panel>
     </div>
     <div class="dialog-footer progressable" tabindex="-1"
          visibleif="saveas-file open-file open-multi-file folder upload-folder">

@@ -77,7 +77,6 @@ ExtensionInstalledBubbleBrowserTest::MakeBubble(
   extension_service()->AddExtension(extension.get());
   auto bubble = std::make_unique<ExtensionInstalledBubble>(
       extension.get(), browser(), SkBitmap());
-  bubble->Initialize();
   return bubble;
 }
 
@@ -138,7 +137,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstalledBubbleBrowserTest,
 IN_PROC_BROWSER_TEST_F(ExtensionInstalledBubbleBrowserTest,
                        DISABLED_InvokeUi_NoAction) {
   // Sign in to supppress the signin promo.
-  identity::MakePrimaryAccountAvailable(
+  signin::MakePrimaryAccountAvailable(
       IdentityManagerFactory::GetForProfile(profile()), "test@example.com");
   ShowAndVerifyUi();
 }

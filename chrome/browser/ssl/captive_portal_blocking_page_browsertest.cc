@@ -20,10 +20,8 @@
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service_test_utils.h"
-#include "chrome/browser/ssl/cert_report_helper.h"
 #include "chrome/browser/ssl/certificate_reporting_test_utils.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
-#include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -33,7 +31,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/captive_portal/captive_portal_detector.h"
 #include "components/prefs/pref_service.h"
+#include "components/security_interstitials/content/cert_report_helper.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
+#include "components/security_interstitials/content/ssl_cert_reporter.h"
 #include "components/security_state/core/security_state.h"
 #include "components/variations/variations_params_manager.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -44,7 +44,6 @@
 #include "net/cert/x509_certificate.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/test/url_request/url_request_failed_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -81,8 +80,6 @@ class CaptivePortalBlockingPageForTesting : public CaptivePortalBlockingPage {
       const GURL& login_url,
       std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
       const net::SSLInfo& ssl_info,
-      const base::Callback<void(content::CertificateRequestResultType)>&
-          callback,
       bool is_wifi,
       const std::string& wifi_ssid)
       : CaptivePortalBlockingPage(web_contents,
@@ -90,8 +87,7 @@ class CaptivePortalBlockingPageForTesting : public CaptivePortalBlockingPage {
                                   login_url,
                                   std::move(ssl_cert_reporter),
                                   ssl_info,
-                                  net::ERR_CERT_COMMON_NAME_INVALID,
-                                  callback),
+                                  net::ERR_CERT_COMMON_NAME_INVALID),
         is_wifi_(is_wifi),
         wifi_ssid_(wifi_ssid) {}
 
@@ -152,7 +148,6 @@ CaptivePortalTestingNavigationThrottle::WillFailRequest() {
       new CaptivePortalBlockingPageForTesting(
           navigation_handle()->GetWebContents(), GURL(kBrokenSSL), login_url_,
           std::move(ssl_cert_reporter_), ssl_info,
-          base::Callback<void(content::CertificateRequestResultType)>(),
           is_wifi_connection_, wifi_ssid_);
 
   std::string html = blocking_page->GetHTMLContents();
@@ -207,22 +202,12 @@ void TestingThrottleInstaller::DidStartNavigation(
           is_wifi_connection_, wifi_ssid_));
 }
 
-void AddURLRequestFilterOnIOThread() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  net::URLRequestFailedJob::AddUrlHandler();
-}
-
 }  // namespace
 
 class CaptivePortalBlockingPageTest : public InProcessBrowserTest {
  public:
   CaptivePortalBlockingPageTest() {
     CertReportHelper::SetFakeOfficialBuildForTesting();
-  }
-
-  void SetUpOnMainThread() override {
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                             base::BindOnce(&AddURLRequestFilterOnIOThread));
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -284,9 +269,11 @@ void CaptivePortalBlockingPageTest::TestInterstitial(
   // handled by the normal SSLErrorNavigationThrotttle since this test only
   // checks the behavior of the Blocking Page, not the integration with that
   // throttle.
-  ui_test_utils::NavigateToURL(
-      browser(),
-      net::URLRequestFailedJob::GetMockHttpsUrl(net::ERR_BLOCKED_BY_CLIENT));
+  //
+  // TODO(https://crbug.com/1003940): Clean this code up now that committed
+  // interstitials have shipped.
+  ui_test_utils::NavigateToURL(browser(),
+                               GURL("https://mock.failed.request/start=-20"));
   content::RenderFrameHost* frame;
   frame = contents->GetMainFrame();
   ASSERT_TRUE(WaitForRenderFrameReady(frame));
@@ -462,7 +449,6 @@ class CaptivePortalBlockingPageIDNTest : public SecurityInterstitialIDNTest {
     CaptivePortalBlockingPage* blocking_page =
         new CaptivePortalBlockingPageForTesting(
             contents, GURL(kBrokenSSL), request_url, nullptr, empty_ssl_info,
-            base::Callback<void(content::CertificateRequestResultType)>(),
             false, "");
     return blocking_page;
   }

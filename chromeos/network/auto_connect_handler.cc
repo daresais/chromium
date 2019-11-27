@@ -117,8 +117,7 @@ AutoConnectHandler::AutoConnectHandler()
       client_certs_resolved_(false),
       applied_autoconnect_policy_(false),
       connect_to_best_services_after_scan_(false),
-      auto_connect_reasons_(0),
-      weak_ptr_factory_(this) {}
+      auto_connect_reasons_(0) {}
 
 AutoConnectHandler::~AutoConnectHandler() {
   if (LoginState::IsInitialized())
@@ -259,6 +258,8 @@ void AutoConnectHandler::NotifyAutoConnectInitiatedForTest(
 }
 
 void AutoConnectHandler::NotifyAutoConnectInitiated(int auto_connect_reasons) {
+  NET_LOG(EVENT) << "AutoConnectInitiated ["
+                 << AutoConnectReasonsToString(auto_connect_reasons_) << "]";
   for (auto& observer : observer_list_)
     observer.OnAutoConnectedInitiated(auto_connect_reasons);
 }

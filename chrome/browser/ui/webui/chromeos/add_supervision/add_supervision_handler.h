@@ -9,17 +9,18 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/chromeos/add_supervision/add_supervision.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace content {
 class WebUI;
 }  // namespace content
 
-namespace identity {
+namespace signin {
 class AccessTokenFetcher;
 struct AccessTokenInfo;
 class IdentityManager;
-}  // namespace identity
+}  // namespace signin
 
 class GoogleServiceAuthError;
 
@@ -39,8 +40,10 @@ class AddSupervisionHandler
 
   // |delegate| is owned by the caller and its lifetime must outlive |this|.
   AddSupervisionHandler(
-      add_supervision::mojom::AddSupervisionHandlerRequest request,
+      mojo::PendingReceiver<add_supervision::mojom::AddSupervisionHandler>
+          receiver,
       content::WebUI* web_ui,
+      signin::IdentityManager* identity_manager,
       Delegate* delegate);
   ~AddSupervisionHandler() override;
 
@@ -54,16 +57,16 @@ class AddSupervisionHandler
  private:
   void OnAccessTokenFetchComplete(GetOAuthTokenCallback callback,
                                   GoogleServiceAuthError error,
-                                  identity::AccessTokenInfo access_token_info);
+                                  signin::AccessTokenInfo access_token_info);
 
   // The AddSupervisionUI that this AddSupervisionHandler belongs to.
   content::WebUI* web_ui_;
 
   // Used to fetch OAuth2 access tokens.
-  identity::IdentityManager* identity_manager_;
-  std::unique_ptr<identity::AccessTokenFetcher> oauth2_access_token_fetcher_;
+  signin::IdentityManager* identity_manager_;
+  std::unique_ptr<signin::AccessTokenFetcher> oauth2_access_token_fetcher_;
 
-  mojo::Binding<add_supervision::mojom::AddSupervisionHandler> binding_;
+  mojo::Receiver<add_supervision::mojom::AddSupervisionHandler> receiver_;
 
   Delegate* delegate_;
 

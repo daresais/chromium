@@ -39,7 +39,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy_manager.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/platform/bindings/shared_persistent.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
@@ -108,7 +107,7 @@ class CORE_EXPORT ScriptController final
   // If an isolated world with the specified ID already exists, it is reused.
   // Otherwise, a new world is created.
   v8::Local<v8::Value> ExecuteScriptInIsolatedWorld(
-      int world_id,
+      int32_t world_id,
       const ScriptSourceCode&,
       const KURL& base_url,
       SanitizeScriptErrors sanitize_script_errors);
@@ -125,7 +124,8 @@ class CORE_EXPORT ScriptController final
 
   // Disables eval for the given isolated |world_id|. This initializes the
   // window proxy for the isolated world, if it's not yet initialized.
-  void DisableEvalForIsolatedWorld(int world_id, const String& error_message);
+  void DisableEvalForIsolatedWorld(int32_t world_id,
+                                   const String& error_message);
 
   TextPosition EventHandlerPosition() const;
 

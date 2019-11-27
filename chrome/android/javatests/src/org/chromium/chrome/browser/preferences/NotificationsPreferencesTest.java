@@ -26,6 +26,7 @@ import org.chromium.chrome.browser.offlinepages.prefetch.PrefetchPrefs;
 import org.chromium.chrome.browser.preferences.website.ContentSettingsResources;
 import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences;
 import org.chromium.chrome.browser.preferences.website.SiteSettingsCategory;
+import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.test.ScreenShooter;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -62,10 +63,9 @@ public class NotificationsPreferencesTest {
         // clang-format on
 
         final PreferenceFragmentCompat fragment =
-                (PreferenceFragmentCompat) mActivity.getMainFragmentCompat();
-        final ChromeSwitchPreferenceCompat toggle =
-                (ChromeSwitchPreferenceCompat) fragment.findPreference(
-                        NotificationsPreferences.PREF_SUGGESTIONS);
+                (PreferenceFragmentCompat) mActivity.getMainFragment();
+        final ChromeSwitchPreference toggle = (ChromeSwitchPreference) fragment.findPreference(
+                NotificationsPreferences.PREF_SUGGESTIONS);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             // Make sure the toggle reflects the state correctly.
@@ -99,11 +99,9 @@ public class NotificationsPreferencesTest {
     public void testToggleDisabledWhenPrefetchingDisabled() {
         // clang-format on
 
-        PreferenceFragmentCompat fragment =
-                (PreferenceFragmentCompat) mActivity.getMainFragmentCompat();
-        ChromeSwitchPreferenceCompat toggle =
-                (ChromeSwitchPreferenceCompat) fragment.findPreference(
-                        NotificationsPreferences.PREF_SUGGESTIONS);
+        PreferenceFragmentCompat fragment = (PreferenceFragmentCompat) mActivity.getMainFragment();
+        ChromeSwitchPreference toggle = (ChromeSwitchPreference) fragment.findPreference(
+                NotificationsPreferences.PREF_SUGGESTIONS);
 
         Assert.assertFalse(toggle.isEnabled());
         Assert.assertFalse(toggle.isChecked());
@@ -122,7 +120,7 @@ public class NotificationsPreferencesTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             PreferenceFragmentCompat fragment =
-                    (PreferenceFragmentCompat) mActivity.getMainFragmentCompat();
+                    (PreferenceFragmentCompat) mActivity.getMainFragment();
             Preference fromWebsites =
                     fragment.findPreference(NotificationsPreferences.PREF_FROM_WEBSITES);
 
@@ -153,18 +151,16 @@ public class NotificationsPreferencesTest {
         // clang-format on
 
         final PreferenceFragmentCompat fragment =
-                (PreferenceFragmentCompat) mActivity.getMainFragmentCompat();
+                (PreferenceFragmentCompat) mActivity.getMainFragment();
         final Preference fromWebsites =
                 fragment.findPreference(NotificationsPreferences.PREF_FROM_WEBSITES);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            PrefServiceBridge.getInstance().setCategoryEnabled(
-                    ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS, false);
+            WebsitePreferenceBridge.setCategoryEnabled(ContentSettingsType.NOTIFICATIONS, false);
             fragment.onResume();
             Assert.assertEquals(fromWebsites.getSummary(), getNotificationsSummary(false));
 
-            PrefServiceBridge.getInstance().setCategoryEnabled(
-                    ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS, true);
+            WebsitePreferenceBridge.setCategoryEnabled(ContentSettingsType.NOTIFICATIONS, true);
             fragment.onResume();
             Assert.assertEquals(fromWebsites.getSummary(), getNotificationsSummary(true));
         });
@@ -173,12 +169,12 @@ public class NotificationsPreferencesTest {
     /** Gets the fragment of the top Activity. Assumes the top Activity is a Preferences. */
     private static Fragment getTopFragment() {
         Preferences preferences = (Preferences) ApplicationStatus.getLastTrackedFocusedActivity();
-        return preferences.getMainFragmentCompat();
+        return preferences.getMainFragment();
     }
 
     /** Gets the summary text that should be used for site specific notifications. */
     private String getNotificationsSummary(boolean enabled) {
         return mActivity.getResources().getString(ContentSettingsResources.getCategorySummary(
-                ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS, enabled));
+                ContentSettingsType.NOTIFICATIONS, enabled));
     }
 }

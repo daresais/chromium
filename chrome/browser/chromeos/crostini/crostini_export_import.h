@@ -60,10 +60,24 @@ class CrostiniExportImport : public KeyedService,
                              public crostini::ExportContainerProgressObserver,
                              public crostini::ImportContainerProgressObserver {
  public:
+  class Observer : public base::CheckedObserver {
+   public:
+    // Called immediately before operation begins with |in_progress|=true, and
+    // again immediately after the operation completes with |in_progress|=false.
+    virtual void OnCrostiniExportImportOperationStatusChanged(
+        bool in_progress) = 0;
+  };
+
   static CrostiniExportImport* GetForProfile(Profile* profile);
 
   explicit CrostiniExportImport(Profile* profile);
   ~CrostiniExportImport() override;
+
+  void AddObserver(Observer* observer) { observers_.AddObserver(observer); }
+
+  void RemoveObserver(Observer* observer) {
+    observers_.RemoveObserver(observer);
+  }
 
   // KeyedService:
   void Shutdown() override;
@@ -82,8 +96,11 @@ class CrostiniExportImport : public KeyedService,
                        base::FilePath path,
                        CrostiniManager::CrostiniResultCallback callback);
 
-  // Called by the notification when it is closed so it can be destroyed.
-  void NotificationCompleted(CrostiniExportImportNotification* notification);
+  // Cancel currently running export/import.
+  void CancelOperation(ExportImportType type, ContainerId id);
+
+  // Whether an export or import is currently in progress.
+  bool GetExportImportOperationStatus() const;
 
   CrostiniExportImportNotification* GetNotificationForTesting(
       ContainerId container_id);
@@ -93,8 +110,14 @@ class CrostiniExportImport : public KeyedService,
                            TestDeprecatedExportSuccess);
   FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestExportSuccess);
   FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestExportFail);
+  FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestExportCancelled);
+  FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest,
+                           TestExportDoneBeforeCancelled);
   FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestImportSuccess);
   FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestImportFail);
+  FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestImportCancelled);
+  FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest,
+                           TestImportDoneBeforeCancelled);
   FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest,
                            TestImportFailArchitecture);
   FRIEND_TEST_ALL_PREFIXES(CrostiniExportImportTest, TestImportFailSpace);
@@ -105,26 +128,23 @@ class CrostiniExportImport : public KeyedService,
                     void* params) override;
 
   void Start(ExportImportType type,
-             const ContainerId& container_id,
+             ContainerId container_id,
              base::FilePath path,
              CrostiniManager::CrostiniResultCallback callback);
 
   // DEPRECATED crostini::ExportContainerProgressObserver implementation.
   // TODO(juwa): delete this once the new version of tremplin has shipped.
-  void OnExportContainerProgress(const std::string& vm_name,
-                                 const std::string& container_name,
+  void OnExportContainerProgress(const ContainerId& container_id,
                                  crostini::ExportContainerProgressStatus status,
                                  int progress_percent,
                                  uint64_t progress_speed) override;
 
   // crostini::ExportContainerProgressObserver implementation.
-  void OnExportContainerProgress(const std::string& vm_name,
-                                 const std::string& container_name,
+  void OnExportContainerProgress(const ContainerId& container_id,
                                  const StreamingExportStatus& status) override;
 
   // crostini::ImportContainerProgressObserver implementation.
-  void OnImportContainerProgress(const std::string& vm_name,
-                                 const std::string& container_name,
+  void OnImportContainerProgress(const ContainerId& container_id,
                                  crostini::ImportContainerProgressStatus status,
                                  int progress_percent,
                                  uint64_t progress_speed,
@@ -134,21 +154,22 @@ class CrostiniExportImport : public KeyedService,
                                  uint64_t minimum_required_space) override;
 
   void ExportAfterSharing(const ContainerId& container_id,
-                          const base::FilePath& filename,
                           CrostiniManager::CrostiniResultCallback callback,
                           const base::FilePath& container_path,
                           bool result,
-                          const std::string failure_reason);
+                          const std::string& failure_reason);
   void OnExportComplete(const base::Time& start,
                         const ContainerId& container_id,
                         CrostiniManager::CrostiniResultCallback callback,
-                        CrostiniResult result);
+                        CrostiniResult result,
+                        uint64_t container_size,
+                        uint64_t compressed_size);
 
   void ImportAfterSharing(const ContainerId& container_id,
                           CrostiniManager::CrostiniResultCallback callback,
                           const base::FilePath& container_path,
                           bool result,
-                          const std::string failure_reason);
+                          const std::string& failure_reason);
   void OnImportComplete(const base::Time& start,
                         const ContainerId& container_id,
                         CrostiniManager::CrostiniResultCallback callback,
@@ -159,15 +180,18 @@ class CrostiniExportImport : public KeyedService,
 
   std::string GetUniqueNotificationId();
 
+  CrostiniExportImportNotification& RemoveNotification(
+      std::map<ContainerId, CrostiniExportImportNotification*>::iterator it);
+
   Profile* profile_;
   scoped_refptr<ui::SelectFileDialog> select_folder_dialog_;
-  std::map<ContainerId, std::unique_ptr<CrostiniExportImportNotification>>
-      notifications_;
+  std::map<ContainerId, CrostiniExportImportNotification*> notifications_;
   // Notifications must have unique-per-profile identifiers.
   // A non-static member on a profile-keyed-service will suffice.
   int next_notification_id_;
+  base::ObserverList<Observer> observers_;
   // weak_ptr_factory_ should always be last member.
-  base::WeakPtrFactory<CrostiniExportImport> weak_ptr_factory_;
+  base::WeakPtrFactory<CrostiniExportImport> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CrostiniExportImport);
 };

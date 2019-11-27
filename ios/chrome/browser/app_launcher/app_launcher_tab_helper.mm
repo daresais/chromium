@@ -11,15 +11,15 @@
 #import "base/strings/sys_string_conversions.h"
 #include "components/reading_list/core/reading_list_model.h"
 #import "ios/chrome/browser/app_launcher/app_launcher_abuse_detector.h"
-#include "ios/chrome/browser/app_launcher/app_launcher_flags.h"
 #import "ios/chrome/browser/app_launcher/app_launcher_tab_helper_delegate.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/chrome_url_util.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
 #import "ios/chrome/browser/u2f/u2f_tab_helper.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/url_scheme_util.h"
+#import "ios/chrome/browser/ui/dialogs/dialog_features.h"
+#import "ios/web/common/url_scheme_util.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #import "ios/web/public/web_client.h"
 #import "net/base/mac/url_conversions.h"
 #include "url/gurl.h"
@@ -148,10 +148,13 @@ bool AppLauncherTabHelper::RequestToLaunchApp(const GURL& url,
                              launchAppWithURL:copied_url
                                linkTransition:YES];
             } else {
-              // TODO(crbug.com/674649): Once non modal dialogs are implemented,
-              // update this to always prompt instead of blocking the app.
-              [abuse_detector_ blockLaunchingAppURL:copied_url
-                                  fromSourcePageURL:copied_source_page_url];
+              if (!base::FeatureList::IsEnabled(dialogs::kNonModalDialogs)) {
+                // Only block app launches if the app launch alert is being
+                // displayed modally since DOS attacks are not possible when the
+                // app launch alert is presented non-modally.
+                [abuse_detector_ blockLaunchingAppURL:copied_url
+                                    fromSourcePageURL:copied_source_page_url];
+              }
             }
             is_prompt_active_ = false;
           }];
@@ -218,7 +221,6 @@ bool AppLauncherTabHelper::ShouldAllowRequest(
   ios::ChromeBrowserState* browser_state =
       ios::ChromeBrowserState::FromBrowserState(web_state_->GetBrowserState());
 
-  if (base::FeatureList::IsEnabled(kAppLauncherRefresh)) {
     if (!is_link_transition && original_pending_url.is_valid()) {
       // At this stage the navigation will be canceled in all cases. If this
       // was a redirection, the |source_url| may not have been reported to
@@ -228,28 +230,13 @@ bool AppLauncherTabHelper::ShouldAllowRequest(
       if (model && model->loaded())
         model->SetReadStatus(original_pending_url, true);
     }
-    if (last_committed_url.is_valid()) {
+    if (last_committed_url.is_valid() ||
+        !web_state_->GetNavigationManager()->GetLastCommittedItem()) {
+      // Launch the app if the URL is valid or if it is the first page of the
+      // tab.
       RequestToLaunchApp(request_url, last_committed_url, is_link_transition);
     }
     return false;
-  }
-
-  if (RequestToLaunchApp(request_url, last_committed_url, is_link_transition)) {
-    // Clears pending navigation history after successfully launching the
-    // external app.
-    web_state_->GetNavigationManager()->DiscardNonCommittedItems();
-
-    // When opening applications, the navigation is cancelled. Report the
-    // opening of the application to the ReadingListWebStateObserver to mark the
-    // entry as read if needed.
-    if (original_pending_url.is_valid()) {
-      ReadingListModel* model =
-          ReadingListModelFactory::GetForBrowserState(browser_state);
-      if (model && model->loaded())
-        model->SetReadStatus(original_pending_url, true);
-    }
-  }
-  return false;
 }
 
 WEB_STATE_USER_DATA_KEY_IMPL(AppLauncherTabHelper)

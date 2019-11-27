@@ -56,6 +56,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES3/gl31.h"
+#include "third_party/skia/include/core/SkData.h"
 
 namespace cc {
 class Layer;
@@ -566,9 +567,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
 
   void MarkLayerComposited() override;
 
-  scoped_refptr<Uint8Array> PaintRenderingResultsToDataArray(
-      SourceDrawingBuffer) override;
-  void ProvideBackBufferToResourceProvider() const override;
+  sk_sp<SkData> PaintRenderingResultsToDataArray(SourceDrawingBuffer) override;
 
   unsigned MaxVertexAttribs() const { return max_vertex_attribs_; }
 
@@ -596,7 +595,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   };
 
   scoped_refptr<StaticBitmapImage> GetImage(
-      AccelerationHint = kPreferAcceleration) const override;
+      AccelerationHint = kPreferAcceleration) override;
   void SetFilterQuality(SkFilterQuality) override;
   bool IsWebGL2OrHigher() {
     return context_type_ == Platform::kWebGL2ContextType ||
@@ -619,6 +618,8 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   ScriptPromise makeXRCompatible(ScriptState*);
   bool IsXRCompatible();
 
+  void UpdateNumberOfUserAllocatedMultisampledRenderbuffers(int delta);
+
  protected:
   friend class EXTDisjointTimerQuery;
   friend class EXTDisjointTimerQueryWebGL2;
@@ -637,7 +638,8 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   friend class WebGLCompressedTextureS3TCsRGB;
   friend class WebGLMultiDraw;
   friend class WebGLMultiDrawCommon;
-  friend class WebGLMultiDrawInstanced;
+  friend class WebGLDrawInstancedBaseVertexBaseInstance;
+  friend class WebGLMultiDrawInstancedBaseVertexBaseInstance;
   friend class WebGLRenderingContextErrorMessageCallback;
   friend class WebGLVertexArrayObjectBase;
   friend class WebGLVideoTexture;
@@ -660,6 +662,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   bool Is3d() const override { return true; }
   bool IsComposited() const override { return true; }
   bool IsAccelerated() const override { return true; }
+  bool UsingSwapChain() const override;
   bool IsOriginTopLeft() const override;
   void SetIsHidden(bool) override;
   bool PaintRenderingResultsToCanvas(SourceDrawingBuffer) override;
@@ -668,7 +671,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   void DidDraw(const SkIRect&) override;
   void DidDraw() override;
   void FinalizeFrame() override;
-  void PushFrame() override;
+  bool PushFrame() override;
 
   // DrawingBuffer::Client implementation.
   bool DrawingBufferClientIsBoundForDraw() override;
@@ -680,6 +683,8 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   void DrawingBufferClientRestoreFramebufferBinding() override;
   void DrawingBufferClientRestorePixelUnpackBufferBinding() override;
   void DrawingBufferClientRestorePixelPackBufferBinding() override;
+  bool DrawingBufferClientUserAllocatedMultisampledRenderbuffers() override;
+  void DrawingBufferClientForceLostContextWithAutoRecovery() override;
 
   virtual void DestroyContext();
   void MarkContextChanged(ContentChangeType);
@@ -1739,7 +1744,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   bool ContextCreatedOnXRCompatibleAdapter();
 
   bool CopyRenderingResultsFromDrawingBuffer(CanvasResourceProvider*,
-                                             SourceDrawingBuffer) const;
+                                             SourceDrawingBuffer);
   void HoldReferenceToDrawingBuffer(DrawingBuffer*);
 
   static void InitializeWebGLContextLimits(
@@ -1759,6 +1764,8 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
 
   FrameOrWorkerScheduler::SchedulingAffectingFeatureHandle
       feature_handle_for_scheduler_;
+
+  int number_of_user_allocated_multisampled_renderbuffers_;
 
   DISALLOW_COPY_AND_ASSIGN(WebGLRenderingContextBase);
 };

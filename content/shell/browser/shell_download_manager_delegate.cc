@@ -83,15 +83,15 @@ bool ShellDownloadManagerDelegate::DetermineDownloadTarget(
       &ShellDownloadManagerDelegate::OnDownloadPathGenerated,
       weak_ptr_factory_.GetWeakPtr(), download->GetId(), callback);
 
-  PostTaskWithTraits(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
-       base::TaskPriority::USER_VISIBLE},
-      base::BindOnce(&ShellDownloadManagerDelegate::GenerateFilename,
-                     download->GetURL(), download->GetContentDisposition(),
-                     download->GetSuggestedFilename(), download->GetMimeType(),
-                     default_download_path_,
-                     std::move(filename_determined_callback)));
+  PostTask(FROM_HERE,
+           {base::ThreadPool(), base::MayBlock(),
+            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
+            base::TaskPriority::USER_VISIBLE},
+           base::BindOnce(&ShellDownloadManagerDelegate::GenerateFilename,
+                          download->GetURL(), download->GetContentDisposition(),
+                          download->GetSuggestedFilename(),
+                          download->GetMimeType(), default_download_path_,
+                          std::move(filename_determined_callback)));
   return true;
 }
 
@@ -126,8 +126,8 @@ void ShellDownloadManagerDelegate::GenerateFilename(
     base::CreateDirectory(suggested_directory);
 
   base::FilePath suggested_path(suggested_directory.Append(generated_name));
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(std::move(callback), suggested_path));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(std::move(callback), suggested_path));
 }
 
 void ShellDownloadManagerDelegate::OnDownloadPathGenerated(
@@ -165,10 +165,12 @@ void ShellDownloadManagerDelegate::ChooseDownloadPath(
   OPENFILENAME save_as;
   ZeroMemory(&save_as, sizeof(save_as));
   save_as.lStructSize = sizeof(OPENFILENAME);
-  save_as.hwndOwner = DownloadItemUtils::GetWebContents(item)
-                          ->GetNativeView()
-                          ->GetHost()
-                          ->GetAcceleratedWidget();
+  WebContents* web_contents = DownloadItemUtils::GetWebContents(item);
+  // |web_contents| could be null if the tab was quickly closed.
+  if (!web_contents)
+    return;
+  save_as.hwndOwner =
+      web_contents->GetNativeView()->GetHost()->GetAcceleratedWidget();
   save_as.lpstrFile = file_name;
   save_as.nMaxFile = base::size(file_name);
 

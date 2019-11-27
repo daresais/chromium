@@ -59,7 +59,6 @@
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/blink/public/mojom/app_banner/app_banner.mojom.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
@@ -278,8 +277,16 @@ void BlinkTestRunner::EnableAutoResizeMode(const WebSize& min_size,
 
 void BlinkTestRunner::DisableAutoResizeMode(const WebSize& new_size) {
   content::DisableAutoResizeMode(render_view(), new_size);
-  if (!new_size.IsEmpty())
-    ForceResizeRenderView(render_view(), new_size);
+  ForceResizeRenderView(render_view(), new_size);
+}
+
+void BlinkTestRunner::ResetAutoResizeMode() {
+  // An empty size indicates to keep the size as is. Resetting races with the
+  // browser setting up the new test (one is a mojo IPC (OnSetTestConfiguration)
+  // and one is legacy (OnReset)) so we can not clobber the size here.
+  content::DisableAutoResizeMode(render_view(), gfx::Size());
+  // Does not call ForceResizeRenderView() here intentionally. This is between
+  // tests, and the next test will set up a size.
 }
 
 void BlinkTestRunner::NavigateSecondaryWindow(const GURL& url) {
@@ -312,12 +319,12 @@ void BlinkTestRunner::SimulateWebNotificationClose(const std::string& title,
                                                        by_user));
 }
 
-void BlinkTestRunner::SetDeviceScaleFactor(float factor) {
-  content::SetDeviceScaleFactor(render_view(), factor);
+void BlinkTestRunner::SimulateWebContentIndexDelete(const std::string& id) {
+  Send(new WebTestHostMsg_SimulateWebContentIndexDelete(routing_id(), id));
 }
 
-float BlinkTestRunner::GetWindowToViewportScale() {
-  return content::GetWindowToViewportScale(render_view());
+void BlinkTestRunner::SetDeviceScaleFactor(float factor) {
+  content::SetDeviceScaleFactor(render_view(), factor);
 }
 
 std::unique_ptr<blink::WebInputEvent>
@@ -635,10 +642,11 @@ void BlinkTestRunner::DispatchBeforeInstallPromptEvent(
     const std::vector<std::string>& event_platforms,
     base::OnceCallback<void(bool)> callback) {
   app_banner_service_.reset(new test_runner::AppBannerService());
-  blink::mojom::AppBannerControllerRequest request =
-      mojo::MakeRequest(&app_banner_service_->controller());
   render_view()->GetMainRenderFrame()->BindLocalInterface(
-      blink::mojom::AppBannerController::Name_, request.PassMessagePipe());
+      blink::mojom::AppBannerController::Name_,
+      app_banner_service_->controller()
+          .BindNewPipeAndPassReceiver()
+          .PassPipe());
   app_banner_service_->SendBannerPromptRequest(event_platforms,
                                                std::move(callback));
 }
@@ -659,10 +667,6 @@ blink::WebPlugin* BlinkTestRunner::CreatePluginPlaceholder(
   plugins::PluginPlaceholder* placeholder = new plugins::PluginPlaceholder(
       render_view()->GetMainRenderFrame(), params, "<div>Test content</div>");
   return placeholder->plugin();
-}
-
-float BlinkTestRunner::GetDeviceScaleFactor() const {
-  return render_view()->GetDeviceScaleFactor();
 }
 
 void BlinkTestRunner::RunIdleTasks(base::OnceClosure callback) {
@@ -747,9 +751,8 @@ void BlinkTestRunner::DidCommitNavigationInMainFrame() {
 mojom::WebTestBluetoothFakeAdapterSetter&
 BlinkTestRunner::GetBluetoothFakeAdapterSetter() {
   if (!bluetooth_fake_adapter_setter_) {
-    RenderThread::Get()->GetConnector()->BindInterface(
-        mojom::kBrowserServiceName,
-        mojo::MakeRequest(&bluetooth_fake_adapter_setter_));
+    RenderThread::Get()->BindHostReceiver(
+        bluetooth_fake_adapter_setter_.BindNewPipeAndPassReceiver());
   }
   return *bluetooth_fake_adapter_setter_;
 }
@@ -790,10 +793,6 @@ void BlinkTestRunner::OnSetTestConfiguration(
   ForceResizeRenderView(render_view(),
                         WebSize(local_params->initial_size.width(),
                                 local_params->initial_size.height()));
-
-  // Tests should always start with the browser controls hidden.
-  render_view()->UpdateBrowserControlsState(
-      BROWSER_CONTROLS_STATE_BOTH, BROWSER_CONTROLS_STATE_HIDDEN, false);
 
   WebTestRenderThreadObserver::GetInstance()
       ->test_interfaces()

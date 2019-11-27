@@ -40,6 +40,7 @@
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom.h"
 #include "url/gurl.h"
 
 using content::RenderFrameHost;
@@ -103,9 +104,10 @@ void ContextualSearchDelegate::GatherAndSaveSurroundingText(
     base::WeakPtr<ContextualSearchContext> contextual_search_context,
     content::WebContents* web_contents) {
   DCHECK(web_contents);
-  RenderFrameHost::TextSurroundingSelectionCallback callback = base::BindOnce(
-      &ContextualSearchDelegate::OnTextSurroundingSelectionAvailable,
-      AsWeakPtr());
+  blink::mojom::LocalFrame::GetTextSurroundingSelectionCallback callback =
+      base::BindOnce(
+          &ContextualSearchDelegate::OnTextSurroundingSelectionAvailable,
+          AsWeakPtr());
   context_ = contextual_search_context;
   if (context_ == nullptr)
     return;
@@ -166,7 +168,7 @@ void ContextualSearchDelegate::ResolveSearchTermFromContext() {
       GetDiscourseContext(*context_));
 
   // Disable cookies for this request.
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   // Add Chrome experiment state to the request headers.
   // Reset will delete any previous loader, and we won't get any callback.

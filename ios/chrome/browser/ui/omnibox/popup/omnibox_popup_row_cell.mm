@@ -9,12 +9,14 @@
 #include "components/omnibox/common/omnibox_features.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/elements/extended_touch_target_button.h"
+#import "ios/chrome/browser/ui/elements/fade_truncating_label.h"
 #import "ios/chrome/browser/ui/omnibox/popup/autocomplete_suggestion.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_icon_view.h"
-#import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_truncating_label.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/dynamic_color_util.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -43,9 +45,9 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 // Stack view containing all text labels.
 @property(nonatomic, strong) UIStackView* textStackView;
 // Truncating label for the main text.
-@property(nonatomic, strong) OmniboxPopupTruncatingLabel* textTruncatingLabel;
+@property(nonatomic, strong) FadeTruncatingLabel* textTruncatingLabel;
 // Truncating label for the detail text.
-@property(nonatomic, strong) OmniboxPopupTruncatingLabel* detailTruncatingLabel;
+@property(nonatomic, strong) FadeTruncatingLabel* detailTruncatingLabel;
 // Regular UILabel for the detail text when the suggestion is an answer.
 // Answers have slightly different display requirements, like possibility of
 // multiple lines and truncating with ellipses instead of a fade gradient.
@@ -64,8 +66,15 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
               reuseIdentifier:(NSString*)reuseIdentifier {
   self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
   if (self) {
+    _incognito = NO;
+
+    self.selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.selectedBackgroundView.backgroundColor = color::DarkModeDynamicColor(
+        [UIColor colorNamed:kTableViewRowHighlightColor], _incognito,
+        [UIColor colorNamed:kTableViewRowHighlightDarkColor]);
+
     _textTruncatingLabel =
-        [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
+        [[FadeTruncatingLabel alloc] initWithFrame:CGRectZero];
     _textTruncatingLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_textTruncatingLabel
         setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh + 1
@@ -78,7 +87,7 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
     _textStackView.alignment = UIStackViewAlignmentLeading;
 
     _detailTruncatingLabel =
-        [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
+        [[FadeTruncatingLabel alloc] initWithFrame:CGRectZero];
     _detailTruncatingLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
     // Answers use a UILabel with NSLineBreakByTruncatingTail to produce a
@@ -102,9 +111,7 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
     _separator.translatesAutoresizingMaskIntoConstraints = NO;
     _separator.hidden = YES;
 
-    _incognito = NO;
-
-    self.backgroundColor = [UIColor clearColor];
+    self.backgroundColor = UIColor.clearColor;
   }
   return self;
 }
@@ -301,6 +308,17 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
   self.suggestion = suggestion;
   self.incognito = incognito;
 
+  // While iOS 12 is still supported, the background color needs to be reset
+  // when the incognito mode changes. Once iOS 12 is no longer supported,
+  // the color should only have to be set once.
+  if (@available(iOS 13, *)) {
+    // Empty because condition should be if (!@available(iOS 13, *)).
+  } else {
+    self.selectedBackgroundView.backgroundColor = color::DarkModeDynamicColor(
+        [UIColor colorNamed:kTableViewRowHighlightColor], self.incognito,
+        [UIColor colorNamed:kTableViewRowHighlightDarkColor]);
+  }
+
   self.separator.backgroundColor =
       self.incognito ? [UIColor.whiteColor colorWithAlphaComponent:0.12]
                      : [UIColor.blackColor colorWithAlphaComponent:0.12];
@@ -363,9 +381,9 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 
   [self.trailingButton setImage:trailingButtonImage
                        forState:UIControlStateNormal];
-  self.trailingButton.tintColor = self.incognito
-                                      ? [UIColor whiteColor]
-                                      : UIColorFromRGB(kLocationBarTintBlue);
+  self.trailingButton.tintColor = color::DarkModeDynamicColor(
+      [UIColor colorNamed:kBlueColor], self.incognito,
+      [UIColor colorNamed:kBlueDarkColor]);
 }
 
 - (NSString*)accessibilityLabel {
@@ -373,7 +391,7 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 }
 
 - (NSString*)accessibilityValue {
-  return self.detailTruncatingLabel.hidden
+  return self.suggestion.hasAnswer
              ? self.detailAnswerLabel.attributedText.string
              : self.detailTruncatingLabel.attributedText.string;
 }

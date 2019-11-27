@@ -19,6 +19,7 @@
 #include "components/autofill/core/common/signatures_util.h"
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
 #include "components/password_manager/core/browser/password_manager.h"
+#include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 
@@ -50,15 +51,6 @@ PasswordGenerationController* PasswordGenerationController::GetIfExisting(
 }
 
 struct PasswordGenerationControllerImpl::GenerationElementData {
-  GenerationElementData(autofill::PasswordForm form,
-                        autofill::FormSignature form_signature,
-                        autofill::FieldSignature field_signature,
-                        uint32_t max_password_length)
-      : form(std::move(form)),
-        form_signature(form_signature),
-        field_signature(field_signature),
-        max_password_length(max_password_length) {}
-
   GenerationElementData(
       const autofill::password_generation::PasswordGenerationUIData& ui_data) {
     const std::string kFieldType = "password";
@@ -68,6 +60,7 @@ struct PasswordGenerationControllerImpl::GenerationElementData {
         autofill::CalculateFormSignature(ui_data.password_form.form_data);
     field_signature = autofill::CalculateFieldSignatureByNameAndType(
         ui_data.generation_element, kFieldType);
+    generation_element_id = ui_data.generation_element_id;
     max_password_length = ui_data.max_length;
   }
 
@@ -79,6 +72,9 @@ struct PasswordGenerationControllerImpl::GenerationElementData {
 
   // Signature of the field for which password generation is triggered.
   autofill::FieldSignature field_signature;
+
+  // Renderer ID of the password field triggering generation.
+  uint32_t generation_element_id;
 
   // Maximum length of the generated password.
   uint32_t max_password_length;
@@ -142,8 +138,7 @@ void PasswordGenerationControllerImpl::OnGenerationRequested(
     PasswordGenerationType type) {
   if (type == PasswordGenerationType::kManual) {
     manual_generation_requested_ = true;
-    ChromePasswordManagerClient::FromWebContents(web_contents_)
-        ->GeneratePassword();
+    client_->GeneratePassword();
   } else {
     ShowDialog(PasswordGenerationType::kAutomatic);
   }
@@ -157,7 +152,9 @@ void PasswordGenerationControllerImpl::GeneratedPasswordAccepted(
     return;
   password_manager::metrics_util::LogGenerationDialogChoice(
       GenerationDialogChoice::kAccepted, type);
-  driver->GeneratedPasswordAccepted(password);
+  driver->GeneratedPasswordAccepted(
+      generation_element_data_->form.form_data,
+      generation_element_data_->generation_element_id, password);
   ResetState();
 }
 
@@ -176,31 +173,36 @@ gfx::NativeWindow PasswordGenerationControllerImpl::top_level_native_window()
 // static
 void PasswordGenerationControllerImpl::CreateForWebContentsForTesting(
     content::WebContents* web_contents,
-    base::WeakPtr<ManualFillingController> manual_filling_controller_,
+    password_manager::PasswordManagerClient* client,
+    base::WeakPtr<ManualFillingController> manual_filling_controller,
     CreateDialogFactory create_dialog_factory) {
   DCHECK(web_contents) << "Need valid WebContents to attach controller to!";
   DCHECK(!FromWebContents(web_contents)) << "Controller already attached!";
-  DCHECK(manual_filling_controller_);
+  DCHECK(manual_filling_controller);
 
   web_contents->SetUserData(
-      UserDataKey(), base::WrapUnique(new PasswordGenerationControllerImpl(
-                         web_contents, std::move(manual_filling_controller_),
-                         create_dialog_factory)));
+      UserDataKey(),
+      base::WrapUnique(new PasswordGenerationControllerImpl(
+          web_contents, client, std::move(manual_filling_controller),
+          create_dialog_factory)));
 }
 
 PasswordGenerationControllerImpl::PasswordGenerationControllerImpl(
     content::WebContents* web_contents)
     : web_contents_(web_contents),
+      client_(ChromePasswordManagerClient::FromWebContents(web_contents)),
       create_dialog_factory_(
           base::BindRepeating(&PasswordGenerationDialogViewInterface::Create)) {
 }
 
 PasswordGenerationControllerImpl::PasswordGenerationControllerImpl(
     content::WebContents* web_contents,
-    base::WeakPtr<ManualFillingController> manual_filling_controller_,
+    password_manager::PasswordManagerClient* client,
+    base::WeakPtr<ManualFillingController> manual_filling_controller,
     CreateDialogFactory create_dialog_factory)
     : web_contents_(web_contents),
-      manual_filling_controller_(std::move(manual_filling_controller_)),
+      client_(client),
+      manual_filling_controller_(std::move(manual_filling_controller)),
       create_dialog_factory_(create_dialog_factory) {}
 
 void PasswordGenerationControllerImpl::ShowDialog(PasswordGenerationType type) {
@@ -224,9 +226,6 @@ void PasswordGenerationControllerImpl::ShowDialog(PasswordGenerationType type) {
           generation_element_data_->form_signature,
           generation_element_data_->field_signature,
           generation_element_data_->max_password_length, &spec_priority);
-  active_frame_driver_->GetPasswordManager()
-      ->ReportSpecPriorityForGeneratedPassword(generation_element_data_->form,
-                                               spec_priority);
   dialog_view_->Show(password, active_frame_driver_, type);
 }
 

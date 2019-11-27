@@ -4,17 +4,14 @@
 
 package org.chromium.chrome.browser.send_tab_to_self;
 
-import android.content.Context;
 import android.content.SharedPreferences;
-import android.support.annotation.Nullable;
 import android.support.test.filters.SmallTest;
 
+import androidx.annotation.Nullable;
+
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Spy;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
@@ -25,15 +22,6 @@ import org.chromium.chrome.browser.send_tab_to_self.NotificationSharedPrefManage
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class NotificationSharedPrefManagerTest {
-    @Spy
-    private Context mContext = RuntimeEnvironment.application.getApplicationContext();
-
-    @Before
-    public void setUp() {
-        ContextUtils.initApplicationContext(mContext);
-        ContextUtils.getAppSharedPreferences().edit().clear().apply();
-    }
-
     private @Nullable ActiveNotification deserialize(String serialized) {
         return NotificationSharedPrefManager.deserializeNotification(serialized);
     }

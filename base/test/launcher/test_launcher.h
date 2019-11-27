@@ -27,7 +27,6 @@
 
 namespace base {
 
-struct LaunchOptions;
 // Constants for GTest command-line flags.
 extern const char kGTestFilterFlag[];
 extern const char kGTestFlagfileFlag[];
@@ -50,24 +49,9 @@ class TestLauncherDelegate {
   // must put the result in |output| and return true on success.
   virtual bool GetTests(std::vector<TestIdentifier>* output) = 0;
 
-  // Called before a test is considered for running. This method must return
-  // true if either the delegate or the TestLauncher will run the test.
-  virtual bool WillRunTest(const std::string& test_case_name,
-                           const std::string& test_name) = 0;
-
-  // Invoked after a child process finishes, reporting the process |exit_code|,
-  // child process |elapsed_time|, whether or not the process was terminated as
-  // a result of a timeout, and the output of the child (stdout and stderr
-  // together). NOTE: this method is invoked on the same thread as
-  // LaunchChildGTestProcess.
-  // Returns test results of child process.
-  virtual std::vector<TestResult> ProcessTestResults(
-      const std::vector<std::string>& test_names,
-      const base::FilePath& output_file,
-      const std::string& output,
-      const base::TimeDelta& elapsed_time,
-      int exit_code,
-      bool was_timeout) = 0;
+  // Additional delegate TestResult processing.
+  virtual void ProcessTestResults(std::vector<TestResult>& test_results,
+                                  TimeDelta elapsed_time) {}
 
   // Called to get the command line for the specified tests.
   // |output_file_| is populated with the path to the result file, and must
@@ -79,7 +63,7 @@ class TestLauncherDelegate {
   // Invoked when a test process exceeds its runtime, immediately before it is
   // terminated. |command_line| is the command line used to launch the process.
   // NOTE: this method is invoked on the thread the process is launched on.
-  virtual void OnTestTimedOut(const base::CommandLine& cmd_line) {}
+  virtual void OnTestTimedOut(const CommandLine& cmd_line) {}
 
   // Returns the delegate specific wrapper for command line.
   // If it is not empty, it is prepended to the final command line.
@@ -94,6 +78,9 @@ class TestLauncherDelegate {
 
   // Returns the delegate specific batch size.
   virtual size_t GetBatchSize() = 0;
+
+  // Returns true if test should run.
+  virtual bool ShouldRunTest(const TestIdentifier& test);
 
  protected:
   virtual ~TestLauncherDelegate();
@@ -134,8 +121,10 @@ class TestLauncher {
   };
 
   // Constructor. |parallel_jobs| is the limit of simultaneous parallel test
-  // jobs.
-  TestLauncher(TestLauncherDelegate* launcher_delegate, size_t parallel_jobs);
+  // jobs. |retry_limit| is the default limit of retries for bots or all tests.
+  TestLauncher(TestLauncherDelegate* launcher_delegate,
+               size_t parallel_jobs,
+               size_t retry_limit = 1U);
   // virtual to mock in testing.
   virtual ~TestLauncher();
 
@@ -210,6 +199,19 @@ class TestLauncher {
   // to foreground blocking tasks (corresponds to the traits used to launch and
   // wait for child processes). virtual to mock in testing.
   virtual void CreateAndStartThreadPool(int num_parallel_jobs);
+
+  // Callback to receive result of a test.
+  // |result_file| is a path to xml file written by child process.
+  // It contains information about test and failed
+  // EXPECT/ASSERT/DCHECK statements. Test launcher parses that
+  // file to get additional information about test run (status,
+  // error-messages, stack-traces and file/line for failures).
+  void ProcessTestResults(const std::vector<std::string>& test_names,
+                          const FilePath& result_file,
+                          const std::string& output,
+                          TimeDelta elapsed_time,
+                          int exit_code,
+                          bool was_timeout);
 
   // Make sure we don't accidentally call the wrong methods e.g. on the worker
   // pool thread.  Should be the first member so that it's destroyed last: when

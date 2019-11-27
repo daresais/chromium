@@ -19,7 +19,7 @@
 #include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/origin_trial_features.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -272,8 +272,6 @@ void OriginTrialContext::AddFeature(OriginTrialFeature feature) {
 }
 
 bool OriginTrialContext::IsFeatureEnabled(OriginTrialFeature feature) const {
-  if (!RuntimeEnabledFeatures::OriginTrialsEnabled())
-    return false;
 
   if (enabled_features_.Contains(feature) ||
       navigation_activated_features_.Contains(feature)) {
@@ -299,9 +297,6 @@ bool OriginTrialContext::IsFeatureEnabled(OriginTrialFeature feature) const {
 
 bool OriginTrialContext::IsNavigationFeatureActivated(
     OriginTrialFeature feature) const {
-  if (!RuntimeEnabledFeatures::OriginTrialsEnabled())
-    return false;
-
   return navigation_activated_features_.Contains(feature);
 }
 

@@ -6,8 +6,9 @@
 #define SERVICES_TRACING_PUBLIC_CPP_PERFETTO_PERFETTO_TRACED_PROCESS_H_
 
 #include "base/component_export.h"
-#include "base/memory/weak_ptr.h"
+#include "base/no_destructor.h"
 #include "base/sequence_checker.h"
+#include "base/sequenced_task_runner.h"
 #include "services/tracing/public/cpp/perfetto/task_runner.h"
 
 namespace tracing {
@@ -29,7 +30,7 @@ class SystemProducer;
 //   in PerfettoProducer::StartDataSource.
 class COMPONENT_EXPORT(TRACING_CPP) PerfettoTracedProcess final {
  public:
-  class DataSourceBase {
+  class COMPONENT_EXPORT(TRACING_CPP) DataSourceBase {
    public:
     explicit DataSourceBase(const std::string& name);
     virtual ~DataSourceBase();
@@ -43,6 +44,8 @@ class COMPONENT_EXPORT(TRACING_CPP) PerfettoTracedProcess final {
         PerfettoProducer* producer,
         const perfetto::DataSourceConfig& data_source_config) = 0;
     // StopTracing must set |producer_| to nullptr before invoking the callback.
+    // TODO(nuskos): Refactor this so that the implementation doesn't have to
+    // remember to do this.
     virtual void StopTracing(
         base::OnceClosure stop_complete_callback = base::OnceClosure()) = 0;
 
@@ -100,10 +103,13 @@ class COMPONENT_EXPORT(TRACING_CPP) PerfettoTracedProcess final {
   bool CanStartTracing(PerfettoProducer* producer,
                        base::OnceCallback<void()> start_tracing);
 
+  void ActivateSystemTriggers(const std::vector<std::string>& triggers);
+
   // Be careful when using ResetTaskRunnerForTesting. There is a PostTask in the
   // constructor of PerfettoTracedProcess, so before this class is constructed
   // is the only safe time to call this.
-  static void ResetTaskRunnerForTesting();
+  static void ResetTaskRunnerForTesting(
+      scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr);
 
   static void ReconstructForTesting(const char* system_socket);
 
@@ -129,9 +135,6 @@ class COMPONENT_EXPORT(TRACING_CPP) PerfettoTracedProcess final {
   std::unique_ptr<SystemProducer> system_producer_endpoint_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-  // NOTE: Weak pointers must be invalidated before all other member
-  // variables.
-  base::WeakPtrFactory<PerfettoTracedProcess> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(PerfettoTracedProcess);
 };
 }  // namespace tracing

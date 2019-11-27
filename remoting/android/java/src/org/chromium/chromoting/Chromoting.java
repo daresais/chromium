@@ -43,6 +43,7 @@ import org.chromium.chromoting.jni.ConnectionListener;
 import org.chromium.chromoting.jni.DirectoryService;
 import org.chromium.chromoting.jni.DirectoryServiceRequestError;
 import org.chromium.chromoting.jni.JniOAuthTokenGetter;
+import org.chromium.chromoting.jni.NotificationPresenter;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,8 +64,7 @@ public class Chromoting extends AppCompatActivity
     // To use these scopes in a debug build, your development account will need to be whitelisted.
     private static final String TOKEN_SCOPE = "oauth2:https://www.googleapis.com/auth/chromoting "
             + "https://www.googleapis.com/auth/chromoting.directory "
-            + "https://www.googleapis.com/auth/tachyon "
-            + "https://www.googleapis.com/auth/googletalk";
+            + "https://www.googleapis.com/auth/tachyon";
 
     /** Result code used for starting {@link DesktopActivity}. */
     public static final int DESKTOP_ACTIVITY = 0;
@@ -97,6 +97,9 @@ public class Chromoting extends AppCompatActivity
 
     /** Dialog for reporting connection progress. */
     private ProgressDialog mProgressIndicator;
+
+    /** Helper for fetching notification and presenting it. */
+    private NotificationPresenter mNotificationPresenter;
 
     /**
      * Helper used by SessionConnection for session authentication. Receives onNewIntent()
@@ -237,6 +240,7 @@ public class Chromoting extends AppCompatActivity
         setSupportActionBar(toolbar);
 
         mDirectoryService = new DirectoryService();
+        mNotificationPresenter = new NotificationPresenter(this);
 
         // Get ahold of our view widgets.
         mHostListView = (ListView) findViewById(R.id.hostList_chooser);
@@ -627,6 +631,7 @@ public class Chromoting extends AppCompatActivity
         }
         mAccount = accountName;
         JniOAuthTokenGetter.setAccount(accountName);
+        mNotificationPresenter.presentIfNecessary(accountName);
 
         // The current host list is no longer valid for the new account, so clear the list.
         mHosts = new HostInfo[0];

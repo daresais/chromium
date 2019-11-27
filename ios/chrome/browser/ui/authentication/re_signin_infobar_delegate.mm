@@ -21,7 +21,6 @@
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/signin_interaction/public/signin_presenter.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -123,7 +122,6 @@ bool ReSignInInfoBarDelegate::Accept() {
   signin_metrics::RecordSigninUserActionForAccessPoint(
       signin_metrics::AccessPoint::ACCESS_POINT_RESIGNIN_INFOBAR,
       signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO);
-  DCHECK(static_cast<InfoBarIOS*>(infobar())->View());
   ShowSigninCommand* command = [[ShowSigninCommand alloc]
       initWithOperation:AUTHENTICATION_OPERATION_REAUTHENTICATE
             accessPoint:signin_metrics::AccessPoint::

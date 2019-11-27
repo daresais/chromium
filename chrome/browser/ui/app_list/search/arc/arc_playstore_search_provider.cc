@@ -88,8 +88,7 @@ ArcPlayStoreSearchProvider::ArcPlayStoreSearchProvider(
     AppListControllerDelegate* list_controller)
     : max_results_(max_results),
       profile_(profile),
-      list_controller_(list_controller),
-      weak_ptr_factory_(this) {
+      list_controller_(list_controller) {
   DCHECK_EQ(kHistogramBuckets, max_results + 1);
 }
 
@@ -170,13 +169,19 @@ void ArcPlayStoreSearchProvider::OnResults(
                             arc::ArcPlayStoreSearchRequestState::STATE_COUNT);
   UMA_HISTOGRAM_TIMES("Arc.PlayStoreSearch.QueryTime",
                       base::TimeTicks::Now() - query_start_time);
-  UMA_HISTOGRAM_EXACT_LINEAR("Arc.PlayStoreSearch.ReturnedAppsTotal",
-                             results.size(), kHistogramBuckets);
-  UMA_HISTOGRAM_EXACT_LINEAR("Arc.PlayStoreSearch.ReturnedUninstalledApps",
-                             results.size() - instant_app_count,
-                             kHistogramBuckets);
-  UMA_HISTOGRAM_EXACT_LINEAR("Arc.PlayStoreSearch.ReturnedInstantApps",
-                             instant_app_count, kHistogramBuckets);
+  if (results.size() > 0) {
+    UMA_HISTOGRAM_EXACT_LINEAR("Arc.PlayStoreSearch.ReturnedAppsTotal",
+                               results.size(), kHistogramBuckets);
+  }
+  if (results.size() - instant_app_count > 0) {
+    UMA_HISTOGRAM_EXACT_LINEAR("Arc.PlayStoreSearch.ReturnedUninstalledApps",
+                               results.size() - instant_app_count,
+                               kHistogramBuckets);
+  }
+  if (instant_app_count > 0) {
+    UMA_HISTOGRAM_EXACT_LINEAR("Arc.PlayStoreSearch.ReturnedInstantApps",
+                               instant_app_count, kHistogramBuckets);
+  }
 }
 
 }  // namespace app_list

@@ -9,14 +9,13 @@ import android.accounts.AccountManager;
 import android.accounts.AuthenticatorDescription;
 import android.app.Activity;
 import android.content.Intent;
-import android.support.annotation.AnyThread;
-import android.support.annotation.MainThread;
-import android.support.annotation.Nullable;
-import android.support.annotation.WorkerThread;
+
+import androidx.annotation.AnyThread;
+import androidx.annotation.MainThread;
+import androidx.annotation.Nullable;
+import androidx.annotation.WorkerThread;
 
 import org.chromium.base.Callback;
-
-import java.util.List;
 
 /**
  * Abstraction of account management implementation.
@@ -44,10 +43,10 @@ public interface AccountManagerDelegate {
     void removeObserver(AccountsChangeObserver observer);
 
     /**
-     * Get information about all the accounts synchronously.
+     * Get all the accounts synchronously.
      */
     @WorkerThread
-    List<CoreAccountInfo> getAccountInfosSync() throws AccountManagerDelegateException;
+    Account[] getAccountsSync() throws AccountManagerDelegateException;
 
     /**
      * Get an auth token.

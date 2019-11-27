@@ -124,8 +124,8 @@ void AccountTrackerService::Initialize(PrefService* pref_service,
   if (!user_data_dir_.empty()) {
     // |image_storage_task_runner_| is a sequenced runner because we want to
     // avoid read and write operations to the same file at the same time.
-    image_storage_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-        {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+    image_storage_task_runner_ = base::CreateSequencedTaskRunner(
+        {base::ThreadPool(), base::MayBlock(), base::TaskPriority::USER_VISIBLE,
          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
     LoadAccountImagesFromDisk();
   }
@@ -314,7 +314,8 @@ void AccountTrackerService::MigrateToGaiaId() {
   std::vector<CoreAccountId> to_remove;
   std::vector<AccountInfo> migrated_accounts;
   for (const auto& pair : accounts_) {
-    const CoreAccountId new_account_id(pair.second.gaia);
+    const CoreAccountId new_account_id =
+        CoreAccountId::FromGaiaId(pair.second.gaia);
     if (pair.first == new_account_id)
       continue;
 
@@ -456,11 +457,11 @@ void AccountTrackerService::LoadFromPrefs() {
         // Ignore incorrectly persisted non-canonical account ids.
         if (value.find('@') != std::string::npos &&
             value != gaia::CanonicalizeEmail(value)) {
-          to_remove.insert(CoreAccountId(value));
+          to_remove.insert(CoreAccountId::FromString(value));
           continue;
         }
-        CoreAccountId account_id(value);
 
+        CoreAccountId account_id = CoreAccountId::FromString(value);
         StartTrackingAccount(account_id);
         AccountInfo& account_info = accounts_[account_id];
 
@@ -599,17 +600,13 @@ CoreAccountId AccountTrackerService::PickAccountIdForAccount(
   DCHECK(!email.empty());
   switch (GetMigrationState(pref_service)) {
     case MIGRATION_NOT_STARTED:
-      // Some tests don't use a real email address.  To support these cases,
-      // don't try to canonicalize these strings.
-      return CoreAccountId(email.find('@') == std::string::npos
-                               ? email
-                               : gaia::CanonicalizeEmail(email));
+      return CoreAccountId::FromEmail(gaia::CanonicalizeEmail(email));
     case MIGRATION_IN_PROGRESS:
     case MIGRATION_DONE:
-      return CoreAccountId(gaia);
+      return CoreAccountId::FromGaiaId(gaia);
     default:
       NOTREACHED();
-      return CoreAccountId(email);
+      return CoreAccountId::FromString(email);
   }
 }
 
@@ -656,15 +653,10 @@ AccountTrackerService::GetJavaObject() {
   return base::android::ScopedJavaLocalRef<jobject>(java_ref_);
 }
 
-void JNI_AccountTrackerService_SeedAccountsInfo(
+void AccountTrackerService::SeedAccountsInfo(
     JNIEnv* env,
-    jlong nativeAccountTrackerService,
     const base::android::JavaParamRef<jobjectArray>& gaiaIds,
     const base::android::JavaParamRef<jobjectArray>& accountNames) {
-  AccountTrackerService* service =
-      reinterpret_cast<AccountTrackerService*>(nativeAccountTrackerService);
-  DCHECK(service);
-
   std::vector<std::string> gaia_ids;
   std::vector<std::string> account_names;
   base::android::AppendJavaStringArrayToStringVector(env, gaiaIds, &gaia_ids);
@@ -675,28 +667,22 @@ void JNI_AccountTrackerService_SeedAccountsInfo(
   DVLOG(1) << "AccountTrackerService.SeedAccountsInfo: "
            << " number of accounts " << gaia_ids.size();
   for (size_t i = 0; i < gaia_ids.size(); ++i) {
-    service->SeedAccountInfo(gaia_ids[i], account_names[i]);
+    SeedAccountInfo(gaia_ids[i], account_names[i]);
   }
 }
 
-jboolean JNI_AccountTrackerService_AreAccountsSeeded(
+jboolean AccountTrackerService::AreAccountsSeeded(
     JNIEnv* env,
-    jlong nativeAccountTrackerService,
-    const base::android::JavaParamRef<jobjectArray>& accountNames) {
-  AccountTrackerService* service =
-      reinterpret_cast<AccountTrackerService*>(nativeAccountTrackerService);
-  DCHECK(service);
-
+    const base::android::JavaParamRef<jobjectArray>& accountNames) const {
   std::vector<std::string> account_names;
   base::android::AppendJavaStringArrayToStringVector(env, accountNames,
                                                      &account_names);
 
-  bool migrated =
-      service->GetMigrationState() ==
-      AccountTrackerService::AccountIdMigrationState::MIGRATION_DONE;
+  const bool migrated =
+      GetMigrationState() == AccountIdMigrationState::MIGRATION_DONE;
 
   for (const auto& account_name : account_names) {
-    AccountInfo info = service->FindAccountInfoByEmail(account_name);
+    AccountInfo info = FindAccountInfoByEmail(account_name);
     if (info.account_id.empty()) {
       return false;
     }

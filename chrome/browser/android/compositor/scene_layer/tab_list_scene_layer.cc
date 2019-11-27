@@ -14,7 +14,6 @@
 #include "chrome/browser/android/compositor/layer/tab_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
-#include "content/public/browser/android/compositor.h"
 #include "ui/android/resources/resource_manager_impl.h"
 
 using base::android::JavaParamRef;
@@ -204,7 +203,8 @@ void TabListSceneLayer::PutBackgroundLayer(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jobj,
     jint resource_id,
-    jfloat alpha) {
+    jfloat alpha,
+    jint top_offset) {
   int ui_resource_id = resource_manager_->GetUIResourceId(
       ui::ANDROID_RESOURCE_TYPE_DYNAMIC, resource_id);
   if (ui_resource_id == 0)
@@ -223,6 +223,7 @@ void TabListSceneLayer::PutBackgroundLayer(
           ->size();
   background_layer_->SetBounds(size);
   background_layer_->SetOpacity(alpha);
+  background_layer_->SetPosition(gfx::PointF(0, top_offset));
 }
 
 void TabListSceneLayer::OnDetach() {

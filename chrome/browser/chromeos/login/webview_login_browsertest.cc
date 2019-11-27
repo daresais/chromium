@@ -17,10 +17,12 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/signin_partition_manager.h"
@@ -30,6 +32,7 @@
 #include "chrome/browser/chromeos/login/test/local_policy_test_server_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
+#include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
@@ -40,8 +43,11 @@
 #include "chrome/browser/ui/login/login_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
+#include "chromeos/tpm/tpm_token_loader.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "components/onc/onc_constants.h"
@@ -60,9 +66,12 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "crypto/nss_util.h"
 #include "crypto/nss_util_internal.h"
+#include "crypto/scoped_test_nss_db.h"
 #include "crypto/scoped_test_system_nss_key_slot.h"
 #include "media/base/media_switches.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
@@ -83,24 +92,24 @@ constexpr char kTestCookieHost[] = "host1.com";
 void InjectCookieDoneCallback(
     base::OnceClosure done_closure,
     net::CanonicalCookie::CookieInclusionStatus status) {
-  ASSERT_EQ(net::CanonicalCookie::CookieInclusionStatus::INCLUDE, status);
+  ASSERT_TRUE(status.IsInclude());
   std::move(done_closure).Run();
 }
 
 // Injects a cookie into |storage_partition|, so we can test for cookie presence
 // later to infer if the StoragePartition has been cleared.
 void InjectCookie(content::StoragePartition* storage_partition) {
-  network::mojom::CookieManagerPtr cookie_manager;
+  mojo::Remote<network::mojom::CookieManager> cookie_manager;
   storage_partition->GetNetworkContext()->GetCookieManager(
-      mojo::MakeRequest(&cookie_manager));
+      cookie_manager.BindNewPipeAndPassReceiver());
 
   base::RunLoop run_loop;
   cookie_manager->SetCanonicalCookie(
-      net::CanonicalCookie(kTestCookieName, kTestCookieValue, kTestCookieHost,
-                           "/", base::Time(), base::Time(), base::Time(), false,
-                           false, net::CookieSameSite::NO_RESTRICTION,
-                           net::COOKIE_PRIORITY_MEDIUM),
-      "http", net::CookieOptions(),
+      net::CanonicalCookie(
+          kTestCookieName, kTestCookieValue, kTestCookieHost, "/", base::Time(),
+          base::Time(), base::Time(), true /* secure */, false /* httponly*/,
+          net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_MEDIUM),
+      "https", net::CookieOptions(),
       base::Bind(&InjectCookieDoneCallback, run_loop.QuitClosure()));
   run_loop.Run();
 }
@@ -115,9 +124,9 @@ void GetAllCookiesCallback(std::string* cookies_out,
 // Returns all cookies present in |storage_partition| as a HTTP header cookie
 // line. Will be an empty string if there are no cookies.
 std::string GetAllCookies(content::StoragePartition* storage_partition) {
-  network::mojom::CookieManagerPtr cookie_manager;
+  mojo::Remote<network::mojom::CookieManager> cookie_manager;
   storage_partition->GetNetworkContext()->GetCookieManager(
-      mojo::MakeRequest(&cookie_manager));
+      cookie_manager.BindNewPipeAndPassReceiver());
 
   std::string cookies;
   base::RunLoop run_loop;
@@ -244,6 +253,7 @@ class WebviewLoginTest : public OobeBaseTest {
 
 // Basic signin with username and password.
 IN_PROC_BROWSER_TEST_F(WebviewLoginTest, Basic) {
+  base::HistogramTester histogram_tester;
   WaitForGaiaPageLoadAndPropertyUpdate();
 
   ExpectIdentifierPage();
@@ -253,18 +263,34 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, Basic) {
   WaitForGaiaPageBackButtonUpdate();
   ExpectPasswordPage();
 
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
+  ASSERT_TRUE(LoginDisplayHost::default_host());
+  EXPECT_TRUE(LoginDisplayHost::default_host()->GetWebUILoginView());
 
   SigninFrameJS().TypeIntoPath("[]", {"services"});
   SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserPassword, {"password"});
   SigninFrameJS().TapOn("nextButton");
 
-  session_start_waiter.Wait();
+  // The login view should be destroyed after the browser window opens.
+  ui_test_utils::WaitForBrowserToOpen();
+  EXPECT_FALSE(LoginDisplayHost::default_host()->GetWebUILoginView());
+
+  test::WaitForPrimaryUserSessionStart();
+
+  // Wait for the LoginDisplayHost to delete itself, which is a posted task.
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_FALSE(LoginDisplayHost::default_host());
+
+  histogram_tester.ExpectUniqueSample("ChromeOS.SAML.APILogin", 0, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(WebviewLoginTest, BackButton) {
+// TODO(crbug.com/998330): The test is flaky (timeout) on Chromium OS MSAN.
+#if defined(MEMORY_SANITIZER) && defined(OS_CHROMEOS)
+#define MAYBE_BackButton DISABLED_BackButton
+#else
+#define MAYBE_BackButton BackButton
+#endif
+IN_PROC_BROWSER_TEST_F(WebviewLoginTest, MAYBE_BackButton) {
   WaitForGaiaPageLoadAndPropertyUpdate();
 
   // Start with identifer page.
@@ -285,16 +311,12 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, BackButton) {
   WaitForGaiaPageBackButtonUpdate();
   ExpectPasswordPage();
 
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
-
   // Finish sign-up.
   SigninFrameJS().TypeIntoPath("[]", {"services"});
   SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserPassword, {"password"});
   SigninFrameJS().TapOn("nextButton");
 
-  session_start_waiter.Wait();
+  test::WaitForPrimaryUserSessionStart();
 }
 
 // Create new account option should be available only if the settings allow it.
@@ -411,33 +433,14 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, RequestCamera) {
   EXPECT_FALSE(getUserMediaSuccess);
 }
 
-class WebviewClientCertsLoginTest : public WebviewLoginTest {
+// Base class for tests of the client certificates in the sign-in frame.
+class WebviewClientCertsLoginTestBase : public WebviewLoginTest {
  public:
-  WebviewClientCertsLoginTest() {}
-
-  // Installs a testing system slot and imports a client certificate into it.
-  void SetUpClientCertInSystemSlot() {
-    {
-      bool system_slot_constructed_successfully = false;
-      base::RunLoop loop;
-      base::PostTaskWithTraitsAndReply(
-          FROM_HERE, {content::BrowserThread::IO},
-          base::BindOnce(&WebviewClientCertsLoginTest::SetUpTestSystemSlotOnIO,
-                         base::Unretained(this),
-                         &system_slot_constructed_successfully),
-          loop.QuitClosure());
-      loop.Run();
-      ASSERT_TRUE(system_slot_constructed_successfully);
-    }
-
-    // Import a second client cert signed by another CA than client_1 into the
-    // system wide key slot.
-    base::ScopedAllowBlockingForTesting allow_io;
-    client_cert_ = net::ImportClientCertAndKeyFromFile(
-        net::GetTestCertsDirectory(), "client_1.pem", "client_1.pk8",
-        test_system_slot_->slot());
-    ASSERT_TRUE(client_cert_.get());
-  }
+  WebviewClientCertsLoginTestBase() = default;
+  WebviewClientCertsLoginTestBase(const WebviewClientCertsLoginTestBase&) =
+      delete;
+  WebviewClientCertsLoginTestBase& operator=(
+      const WebviewClientCertsLoginTestBase&) = delete;
 
   // Sets up the DeviceLoginScreenAutoSelectCertificateForUrls policy.
   void SetAutoSelectCertificatePatterns(
@@ -554,34 +557,16 @@ class WebviewClientCertsLoginTest : public WebviewLoginTest {
     WebviewLoginTest::SetUpInProcessBrowserTestFixture();
   }
 
-  void TearDownOnMainThread() override {
-    TearDownTestSystemSlot();
-    WebviewLoginTest::TearDownOnMainThread();
+  bool ImportSystemSlotClientCert(PK11SlotInfo* system_slot) {
+    base::ScopedAllowBlockingForTesting allow_io;
+    scoped_refptr<net::X509Certificate> client_cert =
+        net::ImportClientCertAndKeyFromFile(net::GetTestCertsDirectory(),
+                                            "client_1.pem", "client_1.pk8",
+                                            system_slot);
+    return client_cert.get() != nullptr;
   }
 
  private:
-  void SetUpTestSystemSlotOnIO(bool* out_system_slot_constructed_successfully) {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-    test_system_slot_ = std::make_unique<crypto::ScopedTestSystemNSSKeySlot>();
-    *out_system_slot_constructed_successfully =
-        test_system_slot_->ConstructedSuccessfully();
-  }
-
-  void TearDownTestSystemSlot() {
-    if (!test_system_slot_)
-      return;
-
-    base::RunLoop loop;
-    base::PostTaskWithTraitsAndReply(
-        FROM_HERE, {content::BrowserThread::IO},
-        base::BindOnce(&WebviewClientCertsLoginTest::TearDownTestSystemSlotOnIO,
-                       base::Unretained(this)),
-        loop.QuitClosure());
-    loop.Run();
-  }
-
-  void TearDownTestSystemSlotOnIO() { test_system_slot_.reset(); }
-
   // Builds a device ONC dictionary defining a single untrusted authority
   // certificate.
   base::DictionaryValue BuildDeviceOncDictForUntrustedAuthority(
@@ -594,7 +579,7 @@ class WebviewClientCertsLoginTest : public WebviewLoginTest {
                            base::Value(x509_authority_cert));
 
     base::ListValue onc_certificates;
-    onc_certificates.GetList().emplace_back(std::move(onc_certificate));
+    onc_certificates.Append(std::move(onc_certificate));
 
     base::DictionaryValue onc_dict;
     onc_dict.SetKey(onc::toplevel_config::kCertificates,
@@ -606,12 +591,61 @@ class WebviewClientCertsLoginTest : public WebviewLoginTest {
   }
 
   policy::DevicePolicyBuilder device_policy_builder_;
-  std::unique_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
-  scoped_refptr<net::X509Certificate> client_cert_;
   std::unique_ptr<net::SpawnedTestServer> https_server_;
 
   DeviceStateMixin device_state_{
       &mixin_host_, DeviceStateMixin::State::OOBE_COMPLETED_CLOUD_ENROLLED};
+};
+
+// Tests of the client certificates in the sign-in frame. The testing system
+// slot is pre-initialized with a client cert.
+class WebviewClientCertsLoginTest : public WebviewClientCertsLoginTestBase {
+ public:
+  WebviewClientCertsLoginTest() = default;
+
+  // Installs a testing system slot and imports a client certificate into it.
+  void SetUpClientCertInSystemSlot() {
+    bool system_slot_constructed_successfully = false;
+    base::RunLoop loop;
+    base::PostTaskAndReply(
+        FROM_HERE, {content::BrowserThread::IO},
+        base::BindOnce(&WebviewClientCertsLoginTest::SetUpTestSystemSlotOnIO,
+                       base::Unretained(this),
+                       &system_slot_constructed_successfully),
+        loop.QuitClosure());
+    loop.Run();
+    ASSERT_TRUE(system_slot_constructed_successfully);
+
+    ASSERT_TRUE(ImportSystemSlotClientCert(test_system_slot_->slot()));
+  }
+
+ protected:
+  void TearDownOnMainThread() override {
+    TearDownTestSystemSlot();
+    WebviewClientCertsLoginTestBase::TearDownOnMainThread();
+  }
+
+ private:
+  void SetUpTestSystemSlotOnIO(bool* out_system_slot_constructed_successfully) {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+    test_system_slot_ = std::make_unique<crypto::ScopedTestSystemNSSKeySlot>();
+    *out_system_slot_constructed_successfully =
+        test_system_slot_->ConstructedSuccessfully();
+  }
+
+  void TearDownTestSystemSlot() {
+    base::RunLoop loop;
+    base::PostTaskAndReply(
+        FROM_HERE, {content::BrowserThread::IO},
+        base::BindOnce(&WebviewClientCertsLoginTest::TearDownTestSystemSlotOnIO,
+                       base::Unretained(this)),
+        loop.QuitClosure());
+    loop.Run();
+  }
+
+  void TearDownTestSystemSlotOnIO() { test_system_slot_.reset(); }
+
+  std::unique_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
 
   DISALLOW_COPY_AND_ASSIGN(WebviewClientCertsLoginTest);
 };
@@ -620,13 +654,10 @@ class WebviewClientCertsLoginTest : public WebviewLoginTest {
 // system slot is enabled in the sign-in frame. The server does not request
 // certificates signed by a specific authority.
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameNoAuthorityGiven DISABLED_SigninFrameNoAuthorityGiven
-#else
-#define MAYBE_SigninFrameNoAuthorityGiven SigninFrameNoAuthorityGiven
-#endif
+// Flaky (timeout), especially (but not only) in debug builds or under
+// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameNoAuthorityGiven) {
+                       DISABLED_SigninFrameNoAuthorityGiven) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -649,15 +680,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // Test that client certificate autoselect selects the right certificate even
 // with multiple filters for the same pattern.
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameCertMultipleFiltersAutoSelected \
-  DISABLED_SigninFrameCertMultipleFiltersAutoSelected
-#else
-#define MAYBE_SigninFrameCertMultipleFiltersAutoSelected \
-  SigninFrameCertMultipleFiltersAutoSelected
-#endif
+// Flaky (timeout), especially (but not only) in debug builds or under
+// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameCertMultipleFiltersAutoSelected) {
+                       DISABLED_SigninFrameCertMultipleFiltersAutoSelected) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -681,14 +707,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // Test that if no client certificate is auto-selected using policy on the
 // sign-in frame, the client does not send up any client certificate.
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameCertNotAutoSelected \
-  DISABLED_SigninFrameCertNotAutoSelected
-#else
-#define MAYBE_SigninFrameCertNotAutoSelected SigninFrameCertNotAutoSelected
-#endif
+// Flaky (timeout), especially (but not only) in debug builds or under
+// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameCertNotAutoSelected) {
+                       DISABLED_SigninFrameCertNotAutoSelected) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -706,13 +728,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // system slot is enabled in the sign-in frame. The server requests
 // a certificate signed by a specific authority.
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameAuthorityGiven DISABLED_SigninFrameAuthorityGiven
-#else
-#define MAYBE_SigninFrameAuthorityGiven SigninFrameAuthorityGiven
-#endif
+// Flaky (timeout), especially (but not only) in debug builds or under
+// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameAuthorityGiven) {
+                       DISABLED_SigninFrameAuthorityGiven) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -740,15 +759,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // a certificate signed by a specific authority. The client doesn't have a
 // matching certificate.
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameAuthorityGivenNoMatchingCert \
-  DISABLED_SigninFrameAuthorityGivenNoMatchingCert
-#else
-#define MAYBE_SigninFrameAuthorityGivenNoMatchingCert \
-  SigninFrameAuthorityGivenNoMatchingCert
-#endif
+// Flaky (timeout), especially (but not only) in debug builds or under
+// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameAuthorityGivenNoMatchingCert) {
+                       DISABLED_SigninFrameAuthorityGivenNoMatchingCert) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -774,15 +788,8 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // known on the device (it has not been made available through device ONC
 // policy).
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameIntermediateAuthorityUnknown \
-  DISABLED_SigninFrameIntermediateAuthorityUnknown
-#else
-#define MAYBE_SigninFrameIntermediateAuthorityUnknown \
-  SigninFrameIntermediateAuthorityUnknown
-#endif
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameIntermediateAuthorityUnknown) {
+                       DISABLED_SigninFrameIntermediateAuthorityUnknown) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -807,15 +814,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // issued by an intermediate authority, and the intermediate authority is
 // known on the device (it has been made available through device ONC policy).
 // TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-#if defined(MEMORY_SANITIZER)
-#define MAYBE_SigninFrameIntermediateAuthorityKnown \
-  DISABLED_SigninFrameIntermediateAuthorityKnown
-#else
-#define MAYBE_SigninFrameIntermediateAuthorityKnown \
-  SigninFrameIntermediateAuthorityKnown
-#endif
+// Flaky (timeout), especially (but not only) in debug builds or under
+// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       MAYBE_SigninFrameIntermediateAuthorityKnown) {
+                       DISABLED_SigninFrameIntermediateAuthorityKnown) {
   ASSERT_NO_FATAL_FAILURE(SetUpClientCertInSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -865,6 +867,148 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"cros-eula-frame"});
   EXPECT_EQ("got no client cert", https_reply_content);
+}
+
+// Tests the scenario where the system token is not initialized initially (due
+// to the TPM not being ready).
+class WebviewClientCertsTokenLoadingLoginTest
+    : public WebviewClientCertsLoginTestBase {
+ public:
+  WebviewClientCertsTokenLoadingLoginTest()
+      : cryptohome_client_(new FakeCryptohomeClient) {
+    cryptohome_client_->set_tpm_is_ready(false);
+  }
+
+  WebviewClientCertsTokenLoadingLoginTest(
+      const WebviewClientCertsTokenLoadingLoginTest&) = delete;
+  WebviewClientCertsTokenLoadingLoginTest& operator=(
+      const WebviewClientCertsTokenLoadingLoginTest&) = delete;
+
+  FakeCryptohomeClient* cryptohome_client() { return cryptohome_client_; }
+
+  // Prepares a testing system slot (without injecting it as an already
+  // initialized yet) and imports a client certificate into it.
+  void PrepareSystemSlot() {
+    bool out_system_slot_prepared_successfully = false;
+    base::RunLoop loop;
+    base::PostTaskAndReply(
+        FROM_HERE, {content::BrowserThread::IO},
+        base::BindOnce(
+            &WebviewClientCertsTokenLoadingLoginTest::PrepareSystemSlotOnIO,
+            base::Unretained(this), &out_system_slot_prepared_successfully),
+        loop.QuitClosure());
+    loop.Run();
+    ASSERT_TRUE(out_system_slot_prepared_successfully);
+
+    ASSERT_TRUE(ImportSystemSlotClientCert(test_system_slot_nss_db_->slot()));
+  }
+
+ protected:
+  void SetUpOnMainThread() override {
+    TPMTokenLoader::Get()->enable_tpm_loading_for_testing(true);
+    WebviewClientCertsLoginTestBase::SetUpOnMainThread();
+  }
+
+  void TearDownOnMainThread() override {
+    TearDownTestSystemSlot();
+    WebviewClientCertsLoginTestBase::TearDownOnMainThread();
+  }
+
+ private:
+  void PrepareSystemSlotOnIO(bool* out_system_slot_prepared_successfully) {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+    test_system_slot_nss_db_ = std::make_unique<crypto::ScopedTestNSSDB>();
+    crypto::SetSystemKeySlotWithoutInitializingTPMForTesting(
+        crypto::ScopedPK11Slot(
+            PK11_ReferenceSlot(test_system_slot_nss_db_->slot())));
+    *out_system_slot_prepared_successfully =
+        test_system_slot_nss_db_->is_open();
+  }
+
+  void TearDownTestSystemSlot() {
+    base::RunLoop loop;
+    base::PostTaskAndReply(
+        FROM_HERE, {content::BrowserThread::IO},
+        base::BindOnce(&WebviewClientCertsTokenLoadingLoginTest::
+                           TearDownTestSystemSlotOnIO,
+                       base::Unretained(this)),
+        loop.QuitClosure());
+    loop.Run();
+  }
+
+  void TearDownTestSystemSlotOnIO() {
+    crypto::SetSystemKeySlotWithoutInitializingTPMForTesting(/*slot=*/nullptr);
+    test_system_slot_nss_db_.reset();
+  }
+
+  // Owned by the CryptohomeClient singleton.
+  FakeCryptohomeClient* cryptohome_client_;
+
+  std::unique_ptr<crypto::ScopedTestNSSDB> test_system_slot_nss_db_;
+};
+
+namespace {
+
+bool IsTpmTokenReady() {
+  base::RunLoop run_loop;
+  bool is_ready = false;
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE, {content::BrowserThread::IO},
+      base::BindOnce(&crypto::IsTPMTokenReady,
+                     /*callback=*/base::OnceClosure()),
+      base::BindOnce(
+          [](base::OnceClosure run_loop_quit_closure, bool* is_ready,
+             bool is_tpm_token_ready) {
+            *is_ready = is_tpm_token_ready;
+            std::move(run_loop_quit_closure).Run();
+          },
+          run_loop.QuitClosure(), base::Unretained(&is_ready)));
+  run_loop.Run();
+  return is_ready;
+}
+
+}  // namespace
+
+// Test that the system slot becomes initialized and the client certificate
+// authentication works in the sign-in frame after the TPM gets reported as
+// ready.
+// Flaky (timeout), in ASAN/LSAN. crbug.com/1022034
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_SystemSlotInitialization DISABLED_SystemSlotInitialization
+#else
+#define MAYBE_SystemSlotInitialization SystemSlotInitialization
+#endif
+IN_PROC_BROWSER_TEST_F(WebviewClientCertsTokenLoadingLoginTest,
+                       MAYBE_SystemSlotInitialization) {
+  ASSERT_NO_FATAL_FAILURE(PrepareSystemSlot());
+  net::SpawnedTestServer::SSLOptions ssl_options;
+  ssl_options.request_client_certificate = true;
+  ASSERT_NO_FATAL_FAILURE(StartHttpsServer(ssl_options));
+
+  const std::vector<std::string> autoselect_patterns = {
+      R"({"pattern": "*", "filter": {"ISSUER": {"CN": "B CA"}}})"};
+  SetAutoSelectCertificatePatterns(autoselect_patterns);
+
+  WaitForGaiaPageLoadAndPropertyUpdate();
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(IsTpmTokenReady());
+
+  // Report the TPM as ready, triggering the system token initialization by
+  // SystemTokenCertDBInitializer.
+  cryptohome_client()->set_tpm_is_ready(true);
+  cryptohome_client()->NotifyTpmInitStatusUpdated(
+      /*ready=*/true, /*owned=*/true,
+      /*was_owned_this_boot=*/false);
+
+  const std::string https_reply_content =
+      RequestClientCertTestPageInFrame({"gaia-signin", gaia_frame_parent_});
+  EXPECT_EQ(
+      "got client cert with fingerprint: "
+      "c66145f49caca4d1325db96ace0f12f615ba4981",
+      https_reply_content);
+
+  EXPECT_TRUE(IsTpmTokenReady());
 }
 
 class WebviewProxyAuthLoginTest : public WebviewLoginTest {
@@ -1028,4 +1172,5 @@ IN_PROC_BROWSER_TEST_F(WebviewProxyAuthLoginTest, DISABLED_ProxyAuthTransfer) {
   // so the sign-in screen will not display user pods.
   ExpectIdentifierPage();
 }
+
 }  // namespace chromeos

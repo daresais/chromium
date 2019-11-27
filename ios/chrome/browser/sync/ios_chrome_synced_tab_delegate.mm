@@ -13,9 +13,9 @@
 #import "ios/chrome/browser/complex_tasks/ios_task_tab_helper.h"
 #include "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
 #include "ios/web/public/favicon/favicon_status.h"
-#include "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/web_state/web_state.h"
+#include "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/web_state.h"
 #include "ui/base/page_transition_types.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -53,12 +53,6 @@ SessionID IOSChromeSyncedTabDelegate::GetSessionId() const {
 
 bool IOSChromeSyncedTabDelegate::IsBeingDestroyed() const {
   return web_state_->IsBeingDestroyed();
-}
-
-// todo(pnoland): add logic to store and return the source tab id on ios.
-// http://crbug/695241
-SessionID IOSChromeSyncedTabDelegate::GetSourceTabID() const {
-  return SessionID::InvalidValue();
 }
 
 std::string IOSChromeSyncedTabDelegate::GetExtensionAppId() const {

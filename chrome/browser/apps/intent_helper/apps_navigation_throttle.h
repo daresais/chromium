@@ -56,7 +56,7 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
 
   // Called when the intent picker is closed for |url|, in |web_contents|, with
   // |launch_name| as the (possibly empty) action to be triggered based on
-  // |app_type|. |close_reason| gives the reason for the picker being closed,
+  // |entry_type|. |close_reason| gives the reason for the picker being closed,
   // and |should_persist| is true if the user indicated they wish to remember
   // the choice made. |ui_auto_display_service| keeps track of whether or not
   // the user dismissed the ui without engaging with it.
@@ -65,15 +65,9 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
       IntentPickerAutoDisplayService* ui_auto_display_service,
       const GURL& url,
       const std::string& launch_name,
-      apps::mojom::AppType app_type,
+      PickerEntryType entry_type,
       IntentPickerCloseReason close_reason,
       bool should_persist);
-
-  static void RecordUma(const std::string& selected_app_package,
-                        apps::mojom::AppType app_type,
-                        IntentPickerCloseReason close_reason,
-                        Source source,
-                        bool should_persist);
 
   static bool IsGoogleRedirectorUrlForTesting(const GURL& url);
 
@@ -83,7 +77,8 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
   static void ShowIntentPickerBubbleForApps(
       content::WebContents* web_contents,
       std::vector<IntentPickerAppInfo> apps,
-      bool show_persistence_options,
+      bool show_stay_in_chrome,
+      bool show_remember_selection,
       IntentPickerResponse callback);
 
   explicit AppsNavigationThrottle(content::NavigationHandle* navigation_handle);
@@ -102,8 +97,8 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
 
  protected:
   // These enums are used to define the buckets for an enumerated UMA histogram
-  // and need to be synced with histograms.xml. This enum class should also be
-  // treated as append-only.
+  // and need to be synced with the ArcIntentHandlerAction enum in enums.xml.
+  // This enum class should also be treated as append-only.
   enum class PickerAction : int {
     // Picker errors occurring after the picker is shown.
     ERROR_AFTER_PICKER = 0,
@@ -129,17 +124,22 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
     // Picker errors occurring before the picker is shown.
     ERROR_BEFORE_PICKER = 10,
     INVALID = 11,
-    kMaxValue = INVALID,
+    DEVICE_PRESSED = 12,
+    MAC_NATIVE_APP_PRESSED = 13,
+    kMaxValue = MAC_NATIVE_APP_PRESSED,
   };
 
   // As for PickerAction, these define the buckets for an UMA histogram, so this
-  // must be treated in an append-only fashion. This helps especify where a
-  // navigation will continue.
+  // must be treated in an append-only fashion. This helps specify where a
+  // navigation will continue. Must be kept in sync with the
+  // ArcIntentHandlerDestinationPlatform enum in enums.xml.
   enum class Platform : int {
     ARC = 0,
     CHROME = 1,
     PWA = 2,
-    kMaxValue = PWA,
+    DEVICE = 3,
+    MAC_NATIVE = 4,
+    kMaxValue = MAC_NATIVE,
   };
 
   // These enums are used to define the intent picker show state, whether the
@@ -152,6 +152,14 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
   // Checks whether we can create the apps_navigation_throttle.
   static bool CanCreate(content::WebContents* web_contents);
 
+  static void RecordUma(const std::string& selected_app_package,
+                        PickerEntryType entry_type,
+                        IntentPickerCloseReason close_reason,
+                        Source source,
+                        bool should_persist,
+                        PickerAction action,
+                        Platform platform);
+
   // Determines the destination of the current navigation. We know that if the
   // |picker_action| is either ERROR or DIALOG_DEACTIVATED the navigation MUST
   // stay in Chrome, and when |picker_action| is PWA_APP_PRESSED the navigation
@@ -160,6 +168,22 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
   static Platform GetDestinationPlatform(
       const std::string& selected_launch_name,
       PickerAction picker_action);
+
+  // Converts the provided |entry_type|, |close_reason| and |should_persist|
+  // boolean to a PickerAction value for recording in UMA.
+  static PickerAction GetPickerAction(PickerEntryType entry_type,
+                                      IntentPickerCloseReason close_reason,
+                                      bool should_persist);
+
+  // This is a wrapper method for querying apps for a URL. Normally this
+  // method will simply querying PWAs that can handle the URL from. If we are
+  // using App Service Intent Handling to support intent picker (currently not
+  // feature complete), this method will query all types of apps that that could
+  // handle the URL from CommonAppsNavigationThrottle.
+  virtual std::vector<IntentPickerAppInfo> FindAppsForUrl(
+      content::WebContents* web_contents,
+      const GURL& url,
+      std::vector<IntentPickerAppInfo> apps);
 
   // If an installed PWA exists that can handle |url|, prepends it to |apps| and
   // returns the new list.
@@ -170,13 +194,13 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
 
   static void CloseOrGoBack(content::WebContents* web_contents);
 
-  static bool ContainsOnlyPwas(
+  static bool ContainsOnlyPwasAndMacApps(
       const std::vector<apps::IntentPickerAppInfo>& apps);
 
   static bool ShouldShowPersistenceOptions(
       std::vector<apps::IntentPickerAppInfo>& apps);
 
-  // Overridden for Chrome OS to allow arc handling.
+  // Overrides for Chrome OS to allow ARC handling.
   virtual void MaybeRemoveComingFromArcFlag(content::WebContents* web_contents,
                                             const GURL& previous_url,
                                             const GURL& current_url) {}
@@ -219,12 +243,6 @@ class AppsNavigationThrottle : public content::NavigationThrottle {
                            TestGetDestinationPlatform);
   FRIEND_TEST_ALL_PREFIXES(chromeos::ChromeOsAppsNavigationThrottleTest,
                            TestGetDestinationPlatform);
-
-  // Converts the provided |app_type|, |close_reason| and |should_persist|
-  // boolean to a PickerAction value for recording in UMA.
-  static PickerAction GetPickerAction(apps::mojom::AppType app_type,
-                                      IntentPickerCloseReason close_reason,
-                                      bool should_persist);
 
   content::NavigationThrottle::ThrottleCheckResult HandleRequest();
 

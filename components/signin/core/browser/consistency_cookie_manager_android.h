@@ -9,27 +9,23 @@
 #include "base/macros.h"
 #include "components/signin/core/browser/consistency_cookie_manager_base.h"
 
-namespace identity {
-class IdentityManager;
-}
-
 class SigninClient;
 
 namespace signin {
+
+class IdentityManager;
 
 // ConsistencyCookieManagerAndroid subclasses ConsistencyCookieManagerBase to
 // watch whether there are pending updates to the account list on the Java side.
 class ConsistencyCookieManagerAndroid : public ConsistencyCookieManagerBase {
  public:
-  ConsistencyCookieManagerAndroid(identity::IdentityManager* identity_manager,
+  ConsistencyCookieManagerAndroid(IdentityManager* identity_manager,
                                   SigninClient* signin_client,
                                   AccountReconcilor* reconcilor);
 
   ~ConsistencyCookieManagerAndroid() override;
 
-  void OnIsUpdatePendingChanged(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& java_self);
+  void OnIsUpdatePendingChanged(JNIEnv* env);
 
  protected:
   std::string CalculateCookieValue() override;

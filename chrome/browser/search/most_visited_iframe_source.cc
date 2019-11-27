@@ -4,8 +4,6 @@
 
 #include "chrome/browser/search/most_visited_iframe_source.h"
 
-#include "base/command_line.h"
-#include "base/feature_list.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -17,6 +15,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/resources/grit/webui_resources.h"
 #include "url/gurl.h"
 
 namespace {
@@ -27,11 +26,14 @@ const char kSingleCSSPath[] = "/single.css";
 const char kSingleJSPath[] = "/single.js";
 
 // Multi-iframe version, used by third party remote NTPs.
+const char kAssertJsPath[] = "/assert.js";
+const char kCommonCSSPath[] = "/common.css";
+const char kDontShowPngPath[] = "/dont_show.png";
+const char kDontShow2XPngPath[] = "/dont_show_2x.png";
 const char kTitleHTMLPath[] = "/title.html";
 const char kTitleCSSPath[] = "/title.css";
 const char kTitleJSPath[] = "/title.js";
 const char kUtilJSPath[] = "/util.js";
-const char kCommonCSSPath[] = "/common.css";
 
 // Edit custom links dialog iframe and resources, used by the local NTP and the
 // Google remote NTP.
@@ -59,18 +61,14 @@ std::string MostVisitedIframeSource::GetSource() {
 }
 
 void MostVisitedIframeSource::StartDataRequest(
-    const std::string& path_and_query,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
-  GURL url(chrome::kChromeSearchMostVisitedUrl + path_and_query);
-  std::string path(url.path());
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path(url.path());
 
   if (path == kSingleHTMLPath) {
-    ui::TemplateReplacements replacements;
-    bool disable_fade = base::FeatureList::IsEnabled(
-        features::kDisableInitialMostVisitedFadeIn);
-    replacements["noInitialFade"] = disable_fade ? "no-initial-fade" : "";
-    SendResource(IDR_MOST_VISITED_SINGLE_HTML, callback, &replacements);
+    SendResource(IDR_MOST_VISITED_SINGLE_HTML, callback);
   } else if (path == kSingleCSSPath) {
     SendResource(IDR_MOST_VISITED_SINGLE_CSS, callback);
   } else if (path == kSingleJSPath) {
@@ -85,6 +83,10 @@ void MostVisitedIframeSource::StartDataRequest(
     SendJSWithOrigin(IDR_MOST_VISITED_UTIL_JS, wc_getter, callback);
   } else if (path == kCommonCSSPath) {
     SendResource(IDR_MOST_VISITED_IFRAME_CSS, callback);
+  } else if (path == kDontShowPngPath) {
+    SendResource(IDR_MOST_VISITED_DONT_SHOW_PNG, callback);
+  } else if (path == kDontShow2XPngPath) {
+    SendResource(IDR_MOST_VISITED_DONT_SHOW_2X_PNG, callback);
   } else if (path == kEditHTMLPath) {
     SendResource(IDR_CUSTOM_LINKS_EDIT_HTML, callback);
   } else if (path == kEditCSSPath) {
@@ -105,6 +107,8 @@ void MostVisitedIframeSource::StartDataRequest(
     SendResource(IDR_LOCAL_NTP_ANIMATIONS_JS, callback);
   } else if (path == kLocalNTPUtilsJSPath) {
     SendResource(IDR_LOCAL_NTP_UTILS_JS, callback);
+  } else if (path == kAssertJsPath) {
+    SendResource(IDR_WEBUI_JS_ASSERT, callback);
   } else {
     callback.Run(nullptr);
   }
@@ -152,25 +156,21 @@ bool MostVisitedIframeSource::ServesPath(const std::string& path) const {
          path == kEditCSSPath || path == kEditJSPath || path == kAddSvgPath ||
          path == kAddWhiteSvgPath || path == kEditMenuSvgPath ||
          path == kLocalNTPCommonCSSPath || path == kAnimationsCSSPath ||
-         path == kAnimationsJSPath || path == kLocalNTPUtilsJSPath;
+         path == kAnimationsJSPath || path == kLocalNTPUtilsJSPath ||
+         path == kAssertJsPath || path == kDontShowPngPath ||
+         path == kDontShow2XPngPath;
 }
 
 void MostVisitedIframeSource::SendResource(
     int resource_id,
-    const content::URLDataSource::GotDataCallback& callback,
-    const ui::TemplateReplacements* replacements) {
-  base::StringPiece resource =
-      ui::ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
-  std::string response =
-      replacements != nullptr
-          ? ui::ReplaceTemplateExpressions(resource, *replacements)
-          : resource.as_string();
-  callback.Run(base::RefCountedString::TakeString(&response));
+    const content::URLDataSource::GotDataCallback& callback) {
+  callback.Run(ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
+      resource_id));
 }
 
 void MostVisitedIframeSource::SendJSWithOrigin(
     int resource_id,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   std::string origin;
   if (!GetOrigin(wc_getter, &origin)) {
@@ -186,7 +186,7 @@ void MostVisitedIframeSource::SendJSWithOrigin(
 }
 
 bool MostVisitedIframeSource::GetOrigin(
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const content::WebContents::Getter& wc_getter,
     std::string* origin) const {
   if (wc_getter.is_null())
     return false;

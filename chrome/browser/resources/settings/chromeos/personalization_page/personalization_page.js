@@ -13,32 +13,38 @@ Polymer({
   is: 'settings-personalization-page',
 
   properties: {
-    /**
-     * Dictionary defining page visibility.
-     * @type {!AppearancePageVisibility}
-     */
-    pageVisibility: Object,
+    /** @private */
+    showWallpaperRow_: {type: Boolean, value: true},
 
     /** @private */
     isWallpaperPolicyControlled_: {type: Boolean, value: true},
+
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        const map = new Map();
+        if (settings.routes.CHANGE_PICTURE) {
+          map.set(settings.routes.CHANGE_PICTURE.path, '#changePictureRow');
+        }
+        return map;
+      }
+    },
   },
 
-  /** @private {?settings.PersonalizationBrowserProxy} */
+  /** @private {?settings.WallpaperBrowserProxy} */
   browserProxy_: null,
 
   /** @override */
   created: function() {
-    this.browserProxy_ = settings.PersonalizationBrowserProxyImpl.getInstance();
+    this.browserProxy_ = settings.WallpaperBrowserProxyImpl.getInstance();
   },
 
   /** @override */
   ready: function() {
     this.browserProxy_.isWallpaperSettingVisible().then(
         isWallpaperSettingVisible => {
-            // TODO(hsuregan): Uncomment after forking new pageVisibility for
-            // OS settings.
-            // assert(this.pageVisibility);
-            // this.pageVisibility.setWallpaper = isWallpaperSettingVisible;
+          this.showWallpaperRow_ = isWallpaperSettingVisible;
         });
     this.browserProxy_.isWallpaperPolicyControlled().then(
         isPolicyControlled => {
@@ -51,6 +57,11 @@ Polymer({
    */
   openWallpaperManager_: function() {
     this.browserProxy_.openWallpaperManager();
+  },
+
+  /** @private */
+  navigateToChangePicture_: function() {
+    settings.navigateTo(settings.routes.CHANGE_PICTURE);
   },
 });
 })();

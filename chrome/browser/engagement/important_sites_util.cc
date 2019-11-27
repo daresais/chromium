@@ -207,7 +207,7 @@ std::unordered_set<std::string> GetBlacklistedImportantDomains(
   ContentSettingsForOneType content_settings_list;
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
-  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO,
+  map->GetSettingsForOneType(ContentSettingsType::IMPORTANT_SITE_INFO,
                              content_settings::ResourceIdentifier(),
                              &content_settings_list);
   std::unordered_set<std::string> ignoring_domains;
@@ -219,7 +219,7 @@ std::unordered_set<std::string> GetBlacklistedImportantDomains(
 
     std::unique_ptr<base::DictionaryValue> dict =
         base::DictionaryValue::From(map->GetWebsiteSetting(
-            origin, origin, CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO, "",
+            origin, origin, ContentSettingsType::IMPORTANT_SITE_INFO, "",
             nullptr));
 
     if (!dict)
@@ -294,7 +294,8 @@ void PopulateInfoMapWithContentTypeAllowed(
             profile);
     // If the permission is controlled by the Default Search Engine then don't
     // consider it important. The DSE gets these permissions by default.
-    if (search_permissions_service->IsPermissionControlledByDSE(
+    if (search_permissions_service &&
+        search_permissions_service->IsPermissionControlledByDSE(
             content_type, url::Origin::Create(url))) {
       continue;
     }
@@ -390,11 +391,11 @@ ImportantSitesUtil::GetImportantRegisterableDomains(Profile* profile,
                                 &engagement_map, &important_info);
 
   PopulateInfoMapWithContentTypeAllowed(
-      profile, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+      profile, ContentSettingsType::NOTIFICATIONS,
       ImportantReason::NOTIFICATIONS, &important_info);
 
   PopulateInfoMapWithContentTypeAllowed(
-      profile, CONTENT_SETTINGS_TYPE_DURABLE_STORAGE, ImportantReason::DURABLE,
+      profile, ContentSettingsType::DURABLE_STORAGE, ImportantReason::DURABLE,
       &important_info);
 
   PopulateInfoMapWithBookmarks(profile, engagement_map, &important_info);
@@ -452,7 +453,7 @@ void ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
       GURL origin("http://" + ignored_site);
       std::unique_ptr<base::DictionaryValue> dict =
           base::DictionaryValue::From(map->GetWebsiteSetting(
-              origin, origin, CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO, "",
+              origin, origin, ContentSettingsType::IMPORTANT_SITE_INFO, "",
               nullptr));
 
       if (!dict)
@@ -461,7 +462,7 @@ void ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
       RecordIgnore(dict.get());
 
       map->SetWebsiteSettingDefaultScope(
-          origin, origin, CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO, "",
+          origin, origin, ContentSettingsType::IMPORTANT_SITE_INFO, "",
           std::move(dict));
     }
   } else {
@@ -477,9 +478,9 @@ void ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
     std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
     dict->SetInteger(kNumTimesIgnoredName, 0);
     dict->Remove(kTimeLastIgnored, nullptr);
-    map->SetWebsiteSettingDefaultScope(
-        origin, origin, CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO, "",
-        std::move(dict));
+    map->SetWebsiteSettingDefaultScope(origin, origin,
+                                       ContentSettingsType::IMPORTANT_SITE_INFO,
+                                       "", std::move(dict));
   }
 
   // Finally, record our old crossed-stats.

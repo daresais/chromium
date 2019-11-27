@@ -17,7 +17,7 @@
 #import "ios/chrome/browser/tabs/tab_model_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -75,6 +75,14 @@ base::Optional<base::Token> TabRestoreServiceDelegateImplIOS::GetTabGroupForTab(
     int index) const {
   // Not supported by iOS.
   return base::nullopt;
+}
+
+TabRestoreServiceDelegateImplIOS::TabGroupMetadata
+TabRestoreServiceDelegateImplIOS::GetTabGroupMetadata(base::Token group) const {
+  // Since we never return a group from GetTabGroupForTab(), this should never
+  // be called.
+  NOTREACHED();
+  return TabGroupMetadata();
 }
 
 const gfx::Rect TabRestoreServiceDelegateImplIOS::GetRestoredBounds() const {
@@ -135,4 +143,10 @@ void TabRestoreServiceDelegateImplIOS::CloseTab() {
   WebStateList* web_state_list = GetWebStateList();
   web_state_list->CloseWebStateAt(web_state_list->active_index(),
                                   WebStateList::CLOSE_USER_ACTION);
+}
+
+void TabRestoreServiceDelegateImplIOS::SetTabGroupMetadata(
+    base::Token group,
+    TabGroupMetadata group_metadata) {
+  // Not supported on iOS.
 }

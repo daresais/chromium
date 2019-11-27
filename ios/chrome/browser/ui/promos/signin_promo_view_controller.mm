@@ -8,14 +8,16 @@
 #include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/version.h"
+#include "components/signin/ios/browser/features.h"
 #include "components/signin/public/base/signin_metrics.h"
-#include "components/unified_consent/feature.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/app/tests_hook.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
@@ -78,15 +80,14 @@ NSSet* GaiaIdSetWithIdentities(NSArray* identities) {
   BOOL _addAccountOperation;
 }
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                          dispatcher:(id<ApplicationCommands>)dispatcher {
-  self = [super initWithBrowserState:browserState
-                         accessPoint:signin_metrics::AccessPoint::
-                                         ACCESS_POINT_SIGNIN_PROMO
-                         promoAction:signin_metrics::PromoAction::
-                                         PROMO_ACTION_NO_SIGNIN_PROMO
-                      signInIdentity:nil
-                          dispatcher:dispatcher];
+- (instancetype)initWithBrowser:(Browser*)browser
+                     dispatcher:(id<ApplicationCommands>)dispatcher {
+  self = [super
+      initWithBrowser:browser
+          accessPoint:signin_metrics::AccessPoint::ACCESS_POINT_SIGNIN_PROMO
+          promoAction:signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO
+       signInIdentity:nil
+           dispatcher:dispatcher];
   if (self) {
     super.delegate = self;
   }
@@ -117,13 +118,8 @@ NSSet* GaiaIdSetWithIdentities(NSArray* identities) {
         self.presentingViewController;
     __weak id<ApplicationCommands> dispatcher = self.dispatcher;
     completion = ^{
-      if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-        [dispatcher showAdvancedSigninSettingsFromViewController:
-                        presentingViewController];
-      } else {
-        [dispatcher
-            showAccountsSettingsFromViewController:presentingViewController];
-      }
+      [dispatcher showAdvancedSigninSettingsFromViewController:
+                      presentingViewController];
     };
   }
   [self.presentingViewController dismissViewControllerAnimated:YES
@@ -173,10 +169,19 @@ NSSet* GaiaIdSetWithIdentities(NSArray* identities) {
   return currentVersion;
 }
 
+#pragma mark Superclass overrides
+
+- (UIColor*)backgroundColor {
+  return [UIColor colorNamed:kBackgroundColor];
+}
+
 #pragma mark - PromoViewController
 
 + (BOOL)shouldBePresentedForBrowserState:
     (ios::ChromeBrowserState*)browserState {
+  if (signin::ForceStartupSigninPromo())
+    return YES;
+
   if (tests_hook::DisableSigninRecallPromo())
     return NO;
 

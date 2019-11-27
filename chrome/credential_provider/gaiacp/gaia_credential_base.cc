@@ -26,11 +26,13 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "base/win/current_module.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_handle.h"
+#include "build/branding_buildflags.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/associated_user_validator.h"
 #include "chrome/credential_provider/gaiacp/auth_utils.h"
@@ -38,6 +40,7 @@
 #include "chrome/credential_provider/gaiacp/gaia_credential_provider_i.h"
 #include "chrome/credential_provider/gaiacp/gaia_resources.h"
 #include "chrome/credential_provider/gaiacp/gcp_utils.h"
+#include "chrome/credential_provider/gaiacp/gcpw_strings.h"
 #include "chrome/credential_provider/gaiacp/grit/gaia_static_resources.h"
 #include "chrome/credential_provider/gaiacp/internet_availability_checker.h"
 #include "chrome/credential_provider/gaiacp/logging.h"
@@ -1116,7 +1119,7 @@ HRESULT CGaiaCredentialBase::HandleAutologon(
 
 // static
 void CGaiaCredentialBase::TellOmahaDidRun() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Tell omaha that product was used.  Best effort only.
   //
   // This code always runs as LocalSystem, which means that HKCU maps to
@@ -1132,7 +1135,7 @@ void CGaiaCredentialBase::TellOmahaDidRun() {
     if (sts != ERROR_SUCCESS)
       LOGFN(INFO) << "Unable to write omaha dr value sts=" << sts;
   }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 void CGaiaCredentialBase::PreventDenyAccessUpdate() {
@@ -1173,7 +1176,7 @@ HRESULT CGaiaCredentialBase::Advise(ICredentialProviderCredentialEvents* cpce) {
 
 HRESULT CGaiaCredentialBase::UnAdvise(void) {
   LOGFN(INFO);
-  events_.Release();
+  events_.Reset();
 
   return S_OK;
 }
@@ -1411,6 +1414,17 @@ HRESULT CGaiaCredentialBase::GetSerialization(
         // OnUserAuthenticated() can be called, followed by
         // provider_->OnUserAuthenticated().
         hr = CreateAndRunLogonStub();
+        if (FAILED(hr)) {
+          base::string16 error_message(
+              GetStringResource(IDS_FAILED_CREATE_LOGON_STUB_BASE));
+          ::SHStrDupW(OLE2CW(error_message.c_str()), status_text);
+
+          *status_icon = CPSI_NONE;
+          *cpgsr = CPGSR_NO_CREDENTIAL_FINISHED;
+          submit_button_enabled = UpdateSubmitButtonInteractiveState();
+
+          hr = S_OK;
+        }
       }
     }
   } else {
@@ -1686,12 +1700,20 @@ HRESULT CGaiaCredentialBase::ForkSaveAccountInfoStub(const base::Value& dict,
   // Write account info to stdin of child process.  This buffer is read by
   // SaveAccountInfoW() in dllmain.cpp.  If this fails, chrome won't pick up
   // the credentials from the credential provider and will need to sign in
-  // manually.  TODO(crbug.com/902911): Figure out how to handle this.
+  // manually.
   std::string json;
   if (base::JSONWriter::Write(dict, &json)) {
-    DWORD written;
-    if (!::WriteFile(parent_handles.hstdin_write.Get(), json.c_str(),
-                     json.length() + 1, &written, /*lpOverlapped=*/nullptr)) {
+    const DWORD buffer_size = json.length() + 1;
+    LOGFN(INFO) << "Json size: " << buffer_size;
+
+    DWORD written = 0;
+    // First, write the buffer size then write the buffer content.
+    if (!::WriteFile(parent_handles.hstdin_write.Get(), &buffer_size,
+                     sizeof(buffer_size), &written, /*lpOverlapped=*/nullptr)) {
+      HRESULT hrWrite = HRESULT_FROM_WIN32(::GetLastError());
+      LOGFN(ERROR) << "WriteFile hr=" << putHR(hrWrite);
+    } else if (!::WriteFile(parent_handles.hstdin_write.Get(), json.c_str(),
+                            buffer_size, &written, /*lpOverlapped=*/nullptr)) {
       HRESULT hrWrite = HRESULT_FROM_WIN32(::GetLastError());
       LOGFN(ERROR) << "WriteFile hr=" << putHR(hrWrite);
     }
@@ -1820,6 +1842,35 @@ HRESULT CGaiaCredentialBase::SaveAccountInfo(const base::Value& properties) {
   return hr;
 }
 
+// Registers OS user - gaia user association in HKEY_LOCAL_MACHINE registry
+// hive.
+HRESULT RegisterAssociation(const base::string16& sid,
+                            const base::string16& id,
+                            const base::string16& email,
+                            const base::string16& token_handle) {
+  // Save token handle.  This handle will be used later to determine if the
+  // the user has changed their password since the account was created.
+  HRESULT hr = SetUserProperty(sid, kUserTokenHandle, token_handle);
+  if (FAILED(hr)) {
+    LOGFN(ERROR) << "SetUserProperty(th) hr=" << putHR(hr);
+    return hr;
+  }
+
+  hr = SetUserProperty(sid, kUserId, id);
+  if (FAILED(hr)) {
+    LOGFN(ERROR) << "SetUserProperty(id) hr=" << putHR(hr);
+    return hr;
+  }
+
+  hr = SetUserProperty(sid, kUserEmail, email);
+  if (FAILED(hr)) {
+    LOGFN(ERROR) << "SetUserProperty(email) hr=" << putHR(hr);
+    return hr;
+  }
+
+  return S_OK;
+}
+
 HRESULT CGaiaCredentialBase::ReportResult(
     NTSTATUS status,
     NTSTATUS substatus,
@@ -1842,12 +1893,34 @@ HRESULT CGaiaCredentialBase::ReportResult(
     authentication_results_->SetKey(
         kKeyPassword, base::Value(base::UTF16ToUTF8((BSTR)password_)));
 
+    base::string16 gaia_id = GetDictString(*authentication_results_, kKeyId);
+    if (gaia_id.empty()) {
+      LOGFN(ERROR) << "Id is empty";
+      return E_INVALIDARG;
+    }
+
+    base::string16 email = GetDictString(*authentication_results_, kKeyEmail);
+    if (email.empty()) {
+      LOGFN(ERROR) << "Email is empty";
+      return E_INVALIDARG;
+    }
+
+    // Os user - gaia user association is saved in HKEY_LOCAL_MACHINE. So, we
+    // can attempt saving association even before calling forked process. Forked
+    // process will also re-write everything saved here as well as valid token
+    // handle. Token handle is saved as empty here, so that if for any reason
+    // forked process fails to save association, it will enforce re-auth due to
+    // invalid token handle.
+    base::string16 sid = OLE2CW(user_sid_);
+    HRESULT hr = RegisterAssociation(sid, gaia_id, email, L"");
+    if (FAILED(hr))
+      return hr;
+
     // At this point the user and password stored in authentication_results_
     // should match what is stored in username_ and password_ so the
     // SaveAccountInfo process can be forked.
     CComBSTR status_text;
-    HRESULT hr =
-        ForkSaveAccountInfoStub(*authentication_results_, &status_text);
+    hr = ForkSaveAccountInfoStub(*authentication_results_, &status_text);
     if (FAILED(hr))
       LOGFN(ERROR) << "ForkSaveAccountInfoStub hr=" << putHR(hr);
   }
@@ -1874,7 +1947,7 @@ HRESULT CGaiaCredentialBase::Initialize(IGaiaCredentialProvider* provider) {
 HRESULT CGaiaCredentialBase::Terminate() {
   LOGFN(INFO);
   SetDeselected();
-  provider_.Release();
+  provider_.Reset();
   return S_OK;
 }
 
@@ -1926,7 +1999,7 @@ HRESULT CGaiaCredentialBase::ValidateOrCreateUser(const base::Value& result,
         allow_consumer_accounts == 0) {
       LOGFN(ERROR) << "Consumer accounts are not allowed mdm_aca="
                    << allow_consumer_accounts;
-      *error_text = AllocErrorString(IDS_INVALID_EMAIL_DOMAIN_BASE);
+      *error_text = AllocErrorString(IDS_DISALLOWED_CONSUMER_EMAIL_BASE);
       return E_FAIL;
     }
   }
@@ -1940,6 +2013,27 @@ HRESULT CGaiaCredentialBase::ValidateOrCreateUser(const base::Value& result,
     if (FAILED(hr)) {
       LOGFN(ERROR) << "ValidateExistingUser hr=" << putHR(hr);
       return hr;
+    }
+
+    // Update the name on the OS account if authenticated user has a different
+    // name.
+    base::string16 os_account_fullname;
+    hr = OSUserManager::Get()->GetUserFullname(found_domain, found_username,
+                                               &os_account_fullname);
+    if (FAILED(hr)) {
+      LOGFN(ERROR) << "GetUserFullname hr=" << putHR(hr);
+      return hr;
+    }
+
+    base::string16 profile_fullname = GetDictString(result, kKeyFullname);
+    if (SUCCEEDED(hr) &&
+        os_account_fullname.compare(profile_fullname.c_str()) != 0) {
+      hr = OSUserManager::Get()->SetUserFullname(found_domain, found_username,
+                                                 profile_fullname.c_str());
+      if (FAILED(hr)) {
+        LOGFN(ERROR) << "SetUserFullname hr=" << putHR(hr);
+        return hr;
+      }
     }
 
     *username = ::SysAllocString(found_username);
@@ -2047,6 +2141,19 @@ HRESULT CGaiaCredentialBase::OnUserAuthenticated(BSTR authentication_info,
 
     base::IgnoreResult(zero_dict_on_exit.Release());
     authentication_results_ = std::move(properties);
+    // Update the info whether the user is an AD joined user or local user.
+    base::string16 sid = OLE2CW(user_sid_);
+    authentication_results_->SetKey(
+        kKeyIsAdJoinedUser,
+        base::Value(OSUserManager::Get()->IsUserDomainJoined(sid) ? "true"
+                                                                  : "false"));
+    // Update the time at which the login attempt happened. This would help
+    // track the last time an online login happened via GCPW.
+    int64_t current_time = static_cast<int64_t>(
+        base::Time::Now().ToDeltaSinceWindowsEpoch().InMilliseconds());
+    authentication_results_->SetKey(
+        kKeyLastSuccessfulOnlineLoginMillis,
+        base::Value(base::NumberToString(current_time)));
   }
 
   base::string16 local_password =
@@ -2153,10 +2260,10 @@ void CGaiaCredentialBase::DisplayPasswordField(int password_message) {
                               GetStringResource(password_message).c_str());
       events_->SetFieldState(this, FID_CURRENT_PASSWORD_FIELD,
                              CPFS_DISPLAY_IN_SELECTED_TILE);
-      // Request force password change wouldn't work on a domain joined
-      // machine as it requires domain admin role privileges to communicate
-      // with the domain controller whereas GCPW only has SYSTEM privilege.
-      if (!OSUserManager::Get()->IsUserDomainJoined(get_sid().m_str)) {
+      // Force password link won't be displayed if the machine is domain joined
+      // or force reset password is disabled through registry.
+      if (!OSUserManager::Get()->IsUserDomainJoined(get_sid().m_str) &&
+          GetGlobalFlagOrDefault(kRegMdmEnableForcePasswordReset, 1)) {
         events_->SetFieldState(this, FID_FORGOT_PASSWORD_LINK,
                                CPFS_DISPLAY_IN_SELECTED_TILE);
         events_->SetFieldString(

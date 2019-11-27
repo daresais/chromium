@@ -54,11 +54,20 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
       invalidation::IdentityProvider* identity_provider,
       PrefService* local_state,
       network::mojom::URLLoaderFactory* url_loader_factory,
-      const ParseJSONCallback& parse_json,
       const std::string& project_id,
       bool migrate_prefs);
 
   virtual ~PerUserTopicRegistrationManager();
+
+  enum class TokenStateOnRegistrationRequest;
+
+  // Just calls std::make_unique. For ease of base::Bind'ing
+  static std::unique_ptr<PerUserTopicRegistrationManager> Create(
+      invalidation::IdentityProvider* identity_provider,
+      PrefService* local_state,
+      network::mojom::URLLoaderFactory* url_loader_factory,
+      const std::string& project_id,
+      bool migrate_prefs);
 
   // RegisterProfilePrefs and RegisterPrefs register the same prefs, because on
   // device level (sign in screen, device local account) we spin up separate
@@ -94,8 +103,8 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
 
   void DoRegistrationUpdate();
 
-  // Tries to register |id|. No retry in case of failure.
-  void StartRegistrationRequest(const Topic& id);
+  // Tries to register |topic|. No retry in case of failure.
+  void StartRegistrationRequest(const Topic& topic);
 
   void ActOnSuccesfullRegistration(
       const Topic& topic,
@@ -115,19 +124,19 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
   void OnAccessTokenRequestSucceeded(std::string access_token);
   void OnAccessTokenRequestFailed(GoogleServiceAuthError error);
 
-  void DropAllSavedRegistrationsOnTokenChange(
-      const std::string& instance_id_token);
+  TokenStateOnRegistrationRequest DropAllSavedRegistrationsOnTokenChange();
   void NotifySubscriptionChannelStateChange(
       SubscriptionChannelState invalidator_state);
 
   std::map<Topic, std::unique_ptr<RegistrationEntry>> registration_statuses_;
 
-  // For registered ids it maps the id value to the topic value.
+  // For registered topics, these map from the topic to the private topic name
+  // and vice versa.
   std::map<Topic, std::string> topic_to_private_topic_;
   std::map<std::string, Topic> private_topic_to_topic_;
 
-  // Token derrived from GCM IID.
-  std::string token_;
+  // Token derived from GCM IID.
+  std::string instance_id_token_;
 
   PrefService* local_state_ = nullptr;
 
@@ -138,9 +147,7 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
   base::OneShotTimer request_access_token_retry_timer_;
   net::BackoffEntry request_access_token_backoff_;
 
-  // The callback for Parsing JSON.
-  ParseJSONCallback parse_json_;
-  network::mojom::URLLoaderFactory* url_loader_factory_;
+  network::mojom::URLLoaderFactory* const url_loader_factory_;
 
   const std::string project_id_;
   const bool migrate_prefs_;

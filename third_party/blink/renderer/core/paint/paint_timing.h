@@ -15,7 +15,6 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace base {
 class TickClock;
@@ -27,9 +26,8 @@ class LocalFrame;
 
 // PaintTiming is responsible for tracking paint-related timings for a given
 // document.
-class CORE_EXPORT PaintTiming final
-    : public GarbageCollectedFinalized<PaintTiming>,
-      public Supplement<Document> {
+class CORE_EXPORT PaintTiming final : public GarbageCollected<PaintTiming>,
+                                      public Supplement<Document> {
   USING_GARBAGE_COLLECTED_MIXIN(PaintTiming);
   friend class FirstMeaningfulPaintDetector;
   using ReportTimeCallback =
@@ -138,8 +136,6 @@ class CORE_EXPORT PaintTiming final
   void SetFirstImagePaintSwap(base::TimeTicks stamp);
 
   void RegisterNotifySwapTime(PaintEvent);
-  void ReportUserInputHistogram(
-      FirstMeaningfulPaintDetector::HadUserInput had_input);
 
   base::TimeTicks FirstPaintRendered() const { return first_paint_; }
 

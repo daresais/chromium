@@ -14,13 +14,14 @@ import android.content.Intent;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.support.v4.app.ServiceCompat;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.notifications.ForegroundServiceUtils;
 
 import java.lang.annotation.Retention;
@@ -249,7 +250,7 @@ public class DownloadForegroundService extends Service {
     @VisibleForTesting
     void stopForegroundInternal(int flags) {
         Log.w(TAG, "stopForegroundInternal flags: " + flags);
-        ServiceCompat.stopForeground(this, flags);
+        ForegroundServiceUtils.getInstance().stopForeground(this, flags);
     }
 
     @VisibleForTesting

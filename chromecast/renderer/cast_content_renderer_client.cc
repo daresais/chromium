@@ -10,26 +10,28 @@
 #include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "chromecast/base/bitstream_audio_codecs.h"
+#include "chromecast/base/cast_features.h"
 #include "chromecast/base/chromecast_switches.h"
 #include "chromecast/media/base/media_codec_support.h"
 #include "chromecast/media/base/supported_codec_profile_levels_memo.h"
 #include "chromecast/public/media/media_capabilities_shlib.h"
 #include "chromecast/renderer/cast_media_playback_options.h"
 #include "chromecast/renderer/cast_url_loader_throttle_provider.h"
+#include "chromecast/renderer/js_channel_bindings.h"
 #include "chromecast/renderer/media/key_systems_cast.h"
 #include "chromecast/renderer/media/media_caps_observer_impl.h"
 #include "chromecast/renderer/on_load_script_injector.h"
 #include "chromecast/renderer/queryable_data_bindings.h"
-#include "components/network_hints/renderer/prescient_networking_dispatcher.h"
+#include "components/network_hints/renderer/web_prescient_networking_impl.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/media.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
@@ -76,9 +78,7 @@ constexpr base::TimeDelta kAudioRendererStartingCapacityEncrypted =
 
 CastContentRendererClient::CastContentRendererClient()
     : supported_profiles_(
-          std::make_unique<media::SupportedCodecProfileLevelsMemo>()),
-      app_media_capabilities_observer_binding_(this),
-      supported_bitstream_audio_codecs_(kBitstreamAudioCodecNone) {
+          std::make_unique<media::SupportedCodecProfileLevelsMemo>()) {
 #if defined(OS_ANDROID)
   DCHECK(::media::MediaCodecUtil::IsMediaCodecAvailable())
       << "MediaCodec is not available!";
@@ -99,27 +99,25 @@ CastContentRendererClient::~CastContentRendererClient() = default;
 void CastContentRendererClient::RenderThreadStarted() {
   // Register as observer for media capabilities
   content::RenderThread* thread = content::RenderThread::Get();
-  media::mojom::MediaCapsPtr media_caps;
-  thread->GetConnector()->BindInterface(content::mojom::kBrowserServiceName,
-                                        &media_caps);
-  media::mojom::MediaCapsObserverPtr proxy;
+  mojo::Remote<media::mojom::MediaCaps> media_caps;
+  thread->BindHostReceiver(media_caps.BindNewPipeAndPassReceiver());
+  mojo::PendingRemote<media::mojom::MediaCapsObserver> proxy;
   media_caps_observer_.reset(
       new media::MediaCapsObserverImpl(&proxy, supported_profiles_.get()));
   media_caps->AddObserver(std::move(proxy));
 
 #if !defined(OS_ANDROID)
   // Register to observe memory pressure changes
-  chromecast::mojom::MemoryPressureControllerPtr memory_pressure_controller;
-  thread->GetConnector()->BindInterface(content::mojom::kBrowserServiceName,
-                                        &memory_pressure_controller);
-  chromecast::mojom::MemoryPressureObserverPtr memory_pressure_proxy;
+  mojo::Remote<chromecast::mojom::MemoryPressureController>
+      memory_pressure_controller;
+  thread->BindHostReceiver(
+      memory_pressure_controller.BindNewPipeAndPassReceiver());
+  mojo::PendingRemote<chromecast::mojom::MemoryPressureObserver>
+      memory_pressure_proxy;
   memory_pressure_observer_.reset(
       new MemoryPressureObserverImpl(&memory_pressure_proxy));
   memory_pressure_controller->AddObserver(std::move(memory_pressure_proxy));
 #endif
-
-  prescient_networking_dispatcher_.reset(
-      new network_hints::PrescientNetworkingDispatcher());
 
 #if !defined(OS_FUCHSIA)
   // TODO(crbug.com/753619): Enable crash reporting on Fuchsia.
@@ -169,19 +167,20 @@ void CastContentRendererClient::RenderFrameCreated(
   DCHECK(render_frame);
   // Lifetime is tied to |render_frame| via content::RenderFrameObserver.
   new CastMediaPlaybackOptions(render_frame);
-  new QueryableDataBindings(render_frame);
+  if (!::chromecast::IsFeatureEnabled(kUseQueryableDataBackend)) {
+    new QueryableDataBindings(render_frame);
+  }
 
   // Add script injection support to the RenderFrame, used by Cast platform
   // APIs. The objects' lifetimes are bound to the RenderFrame's lifetime.
   new OnLoadScriptInjector(render_frame);
 
-  if (!app_media_capabilities_observer_binding_.is_bound()) {
-    mojom::ApplicationMediaCapabilitiesObserverPtr observer;
-    app_media_capabilities_observer_binding_.Bind(mojo::MakeRequest(&observer));
-    mojom::ApplicationMediaCapabilitiesPtr app_media_capabilities;
+  if (!app_media_capabilities_observer_receiver_.is_bound()) {
+    mojo::Remote<mojom::ApplicationMediaCapabilities> app_media_capabilities;
     render_frame->GetRemoteInterfaces()->GetInterface(
-        mojo::MakeRequest(&app_media_capabilities));
-    app_media_capabilities->AddObserver(std::move(observer));
+        app_media_capabilities.BindNewPipeAndPassReceiver());
+    app_media_capabilities->AddObserver(
+        app_media_capabilities_observer_receiver_.BindNewPipeAndPassRemote());
   }
 
 #if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
@@ -191,6 +190,11 @@ void CastContentRendererClient::RenderFrameCreated(
   new extensions::ExtensionFrameHelper(render_frame, dispatcher);
 
   dispatcher->OnRenderFrameCreated(render_frame);
+#endif
+
+#if BUILDFLAG(ENABLE_CAST_WAYLAND_SERVER)
+  // JsChannelBindings destroys itself when the RenderFrame is destroyed.
+  JsChannelBindings::Create(render_frame);
 #endif
 }
 
@@ -238,11 +242,14 @@ bool CastContentRendererClient::IsSupportedAudioType(
   // No ATV device we know of has (E)AC3 decoder, so it relies on the audio sink
   // device.
   if (type.codec == ::media::kCodecEAC3)
-    return kBitstreamAudioCodecEac3 & supported_bitstream_audio_codecs_;
+    return kBitstreamAudioCodecEac3 &
+           supported_bitstream_audio_codecs_info_.codecs;
   if (type.codec == ::media::kCodecAC3)
-    return kBitstreamAudioCodecAc3 & supported_bitstream_audio_codecs_;
+    return kBitstreamAudioCodecAc3 &
+           supported_bitstream_audio_codecs_info_.codecs;
   if (type.codec == ::media::kCodecMpegHAudio)
-    return kBitstreamAudioCodecMpegHAudio & supported_bitstream_audio_codecs_;
+    return kBitstreamAudioCodecMpegHAudio &
+           supported_bitstream_audio_codecs_info_.codecs;
 
   // TODO(sanfin): Implement this for Android.
   return true;
@@ -283,16 +290,23 @@ bool CastContentRendererClient::IsSupportedVideoType(
 bool CastContentRendererClient::IsSupportedBitstreamAudioCodec(
     ::media::AudioCodec codec) {
   return (codec == ::media::kCodecAC3 &&
-          (kBitstreamAudioCodecAc3 & supported_bitstream_audio_codecs_)) ||
+          (kBitstreamAudioCodecAc3 &
+           supported_bitstream_audio_codecs_info_.codecs)) ||
          (codec == ::media::kCodecEAC3 &&
-          (kBitstreamAudioCodecEac3 & supported_bitstream_audio_codecs_)) ||
+          (kBitstreamAudioCodecEac3 &
+           supported_bitstream_audio_codecs_info_.codecs)) ||
          (codec == ::media::kCodecMpegHAudio &&
-          (kBitstreamAudioCodecMpegHAudio & supported_bitstream_audio_codecs_));
+          (kBitstreamAudioCodecMpegHAudio &
+           supported_bitstream_audio_codecs_info_.codecs));
 }
 
 blink::WebPrescientNetworking*
 CastContentRendererClient::GetPrescientNetworking() {
-  return prescient_networking_dispatcher_.get();
+  if (!web_prescient_networking_impl_) {
+    web_prescient_networking_impl_ =
+        std::make_unique<network_hints::WebPrescientNetworkingImpl>();
+  }
+  return web_prescient_networking_impl_.get();
 }
 
 bool CastContentRendererClient::DeferMediaLoad(
@@ -324,8 +338,8 @@ void CastContentRendererClient::
 }
 
 void CastContentRendererClient::OnSupportedBitstreamAudioCodecsChanged(
-    int codecs) {
-  supported_bitstream_audio_codecs_ = codecs;
+    const BitstreamAudioCodecsInfo& info) {
+  supported_bitstream_audio_codecs_info_ = info;
 }
 
 std::unique_ptr<content::URLLoaderThrottleProvider>

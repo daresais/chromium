@@ -28,7 +28,7 @@ constexpr float kShadowOpacity = 0.12;
 // Properties of the alert view.
 constexpr CGFloat kCornerRadius = 14;
 constexpr CGFloat kAlertWidth = 270;
-constexpr CGFloat kAlertWidthAccessibilty = 402;
+constexpr CGFloat kAlertWidthAccessibility = 402;
 constexpr CGFloat kTextFieldCornerRadius = 5;
 constexpr CGFloat kMinimumHeight = 30;
 constexpr CGFloat kMinimumMargin = 4;
@@ -86,6 +86,9 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
 @property(nonatomic, copy)
     NSArray<TextFieldConfiguration*>* textFieldConfigurations;
 
+// The alert view's accessibility identifier.
+@property(nonatomic, copy) NSString* alertAccessibilityIdentifier;
+
 // The text fields that had been added to this alert.
 @property(nonatomic, strong) NSArray<UITextField*>* textFields;
 
@@ -114,18 +117,14 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
   [super traitCollectionDidChange:previousTraitCollection];
 
-#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
   if (@available(iOS 13, *)) {
     if ([self.traitCollection
             hasDifferentColorAppearanceComparedToTraitCollection:
                 previousTraitCollection]) {
-      [self.traitCollection performAsCurrentTraitCollection:^{
-        self.textFieldStackHolder.layer.borderColor =
-            UIColor.cr_separatorColor.CGColor;
-      }];
+      self.textFieldStackHolder.layer.borderColor =
+          UIColor.cr_separatorColor.CGColor;
     }
   }
-#endif
 }
 
 - (void)loadView {
@@ -141,6 +140,7 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
   [self.view addGestureRecognizer:self.tapRecognizer];
 
   self.contentView = [[UIView alloc] init];
+  self.contentView.accessibilityIdentifier = self.alertAccessibilityIdentifier;
   self.contentView.clipsToBounds = YES;
   self.contentView.backgroundColor = UIColor.cr_systemBackgroundColor;
   self.contentView.layer.cornerRadius = kCornerRadius;
@@ -162,7 +162,7 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
     BOOL isAccessibilityContentSize =
         UIContentSizeCategoryIsAccessibilityCategory(
             [UIApplication sharedApplication].preferredContentSizeCategory);
-    return isAccessibilityContentSize ? kAlertWidthAccessibilty : kAlertWidth;
+    return isAccessibilityContentSize ? kAlertWidthAccessibility : kAlertWidth;
   };
 
   NSLayoutConstraint* widthConstraint =
@@ -210,6 +210,7 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
   ]];
 
   UIScrollView* scrollView = [[UIScrollView alloc] init];
+  scrollView.delaysContentTouches = NO;
   scrollView.showsVerticalScrollIndicator = YES;
   scrollView.showsHorizontalScrollIndicator = NO;
   scrollView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -281,14 +282,13 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
     // fields.
     UIView* stackHolder = [[UIView alloc] init];
     stackHolder.layer.cornerRadius = kTextFieldCornerRadius;
+    stackHolder.layer.borderColor = UIColor.cr_separatorColor.CGColor;
     if (@available(iOS 13, *)) {
-#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
+      // Use performAsCurrentTraitCollection to get the correct CGColor for the
+      // given dynamic color and current userInterfaceStyle.
       [self.traitCollection performAsCurrentTraitCollection:^{
         stackHolder.layer.borderColor = UIColor.cr_separatorColor.CGColor;
       }];
-#endif
-    } else {
-      stackHolder.layer.borderColor = UIColor.cr_separatorColor.CGColor;
     }
     stackHolder.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
     stackHolder.clipsToBounds = YES;
@@ -386,13 +386,13 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
     UIColor* textColor = nil;
     if (action.style == UIAlertActionStyleDefault) {
       font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-      textColor = [UIColor colorNamed:kTintColor];
+      textColor = [UIColor colorNamed:kBlueColor];
     } else if (action.style == UIAlertActionStyleCancel) {
       font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-      textColor = [UIColor colorNamed:kTintColor];
+      textColor = [UIColor colorNamed:kBlueColor];
     } else {  // Style is UIAlertActionStyleDestructive
       font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-      textColor = [UIColor colorNamed:kDestructiveTintColor];
+      textColor = [UIColor colorNamed:kRedColor];
     }
     button.titleLabel.font = font;
     button.titleLabel.adjustsFontForContentSizeCategory = YES;

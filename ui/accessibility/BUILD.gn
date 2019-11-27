@@ -33,12 +33,15 @@ mojom("ax_constants_mojo") {
 
 jumbo_component("accessibility") {
   sources = [
+    "accessibility_features.cc",
+    "accessibility_features.h",
     "accessibility_switches.cc",
     "accessibility_switches.h",
     "ax_action_data.cc",
     "ax_action_data.h",
     "ax_action_handler.cc",
     "ax_action_handler.h",
+    "ax_action_target.h",
     "ax_active_popup.cc",
     "ax_active_popup.h",
     "ax_clipping_behavior.h",
@@ -99,6 +102,8 @@ jumbo_component("accessibility") {
     "ax_tree_source.h",
     "ax_tree_source_checker.h",
     "ax_tree_update.h",
+    "null_ax_action_target.cc",
+    "null_ax_action_target.h",
     "platform/ax_android_constants.cc",
     "platform/ax_android_constants.h",
     "platform/ax_platform_node.cc",
@@ -191,16 +196,6 @@ jumbo_component("accessibility") {
     if (use_glib) {
       configs += [ "//build/config/linux:glib" ]
     }
-
-    if (use_x11) {
-      sources += [ "platform/atk_util_auralinux_x11.cc" ]
-
-      configs += [ "//build/config/linux:x11" ]
-      public_deps += [
-        "//ui/events/x",
-        "//ui/gfx/x",
-      ]
-    }
   }
 
   if (use_aura) {
@@ -252,6 +247,7 @@ test("accessibility_unittests") {
     "ax_text_utils_unittest.cc",
     "ax_tree_combiner_unittest.cc",
     "ax_tree_serializer_unittest.cc",
+    "ax_tree_source_checker_unittest.cc",
     "ax_tree_unittest.cc",
     "mojom/ax_action_data_mojom_traits_unittest.cc",
     "mojom/ax_event_mojom_traits_unittest.cc",
@@ -260,6 +256,7 @@ test("accessibility_unittests") {
     "mojom/ax_tree_data_mojom_traits_unittest.cc",
     "mojom/ax_tree_id_mojom_traits_unittest.cc",
     "mojom/ax_tree_update_mojom_traits_unittest.cc",
+    "null_ax_action_target_unittest.cc",
     "platform/ax_fragment_root_win_unittest.cc",
     "platform/ax_platform_node_textchildprovider_win_unittest.cc",
     "platform/ax_platform_node_textprovider_win_unittest.cc",
@@ -329,4 +326,22 @@ fuzzer_test("ax_table_fuzzer") {
   ]
 
   seed_corpus = "fuzz_corpus"
+}
+
+test("accessibility_perftests") {
+  testonly = true
+  sources = [
+    "ax_node_position_perftest.cc",
+  ]
+
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//mojo/core/test:run_all_unittests",
+    "//skia",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//testing/perf",
+    "//ui/accessibility/mojom",
+  ]
 }

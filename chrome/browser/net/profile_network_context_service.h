@@ -6,9 +6,12 @@
 #define CHROME_BROWSER_NET_PROFILE_NETWORK_CONTEXT_SERVICE_H_
 
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "base/callback_forward.h"
 #include "base/files/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/scoped_observer.h"
@@ -20,11 +23,17 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_member.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/net_buildflags.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 
+class PrefRegistrySimple;
 class Profile;
 class TrialComparisonCertVerifierController;
+
+namespace net {
+class ClientCertStore;
+}
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -43,19 +52,18 @@ class ProfileNetworkContextService
   // Creates a NetworkContext for the BrowserContext, using the specified
   // parameters. An empty |relative_partition_path| corresponds to the main
   // network context.
-  network::mojom::NetworkContextPtr CreateNetworkContext(
+  mojo::Remote<network::mojom::NetworkContext> CreateNetworkContext(
       bool in_memory,
       const base::FilePath& relative_partition_path);
 
 #if defined(OS_CHROMEOS)
-  void UpdateAdditionalCertificates(
-      const net::CertificateList& all_additional_certificates,
-      const net::CertificateList& trust_anchors);
+  void UpdateAdditionalCertificates();
 
   bool using_builtin_cert_verifier() { return using_builtin_cert_verifier_; }
 #endif
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
   // Packages up configuration info in |profile| and |cookie_settings| into a
   // mojo-friendly form.
@@ -68,7 +76,26 @@ class ProfileNetworkContextService
 
   static void SetDiscardDomainReliabilityUploadsForTesting(bool value);
 
+  void set_client_cert_store_factory_for_testing(
+      base::RepeatingCallback<std::unique_ptr<net::ClientCertStore>()>
+          factory) {
+    client_cert_store_factory_ = std::move(factory);
+  }
+
+  // Get platform ClientCertStore. May return nullptr.
+  std::unique_ptr<net::ClientCertStore> CreateClientCertStore();
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(ProfileNetworkContextServiceBrowsertest,
+                           DefaultCacheSize);
+  FRIEND_TEST_ALL_PREFIXES(ProfileNetworkContextServiceDiskCacheBrowsertest,
+                           DiskCacheSize);
+  FRIEND_TEST_ALL_PREFIXES(
+      ProfileNetworkContextServiceCertVerifierBuiltinFeaturePolicyTest,
+      Test);
+
+  friend class AmbientAuthenticationTest;
+
   // Checks |quic_allowed_|, and disables QUIC if needed.
   void DisableQuicIfNotAllowed();
 
@@ -93,6 +120,12 @@ class ProfileNetworkContextService
   void UpdateCTPolicy();
 
   void ScheduleUpdateCTPolicy();
+
+  // Update the CORS mitigation list for the all of profiles_'s NetworkContexts.
+  void UpdateCorsMitigationList();
+
+  bool ShouldSplitAuthCacheByNetworkIsolationKey() const;
+  void UpdateSplitAuthCacheByNetworkIsolationKey();
 
   // Creates parameters for the NetworkContext. Use |in_memory| instead of
   // |profile_->IsOffTheRecord()| because sometimes normal profiles want off the
@@ -125,8 +158,9 @@ class ProfileNetworkContextService
   PrefChangeRegistrar pref_change_registrar_;
 
   scoped_refptr<content_settings::CookieSettings> cookie_settings_;
-  ScopedObserver<content_settings::CookieSettings, ProfileNetworkContextService>
-      cookie_settings_observer_;
+  ScopedObserver<content_settings::CookieSettings,
+                 content_settings::CookieSettings::Observer>
+      cookie_settings_observer_{this};
 
   // Used to post schedule CT policy updates
   base::OneShotTimer ct_policy_update_timer_;
@@ -137,6 +171,10 @@ class ProfileNetworkContextService
   std::unique_ptr<TrialComparisonCertVerifierController>
       trial_comparison_cert_verifier_controller_;
 #endif
+
+  // Used for testing.
+  base::RepeatingCallback<std::unique_ptr<net::ClientCertStore>()>
+      client_cert_store_factory_;
 
 #if defined(OS_CHROMEOS)
   bool using_builtin_cert_verifier_;

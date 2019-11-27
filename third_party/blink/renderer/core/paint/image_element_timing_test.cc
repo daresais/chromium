@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/layout/layout_image.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
-#include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
@@ -55,10 +55,16 @@ class ImageElementTimingTest : public testing::Test {
     return layout_image;
   }
 
-  const WTF::HashSet<
-      std::pair<const LayoutObject*, const ImageResourceContent*>>&
-  GetImagesNotified() {
-    return ImageElementTiming::From(*GetDoc()->domWindow()).images_notified_;
+  bool ImagesNotifiedContains(
+      const std::pair<const LayoutObject*, const ImageResourceContent*>&
+          record_id) {
+    return ImageElementTiming::From(*GetDoc()->domWindow())
+        .images_notified_.Contains(record_id);
+  }
+
+  unsigned ImagesNotifiedSize() {
+    return ImageElementTiming::From(*GetDoc()->domWindow())
+        .images_notified_.size();
   }
 
   Document* GetDoc() {
@@ -93,7 +99,7 @@ class ImageElementTimingTest : public testing::Test {
     sk_sp<SkImage> image = surface->makeImageSnapshot();
     ImageResourceContent* original_image_resource =
         ImageResourceContent::CreateLoaded(
-            StaticBitmapImage::Create(image).get());
+            UnacceleratedStaticBitmapImage::Create(image).get());
     return original_image_resource;
   }
 };
@@ -116,13 +122,13 @@ TEST_F(ImageElementTimingTest, TestIsExplicitlyRegisteredForTiming) {
   LayoutObject* with_undefined_attribute =
       GetLayoutObjectById("unset-attribute");
   actual = internal::IsExplicitlyRegisteredForTiming(with_undefined_attribute);
-  EXPECT_FALSE(actual) << "Nodes with undefined 'elementtiming' attribute "
-                          "should not be explicitly registered.";
+  EXPECT_TRUE(actual) << "Nodes with undefined 'elementtiming' attribute "
+                         "should be explicitly registered.";
 
   LayoutObject* with_empty_attribute = GetLayoutObjectById("empty-attribute");
   actual = internal::IsExplicitlyRegisteredForTiming(with_empty_attribute);
-  EXPECT_FALSE(actual) << "Nodes with an empty 'elementtiming' attribute "
-                          "should not be explicitly registered.";
+  EXPECT_TRUE(actual) << "Nodes with an empty 'elementtiming' attribute "
+                         "should be explicitly registered.";
 
   LayoutObject* with_explicit_element_timing =
       GetLayoutObjectById("valid-attribute");
@@ -143,7 +149,7 @@ TEST_F(ImageElementTimingTest, IgnoresUnmarkedElement) {
   LayoutImage* layout_image = SetImageResource("target", 5, 5);
   ASSERT_TRUE(layout_image);
   UpdateAllLifecyclePhases();
-  EXPECT_FALSE(GetImagesNotified().Contains(
+  EXPECT_FALSE(ImagesNotifiedContains(
       std::make_pair(layout_image, layout_image->CachedImage())));
 }
 
@@ -165,7 +171,7 @@ TEST_F(ImageElementTimingTest, ImageInsideSVG) {
   UpdateAllLifecyclePhases();
 
   // |layout_image| should have had its paint notified to ImageElementTiming.
-  EXPECT_TRUE(GetImagesNotified().Contains(
+  EXPECT_TRUE(ImagesNotifiedContains(
       std::make_pair(layout_image, layout_image->CachedImage())));
 }
 
@@ -178,13 +184,13 @@ TEST_F(ImageElementTimingTest, ImageRemoved) {
   LayoutImage* layout_image = SetImageResource("target", 5, 5);
   ASSERT_TRUE(layout_image);
   UpdateAllLifecyclePhases();
-  EXPECT_TRUE(GetImagesNotified().Contains(
+  EXPECT_TRUE(ImagesNotifiedContains(
       std::make_pair(layout_image, layout_image->CachedImage())));
 
   GetDoc()->getElementById("target")->remove();
   // |layout_image| should no longer be part of |images_notified| since it will
   // be destroyed.
-  EXPECT_TRUE(GetImagesNotified().IsEmpty());
+  EXPECT_EQ(ImagesNotifiedSize(), 0u);
 }
 
 TEST_F(ImageElementTimingTest, SVGImageRemoved) {
@@ -198,13 +204,13 @@ TEST_F(ImageElementTimingTest, SVGImageRemoved) {
   LayoutSVGImage* layout_image = SetSVGImageResource("target", 5, 5);
   ASSERT_TRUE(layout_image);
   UpdateAllLifecyclePhases();
-  EXPECT_TRUE(GetImagesNotified().Contains(std::make_pair(
+  EXPECT_TRUE(ImagesNotifiedContains(std::make_pair(
       layout_image, layout_image->ImageResource()->CachedImage())));
 
   GetDoc()->getElementById("target")->remove();
   // |layout_image| should no longer be part of |images_notified| since it will
   // be destroyed.
-  EXPECT_TRUE(GetImagesNotified().IsEmpty());
+  EXPECT_EQ(ImagesNotifiedSize(), 0u);
 }
 
 TEST_F(ImageElementTimingTest, BackgroundImageRemoved) {
@@ -224,11 +230,11 @@ TEST_F(ImageElementTimingTest, BackgroundImageRemoved) {
   ImageResourceContent* content =
       object->Style()->BackgroundLayers().GetImage()->CachedImage();
   UpdateAllLifecyclePhases();
-  EXPECT_EQ(GetImagesNotified().size(), 1u);
-  EXPECT_TRUE(GetImagesNotified().Contains(std::make_pair(object, content)));
+  EXPECT_EQ(ImagesNotifiedSize(), 1u);
+  EXPECT_TRUE(ImagesNotifiedContains(std::make_pair(object, content)));
 
   GetDoc()->getElementById("target")->remove();
-  EXPECT_TRUE(GetImagesNotified().IsEmpty());
+  EXPECT_EQ(ImagesNotifiedSize(), 0u);
 }
 
 }  // namespace blink

@@ -111,6 +111,8 @@ class FileGrid extends cr.ui.Grid {
     cr.ui.Grid.decorate(element);
     const self = /** @type {!FileGrid} */ (element);
     self.__proto__ = FileGrid.prototype;
+    self.setAttribute('aria-multiselectable', true);
+    self.setAttribute('aria-describedby', 'more-actions-info');
     self.metadataModel_ = metadataModel;
     self.volumeManager_ = volumeManager;
     self.historyLoader_ = historyLoader;
@@ -237,7 +239,7 @@ class FileGrid extends cr.ui.Grid {
    * @override
    */
   mergeItems(beginIndex, endIndex) {
-    super.mergeItems(beginIndex, endIndex);
+    cr.ui.List.prototype.mergeItems.call(this, beginIndex, endIndex);
 
     const afterFiller = this.afterFiller_;
     const columns = this.columns;

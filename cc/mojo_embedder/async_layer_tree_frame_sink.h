@@ -19,8 +19,13 @@
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 
 namespace base {
 class HistogramBase;
@@ -28,7 +33,6 @@ class HistogramBase;
 
 namespace viz {
 class HitTestDataProvider;
-class LocalSurfaceIdProvider;
 }  // namespace viz
 
 namespace cc {
@@ -75,12 +79,14 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
 
     bool HasUnbound() const;
 
-    // Only one of |compositor_frame_sink_info| or
-    // |compositor_frame_sink_associated_info| should be set.
-    viz::mojom::CompositorFrameSinkPtrInfo compositor_frame_sink_info;
-    viz::mojom::CompositorFrameSinkAssociatedPtrInfo
-        compositor_frame_sink_associated_info;
-    viz::mojom::CompositorFrameSinkClientRequest client_request;
+    // Only one of |compositor_frame_sink_remote| or
+    // |compositor_frame_sink_associated_remote| should be set.
+    mojo::PendingRemote<viz::mojom::CompositorFrameSink>
+        compositor_frame_sink_remote;
+    mojo::PendingAssociatedRemote<viz::mojom::CompositorFrameSink>
+        compositor_frame_sink_associated_remote;
+    mojo::PendingReceiver<viz::mojom::CompositorFrameSinkClient>
+        client_receiver;
   };
 
   struct CC_MOJO_EMBEDDER_EXPORT InitParams {
@@ -92,9 +98,7 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
     std::unique_ptr<viz::SyntheticBeginFrameSource>
         synthetic_begin_frame_source;
     std::unique_ptr<viz::HitTestDataProvider> hit_test_data_provider;
-    std::unique_ptr<viz::LocalSurfaceIdProvider> local_surface_id_provider;
     UnboundMessagePipes pipes;
-    bool enable_surface_synchronization = false;
     bool wants_animate_only_begin_frames = false;
     const char* client_name = nullptr;
   };
@@ -127,7 +131,6 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
   void DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion region,
                                const viz::SharedBitmapId& id) override;
   void DidDeleteSharedBitmap(const viz::SharedBitmapId& id) override;
-  void ForceAllocateNewId() override;
 
   const viz::HitTestRegionList& get_last_hit_test_data_for_testing() const {
     return last_hit_test_data_;
@@ -153,7 +156,6 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
   bool needs_begin_frames_ = false;
   viz::LocalSurfaceId local_surface_id_;
   std::unique_ptr<viz::HitTestDataProvider> hit_test_data_provider_;
-  std::unique_ptr<viz::LocalSurfaceIdProvider> local_surface_id_provider_;
   std::unique_ptr<viz::ExternalBeginFrameSource> begin_frame_source_;
   std::unique_ptr<viz::SyntheticBeginFrameSource> synthetic_begin_frame_source_;
 
@@ -164,13 +166,12 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
   // be bound after calling BindToClient(). |compositor_frame_sink_ptr_| will
   // point to message pipe we want to use.
   viz::mojom::CompositorFrameSink* compositor_frame_sink_ptr_ = nullptr;
-  viz::mojom::CompositorFrameSinkPtr compositor_frame_sink_;
-  viz::mojom::CompositorFrameSinkAssociatedPtr
+  mojo::Remote<viz::mojom::CompositorFrameSink> compositor_frame_sink_;
+  mojo::AssociatedRemote<viz::mojom::CompositorFrameSink>
       compositor_frame_sink_associated_;
-  mojo::Binding<viz::mojom::CompositorFrameSinkClient> client_binding_;
+  mojo::Receiver<viz::mojom::CompositorFrameSinkClient> client_receiver_{this};
 
   THREAD_CHECKER(thread_checker_);
-  const bool enable_surface_synchronization_;
   const bool wants_animate_only_begin_frames_;
 
   viz::HitTestRegionList last_hit_test_data_;

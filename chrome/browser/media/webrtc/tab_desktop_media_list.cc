@@ -4,6 +4,8 @@
 
 #include "chrome/browser/media/webrtc/tab_desktop_media_list.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/hash/hash.h"
@@ -63,18 +65,19 @@ TabDesktopMediaList::TabDesktopMediaList()
     : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
           kDefaultTabDesktopMediaListUpdatePeriod)) {
   type_ = DesktopMediaID::TYPE_WEB_CONTENTS;
-  thumbnail_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
+  thumbnail_task_runner_ = base::CreateSequencedTaskRunner(
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::USER_VISIBLE});
 }
 
 TabDesktopMediaList::~TabDesktopMediaList() {}
 
-void TabDesktopMediaList::Refresh() {
+void TabDesktopMediaList::Refresh(bool update_thumnails) {
+  DCHECK(can_refresh());
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Profile* profile = ProfileManager::GetLastUsedProfileAllowedByPolicy();
   if (!profile) {
-    ScheduleNextRefresh();
+    OnRefreshComplete();
     return;
   }
 
@@ -150,12 +153,11 @@ void TabDesktopMediaList::Refresh() {
                    weak_factory_.GetWeakPtr(), it.first));
   }
 
-  // ScheduleNextRefresh() needs to be called after all calls for
-  // UpdateSourceThumbnail() have done. Therefore, a DoNothing task is posted
-  // to the same sequenced task runner that CreateEnlargedFaviconImag()
-  // is posted.
+  // OnRefreshComplete() needs to be called after all calls for
+  // UpdateSourceThumbnail() have done. Therefore, a DoNothing task is posted to
+  // the same sequenced task runner that CreateEnlargedFaviconImag() is posted.
   thumbnail_task_runner_.get()->PostTaskAndReply(
       FROM_HERE, base::DoNothing(),
-      base::BindOnce(&TabDesktopMediaList::ScheduleNextRefresh,
+      base::BindOnce(&TabDesktopMediaList::OnRefreshComplete,
                      weak_factory_.GetWeakPtr()));
 }

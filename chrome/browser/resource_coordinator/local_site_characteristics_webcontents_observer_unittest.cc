@@ -10,7 +10,6 @@
 #include "chrome/browser/resource_coordinator/local_site_characteristics_data_store_factory.h"
 #include "chrome/browser/resource_coordinator/local_site_characteristics_data_unittest_utils.h"
 #include "chrome/browser/resource_coordinator/site_characteristics_data_store.h"
-#include "chrome/browser/resource_coordinator/tab_manager_features.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/favicon_url.h"
@@ -22,6 +21,11 @@
 namespace resource_coordinator {
 
 using LoadingState = TabLoadTracker::LoadingState;
+
+constexpr base::TimeDelta kTitleOrFaviconChangePostLoadGracePeriod =
+    base::TimeDelta::FromSeconds(20);
+constexpr base::TimeDelta kFeatureUsagePostBackgroundGracePeriod =
+    base::TimeDelta::FromSeconds(10);
 
 // A mock implementation of a SiteCharacteristicsDataWriter.
 class LenientMockDataWriter : public SiteCharacteristicsDataWriter {
@@ -140,7 +144,7 @@ TEST_F(LocalSiteCharacteristicsWebContentsObserverTest,
   MockDataWriter* mock_writer = NavigateAndReturnMockWriter(kTestUrl1);
   EXPECT_TRUE(mock_writer);
 
-  auto writer_origin = observer()->GetWriterOriginForTesting();
+  auto writer_origin = observer()->writer_origin();
 
   EXPECT_EQ(url::Origin::Create(kTestUrl1), writer_origin);
 
@@ -162,8 +166,8 @@ TEST_F(LocalSiteCharacteristicsWebContentsObserverTest,
   mock_writer = NavigateAndReturnMockWriter(kTestUrl2);
   ::testing::Mock::VerifyAndClear(mock_writer);
 
-  EXPECT_FALSE(writer_origin == observer()->GetWriterOriginForTesting());
-  writer_origin = observer()->GetWriterOriginForTesting();
+  EXPECT_FALSE(writer_origin == observer()->writer_origin());
+  writer_origin = observer()->writer_origin();
 
   EXPECT_EQ(url::Origin::Create(kTestUrl2), mock_writer->Origin());
 
@@ -211,18 +215,12 @@ TEST_F(LocalSiteCharacteristicsWebContentsObserverTest,
   web_contents()->WasHidden();
   ::testing::Mock::VerifyAndClear(mock_writer);
 
-  // Notification usage events always get forwarded.
-  EXPECT_CALL(*mock_writer, NotifyUsesNotificationsInBackground());
-  observer()->OnNonPersistentNotificationCreated();
-  ::testing::Mock::VerifyAndClear(mock_writer);
-
-  auto params = GetStaticSiteCharacteristicsDatabaseParams();
   // Title and Favicon should be ignored during the post-loading grace period.
   observer()->DidUpdateFaviconURL({});
   observer()->TitleWasSet(nullptr);
   ::testing::Mock::VerifyAndClear(mock_writer);
 
-  test_clock().Advance(params.title_or_favicon_change_grace_period);
+  test_clock().Advance(kTitleOrFaviconChangePostLoadGracePeriod);
 
   EXPECT_CALL(*mock_writer, NotifyUpdatesFaviconInBackground());
   observer()->DidUpdateFaviconURL({});
@@ -242,14 +240,21 @@ TEST_F(LocalSiteCharacteristicsWebContentsObserverTest,
   web_contents()->WasHidden();
   ::testing::Mock::VerifyAndClear(mock_writer);
 
-  // Audio usage events should be ignored during the post-background grace
-  // period.
+  // These events should be ignored during the post-background grace period.
   observer()->OnAudioStateChanged(true);
+  observer()->DidUpdateFaviconURL({});
+  observer()->TitleWasSet(nullptr);
   ::testing::Mock::VerifyAndClear(mock_writer);
 
-  test_clock().Advance(params.audio_usage_grace_period);
+  test_clock().Advance(kFeatureUsagePostBackgroundGracePeriod);
   EXPECT_CALL(*mock_writer, NotifyUsesAudioInBackground());
+  EXPECT_CALL(*mock_writer, NotifyUpdatesFaviconInBackground());
+  EXPECT_CALL(*mock_writer, NotifyUpdatesTitleInBackground());
+  EXPECT_CALL(*mock_writer, NotifyUsesNotificationsInBackground());
   observer()->OnAudioStateChanged(true);
+  observer()->DidUpdateFaviconURL({});
+  observer()->TitleWasSet(nullptr);
+  observer()->OnNonPersistentNotificationCreated();
   ::testing::Mock::VerifyAndClear(mock_writer);
 
   EXPECT_CALL(*mock_writer, OnDestroy());
@@ -295,6 +300,8 @@ TEST_F(LocalSiteCharacteristicsWebContentsObserverTest,
                   performance_manager::TabVisibility::kBackground));
   web_contents()->WasHidden();
   ::testing::Mock::VerifyAndClear(mock_writer);
+
+  test_clock().Advance(kFeatureUsagePostBackgroundGracePeriod);
 
   EXPECT_CALL(*mock_writer, NotifyUsesNotificationsInBackground());
   observer()->OnNonPersistentNotificationCreated();

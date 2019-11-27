@@ -7,7 +7,8 @@
 #include <utility>
 
 #include "chrome/browser/apps/app_service/dip_px_util.h"
-#include "chrome/browser/apps/app_service/launch_util.h"
+#include "chrome/browser/chromeos/crostini/crostini_features.h"
+#include "chrome/browser/chromeos/crostini/crostini_package_service.h"
 #include "chrome/browser/chromeos/crostini/crostini_pref_names.h"
 #include "chrome/browser/chromeos/crostini/crostini_registry_service_factory.h"
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
@@ -22,11 +23,12 @@
 
 namespace apps {
 
-CrostiniApps::CrostiniApps()
-    : binding_(this),
-      profile_(nullptr),
-      registry_(nullptr),
-      crostini_enabled_(false) {}
+CrostiniApps::CrostiniApps(
+    const mojo::Remote<apps::mojom::AppService>& app_service,
+    Profile* profile)
+    : profile_(profile), registry_(nullptr), crostini_enabled_(false) {
+  Initialize(app_service);
+}
 
 CrostiniApps::~CrostiniApps() {
   if (registry_) {
@@ -34,59 +36,65 @@ CrostiniApps::~CrostiniApps() {
   }
 }
 
-void CrostiniApps::Initialize(const apps::mojom::AppServicePtr& app_service,
-                              Profile* profile) {
-  profile_ = nullptr;
-  registry_ = nullptr;
-  crostini_enabled_ = false;
-
-  if (!crostini::IsCrostiniUIAllowedForProfile(profile)) {
-    return;
-  }
-  registry_ = crostini::CrostiniRegistryServiceFactory::GetForProfile(profile);
-  if (!registry_) {
-    return;
-  }
-  profile_ = profile;
-  crostini_enabled_ = crostini::IsCrostiniEnabled(profile);
-
-  registry_->AddObserver(this);
-
-  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
-  pref_change_registrar_->Init(profile->GetPrefs());
-  pref_change_registrar_->Add(
-      crostini::prefs::kCrostiniEnabled,
-      base::BindRepeating(&CrostiniApps::OnCrostiniEnabledChanged,
-                          base::Unretained(this)));
-
-  apps::mojom::PublisherPtr publisher;
-  binding_.Bind(mojo::MakeRequest(&publisher));
-  app_service->RegisterPublisher(std::move(publisher),
-                                 apps::mojom::AppType::kCrostini);
+void CrostiniApps::FlushMojoCallsForTesting() {
+  if (receiver_.is_bound())
+    receiver_.FlushForTesting();
 }
 
 void CrostiniApps::ReInitializeForTesting(
-    const apps::mojom::AppServicePtr& app_service,
+    const mojo::Remote<apps::mojom::AppService>& app_service,
     Profile* profile) {
   // Some test code creates a profile (and therefore profile-linked services
   // like the App Service) before it creates the fake user that lets
   // IsCrostiniUIAllowedForProfile return true. To work around that, we issue a
   // second Initialize call.
-  Initialize(app_service, profile);
+  receiver_.reset();
+  profile_ = profile;
+  registry_ = nullptr;
+  crostini_enabled_ = false;
+
+  Initialize(app_service);
 }
 
-void CrostiniApps::Connect(apps::mojom::SubscriberPtr subscriber,
-                           apps::mojom::ConnectOptionsPtr opts) {
-  std::vector<apps::mojom::AppPtr> apps;
-  for (const std::string& app_id : registry_->GetRegisteredAppIds()) {
-    base::Optional<crostini::CrostiniRegistryService::Registration>
-        registration = registry_->GetRegistration(app_id);
-    if (registration.has_value()) {
-      apps.push_back(Convert(app_id, *registration, true));
-    }
+void CrostiniApps::Initialize(
+    const mojo::Remote<apps::mojom::AppService>& app_service) {
+  DCHECK(profile_);
+  if (!crostini::CrostiniFeatures::Get()->IsUIAllowed(profile_)) {
+    return;
   }
+  registry_ = crostini::CrostiniRegistryServiceFactory::GetForProfile(profile_);
+  if (!registry_) {
+    return;
+  }
+  crostini_enabled_ = crostini::CrostiniFeatures::Get()->IsEnabled(profile_);
+
+  registry_->AddObserver(this);
+
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
+  pref_change_registrar_->Init(profile_->GetPrefs());
+  pref_change_registrar_->Add(
+      crostini::prefs::kCrostiniEnabled,
+      base::BindRepeating(&CrostiniApps::OnCrostiniEnabledChanged,
+                          base::Unretained(this)));
+
+  app_service->RegisterPublisher(receiver_.BindNewPipeAndPassRemote(),
+                                 apps::mojom::AppType::kCrostini);
+}
+
+void CrostiniApps::Connect(
+    mojo::PendingRemote<apps::mojom::Subscriber> subscriber_remote,
+    apps::mojom::ConnectOptionsPtr opts) {
+  std::vector<apps::mojom::AppPtr> apps;
+  for (const auto& pair : registry_->GetRegisteredApps()) {
+    const std::string& app_id = pair.first;
+    const crostini::CrostiniRegistryService::Registration& registration =
+        pair.second;
+    apps.push_back(Convert(app_id, registration, true));
+  }
+  mojo::Remote<apps::mojom::Subscriber> subscriber(
+      std::move(subscriber_remote));
   subscriber->OnApps(std::move(apps));
-  subscribers_.AddPtr(std::move(subscriber));
+  subscribers_.Add(std::move(subscriber));
 }
 
 void CrostiniApps::LoadIcon(const std::string& app_id,
@@ -130,7 +138,14 @@ void CrostiniApps::Launch(const std::string& app_id,
                           int32_t event_flags,
                           apps::mojom::LaunchSource launch_source,
                           int64_t display_id) {
-  apps_util::Launch(app_id, event_flags, launch_source, display_id);
+  crostini::LaunchCrostiniApp(profile_, app_id, display_id);
+}
+
+void CrostiniApps::LaunchAppWithIntent(const std::string& app_id,
+                                       apps::mojom::IntentPtr intent,
+                                       apps::mojom::LaunchSource launch_source,
+                                       int64_t display_id) {
+  NOTIMPLEMENTED();
 }
 
 void CrostiniApps::SetPermission(const std::string& app_id,
@@ -138,11 +153,32 @@ void CrostiniApps::SetPermission(const std::string& app_id,
   NOTIMPLEMENTED();
 }
 
-void CrostiniApps::Uninstall(const std::string& app_id) {
+void CrostiniApps::PromptUninstall(const std::string& app_id) {
+  NOTIMPLEMENTED();
+}
+
+void CrostiniApps::Uninstall(const std::string& app_id,
+                             bool clear_site_data,
+                             bool report_abuse) {
+  crostini::CrostiniPackageService::GetForProfile(profile_)
+      ->QueueUninstallApplication(app_id);
+}
+
+void CrostiniApps::PauseApp(const std::string& app_id) {
+  NOTIMPLEMENTED();
+}
+
+void CrostiniApps::UnpauseApps(const std::string& app_id) {
   NOTIMPLEMENTED();
 }
 
 void CrostiniApps::OpenNativeSettings(const std::string& app_id) {
+  NOTIMPLEMENTED();
+}
+
+void CrostiniApps::OnPreferredAppSet(const std::string& app_id,
+                                     apps::mojom::IntentFilterPtr intent_filter,
+                                     apps::mojom::IntentPtr intent) {
   NOTIMPLEMENTED();
 }
 
@@ -172,7 +208,8 @@ void CrostiniApps::OnAppIconUpdated(const std::string& app_id,
 }
 
 void CrostiniApps::OnCrostiniEnabledChanged() {
-  crostini_enabled_ = profile_ && crostini::IsCrostiniEnabled(profile_);
+  crostini_enabled_ =
+      profile_ && crostini::CrostiniFeatures::Get()->IsEnabled(profile_);
   auto show = crostini_enabled_ ? apps::mojom::OptionalBool::kTrue
                                 : apps::mojom::OptionalBool::kFalse;
 
@@ -256,15 +293,21 @@ apps::mojom::AppPtr CrostiniApps::Convert(
 
   auto show = !registration.NoDisplay() ? apps::mojom::OptionalBool::kTrue
                                         : apps::mojom::OptionalBool::kFalse;
+  auto show_in_search = show;
   if (registration.is_terminal_app()) {
     show = crostini_enabled_ ? apps::mojom::OptionalBool::kTrue
                              : apps::mojom::OptionalBool::kFalse;
+    // The Crostini Terminal should appear in the app search, even when
+    // Crostini is not installed.
+    show_in_search = apps::mojom::OptionalBool::kTrue;
   }
   app->show_in_launcher = show;
-  app->show_in_search = show;
+  app->show_in_search = show_in_search;
   // TODO(crbug.com/955937): Enable once Crostini apps are managed inside App
   // Management.
   app->show_in_management = apps::mojom::OptionalBool::kFalse;
+
+  app->paused = apps::mojom::OptionalBool::kFalse;
 
   return app;
 }
@@ -306,11 +349,11 @@ void CrostiniApps::PublishAppID(const std::string& app_id,
 }
 
 void CrostiniApps::Publish(apps::mojom::AppPtr app) {
-  subscribers_.ForAllPtrs([&app](apps::mojom::Subscriber* subscriber) {
+  for (auto& subscriber : subscribers_) {
     std::vector<apps::mojom::AppPtr> apps;
     apps.push_back(app.Clone());
     subscriber->OnApps(std::move(apps));
-  });
+  }
 }
 
 }  // namespace apps

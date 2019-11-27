@@ -16,7 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/resource_request_info.h"
+#include "content/public/browser/native_file_system_permission_context.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -42,11 +42,6 @@ class Extension;
 namespace net {
 class AuthChallengeInfo;
 }
-
-namespace payments {
-class PaymentRequest;
-class PaymentRequestDialog;
-}  // namespace payments
 
 namespace safe_browsing {
 class ChromeCleanerController;
@@ -139,9 +134,6 @@ void SetAutoAcceptPWAInstallConfirmationForTesting(bool auto_accept);
 task_manager::TaskManagerTableModel* ShowTaskManagerViews(Browser* browser);
 void HideTaskManagerViews();
 
-// Show the Views "Chrome Update" dialog.
-void ShowUpdateChromeDialogViews(gfx::NativeWindow parent);
-
 #endif  // OS_MACOSX
 
 #if defined(TOOLKIT_VIEWS)
@@ -151,15 +143,6 @@ std::unique_ptr<LoginHandler> CreateLoginHandlerViews(
     const net::AuthChallengeInfo& auth_info,
     content::WebContents* web_contents,
     LoginAuthRequiredCallback auth_required_callback);
-
-// Shows the toolkit-views based BookmarkEditor.
-void ShowBookmarkEditorViews(gfx::NativeWindow parent_window,
-                             Profile* profile,
-                             const BookmarkEditor::EditDetails& details,
-                             BookmarkEditor::Configuration configuration);
-
-payments::PaymentRequestDialog* CreatePaymentRequestDialog(
-    payments::PaymentRequest* request);
 
 #endif  // TOOLKIT_VIEWS
 
@@ -263,6 +246,13 @@ enum class DialogIdentifier {
   INCOGNITO_WINDOW_COUNT = 92,
   CROSTINI_APP_UNINSTALLER = 93,
   CROSTINI_CONTAINER_UPGRADE = 94,
+  COOKIE_CONTROLS = 95,
+  CROSTINI_ANSIBLE_SOFTWARE_CONFIG = 96,
+  INCOGNITO_MENU = 97,
+  PHONE_CHOOSER = 98,
+  QR_CODE_GENERATOR = 99,
+  CROSTINI_FORCE_CLOSE = 100,
+  APP_UNINSTALL = 101,
   // Add values above this line with a corresponding label in
   // tools/metrics/histograms/enums.xml
   MAX_VALUE
@@ -313,13 +303,17 @@ void ShowNativeFileSystemPermissionDialog(
     base::OnceCallback<void(PermissionAction result)> callback,
     content::WebContents* web_contents);
 
-// Displays a dialog to inform the user that the directory |path| they picked
-// using the native file system API is blocked by chrome.
-// |callback| is called when the user has dismissed the dialog.
+// Displays a dialog to inform the user that the |path| they picked using the
+// native file system API is blocked by chrome. |is_directory| is true if the
+// user was selecting a directory, otherwise the user was selecting files within
+// a directory. |callback| is called when the user has dismissed the dialog.
 void ShowNativeFileSystemRestrictedDirectoryDialog(
     const url::Origin& origin,
     const base::FilePath& path,
-    base::OnceClosure callback,
+    bool is_directory,
+    base::OnceCallback<void(
+        content::NativeFileSystemPermissionContext::SensitiveDirectoryResult)>
+        callback,
     content::WebContents* web_contents);
 
 // Displays a dialog to confirm that the user intended to give read access to a

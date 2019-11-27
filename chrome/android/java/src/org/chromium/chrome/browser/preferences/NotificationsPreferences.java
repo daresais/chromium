@@ -6,9 +6,10 @@ package org.chromium.chrome.browser.preferences;
 
 import android.os.Build;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceFragmentCompat;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ContentSettingsType;
@@ -17,6 +18,7 @@ import org.chromium.chrome.browser.offlinepages.prefetch.PrefetchPrefs;
 import org.chromium.chrome.browser.preferences.website.ContentSettingsResources;
 import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences;
 import org.chromium.chrome.browser.preferences.website.SiteSettingsCategory;
+import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 
 /**
  * Settings fragment that allows the user to configure notifications. It contains general
@@ -33,7 +35,7 @@ public class NotificationsPreferences extends PreferenceFragmentCompat {
     // The following field is only set if Feed is disabled, and should be null checked before
     // being used.
     @Nullable
-    private ChromeSwitchPreferenceCompat mSuggestionsPref;
+    private ChromeSwitchPreference mSuggestionsPref;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -43,7 +45,7 @@ public class NotificationsPreferences extends PreferenceFragmentCompat {
         PreferenceUtils.addPreferencesFromResource(this, R.xml.notifications_preferences);
         getActivity().setTitle(R.string.prefs_notifications);
 
-        mSuggestionsPref = (ChromeSwitchPreferenceCompat) findPreference(PREF_SUGGESTIONS);
+        mSuggestionsPref = (ChromeSwitchPreference) findPreference(PREF_SUGGESTIONS);
         mSuggestionsPref.setOnPreferenceChangeListener((Preference preference, Object newValue) -> {
             PrefetchPrefs.setNotificationEnabled((boolean) newValue);
             return true;
@@ -75,8 +77,7 @@ public class NotificationsPreferences extends PreferenceFragmentCompat {
         }
 
         mFromWebsitesPref.setSummary(ContentSettingsResources.getCategorySummary(
-                ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-                PrefServiceBridge.getInstance().isCategoryEnabled(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS)));
+                ContentSettingsType.NOTIFICATIONS,
+                WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.NOTIFICATIONS)));
     }
 }

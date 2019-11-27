@@ -20,13 +20,13 @@
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/chromeos/fileapi/recent_source.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "content/public/test/browser_task_environment.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/test/test_file_system_context.h"
-#include "storage/common/fileapi/file_system_mount_option.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/common/file_system/file_system_mount_option.h"
+#include "storage/common/file_system/file_system_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -90,7 +90,7 @@ class RecentDiskSourceTest : public testing::Test {
     return files;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   const GURL origin_;
   std::unique_ptr<TestingProfile> profile_;
   base::ScopedTempDir temp_dir_;

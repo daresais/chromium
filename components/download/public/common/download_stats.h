@@ -267,21 +267,10 @@ COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadInterrupted(
     int64_t total,
     bool is_parallelizable,
     bool is_parallel_download_enabled,
-    DownloadSource download_source,
-    bool post_content_length_mismatch);
-
-// Record that a download has been classified as malicious.
-COMPONENTS_DOWNLOAD_EXPORT void RecordMaliciousDownloadClassified(
-    DownloadDangerType danger_type);
+    DownloadSource download_source);
 
 // Record a dangerous download accept event.
 COMPONENTS_DOWNLOAD_EXPORT void RecordDangerousDownloadAccept(
-    DownloadDangerType danger_type,
-    const base::FilePath& file_path);
-
-// Record a dangerous download discard event.
-COMPONENTS_DOWNLOAD_EXPORT void RecordDangerousDownloadDiscard(
-    DownloadDiscardReason reason,
     DownloadDangerType danger_type,
     const base::FilePath& file_path);
 
@@ -446,7 +435,8 @@ COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadSourcePageTransitionType(
     const base::Optional<ui::PageTransition>& transition);
 
 COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadHttpResponseCode(
-    int response_code);
+    int response_code,
+    bool is_background_mode);
 
 COMPONENTS_DOWNLOAD_EXPORT void RecordInProgressDBCount(
     InProgressDBCountTypes type);
@@ -473,6 +463,15 @@ COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadResumed(
 COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadConnectionInfo(
     net::HttpResponseInfo::ConnectionInfo connection_info);
 
+COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadManagerCreationTimeSinceStartup(
+    base::TimeDelta elapsed_time);
+
+COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadManagerMemoryUsage(
+    size_t bytes_used);
+
+COMPONENTS_DOWNLOAD_EXPORT void RecordParallelRequestCreationFailure(
+    DownloadInterruptReason reason);
+
 #if defined(OS_ANDROID)
 // Records the download interrupt reason for the first background download.
 // If |download_started| is true, this records the last interrupt reason
@@ -480,6 +479,24 @@ COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadConnectionInfo(
 COMPONENTS_DOWNLOAD_EXPORT void RecordFirstBackgroundDownloadInterruptReason(
     DownloadInterruptReason reason,
     bool download_started);
+
+enum class BackgroudTargetDeterminationResultTypes {
+  // Target determination succeeded.
+  kSuccess = 0,
+
+  // Target path doesn't exist.
+  kTargetPathMissing = 1,
+
+  // Path reservation failed.
+  kPathReservationFailed = 2,
+
+  kMaxValue = kPathReservationFailed
+};
+
+// Records whether download target determination is successfully completed in
+// reduced mode.
+COMPONENTS_DOWNLOAD_EXPORT void RecordBackgroundTargetDeterminationResult(
+    BackgroudTargetDeterminationResultTypes type);
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)

@@ -336,7 +336,7 @@ void BrowserAccessibilityManagerMac::FireGeneratedEvent(
       // Use native VoiceOver support for live regions.
       base::scoped_nsobject<BrowserAccessibilityCocoa> retained_node(
           [native_node retain]);
-      base::PostDelayedTaskWithTraits(
+      base::PostDelayedTask(
           FROM_HERE, {BrowserThread::UI},
           base::BindOnce(
               [](base::scoped_nsobject<BrowserAccessibilityCocoa> node) {
@@ -484,7 +484,7 @@ NSDictionary* BrowserAccessibilityManagerMac::
                 forKey:NSAccessibilityTextSelectionGranularity];
   [user_info setObject:@YES forKey:NSAccessibilityTextSelectionChangedFocus];
 
-  int32_t focus_id = GetTreeData().sel_focus_object_id;
+  int32_t focus_id = ax_tree()->GetUnignoredSelection().focus_object_id;
   BrowserAccessibility* focus_object = GetFromID(focus_id);
   if (focus_object) {
     focus_object = focus_object->GetClosestPlatformObject();

@@ -28,7 +28,7 @@
 #include "components/download/public/background_service/test/test_download_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -62,12 +62,14 @@ class MockObserver : public PluginVmImageManager::Observer {
                     base::TimeDelta elapsed_time));
   MOCK_METHOD0(OnDownloadCompleted, void());
   MOCK_METHOD0(OnDownloadCancelled, void());
-  MOCK_METHOD0(OnDownloadFailed, void());
+  MOCK_METHOD1(OnDownloadFailed,
+               void(plugin_vm::PluginVmImageManager::FailureReason));
   MOCK_METHOD2(OnImportProgressUpdated,
                void(int percent_completed, base::TimeDelta elapsed_time));
   MOCK_METHOD0(OnImported, void());
   MOCK_METHOD0(OnImportCancelled, void());
-  MOCK_METHOD0(OnImportFailed, void());
+  MOCK_METHOD1(OnImportFailed,
+               void(plugin_vm::PluginVmImageManager::FailureReason));
 };
 
 class PluginVmImageManagerTest : public testing::Test {
@@ -125,7 +127,7 @@ class PluginVmImageManagerTest : public testing::Test {
 
   void ProcessImageUntilImporting() {
     manager_->StartDownload();
-    test_browser_thread_bundle_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void ProcessImageUntilConfigured() {
@@ -135,7 +137,7 @@ class PluginVmImageManagerTest : public testing::Test {
     manager_->SetDownloadedPluginVmImageArchiveForTesting(
         fake_downloaded_plugin_vm_image_archive_);
     manager_->StartImport();
-    test_browser_thread_bundle_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   base::FilePath CreateZipFile() {
@@ -145,7 +147,7 @@ class PluginVmImageManagerTest : public testing::Test {
     return zip_file_path;
   }
 
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<PluginVmTestHelper> plugin_vm_test_helper_;
   PluginVmImageManager* manager_;
@@ -192,12 +194,12 @@ TEST_F(PluginVmImageManagerTest, DownloadPluginVmImageParamsTest) {
   EXPECT_EQ(GURL(kUrl), params->request_params.url);
 
   // Finishing image processing.
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Faking downloaded file for testing.
   manager_->SetDownloadedPluginVmImageArchiveForTesting(
       fake_downloaded_plugin_vm_image_archive_);
   manager_->StartImport();
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(PluginVmImageManagerTest, OnlyOneImageIsProcessedTest) {
@@ -211,7 +213,7 @@ TEST_F(PluginVmImageManagerTest, OnlyOneImageIsProcessedTest) {
 
   EXPECT_TRUE(manager_->IsProcessingImage());
 
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Faking downloaded file for testing.
   manager_->SetDownloadedPluginVmImageArchiveForTesting(
       fake_downloaded_plugin_vm_image_archive_);
@@ -222,7 +224,7 @@ TEST_F(PluginVmImageManagerTest, OnlyOneImageIsProcessedTest) {
 
   EXPECT_TRUE(manager_->IsProcessingImage());
 
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_FALSE(manager_->IsProcessingImage());
 
@@ -252,7 +254,10 @@ TEST_F(PluginVmImageManagerTest, CanProceedWithANewImageWhenSucceededTest) {
 TEST_F(PluginVmImageManagerTest, CanProceedWithANewImageWhenFailedTest) {
   SetupConciergeForSuccessfulDiskImageImport(fake_concierge_client_);
 
-  EXPECT_CALL(*observer_, OnDownloadFailed());
+  EXPECT_CALL(
+      *observer_,
+      OnDownloadFailed(
+          PluginVmImageManager::FailureReason::DOWNLOAD_FAILED_ABORTED));
   EXPECT_CALL(*observer_, OnDownloadCompleted());
   EXPECT_CALL(*observer_, OnImportProgressUpdated(50.0, _));
   EXPECT_CALL(*observer_, OnImported());
@@ -260,7 +265,7 @@ TEST_F(PluginVmImageManagerTest, CanProceedWithANewImageWhenFailedTest) {
   manager_->StartDownload();
   std::string guid = manager_->GetCurrentDownloadGuidForTesting();
   download_service_->SetFailedDownload(guid, false);
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_FALSE(manager_->IsProcessingImage());
 
@@ -276,7 +281,7 @@ TEST_F(PluginVmImageManagerTest, CancelledDownloadTest) {
 
   manager_->StartDownload();
   manager_->CancelDownload();
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Finishing image processing as it should really happen.
   manager_->OnDownloadCancelled();
 
@@ -287,12 +292,14 @@ TEST_F(PluginVmImageManagerTest, ImportNonExistingImageTest) {
   SetupConciergeForSuccessfulDiskImageImport(fake_concierge_client_);
 
   EXPECT_CALL(*observer_, OnDownloadCompleted());
-  EXPECT_CALL(*observer_, OnImportFailed());
+  EXPECT_CALL(*observer_,
+              OnImportFailed(
+                  PluginVmImageManager::FailureReason::COULD_NOT_OPEN_IMAGE));
 
   ProcessImageUntilImporting();
   // Should fail as fake downloaded file isn't set.
   manager_->StartImport();
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   histogram_tester_->ExpectUniqueSample(kPluginVmImageDownloadedSizeHistogram,
                                         kDownloadedPluginVmImageSizeInMb, 1);
@@ -313,12 +320,14 @@ TEST_F(PluginVmImageManagerTest, CancelledImportTest) {
       fake_downloaded_plugin_vm_image_archive_);
   manager_->StartImport();
   manager_->CancelImport();
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(PluginVmImageManagerTest, EmptyPluginVmImageUrlTest) {
   SetPluginVmImagePref("", kHash);
-  EXPECT_CALL(*observer_, OnDownloadFailed());
+  EXPECT_CALL(
+      *observer_,
+      OnDownloadFailed(PluginVmImageManager::FailureReason::INVALID_IMAGE_URL));
   ProcessImageUntilImporting();
 
   histogram_tester_->ExpectTotalCount(kPluginVmImageDownloadedSizeHistogram, 0);
@@ -334,7 +343,9 @@ TEST_F(PluginVmImageManagerTest, VerifyDownloadTest) {
 TEST_F(PluginVmImageManagerTest, CannotStartDownloadIfPluginVmGetsDisabled) {
   profile_->ScopedCrosSettingsTestHelper()->SetBoolean(
       chromeos::kPluginVmAllowed, false);
-  EXPECT_CALL(*observer_, OnDownloadFailed());
+  EXPECT_CALL(
+      *observer_,
+      OnDownloadFailed(PluginVmImageManager::FailureReason::NOT_ALLOWED));
   ProcessImageUntilImporting();
 }
 

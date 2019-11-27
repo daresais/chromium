@@ -151,17 +151,10 @@ DockedMagnifierControllerImpl::~DockedMagnifierControllerImpl() {
 
 // static
 void DockedMagnifierControllerImpl::RegisterProfilePrefs(
-    PrefRegistrySimple* registry,
-    bool for_test) {
-  if (for_test) {
-    // In tests there is no remote pref service. Make ash own the prefs.
-    // TODO(xiyuan): move ownership to ash.
-    registry->RegisterBooleanPref(prefs::kDockedMagnifierEnabled, false,
-                                  PrefRegistry::PUBLIC);
-  }
-
+    PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kDockedMagnifierEnabled, false);
   registry->RegisterDoublePref(prefs::kDockedMagnifierScale,
-                               kDefaultMagnifierScale, PrefRegistry::PUBLIC);
+                               kDefaultMagnifierScale);
 }
 
 bool DockedMagnifierControllerImpl::GetEnabled() const {
@@ -310,6 +303,10 @@ void DockedMagnifierControllerImpl::CenterOnPoint(
   settings.SetTweenType(gfx::Tween::ZERO);
   settings.SetPreemptionStrategy(ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
   viewport_magnifier_layer_->SetTransform(transform);
+}
+
+int DockedMagnifierControllerImpl::GetMagnifierHeightForTesting() const {
+  return GetTotalMagnifierHeight();
 }
 
 void DockedMagnifierControllerImpl::OnActiveUserPrefServiceChanged(
@@ -507,17 +504,16 @@ void DockedMagnifierControllerImpl::SwitchCurrentSourceRootWindowIfNeeded(
   is_minimum_point_of_interest_height_valid_ = false;
 
   if (old_root_window) {
-    if (separator_layer_) {
-      GetViewportParentContainerForRoot(old_root_window)
-          ->layer()
-          ->Remove(separator_layer_.get());
-    }
-    if (update_old_root_workarea)
-      SetViewportHeightInWorkArea(old_root_window, 0);
-
+    // Order here matters. We should stop observing caret bounds changes before
+    // updating the work area bounds of the old root window. Otherwise, work
+    // area bounds changes will lead to caret bounds changes that recurses back
+    // here unnecessarily. https://crbug.com/1000903.
     if (input_method_)
       input_method_->RemoveObserver(this);
     input_method_ = nullptr;
+
+    if (update_old_root_workarea)
+      SetViewportHeightInWorkArea(old_root_window, 0);
 
     // Reset mouse cursor confinement to default.
     RootWindowController::ForWindow(old_root_window)
@@ -626,16 +622,15 @@ void DockedMagnifierControllerImpl::OnEnabledPrefChanged() {
   Shell* shell = Shell::Get();
   auto* overview_controller = shell->overview_controller();
   if (overview_controller->InOverviewSession()) {
-    auto* split_view_controller = shell->split_view_controller();
-    if (split_view_controller->InSplitViewMode()) {
-      // In this case, we're in a single-split-view mode, i.e. a window is
-      // snapped to one side of the split view, while the other side has
-      // overview active. We need to exit split view as well as exiting overview
-      // mode, otherwise we'll be in an invalid state.
+    // |OverviewController::EndOverview| fails (returning false) in certain
+    // cases involving tablet split view mode. We can guarantee success by
+    // ensuring that tablet split view mode is not in session.
+    auto* split_view_controller =
+        SplitViewController::Get(Shell::GetPrimaryRootWindow());
+    if (split_view_controller->InTabletSplitViewMode()) {
       split_view_controller->EndSplitView(
           SplitViewController::EndReason::kNormal);
     }
-
     overview_controller->EndOverview();
   }
 
@@ -713,13 +708,11 @@ void DockedMagnifierControllerImpl::CreateMagnifierViewport() {
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.accept_events = false;
   params.bounds = viewport_bounds;
-  params.opacity = views::Widget::InitParams::OPAQUE_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kOpaque;
   params.parent =
       GetViewportParentContainerForRoot(current_source_root_window_);
   params.name = kDockedMagnifierViewportWindowName;
-  viewport_widget_->Init(params);
-  viewport_widget_->Show();
-  viewport_widget_->AddObserver(this);
+  viewport_widget_->Init(std::move(params));
 
   // 2- Create the separator layer right below the viwport widget, parented to
   //    the layer of the root window.
@@ -743,6 +736,13 @@ void DockedMagnifierControllerImpl::CreateMagnifierViewport() {
   //    and magnified.
   viewport_magnifier_layer_ =
       std::make_unique<ui::Layer>(ui::LAYER_SOLID_COLOR);
+  // There are situations that the content rect for the magnified container gets
+  // larger than its bounds (e.g. shelf stretches beyond the screen to allow it
+  // being dragged up, or contents of mouse pointer might go beyond screen when
+  // the pointer is at the edges of the screen). To avoid this extra content
+  // becoming visible in the magnifier, magnifier layer should clip its contents
+  // to its bounds.
+  viewport_magnifier_layer_->SetMasksToBounds(true);
   viewport_layer->Add(viewport_magnifier_layer_.get());
   viewport_layer->SetMasksToBounds(true);
 
@@ -758,6 +758,11 @@ void DockedMagnifierControllerImpl::CreateMagnifierViewport() {
 
   // 6- Confine the mouse cursor within the remaining part of the display.
   ConfineMouseCursorOutsideViewport();
+
+  // 7- Show the widget, which can trigger events to request movement of the
+  // viewport now that all internal state has been created.
+  viewport_widget_->AddObserver(this);
+  viewport_widget_->Show();
 }
 
 void DockedMagnifierControllerImpl::MaybeCachePointOfInterestMinimumHeight(

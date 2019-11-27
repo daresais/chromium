@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/display/screen_orientation_controller.h"
 #include "ash/home_screen/home_screen_controller.h"
 #include "ash/public/cpp/wallpaper_types.h"
 #include "ash/root_window_controller.h"
@@ -220,7 +221,7 @@ class TabletModeBrowserWindowDragDelegate::WindowsHider
 
   // The original backdrop mode of the source window. Should be disabled during
   // dragging.
-  BackdropWindowMode source_window_backdrop_ = BackdropWindowMode::kAuto;
+  BackdropWindowMode source_window_backdrop_ = BackdropWindowMode::kAutoOpaque;
 
   DISALLOW_COPY_AND_ASSIGN(WindowsHider);
 };
@@ -235,7 +236,7 @@ void TabletModeBrowserWindowDragDelegate::PrepareWindowDrag(
     const gfx::Point& location_in_screen) {
   DCHECK(dragged_window_);
 
-  wm::WindowState* window_state = wm::GetWindowState(dragged_window_);
+  WindowState* window_state = WindowState::Get(dragged_window_);
   window_state->OnDragStarted(window_state->drag_details()->window_component);
 }
 
@@ -251,9 +252,9 @@ void TabletModeBrowserWindowDragDelegate::EndingWindowDrag(
     ToplevelWindowEventHandler::DragResult result,
     const gfx::Point& location_in_screen) {
   if (result == ToplevelWindowEventHandler::DragResult::SUCCESS)
-    wm::GetWindowState(dragged_window_)->OnCompleteDrag(location_in_screen);
+    WindowState::Get(dragged_window_)->OnCompleteDrag(location_in_screen);
   else
-    wm::GetWindowState(dragged_window_)->OnRevertDrag(location_in_screen);
+    WindowState::Get(dragged_window_)->OnRevertDrag(location_in_screen);
 }
 
 void TabletModeBrowserWindowDragDelegate::EndedWindowDrag(
@@ -310,9 +311,10 @@ void TabletModeBrowserWindowDragDelegate::UpdateSourceWindow(
     } else {
       // Put the source window on the other side of the split screen.
       expected_bounds = split_view_controller_->GetSnappedWindowBoundsInScreen(
-          source_window, snap_position == SplitViewController::LEFT
-                             ? SplitViewController::RIGHT
-                             : SplitViewController::LEFT);
+          snap_position == SplitViewController::LEFT
+              ? SplitViewController::RIGHT
+              : SplitViewController::LEFT,
+          source_window);
     }
   }
   ::wm::ConvertRectFromScreen(source_window->parent(), &expected_bounds);
@@ -333,7 +335,7 @@ void TabletModeBrowserWindowDragDelegate::UpdateSourceWindow(
 void TabletModeBrowserWindowDragDelegate::MergeBackToSourceWindowIfApplicable(
     const gfx::Point& location_in_screen) {
   // No need to merge back if we're not in tab dragging process.
-  if (!wm::IsDraggingTabs(dragged_window_))
+  if (!window_util::IsDraggingTabs(dragged_window_))
     return;
 
   aura::Window* source_window =

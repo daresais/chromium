@@ -13,9 +13,6 @@ import android.graphics.Point;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.annotation.StringRes;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AlertDialog;
@@ -26,6 +23,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
+
 import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
@@ -33,6 +34,7 @@ import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.consent_auditor.ConsentAuditorFeature;
 import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.sync.SyncUserDataWiper;
 import org.chromium.components.signin.AccountIdProvider;
@@ -75,14 +77,13 @@ public abstract class SigninFragmentBase
     private static final int ADD_ACCOUNT_REQUEST_CODE = 1;
 
     @IntDef({SigninFlowType.DEFAULT, SigninFlowType.FORCED, SigninFlowType.CHOOSE_ACCOUNT,
-            SigninFlowType.ADD_ACCOUNT, SigninFlowType.CONSENT_BUMP})
+            SigninFlowType.ADD_ACCOUNT})
     @Retention(RetentionPolicy.SOURCE)
     @interface SigninFlowType {
         int DEFAULT = 0;
         int FORCED = 1;
         int CHOOSE_ACCOUNT = 2;
         int ADD_ACCOUNT = 3;
-        int CONSENT_BUMP = 4;
     }
 
     private @SigninFlowType int mSigninFlowType;
@@ -159,17 +160,6 @@ public abstract class SigninFragmentBase
         return result;
     }
 
-    /**
-     * Creates an argument bundle for the consent bump screen.
-     * @param accountName The name of the signed in account.
-     */
-    protected static Bundle createArgumentsForConsentBumpFlow(String accountName) {
-        Bundle result = new Bundle();
-        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SigninFlowType.CONSENT_BUMP);
-        result.putString(ARGUMENT_ACCOUNT_NAME, accountName);
-        return result;
-    }
-
     protected SigninFragmentBase() {
         mAccountsChangedObserver = this::triggerUpdateAccounts;
         mProfileDataCacheObserver = (String accountId) -> updateProfileData();
@@ -204,11 +194,6 @@ public abstract class SigninFragmentBase
     /** Returns whether this fragment is in "force sign-in" mode. */
     protected boolean isForcedSignin() {
         return mSigninFlowType == SigninFlowType.FORCED;
-    }
-
-    /** Returns whether this fragment is in Consent bump mode. */
-    protected boolean isConsentBump() {
-        return mSigninFlowType == SigninFlowType.CONSENT_BUMP;
     }
 
     @Override
@@ -289,8 +274,6 @@ public abstract class SigninFragmentBase
             endImageViewDrawable = SigninView.getCheckmarkDrawable(getContext());
             mView.getRefuseButton().setVisibility(View.GONE);
             mView.getAcceptButtonEndPadding().setVisibility(View.INVISIBLE);
-        } else if (mSigninFlowType == SigninFlowType.CONSENT_BUMP) {
-            endImageViewDrawable = SigninView.getCheckmarkDrawable(getContext());
         } else {
             endImageViewDrawable = SigninView.getExpandArrowDrawable(getContext());
         }
@@ -378,7 +361,7 @@ public abstract class SigninFragmentBase
     }
 
     private void onAccountPickerClicked() {
-        if (isForcedSignin() || isConsentBump() || !areControlsEnabled()) return;
+        if (isForcedSignin() || !areControlsEnabled()) return;
         showAccountPicker();
     }
 
@@ -419,6 +402,8 @@ public abstract class SigninFragmentBase
      * visual appearance of these controls. Refuse button is always enabled.
      */
     private boolean areControlsEnabled() {
+        // Ignore clicks if the fragment is being removed or the app is being backgrounded.
+        if (!isResumed() || isStateSaved()) return false;
         return !mAccountSelectionPending && !mIsSigninInProgress && !mHasGmsError;
     }
 
@@ -452,9 +437,8 @@ public abstract class SigninFragmentBase
     private void runStateMachineAndSignin(boolean settingsClicked) {
         mConfirmSyncDataStateMachine = new ConfirmSyncDataStateMachine(getContext(),
                 getChildFragmentManager(),
-                ConfirmImportSyncDataDialog.ImportSyncType.PREVIOUS_DATA_FOUND,
-                PrefServiceBridge.getInstance().getSyncLastAccountName(), mSelectedAccountName,
-                new ConfirmImportSyncDataDialog.Listener() {
+                PrefServiceBridge.getInstance().getString(Pref.SYNC_LAST_ACCOUNT_NAME),
+                mSelectedAccountName, new ConfirmImportSyncDataDialog.Listener() {
                     @Override
                     public void onConfirm(boolean wipeData) {
                         mConfirmSyncDataStateMachine = null;
@@ -510,7 +494,7 @@ public abstract class SigninFragmentBase
                 AccountPickerDialogFragment.create(mSelectedAccountName);
         FragmentTransaction transaction = getChildFragmentManager().beginTransaction();
         transaction.add(dialog, ACCOUNT_PICKER_DIALOG_TAG);
-        transaction.commit();
+        transaction.commitAllowingStateLoss();
     }
 
     private AccountPickerDialogFragment getAccountPickerDialogFragment() {
@@ -533,8 +517,9 @@ public abstract class SigninFragmentBase
                 return;
             }
 
-            // AccountManagerFacade couldn't create intent, use AccountAdder as fallback.
-            AccountAdder.getInstance().addAccount(this, ADD_ACCOUNT_REQUEST_CODE);
+            // AccountManagerFacade couldn't create intent, use SigninUtils to open settings
+            // instead.
+            SigninUtils.openSettingsForAllAccounts(getContext());
         });
     }
 
@@ -548,7 +533,7 @@ public abstract class SigninFragmentBase
             // Found the account name, dismiss the account picker dialog if it is shown.
             AccountPickerDialogFragment accountPickerFragment = getAccountPickerDialogFragment();
             if (accountPickerFragment != null) {
-                accountPickerFragment.dismiss();
+                accountPickerFragment.dismissAllowingStateLoss();
             }
 
             // Wait for the account cache to be updated and select newly-added account.
@@ -602,7 +587,8 @@ public abstract class SigninFragmentBase
 
         mAccountNames = getAccountNames(maybeAccountNames);
         mHasGmsError = mAccountNames == null;
-        if (mAccountNames == null) return;
+        mView.getAcceptButton().setEnabled(!mHasGmsError);
+        if (mHasGmsError) return;
 
         if (mAccountNames.isEmpty()) {
             mSelectedAccountName = null;

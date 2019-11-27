@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "base/bit_cast.h"
+#include "base/containers/checked_iterators.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -58,7 +59,7 @@ std::unique_ptr<Value> CopyListWithoutEmptyChildren(const Value& list) {
   for (const auto& entry : list.GetList()) {
     std::unique_ptr<Value> child_copy = CopyWithoutEmptyChildren(entry);
     if (child_copy)
-      copy.GetList().push_back(std::move(*child_copy));
+      copy.Append(std::move(*child_copy));
   }
   return copy.GetList().empty() ? nullptr
                                 : std::make_unique<Value>(std::move(copy));
@@ -145,6 +146,18 @@ Value Value::FromUniquePtrValue(std::unique_ptr<Value> val) {
 // static
 std::unique_ptr<Value> Value::ToUniquePtrValue(Value val) {
   return std::make_unique<Value>(std::move(val));
+}
+
+// static
+const DictionaryValue& Value::AsDictionaryValue(const Value& val) {
+  CHECK(val.is_dict());
+  return static_cast<const DictionaryValue&>(val);
+}
+
+// static
+const ListValue& Value::AsListValue(const Value& val) {
+  CHECK(val.is_list());
+  return static_cast<const ListValue&>(val);
 }
 
 Value::Value(Value&& that) noexcept {
@@ -234,7 +247,7 @@ Value::Value(const DictStorage& in_dict) : type_(Type::DICTIONARY), dict_() {
 Value::Value(DictStorage&& in_dict) noexcept
     : type_(Type::DICTIONARY), dict_(std::move(in_dict)) {}
 
-Value::Value(const ListStorage& in_list) : type_(Type::LIST), list_() {
+Value::Value(span<const Value> in_list) : type_(Type::LIST), list_() {
   list_.reserve(in_list.size());
   for (const auto& val : in_list)
     list_.emplace_back(val.Clone());
@@ -320,6 +333,11 @@ const std::string& Value::GetString() const {
   return string_value_;
 }
 
+std::string& Value::GetString() {
+  CHECK(is_string());
+  return string_value_;
+}
+
 const Value::BlobStorage& Value::GetBlob() const {
   CHECK(is_blob());
   return binary_value_;
@@ -330,13 +348,96 @@ Value::ListStorage& Value::GetList() {
   return list_;
 }
 
-const Value::ListStorage& Value::GetList() const {
+span<const Value> Value::GetList() const {
   CHECK(is_list());
   return list_;
 }
 
+Value::ListStorage Value::TakeList() {
+  CHECK(is_list());
+  return std::exchange(list_, ListStorage());
+}
+
+void Value::Append(bool value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(int value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(double value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(const char* value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(StringPiece value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(std::string&& value) {
+  CHECK(is_list());
+  list_.emplace_back(std::move(value));
+}
+
+void Value::Append(const char16* value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(StringPiece16 value) {
+  CHECK(is_list());
+  list_.emplace_back(value);
+}
+
+void Value::Append(Value&& value) {
+  CHECK(is_list());
+  list_.emplace_back(std::move(value));
+}
+
+Value::ListStorage::iterator Value::Insert(ListStorage::const_iterator pos,
+                                           Value&& value) {
+  CHECK(is_list());
+  return list_.insert(pos, std::move(value));
+}
+
+CheckedContiguousIterator<Value> Value::Insert(
+    CheckedContiguousConstIterator<Value> pos,
+    Value&& value) {
+  CHECK(is_list());
+  const auto offset = pos - make_span(list_).begin();
+  list_.insert(list_.begin() + offset, std::move(value));
+  return make_span(list_).begin() + offset;
+}
+
+bool Value::EraseListIter(ListStorage::const_iterator iter) {
+  CHECK(is_list());
+  if (iter == list_.end())
+    return false;
+
+  list_.erase(iter);
+  return true;
+}
+
+bool Value::EraseListIter(CheckedContiguousConstIterator<Value> iter) {
+  const auto offset = iter - as_const(*this).GetList().begin();
+  return EraseListIter(list_.begin() + offset);
+}
+
+size_t Value::EraseListValue(const Value& val) {
+  return EraseListValueIf([&val](const Value& other) { return val == other; });
+}
+
 Value* Value::FindKey(StringPiece key) {
-  return const_cast<Value*>(static_cast<const Value*>(this)->FindKey(key));
+  return const_cast<Value*>(as_const(*this).FindKey(key));
 }
 
 const Value* Value::FindKey(StringPiece key) const {
@@ -348,8 +449,7 @@ const Value* Value::FindKey(StringPiece key) const {
 }
 
 Value* Value::FindKeyOfType(StringPiece key, Type type) {
-  return const_cast<Value*>(
-      static_cast<const Value*>(this)->FindKeyOfType(key, type));
+  return const_cast<Value*>(as_const(*this).FindKeyOfType(key, type));
 }
 
 const Value* Value::FindKeyOfType(StringPiece key, Type type) const {
@@ -383,6 +483,11 @@ base::Optional<double> Value::FindDoubleKey(StringPiece key) const {
 
 const std::string* Value::FindStringKey(StringPiece key) const {
   const Value* result = FindKeyOfType(key, Type::STRING);
+  return result ? &result->string_value_ : nullptr;
+}
+
+std::string* Value::FindStringKey(StringPiece key) {
+  Value* result = FindKeyOfType(key, Type::STRING);
   return result ? &result->string_value_ : nullptr;
 }
 
@@ -468,7 +573,7 @@ Optional<Value> Value::ExtractKey(StringPiece key) {
 }
 
 Value* Value::FindPath(StringPiece path) {
-  return const_cast<Value*>(const_cast<const Value*>(this)->FindPath(path));
+  return const_cast<Value*>(as_const(*this).FindPath(path));
 }
 
 const Value* Value::FindPath(StringPiece path) const {
@@ -483,8 +588,7 @@ const Value* Value::FindPath(StringPiece path) const {
 }
 
 Value* Value::FindPathOfType(StringPiece path, Type type) {
-  return const_cast<Value*>(
-      const_cast<const Value*>(this)->FindPathOfType(path, type));
+  return const_cast<Value*>(as_const(*this).FindPathOfType(path, type));
 }
 
 const Value* Value::FindPathOfType(StringPiece path, Type type) const {
@@ -524,6 +628,10 @@ const std::string* Value::FindStringPath(StringPiece path) const {
   if (!cur || !cur->is_string())
     return nullptr;
   return &cur->string_value_;
+}
+
+std::string* Value::FindStringPath(StringPiece path) {
+  return const_cast<std::string*>(as_const(*this).FindStringPath(path));
 }
 
 const Value::BlobStorage* Value::FindBlobPath(StringPiece path) const {
@@ -609,11 +717,11 @@ Optional<Value> Value::ExtractPath(StringPiece path) {
 
 // DEPRECATED METHODS
 Value* Value::FindPath(std::initializer_list<StringPiece> path) {
-  return const_cast<Value*>(const_cast<const Value*>(this)->FindPath(path));
+  return const_cast<Value*>(as_const(*this).FindPath(path));
 }
 
 Value* Value::FindPath(span<const StringPiece> path) {
-  return const_cast<Value*>(const_cast<const Value*>(this)->FindPath(path));
+  return const_cast<Value*>(as_const(*this).FindPath(path));
 }
 
 const Value* Value::FindPath(std::initializer_list<StringPiece> path) const {
@@ -632,13 +740,11 @@ const Value* Value::FindPath(span<const StringPiece> path) const {
 
 Value* Value::FindPathOfType(std::initializer_list<StringPiece> path,
                              Type type) {
-  return const_cast<Value*>(
-      const_cast<const Value*>(this)->FindPathOfType(path, type));
+  return const_cast<Value*>(as_const(*this).FindPathOfType(path, type));
 }
 
 Value* Value::FindPathOfType(span<const StringPiece> path, Type type) {
-  return const_cast<Value*>(
-      const_cast<const Value*>(this)->FindPathOfType(path, type));
+  return const_cast<Value*>(as_const(*this).FindPathOfType(path, type));
 }
 
 const Value* Value::FindPathOfType(std::initializer_list<StringPiece> path,
@@ -800,7 +906,7 @@ bool Value::GetAsString(string16* out_value) const {
 
 bool Value::GetAsString(const Value** out_value) const {
   if (out_value && is_string()) {
-    *out_value = static_cast<const Value*>(this);
+    *out_value = this;
     return true;
   }
   return is_string();
@@ -1198,9 +1304,7 @@ bool DictionaryValue::Get(StringPiece path,
 }
 
 bool DictionaryValue::Get(StringPiece path, Value** out_value)  {
-  return static_cast<const DictionaryValue&>(*this).Get(
-      path,
-      const_cast<const Value**>(out_value));
+  return as_const(*this).Get(path, const_cast<const Value**>(out_value));
 }
 
 bool DictionaryValue::GetBoolean(StringPiece path, bool* bool_value) const {
@@ -1273,8 +1377,7 @@ bool DictionaryValue::GetBinary(StringPiece path,
 }
 
 bool DictionaryValue::GetBinary(StringPiece path, Value** out_value) {
-  return static_cast<const DictionaryValue&>(*this).GetBinary(
-      path, const_cast<const Value**>(out_value));
+  return as_const(*this).GetBinary(path, const_cast<const Value**>(out_value));
 }
 
 bool DictionaryValue::GetDictionary(StringPiece path,
@@ -1292,9 +1395,8 @@ bool DictionaryValue::GetDictionary(StringPiece path,
 
 bool DictionaryValue::GetDictionary(StringPiece path,
                                     DictionaryValue** out_value) {
-  return static_cast<const DictionaryValue&>(*this).GetDictionary(
-      path,
-      const_cast<const DictionaryValue**>(out_value));
+  return as_const(*this).GetDictionary(
+      path, const_cast<const DictionaryValue**>(out_value));
 }
 
 bool DictionaryValue::GetList(StringPiece path,
@@ -1311,9 +1413,8 @@ bool DictionaryValue::GetList(StringPiece path,
 }
 
 bool DictionaryValue::GetList(StringPiece path, ListValue** out_value) {
-  return static_cast<const DictionaryValue&>(*this).GetList(
-      path,
-      const_cast<const ListValue**>(out_value));
+  return as_const(*this).GetList(path,
+                                 const_cast<const ListValue**>(out_value));
 }
 
 bool DictionaryValue::GetWithoutPathExpansion(StringPiece key,
@@ -1330,9 +1431,8 @@ bool DictionaryValue::GetWithoutPathExpansion(StringPiece key,
 
 bool DictionaryValue::GetWithoutPathExpansion(StringPiece key,
                                               Value** out_value) {
-  return static_cast<const DictionaryValue&>(*this).GetWithoutPathExpansion(
-      key,
-      const_cast<const Value**>(out_value));
+  return as_const(*this).GetWithoutPathExpansion(
+      key, const_cast<const Value**>(out_value));
 }
 
 bool DictionaryValue::GetBooleanWithoutPathExpansion(StringPiece key,
@@ -1398,11 +1498,8 @@ bool DictionaryValue::GetDictionaryWithoutPathExpansion(
 bool DictionaryValue::GetDictionaryWithoutPathExpansion(
     StringPiece key,
     DictionaryValue** out_value) {
-  const DictionaryValue& const_this =
-      static_cast<const DictionaryValue&>(*this);
-  return const_this.GetDictionaryWithoutPathExpansion(
-          key,
-          const_cast<const DictionaryValue**>(out_value));
+  return as_const(*this).GetDictionaryWithoutPathExpansion(
+      key, const_cast<const DictionaryValue**>(out_value));
 }
 
 bool DictionaryValue::GetListWithoutPathExpansion(
@@ -1421,10 +1518,8 @@ bool DictionaryValue::GetListWithoutPathExpansion(
 
 bool DictionaryValue::GetListWithoutPathExpansion(StringPiece key,
                                                   ListValue** out_value) {
-  return
-      static_cast<const DictionaryValue&>(*this).GetListWithoutPathExpansion(
-          key,
-          const_cast<const ListValue**>(out_value));
+  return as_const(*this).GetListWithoutPathExpansion(
+      key, const_cast<const ListValue**>(out_value));
 }
 
 bool DictionaryValue::Remove(StringPiece path,
@@ -1520,7 +1615,7 @@ std::unique_ptr<ListValue> ListValue::From(std::unique_ptr<Value> value) {
 }
 
 ListValue::ListValue() : Value(Type::LIST) {}
-ListValue::ListValue(const ListStorage& in_list) : Value(in_list) {}
+ListValue::ListValue(span<const Value> in_list) : Value(in_list) {}
 ListValue::ListValue(ListStorage&& in_list) noexcept
     : Value(std::move(in_list)) {}
 
@@ -1554,9 +1649,7 @@ bool ListValue::Get(size_t index, const Value** out_value) const {
 }
 
 bool ListValue::Get(size_t index, Value** out_value) {
-  return static_cast<const ListValue&>(*this).Get(
-      index,
-      const_cast<const Value**>(out_value));
+  return as_const(*this).Get(index, const_cast<const Value**>(out_value));
 }
 
 bool ListValue::GetBoolean(size_t index, bool* bool_value) const {
@@ -1613,9 +1706,8 @@ bool ListValue::GetDictionary(size_t index,
 }
 
 bool ListValue::GetDictionary(size_t index, DictionaryValue** out_value) {
-  return static_cast<const ListValue&>(*this).GetDictionary(
-      index,
-      const_cast<const DictionaryValue**>(out_value));
+  return as_const(*this).GetDictionary(
+      index, const_cast<const DictionaryValue**>(out_value));
 }
 
 bool ListValue::GetList(size_t index, const ListValue** out_value) const {
@@ -1631,9 +1723,8 @@ bool ListValue::GetList(size_t index, const ListValue** out_value) const {
 }
 
 bool ListValue::GetList(size_t index, ListValue** out_value) {
-  return static_cast<const ListValue&>(*this).GetList(
-      index,
-      const_cast<const ListValue**>(out_value));
+  return as_const(*this).GetList(index,
+                                 const_cast<const ListValue**>(out_value));
 }
 
 bool ListValue::Remove(size_t index, std::unique_ptr<Value>* out_value) {

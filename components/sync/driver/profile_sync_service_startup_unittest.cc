@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync/base/pref_names.h"
@@ -59,8 +59,7 @@ ACTION_P3(InvokeOnConfigureDone, sync_service, error_callback, result) {
 class ProfileSyncServiceStartupTest : public testing::Test {
  public:
   ProfileSyncServiceStartupTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME),
+      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
         sync_prefs_(profile_sync_service_bundle_.pref_service()) {
     profile_sync_service_bundle_.identity_test_env()
         ->SetAutomaticIssueOfAccessTokens(true);
@@ -138,11 +137,11 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   }
 
   void FastForwardUntilNoTasksRemain() {
-    scoped_task_environment_.FastForwardUntilNoTasksRemain();
+    task_environment_.FastForwardUntilNoTasksRemain();
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ProfileSyncServiceBundle profile_sync_service_bundle_;
   SyncPrefs sync_prefs_;
   std::unique_ptr<ProfileSyncService> sync_service_;
@@ -218,7 +217,8 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
   EXPECT_CALL(*data_type_manager, Configure(_, _));
   ON_CALL(*data_type_manager, state())
       .WillByDefault(Return(DataTypeManager::CONFIGURED));
-  sync_service()->GetUserSettings()->SetFirstSetupComplete();
+  sync_service()->GetUserSettings()->SetFirstSetupComplete(
+      syncer::SyncFirstSetupCompleteSource::BASIC_FLOW);
 
   // This should have fully enabled sync.
   EXPECT_TRUE(sync_service()->IsSyncFeatureEnabled());
@@ -599,7 +599,8 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceFirstTime) {
 
   // Note: Deferred startup is only enabled if SESSIONS is among the preferred
   // data types.
-  CreateSyncService(ProfileSyncService::MANUAL_START, ModelTypeSet(SESSIONS));
+  CreateSyncService(ProfileSyncService::MANUAL_START,
+                    ModelTypeSet(SESSIONS, TYPED_URLS));
   sync_service()->Initialize();
 
   // There is no signed-in user, so also nobody has decided that Sync should be
@@ -636,6 +637,7 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceFirstTime) {
                                       WeakHandle<DataTypeDebugInfoListener>(),
                                       "test-guid", "test-birthday",
                                       "test-bag-of-chips",
+                                      /*last_keystore_key=*/std::string(),
                                       /*success=*/true);
   ASSERT_TRUE(sync_service()->IsEngineInitialized());
   EXPECT_EQ(SyncService::TransportState::PENDING_DESIRED_CONFIGURATION,
@@ -646,7 +648,8 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceFirstTime) {
   // configuring the data types. Just marking the initial setup as complete
   // isn't enough though, because setup is still considered in progress (we
   // haven't released the setup-in-progress handle).
-  sync_service()->GetUserSettings()->SetFirstSetupComplete();
+  sync_service()->GetUserSettings()->SetFirstSetupComplete(
+      syncer::SyncFirstSetupCompleteSource::BASIC_FLOW);
   EXPECT_EQ(SyncService::TransportState::PENDING_DESIRED_CONFIGURATION,
             sync_service()->GetTransportState());
   EXPECT_TRUE(sync_service()->IsSyncFeatureEnabled());
@@ -693,7 +696,8 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceNthTime) {
 
   // Note: Deferred startup is only enabled if SESSIONS is among the preferred
   // data types.
-  CreateSyncService(ProfileSyncService::MANUAL_START, ModelTypeSet(SESSIONS));
+  CreateSyncService(ProfileSyncService::MANUAL_START,
+                    ModelTypeSet(SESSIONS, TYPED_URLS));
   sync_service()->Initialize();
 
   // Nothing is preventing Sync from starting, but it should be deferred so as
@@ -716,6 +720,7 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceNthTime) {
                                       WeakHandle<DataTypeDebugInfoListener>(),
                                       "test-guid", "test-birthday",
                                       "test-bag-of-chips",
+                                      /*last_keystore_key=*/std::string(),
                                       /*success=*/true);
   ON_CALL(*data_type_manager, state())
       .WillByDefault(Return(DataTypeManager::CONFIGURING));

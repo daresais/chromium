@@ -13,7 +13,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "remoting/signaling/jid_util.h"
+#include "remoting/signaling/signaling_id_util.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 #include "third_party/libjingle_xmpp/xmpp/constants.h"
 
@@ -31,8 +31,7 @@ void FakeSignalStrategy::Connect(FakeSignalStrategy* peer1,
 FakeSignalStrategy::FakeSignalStrategy(const SignalingAddress& address)
     : main_thread_(base::ThreadTaskRunnerHandle::Get()),
       address_(address),
-      last_id_(0),
-      weak_factory_(this) {
+      last_id_(0) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 

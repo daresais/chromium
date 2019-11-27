@@ -10,7 +10,7 @@
 #include "chrome/common/extensions/extension_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/version_info/channel.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/features/feature_channel.h"
@@ -51,7 +51,7 @@ class ExtensionActionManagerTest
   ExtensionRegistry* registry() { return registry_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   ExtensionRegistry* registry_;
   ExtensionActionManager* manager_;
 
@@ -148,7 +148,7 @@ TEST_P(ExtensionActionManagerTest, TestDontOverrideIfDefaultsProvided) {
   EXPECT_EQ("Action!", action->GetTitle(ExtensionAction::kDefaultTabId));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          ExtensionActionManagerTest,
                          testing::Values(ActionInfo::TYPE_ACTION,
                                          ActionInfo::TYPE_BROWSER,

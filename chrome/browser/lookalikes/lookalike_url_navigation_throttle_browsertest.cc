@@ -34,13 +34,9 @@
 
 namespace {
 
-using lookalikes::LookalikeUrlNavigationThrottle;
-using lookalikes::LookalikeUrlService;
 using security_interstitials::MetricsHelper;
 using security_interstitials::SecurityInterstitialCommand;
 using UkmEntry = ukm::builders::LookalikeUrl_NavigationSuggestion;
-using NavigationSuggestionEvent =
-    lookalikes::LookalikeUrlNavigationThrottle::NavigationSuggestionEvent;
 
 using MatchType = LookalikeUrlInterstitialPage::MatchType;
 using UserAction = LookalikeUrlInterstitialPage::UserAction;
@@ -258,10 +254,12 @@ class LookalikeUrlNavigationThrottleBrowserTest
     if (!ui_enabled()) {
       return false;
     }
-    if (expected_event == NavigationSuggestionEvent::kMatchSiteEngagement) {
+    if (expected_event == LookalikeUrlNavigationThrottle::
+                              NavigationSuggestionEvent::kMatchSiteEngagement) {
       return true;
     }
-    if (expected_event == NavigationSuggestionEvent::kMatchTopSite &&
+    if (expected_event == LookalikeUrlNavigationThrottle::
+                              NavigationSuggestionEvent::kMatchTopSite &&
         ui_status() == UIStatus::kEnabledForSiteEngagementAndTopDomains) {
       return true;
     }
@@ -398,7 +396,7 @@ class LookalikeUrlInterstitialPageBrowserTest
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     LookalikeUrlNavigationThrottleBrowserTest,
     ::testing::Values(UIStatus::kDisabled,
                       UIStatus::kEnabledForSiteEngagement,
@@ -443,8 +441,28 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
 
   TestMetricsRecordedAndMaybeInterstitialShown(
       browser(), kNavigatedUrl, kExpectedSuggestedUrl,
-      NavigationSuggestionEvent::kMatchTopSite);
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::kMatchTopSite);
 
+  CheckUkm({kNavigatedUrl}, "MatchType", MatchType::kTopSite);
+}
+
+// Similar to Idn_TopDomain_Match but the domain is not in top 500. Should not
+// show an interstitial, but should still record metrics.
+IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
+                       Idn_TopDomain_Match_Not500) {
+  const GURL kNavigatedUrl = GetURL("googlé.sk");
+  // Even if the navigated site has a low engagement score, it should be
+  // considered for lookalike suggestions.
+  SetEngagementScore(browser(), kNavigatedUrl, kLowEngagement);
+
+  base::HistogramTester histograms;
+  TestInterstitialNotShown(browser(), kNavigatedUrl);
+  histograms.ExpectTotalCount(LookalikeUrlNavigationThrottle::kHistogramName,
+                              1);
+  histograms.ExpectBucketCount(
+      LookalikeUrlNavigationThrottle::kHistogramName,
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::kMatchTopSite,
+      1);
   CheckUkm({kNavigatedUrl}, "MatchType", MatchType::kTopSite);
 }
 
@@ -462,7 +480,7 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
 
   TestMetricsRecordedAndMaybeInterstitialShown(
       browser(), kNavigatedUrl, kExpectedSuggestedUrl,
-      NavigationSuggestionEvent::kMatchTopSite);
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::kMatchTopSite);
 
   CheckUkm({kNavigatedUrl}, "MatchType", MatchType::kTopSite);
 }
@@ -521,7 +539,9 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
                               1);
   histograms.ExpectBucketCount(
       LookalikeUrlNavigationThrottle::kHistogramName,
-      NavigationSuggestionEvent::kMatchEditDistanceSiteEngagement, 1);
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+          kMatchEditDistanceSiteEngagement,
+      1);
 
   CheckUkm({kNavigatedUrl}, "MatchType",
            MatchType::kEditDistanceSiteEngagement);
@@ -544,9 +564,11 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
   TestInterstitialNotShown(browser(), kNavigatedUrl);
   histograms.ExpectTotalCount(LookalikeUrlNavigationThrottle::kHistogramName,
                               1);
-  histograms.ExpectBucketCount(LookalikeUrlNavigationThrottle::kHistogramName,
-                               NavigationSuggestionEvent::kMatchEditDistance,
-                               1);
+  histograms.ExpectBucketCount(
+      LookalikeUrlNavigationThrottle::kHistogramName,
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+          kMatchEditDistance,
+      1);
 
   CheckUkm({kNavigatedUrl}, "MatchType", MatchType::kEditDistance);
 }
@@ -558,8 +580,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
   TestInterstitialNotShown(browser(), GetURL("google.com.tw"));
   CheckNoUkm();
 
-  // Matches bing.com but is a top domain itself.
-  TestInterstitialNotShown(browser(), GetURL("ning.com"));
+  // Matches academia.edu but is a top domain itself.
+  TestInterstitialNotShown(browser(), GetURL("academic.ru"));
   CheckNoUkm();
 
   // Matches ask.com but is too short.
@@ -590,7 +612,7 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
   CheckNoUkm();
 }
 
-// Test that the heuristics are triggered even with net errors.
+// Test that the heuristics are not triggered with net errors.
 IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
                        NetError_SiteEngagement_Interstitial) {
   // Create a test server that returns invalid responses.
@@ -603,10 +625,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
   // Advance clock to force a fetch of new engaged sites list.
   test_clock()->Advance(base::TimeDelta::FromHours(1));
 
-  TestMetricsRecordedAndMaybeInterstitialShown(
-      browser(), custom_test_server.GetURL("sité1.com", "/title1.html"),
-      custom_test_server.GetURL("site1.com", "/"),
-      NavigationSuggestionEvent::kMatchSiteEngagement);
+  TestInterstitialNotShown(
+      browser(), custom_test_server.GetURL("sité1.com", "/title1.html"));
 }
 
 // Same as NetError_SiteEngagement_Interstitial, but triggered by a top domain.
@@ -617,61 +637,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
   custom_test_server.RegisterRequestHandler(
       base::BindRepeating(&NetworkErrorResponseHandler));
   ASSERT_TRUE(custom_test_server.Start());
-
-  TestMetricsRecordedAndMaybeInterstitialShown(
-      browser(), GetURL("googlé.com"), GetURLWithoutPath("google.com"),
-      NavigationSuggestionEvent::kMatchTopSite);
-}
-
-// Verify that, after dismissing a lookalike warning when enabled, the user
-// sees a net error when applicable.
-IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
-                       NetError_SiteEngagement_NetErrorAfterDismiss) {
-  // Create a test server that returns invalid responses.
-  net::EmbeddedTestServer custom_test_server;
-  custom_test_server.RegisterRequestHandler(
-      base::BindRepeating(&NetworkErrorResponseHandler));
-  ASSERT_TRUE(custom_test_server.Start());
-
-  SetEngagementScore(browser(), GURL("http://site1.com"), kHighEngagement);
-  // Advance clock to force a fetch of new engaged sites list.
-  test_clock()->Advance(base::TimeDelta::FromHours(1));
-  NavigateToURLSync(browser(),
-                    custom_test_server.GetURL("sité1.com", "/title1.html"));
-  if (ui_enabled()) {
-    SendInterstitialCommandSync(browser(),
-                                SecurityInterstitialCommand::CMD_PROCEED);
-  }
-
-  EXPECT_GE(ui_test_utils::FindInPage(
-                browser()->tab_strip_model()->GetActiveWebContents(),
-                base::ASCIIToUTF16("ERR_EMPTY_RESPONSE"), true, true, nullptr,
-                nullptr),
-            1);
-}
-
-// Same as NetError_SiteEngagement_NetErrorAfterDismiss, but navigates to a top
-// domain instead.
-IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
-                       NetError_TopDomain_NetErrorAfterDismiss) {
-  // Create a test server that returns invalid responses.
-  net::EmbeddedTestServer custom_test_server;
-  custom_test_server.RegisterRequestHandler(
-      base::BindRepeating(&NetworkErrorResponseHandler));
-  ASSERT_TRUE(custom_test_server.Start());
-
-  NavigateToURLSync(browser(),
-                    custom_test_server.GetURL("googlé.com", "/title1.html"));
-  if (ShouldExpectInterstitial(NavigationSuggestionEvent::kMatchTopSite)) {
-    SendInterstitialCommandSync(browser(),
-                                SecurityInterstitialCommand::CMD_PROCEED);
-  }
-
-  EXPECT_GE(ui_test_utils::FindInPage(
-                browser()->tab_strip_model()->GetActiveWebContents(),
-                base::ASCIIToUTF16("ERR_EMPTY_RESPONSE"), true, true, nullptr,
-                nullptr),
-            1);
+  TestInterstitialNotShown(browser(),
+                           custom_test_server.GetURL("googlé.com", "/"));
 }
 
 // Navigate to a domain whose visual representation looks like a domain with a
@@ -726,11 +693,44 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
 
     TestMetricsRecordedAndMaybeInterstitialShown(
         browser(), kNavigatedUrl, kExpectedSuggestedUrl,
-        NavigationSuggestionEvent::kMatchSiteEngagement);
+        LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+            kMatchSiteEngagement);
 
     ukm_urls.push_back(kNavigatedUrl);
     CheckUkm(ukm_urls, "MatchType", MatchType::kSiteEngagement);
   }
+}
+
+// The site redirects to the matched site, this should not show
+// an interstitial.
+IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
+                       Idn_SiteEngagement_SafeRedirect) {
+  const GURL kExpectedSuggestedUrl = GetURLWithoutPath("site1.com");
+  const GURL kNavigatedUrl = embedded_test_server()->GetURL(
+      "sité1.com", "/server-redirect?" + kExpectedSuggestedUrl.spec());
+  SetEngagementScore(browser(), kNavigatedUrl, kLowEngagement);
+  SetEngagementScore(browser(), kExpectedSuggestedUrl, kHighEngagement);
+
+  TestInterstitialNotShown(browser(), kNavigatedUrl);
+}
+
+// The site redirects to the matched site, but the redirect chain has more than
+// two redirects.
+// TODO(meacer): Consider allowing this case.
+IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
+                       Idn_SiteEngagement_UnsafeRedirect) {
+  const GURL kExpectedSuggestedUrl = GetURLWithoutPath("site1.com");
+  const GURL kMidUrl = embedded_test_server()->GetURL(
+      "sité1.com", "/server-redirect?" + kExpectedSuggestedUrl.spec());
+  const GURL kNavigatedUrl = embedded_test_server()->GetURL(
+      "other-site.test", "/server-redirect?" + kMidUrl.spec());
+
+  SetEngagementScore(browser(), kNavigatedUrl, kLowEngagement);
+  SetEngagementScore(browser(), kExpectedSuggestedUrl, kHighEngagement);
+  TestMetricsRecordedAndMaybeInterstitialShown(
+      browser(), kNavigatedUrl, kExpectedSuggestedUrl,
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+          kMatchSiteEngagement);
 }
 
 // Tests negative examples for all heuristics.
@@ -772,7 +772,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
 
   TestMetricsRecordedAndMaybeInterstitialShown(
       browser(), kNavigatedUrl, kExpectedSuggestedUrl,
-      NavigationSuggestionEvent::kMatchSiteEngagement);
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+          kMatchSiteEngagement);
 
   CheckUkm({kNavigatedUrl}, "MatchType", MatchType::kSiteEngagement);
 }
@@ -801,7 +802,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
     test_clock()->Advance(base::TimeDelta::FromHours(1));
     TestMetricsRecordedAndMaybeInterstitialShown(
         browser(), kNavigatedUrl, kEngagedUrl,
-        NavigationSuggestionEvent::kMatchSiteEngagement);
+        LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+            kMatchSiteEngagement);
 
     ukm_urls.push_back(kNavigatedUrl);
     CheckUkm(ukm_urls, "MatchType", MatchType::kSiteEngagement);
@@ -827,7 +829,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
 
     TestMetricsRecordedAndMaybeInterstitialShown(
         incognito, kNavigatedUrl, kEngagedUrl,
-        NavigationSuggestionEvent::kMatchSiteEngagement);
+        LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+            kMatchSiteEngagement);
     ukm_urls.push_back(kNavigatedUrl);
     CheckUkm(ukm_urls, "MatchType", MatchType::kSiteEngagement);
   }
@@ -907,7 +910,8 @@ IN_PROC_BROWSER_TEST_P(LookalikeUrlNavigationThrottleBrowserTest,
 
   TestHistogramEventsRecordedWhenInterstitialIgnored(
       browser(), &histograms, kNavigatedUrl,
-      NavigationSuggestionEvent::kMatchSiteEngagement);
+      LookalikeUrlNavigationThrottle::NavigationSuggestionEvent::
+          kMatchSiteEngagement);
 
   CheckUkm({kNavigatedUrl}, "MatchType", MatchType::kSiteEngagement);
 }
@@ -1049,21 +1053,29 @@ IN_PROC_BROWSER_TEST_F(LookalikeUrlInterstitialPageBrowserTest,
 // Regression test for crbug/941886.
 IN_PROC_BROWSER_TEST_F(LookalikeUrlInterstitialPageBrowserTest,
                        RefreshDoesntDismiss) {
-  // Verify it works when the lookalike domain is the first in the chain
+  // Verify it works when the lookalike domain is the first in the chain.
   const GURL kNavigatedUrl =
       GetLongRedirect("googlé.com", "example.net", "example.com");
-
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
 
   SetEngagementScore(browser(), kNavigatedUrl, kLowEngagement);
   LoadAndCheckInterstitialAt(browser(), kNavigatedUrl);
 
-  content::TestNavigationObserver navigation_observer(web_contents);
-  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
-  navigation_observer.Wait();
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
 
-  EXPECT_EQ(LookalikeUrlInterstitialPage::kTypeForTesting,
-            GetInterstitialType(web_contents));
-  EXPECT_FALSE(IsUrlShowing(browser()));
+  // Reload the interstitial twice. Should still work.
+  for (size_t i = 0; i < 2; i++) {
+    content::TestNavigationObserver navigation_observer(web_contents);
+    chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
+    navigation_observer.Wait();
+
+    EXPECT_EQ(LookalikeUrlInterstitialPage::kTypeForTesting,
+              GetInterstitialType(web_contents));
+    EXPECT_FALSE(IsUrlShowing(browser()));
+  }
+
+  // Go to the affected site directly. This should not result in an
+  // interstitial.
+  TestInterstitialNotShown(browser(),
+                           embedded_test_server()->GetURL("example.net", "/"));
 }

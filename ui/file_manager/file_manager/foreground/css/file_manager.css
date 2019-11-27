@@ -100,6 +100,7 @@ a:focus {
   display: flex;
   flex: 1 1 auto;
   margin-top: 8px;
+  position: relative;
 }
 
 .dialog-navigation-list-footer {
@@ -108,23 +109,23 @@ a:focus {
   flex-direction: column;
 }
 
-/* A vertical splitter between the roots list and the file list. It is actually
-   a transparent area centered on the roots list right border.*/
-div.splitter {
-  cursor: col-resize;
-  flex: none;
-  margin-inline-end: -3px;
-  margin-inline-start: -3px;
-  position: relative;
-  width: 6px;
-  z-index: 500;  /* Must be below the contextmenu (600). */
-}
-
 #directory-tree {
   bottom: 0;
   flex: none;
   left: 0;
-  min-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: absolute;   /* TODO(adanilo): crbug.com/212268 still needed? */
+  right: 0;
+  top: 0;
+}
+
+html[class*='col-resize'] #directory-tree {
+  overflow-y: hidden;
+}
+
+#directory-tree .tree-item[section-start] {
+  border-top: 1px solid rgba(0, 0, 0, 0.10);
 }
 
 #directory-tree .tree-row {
@@ -134,21 +135,6 @@ div.splitter {
   display: flex;
   height: 40px;
   padding: 0 3px;
-}
-
-.tree-item > .ejectable {
-  position: inherit;
-}
-
-.ejectable > span.label {
-  left: 52px;
-  position: absolute;
-  width: calc(100% - 92px);
-}
-
-#directory-tree .tree-row > .button {
-  display: flex;
-  min-width: 0;
 }
 
 #directory-tree .tree-row > .expand-icon {
@@ -223,35 +209,56 @@ div.splitter {
 }
 
 #directory-tree .tree-row > .align-right-icon {
+  --iron-icon-height: 16px;
+  --iron-icon-width: 16px;
   border-style: none;
   cursor: pointer;
   flex: none;
   height: 40px;
-  position: absolute;
-  right: 0;
+  position: relative;
   width: 40px;
-  z-index: 1;  /* Make sure the icon is on upper layer than paper-ripple. */
+  z-index: 1;
 }
 
-#directory-tree .tree-row > .external-link-icon {
-  background: url(../images/files/ui/external_link.svg) no-repeat center;
+#directory-tree .tree-row > .external-link-icon iron-icon {
+  padding: 12px;
 }
 
 #directory-tree .tree-row > .root-eject {
-  background: -webkit-image-set(
-      url(../images/files/ui/eject.png) 1x,
-      url(../images/files/ui/2x/eject.png) 2x) no-repeat center;
+  --active-bg: none;  /* prevent dark-mode activation color */
+  --text-color: currentColor;
+  box-shadow: none;
+  min-width: 40px;
+  padding: 12px;
 }
 
-#directory-tree .tree-row[selected] > .root-eject {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/eject_active.png) 1x,
-      url(../images/files/ui/2x/eject_active.png) 2x);
+html[class*='col-resize'] #directory-tree .tree-row > .root-eject:hover {
+  --hover-bg-color: none;
+}
+
+#directory-tree .tree-row > .root-eject:focus {
+  outline: 1px auto rgb(77, 144, 254);
+}
+
+#directory-tree .tree-row > .root-eject:active {
+  border-radius: 20px;
+  outline-width: 0;
 }
 
 #directory-tree .root-item[disabled] {
   opacity: 0.5;
   pointer-events: none;
+}
+
+/* A vertical splitter between the directory tree and the file list. It is
+   a transparent area centered on the directory tree right border.*/
+div.splitter {
+  cursor: col-resize;
+  flex: none;
+  margin: 0 -3px;
+  position: relative;
+  width: 6px;
+  z-index: 500;  /* Must be below the contextmenu (600). */
 }
 
 /* Breadcrumbs and things under the title but above the list view. */
@@ -462,6 +469,10 @@ body.check-select #gear-button {
 
 body:not(.check-select) #selection-menu-button {
   display: none;
+}
+
+.cloud-import-combo-button {
+  position: relative;
 }
 
 .cloud-import-combo-button > .buttons {
@@ -1014,6 +1025,7 @@ body.check-select #read-only-indicator {
   flex: auto;
   flex-direction: column;
   min-height: 0;
+  outline: none;
 }
 
 #detail-table > list,
@@ -1728,6 +1740,12 @@ body.check-select #list-container list li[selected] .detail-thumbnail
       url(../images/files/ui/2x/person_add.png) 2x);
 }
 
+cr-menu-item[command='#install-new-extension'] .icon.start {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/store.png) 1x,
+      url(../images/files/ui/2x/store.png) 2x);
+}
+
 #action-bar {
   display: flex;
   flex: none;
@@ -1755,7 +1773,7 @@ body:not([type='saveas-file']) #filename-input-box {
 
 body[type='folder'] .file,
 body[type='upload-folder'] .file,
-.dialog-container[connection='offline'] .dim-offline,
+.dialog-container[connection='OFFLINE'] .dim-offline,
 body[block-hosted-docs] .file.dim-hosted {
   opacity: 0.4;
 }
@@ -2160,14 +2178,6 @@ list.autocomplete-suggestions > [lead] {
   position: absolute;
   right: 24px;
   z-index: 502; /* Above splitter, but below quickview. */
-}
-
-.files-vertical-padder-8 {
-  height: 8px;
-}
-
-#completed-panel {
-  padding-bottom: 8px;
 }
 
 .signals-overscroll {

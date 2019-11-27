@@ -139,20 +139,6 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
   return Take(ScopedFDPair(std::move(handle), ScopedFD()), mode, size, guid);
 }
 
-// static
-PlatformSharedMemoryRegion
-PlatformSharedMemoryRegion::TakeFromSharedMemoryHandle(
-    const SharedMemoryHandle& handle,
-    Mode mode) {
-  CHECK(mode == Mode::kReadOnly || mode == Mode::kUnsafe);
-  if (!handle.IsValid())
-    return {};
-
-  return Take(
-      base::subtle::ScopedFDPair(ScopedFD(handle.GetHandle()), ScopedFD()),
-      mode, handle.GetSize(), handle.GetGUID());
-}
-
 FDPair PlatformSharedMemoryRegion::GetPlatformHandle() const {
   return handle_.get();
 }
@@ -267,7 +253,8 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
   }
 
   FilePath path;
-  File shm_file(CreateAndOpenFdForTemporaryFileInDir(directory, &path));
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(directory, &path);
+  File shm_file(fd.release());
 
   if (!shm_file.IsValid()) {
     LogCreateError(

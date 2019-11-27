@@ -16,8 +16,8 @@ import android.view.MenuItem;
 import org.chromium.base.BuildInfo;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
-import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreferenceCompat;
-import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegateCompat;
+import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
+import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
@@ -39,7 +39,7 @@ public class PrivacyPreferences
     private static final String PREF_DO_NOT_TRACK = "do_not_track";
     private static final String PREF_SYNC_AND_SERVICES_LINK = "sync_and_services_link";
 
-    private ManagedPreferenceDelegateCompat mManagedPreferenceDelegate;
+    private ManagedPreferenceDelegate mManagedPreferenceDelegate;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -48,17 +48,17 @@ public class PrivacyPreferences
         PreferenceUtils.addPreferencesFromResource(this, R.xml.privacy_preferences);
         getActivity().setTitle(R.string.prefs_privacy);
         setHasOptionsMenu(true);
-        PrefServiceBridge prefServiceBridge = PrefServiceBridge.getInstance();
 
         mManagedPreferenceDelegate = createManagedPreferenceDelegate();
 
-        ChromeBaseCheckBoxPreferenceCompat canMakePaymentPref =
-                (ChromeBaseCheckBoxPreferenceCompat) findPreference(PREF_CAN_MAKE_PAYMENT);
+        ChromeBaseCheckBoxPreference canMakePaymentPref =
+                (ChromeBaseCheckBoxPreference) findPreference(PREF_CAN_MAKE_PAYMENT);
         canMakePaymentPref.setOnPreferenceChangeListener(this);
 
-        ChromeBaseCheckBoxPreferenceCompat networkPredictionPref =
-                (ChromeBaseCheckBoxPreferenceCompat) findPreference(PREF_NETWORK_PREDICTIONS);
-        networkPredictionPref.setChecked(prefServiceBridge.getNetworkPredictionEnabled());
+        ChromeBaseCheckBoxPreference networkPredictionPref =
+                (ChromeBaseCheckBoxPreference) findPreference(PREF_NETWORK_PREDICTIONS);
+        networkPredictionPref.setChecked(
+                PrivacyPreferencesManager.getInstance().getNetworkPredictionEnabled());
         networkPredictionPref.setOnPreferenceChangeListener(this);
         networkPredictionPref.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
 
@@ -81,7 +81,7 @@ public class PrivacyPreferences
             PrefServiceBridge.getInstance().setBoolean(
                     Pref.CAN_MAKE_PAYMENT_ENABLED, (boolean) newValue);
         } else if (PREF_NETWORK_PREDICTIONS.equals(key)) {
-            PrefServiceBridge.getInstance().setNetworkPredictionEnabled((boolean) newValue);
+            PrivacyPreferencesManager.getInstance().setNetworkPredictionEnabled((boolean) newValue);
         }
 
         return true;
@@ -99,9 +99,6 @@ public class PrivacyPreferences
     public void updateSummaries() {
         PrefServiceBridge prefServiceBridge = PrefServiceBridge.getInstance();
 
-        CharSequence textOn = getActivity().getResources().getText(R.string.text_on);
-        CharSequence textOff = getActivity().getResources().getText(R.string.text_off);
-
         CheckBoxPreference canMakePaymentPref =
                 (CheckBoxPreference) findPreference(PREF_CAN_MAKE_PAYMENT);
         if (canMakePaymentPref != null) {
@@ -111,7 +108,9 @@ public class PrivacyPreferences
 
         Preference doNotTrackPref = findPreference(PREF_DO_NOT_TRACK);
         if (doNotTrackPref != null) {
-            doNotTrackPref.setSummary(prefServiceBridge.isDoNotTrackEnabled() ? textOn : textOff);
+            doNotTrackPref.setSummary(prefServiceBridge.getBoolean(Pref.ENABLE_DO_NOT_TRACK)
+                            ? R.string.text_on
+                            : R.string.text_off);
         }
 
         Preference usageStatsPref = findPreference(PREF_USAGE_STATS);
@@ -134,12 +133,11 @@ public class PrivacyPreferences
         }
     }
 
-    private ManagedPreferenceDelegateCompat createManagedPreferenceDelegate() {
+    private ManagedPreferenceDelegate createManagedPreferenceDelegate() {
         return preference -> {
             String key = preference.getKey();
-            PrefServiceBridge prefs = PrefServiceBridge.getInstance();
             if (PREF_NETWORK_PREDICTIONS.equals(key)) {
-                return prefs.isNetworkPredictionManaged();
+                return PrivacyPreferencesManager.getInstance().isNetworkPredictionManaged();
             }
             return false;
         };
@@ -157,9 +155,8 @@ public class PrivacyPreferences
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == R.id.menu_id_targeted_help) {
-            HelpAndFeedback.getInstance(getActivity())
-                    .show(getActivity(), getString(R.string.help_context_privacy),
-                            Profile.getLastUsedProfile(), null);
+            HelpAndFeedback.getInstance().show(getActivity(),
+                    getString(R.string.help_context_privacy), Profile.getLastUsedProfile(), null);
             return true;
         }
         return false;

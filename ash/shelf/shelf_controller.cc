@@ -10,7 +10,6 @@
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -26,7 +25,6 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
-#include "ui/message_center/message_center.h"
 
 namespace ash {
 
@@ -102,8 +100,7 @@ void SetShelfBehaviorsFromPrefs() {
 
 ShelfController::ShelfController()
     : is_notification_indicator_enabled_(
-          features::IsNotificationIndicatorEnabled()),
-      message_center_observer_(this) {
+          features::IsNotificationIndicatorEnabled()) {
   ShelfModel::SetInstance(&model_);
 
   Shell::Get()->session_controller()->AddObserver(this);
@@ -131,16 +128,14 @@ void ShelfController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   // per-display behaviors.
   registry->RegisterStringPref(
       prefs::kShelfAutoHideBehavior, kShelfAutoHideBehaviorNever,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterStringPref(prefs::kShelfAutoHideBehaviorLocal,
-                               std::string(), PrefRegistry::PUBLIC);
+                               std::string());
   registry->RegisterStringPref(
       prefs::kShelfAlignment, kShelfAlignmentBottom,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterStringPref(prefs::kShelfAlignmentLocal, std::string(),
-                               PrefRegistry::PUBLIC);
-  registry->RegisterDictionaryPref(prefs::kShelfPreferences,
-                                   PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+  registry->RegisterStringPref(prefs::kShelfAlignmentLocal, std::string());
+  registry->RegisterDictionaryPref(prefs::kShelfPreferences);
 }
 
 void ShelfController::OnActiveUserPrefServiceChanged(
@@ -191,30 +186,9 @@ void ShelfController::OnTabletModeEnded() {
 }
 
 void ShelfController::OnDisplayConfigurationChanged() {
-  // Set/init the shelf behaviors from preferences, in case a display was added.
-  SetShelfBehaviorsFromPrefs();
-
-  // Update shelf visibility to adapt to display changes. For instance shelf
-  // should be hidden on secondary display during inactive session states.
-  UpdateShelfVisibility();
-}
-
-void ShelfController::OnWindowTreeHostReusedForDisplay(
-    AshWindowTreeHost* window_tree_host,
-    const display::Display& display) {
-  // See comment in OnWindowTreeHostsSwappedDisplays().
-  SetShelfBehaviorsFromPrefs();
-
-  // Update shelf visibility to adapt to display changes. For instance shelf
-  // should be hidden on secondary display during inactive session states.
-  UpdateShelfVisibility();
-}
-
-void ShelfController::OnWindowTreeHostsSwappedDisplays(
-    AshWindowTreeHost* host1,
-    AshWindowTreeHost* host2) {
-  // The display ids for existing shelf instances may have changed, so update
-  // the alignment and auto-hide state from prefs. See http://crbug.com/748291
+  // Update the alignment and auto-hide state from prefs, because a display may
+  // have been added, or the display ids for existing shelf instances may have
+  // changed. See https://crbug.com/748291
   SetShelfBehaviorsFromPrefs();
 
   // Update shelf visibility to adapt to display changes. For instance shelf

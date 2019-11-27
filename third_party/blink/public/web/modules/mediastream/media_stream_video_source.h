@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
-#include "base/sequence_checker.h"
+#include "base/threading/thread_checker.h"
 #include "media/base/video_frame.h"
 #include "media/capture/video_capture_types.h"
 #include "third_party/blink/public/common/media/video_capture.h"
@@ -73,7 +73,7 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
                 const VideoCaptureDeliverFrameCB& frame_callback,
                 const VideoTrackSettingsCallback& settings_callback,
                 const VideoTrackFormatCallback& format_callback,
-                const ConstraintsCallback& callback);
+                ConstraintsOnceCallback callback);
   void RemoveTrack(MediaStreamVideoTrack* track, base::OnceClosure callback);
 
   // Reconfigures this MediaStreamVideoSource to use |adapter_settings| on
@@ -154,7 +154,7 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   bool IsRunning() const { return state_ == STARTED; }
 
   size_t NumTracks() const {
-    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     return tracks_.size();
   }
 
@@ -254,7 +254,7 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   };
   State state() const { return state_; }
 
-  SEQUENCE_CHECKER(sequence_checker_);
+  THREAD_CHECKER(thread_checker_);
 
  private:
   // Trigger all cached callbacks from AddTrack. AddTrack is successful
@@ -284,7 +284,7 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
         const VideoTrackSettingsCallback& settings_callback,
         const VideoTrackFormatCallback& format_callback,
         std::unique_ptr<VideoTrackAdapterSettings> adapter_settings,
-        const ConstraintsCallback& callback);
+        ConstraintsOnceCallback callback);
     PendingTrackInfo(PendingTrackInfo&& other);
     PendingTrackInfo& operator=(PendingTrackInfo&& other);
     ~PendingTrackInfo();
@@ -296,7 +296,7 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
     // TODO(guidou): Make |adapter_settings| a regular field instead of a
     // unique_ptr.
     std::unique_ptr<VideoTrackAdapterSettings> adapter_settings;
-    ConstraintsCallback callback;
+    ConstraintsOnceCallback callback;
   };
   std::vector<PendingTrackInfo> pending_tracks_;
 

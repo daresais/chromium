@@ -16,15 +16,15 @@
 #include "media/base/video_codecs.h"
 #include "media/base/video_frame.h"
 #include "media/muxers/webm_muxer.h"
-#include "third_party/blink/public/platform/modules/media_capabilities/web_media_capabilities_info.h"
-#include "third_party/blink/public/platform/modules/media_capabilities/web_media_configuration.h"
-#include "third_party/blink/public/platform/modules/mediastream/webrtc_uma_histograms.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/modules/mediarecorder/buildflags.h"
 #include "third_party/blink/renderer/modules/mediarecorder/media_recorder.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/media_capabilities/web_media_capabilities_info.h"
+#include "third_party/blink/renderer/platform/media_capabilities/web_media_configuration.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
+#include "third_party/blink/renderer/platform/mediastream/webrtc_uma_histograms.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -161,10 +161,10 @@ bool MediaRecorderHandler::CanSupportMimeType(const String& type,
   media::SplitCodecs(web_codecs.Utf8(), &codecs_list);
   media::StripCodecs(&codecs_list);
   for (const auto& codec : codecs_list) {
+    String codec_string = String::FromUTF8(codec);
     auto* const* found = std::find_if(
-        &codecs[0], &codecs[codecs_count], [&codec](const char* name) {
-          return !CodeUnitCompareIgnoringASCIICase(
-              String::FromUTF8(codec.c_str()), name);
+        &codecs[0], &codecs[codecs_count], [&codec_string](const char* name) {
+          return !CodeUnitCompareIgnoringASCIICase(codec_string, name);
         });
     if (found == &codecs[codecs_count])
       return false;
@@ -298,6 +298,9 @@ bool MediaRecorderHandler::Start(int timeslice) {
 void MediaRecorderHandler::Stop() {
   DCHECK(IsMainThread());
   // Don't check |recording_| since we can go directly from pause() to stop().
+
+  if (recording_)
+    Pause();
 
   recording_ = false;
   timeslice_ = base::TimeDelta::FromMilliseconds(0);
@@ -498,6 +501,10 @@ void MediaRecorderHandler::OnEncodedAudio(const media::AudioParameters& params,
 
 void MediaRecorderHandler::WriteData(base::StringPiece data) {
   DCHECK(IsMainThread());
+
+  if (!recording_)
+    return;
+
   const base::TimeTicks now = base::TimeTicks::Now();
   // Non-buffered mode does not need to check timestamps.
   if (timeslice_.is_zero()) {

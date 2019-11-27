@@ -17,10 +17,9 @@
 #include "components/translate/core/language_detection/language_detection_util.h"
 #import "components/translate/ios/browser/js_language_detection_manager.h"
 #include "components/translate/ios/browser/string_clipping_util.h"
+#import "ios/web/common/url_scheme_util.h"
 #include "ios/web/public/js_messaging/web_frame.h"
-#import "ios/web/public/url_scheme_util.h"
-#import "ios/web/public/web_state/navigation_context.h"
-#include "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/navigation/navigation_context.h"
 #include "net/http/http_response_headers.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -47,7 +46,7 @@ LanguageDetectionController::LanguageDetectionController(
 
   translate_enabled_.Init(prefs::kOfferTranslateEnabled, prefs);
   web_state_->AddObserver(this);
-  web_state_->AddScriptCommandCallback(
+  subscription_ = web_state_->AddScriptCommandCallback(
       base::Bind(&LanguageDetectionController::OnTextCaptured,
                  base::Unretained(this)),
       kCommandPrefix);
@@ -55,7 +54,6 @@ LanguageDetectionController::LanguageDetectionController(
 
 LanguageDetectionController::~LanguageDetectionController() {
   if (web_state_) {
-    web_state_->RemoveScriptCommandCallback(kCommandPrefix);
     web_state_->RemoveObserver(this);
     web_state_ = nullptr;
   }
@@ -186,7 +184,6 @@ void LanguageDetectionController::DidFinishNavigation(
 
 void LanguageDetectionController::WebStateDestroyed(web::WebState* web_state) {
   DCHECK_EQ(web_state_, web_state);
-  web_state_->RemoveScriptCommandCallback(kCommandPrefix);
   web_state_->RemoveObserver(this);
   web_state_ = nullptr;
 }

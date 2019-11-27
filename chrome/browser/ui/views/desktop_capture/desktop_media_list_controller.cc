@@ -91,10 +91,6 @@ void DesktopMediaListController::SetThumbnailSize(const gfx::Size& size) {
   media_list_->SetThumbnailSize(size);
 }
 
-views::View* DesktopMediaListController::GetViewForInitialFocus() {
-  return view_;
-}
-
 void DesktopMediaListController::OnSourceAdded(DesktopMediaList* list,
                                                int index) {
   if (view_) {
@@ -110,7 +106,7 @@ void DesktopMediaListController::OnSourceAdded(DesktopMediaList* list,
       base::ASCIIToUTF16(autoselect_source) != source.name) {
     return;
   }
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&DesktopMediaListController::AcceptSpecificSource,
                      weak_factory_.GetWeakPtr(), source.id));

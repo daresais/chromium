@@ -224,10 +224,21 @@ EnrollmentConfig DeviceCloudPolicyInitializer::GetPrescribedEnrollmentConfig()
       local_state_->GetDictionary(prefs::kServerBackedDeviceState);
   std::string device_state_mode;
   std::string device_state_management_domain;
+  base::Optional<bool> is_license_packaged_with_device;
+
   if (device_state) {
     device_state->GetString(kDeviceStateMode, &device_state_mode);
     device_state->GetString(kDeviceStateManagementDomain,
                             &device_state_management_domain);
+    is_license_packaged_with_device =
+        device_state->FindBoolPath(kDeviceStatePackagedLicense);
+  }
+
+  if (is_license_packaged_with_device) {
+    config.is_license_packaged_with_device =
+        is_license_packaged_with_device.value();
+  } else {
+    config.is_license_packaged_with_device = false;
   }
 
   const bool pref_enrollment_auto_start_present =
@@ -373,7 +384,7 @@ bool DeviceCloudPolicyInitializer::GetMachineFlag(const std::string& key,
 DeviceCloudPolicyInitializer::TpmEnrollmentKeySigningService::
     TpmEnrollmentKeySigningService(
         cryptohome::AsyncMethodCaller* async_method_caller)
-    : async_method_caller_(async_method_caller), weak_ptr_factory_(this) {}
+    : async_method_caller_(async_method_caller) {}
 
 DeviceCloudPolicyInitializer::TpmEnrollmentKeySigningService::
     ~TpmEnrollmentKeySigningService() {}

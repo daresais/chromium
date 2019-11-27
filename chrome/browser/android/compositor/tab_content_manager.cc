@@ -41,7 +41,6 @@ using base::android::JavaRef;
 
 namespace {
 
-const size_t kMaxReadbacks = 1;
 using TabReadbackCallback = base::OnceCallback<void(float, const SkBitmap&)>;
 
 }  // namespace
@@ -56,8 +55,7 @@ class TabContentManager::TabReadbackRequest {
                      TabReadbackCallback end_callback)
       : thumbnail_scale_(thumbnail_scale),
         end_callback_(std::move(end_callback)),
-        drop_after_readback_(false),
-        weak_factory_(this) {
+        drop_after_readback_(false) {
     DCHECK(rwhv);
     auto result_callback =
         base::BindOnce(&TabReadbackRequest::OnFinishGetTabThumbnailBitmap,
@@ -100,7 +98,7 @@ class TabContentManager::TabReadbackRequest {
   TabReadbackCallback end_callback_;
   bool drop_after_readback_;
 
-  base::WeakPtrFactory<TabReadbackRequest> weak_factory_;
+  base::WeakPtrFactory<TabReadbackRequest> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TabReadbackRequest);
 };
@@ -123,7 +121,7 @@ TabContentManager::TabContentManager(JNIEnv* env,
                                      jint write_queue_max_size,
                                      jboolean use_approximation_thumbnail,
                                      jboolean save_jpeg_thumbnails)
-    : weak_java_tab_content_manager_(env, obj), weak_factory_(this) {
+    : weak_java_tab_content_manager_(env, obj) {
   thumbnail_cache_ = std::make_unique<ThumbnailCache>(
       static_cast<size_t>(default_cache_size),
       static_cast<size_t>(approximation_cache_size),
@@ -136,7 +134,7 @@ TabContentManager::TabContentManager(JNIEnv* env,
 TabContentManager::~TabContentManager() {
 }
 
-void TabContentManager::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+void TabContentManager::Destroy(JNIEnv* env) {
   thumbnail_cache_->RemoveThumbnailCacheObserver(this);
   delete this;
 }
@@ -226,8 +224,7 @@ content::RenderWidgetHostView* TabContentManager::GetRwhvForTab(
   TabAndroid* tab_android = TabAndroid::GetNativeTab(env, tab);
   DCHECK(tab_android);
   const int tab_id = tab_android->GetAndroidId();
-  if (pending_tab_readbacks_.find(tab_id) != pending_tab_readbacks_.end() ||
-      pending_tab_readbacks_.size() >= kMaxReadbacks) {
+  if (pending_tab_readbacks_.find(tab_id) != pending_tab_readbacks_.end()) {
     return nullptr;
   }
 
@@ -410,6 +407,12 @@ void TabContentManager::SetCaptureMinRequestTimeForTesting(
     const base::android::JavaParamRef<jobject>& obj,
     jint timeMs) {
   thumbnail_cache_->SetCaptureMinRequestTimeForTesting(timeMs);
+}
+
+jint TabContentManager::GetPendingReadbacksForTesting(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  return pending_tab_readbacks_.size();
 }
 
 // ----------------------------------------------------------------------------

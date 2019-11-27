@@ -12,14 +12,15 @@
 
 #include "android_webview/browser/gfx/child_frame.h"
 #include "android_webview/browser/gfx/compositor_frame_producer.h"
-#include "android_webview/browser/gfx/compositor_id.h"
 #include "android_webview/browser/gfx/parent_compositor_draw_constraints.h"
+#include "android_webview/browser/gfx/root_frame_sink_proxy.h"
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "base/trace_event/trace_event.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -39,11 +40,13 @@ namespace android_webview {
 class BrowserViewRendererClient;
 class ChildFrame;
 class CompositorFrameConsumer;
+class RootFrameSinkProxy;
 
 // Interface for all the WebView-specific content rendering operations.
 // Provides software and hardware rendering and the Capture Picture API.
 class BrowserViewRenderer : public content::SynchronousCompositorClient,
-                            public CompositorFrameProducer {
+                            public CompositorFrameProducer,
+                            public RootFrameSinkProxyClient {
  public:
   static void CalculateTileMemoryPolicy();
   static BrowserViewRenderer* FromWebContents(
@@ -119,11 +122,9 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
 
   // SynchronousCompositorClient overrides.
   void DidInitializeCompositor(content::SynchronousCompositor* compositor,
-                               int process_id,
-                               int routing_id) override;
+                               const viz::FrameSinkId& frame_sink_id) override;
   void DidDestroyCompositor(content::SynchronousCompositor* compositor,
-                            int process_id,
-                            int routing_id) override;
+                            const viz::FrameSinkId& frame_sink_id) override;
   void PostInvalidate(content::SynchronousCompositor* compositor) override;
   void DidUpdateContent(content::SynchronousCompositor* compositor) override;
 
@@ -152,14 +153,18 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   void RemoveCompositorFrameConsumer(
       CompositorFrameConsumer* consumer) override;
   void ReturnUsedResources(const std::vector<viz::ReturnedResource>& resources,
-                           const CompositorID& compositor_id,
+                           const viz::FrameSinkId& frame_sink_id,
                            uint32_t layer_tree_frame_sink_id) override;
   void OnParentDrawDataUpdated(
       CompositorFrameConsumer* compositor_frame_consumer) override;
   void OnViewTreeForceDarkStateChanged(
       bool view_tree_force_dark_state) override;
 
-  void SetActiveCompositorID(const CompositorID& compositor_id);
+  void SetActiveFrameSinkId(const viz::FrameSinkId& frame_sink_id);
+
+  // RootFrameSinkProxy overrides
+  void Invalidate() override;
+  void ProgressFling(base::TimeTicks frame_time) override;
 
   // Visible for testing.
   content::SynchronousCompositor* GetActiveCompositorForTesting() const {
@@ -190,7 +195,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   gfx::Rect ComputeTileRectAndUpdateMemoryPolicy();
 
   content::SynchronousCompositor* FindCompositor(
-      const CompositorID& compositor_id) const;
+      const viz::FrameSinkId& frame_sink_id) const;
   // For debug tracing or logging. Return the string representation of this
   // view renderer's state.
   std::string ToString() const;
@@ -198,19 +203,16 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   BrowserViewRendererClient* const client_;
   const scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   CompositorFrameConsumer* current_compositor_frame_consumer_;
+  std::unique_ptr<RootFrameSinkProxy> root_frame_sink_proxy_;
 
   // The current compositor that's owned by the current RVH.
   content::SynchronousCompositor* compositor_;
-  // The process id and routing id of the most recent RVH according to
-  // RVHChanged.
-  CompositorID compositor_id_;
+  // The id of the most recent RVH according to RVHChanged.
+  viz::FrameSinkId frame_sink_id_;
   // A map from compositor's per-WebView unique ID to the compositor's raw
   // pointer. A raw pointer here is fine because the entry will be erased when
   // a compositor is destroyed.
-  std::map<CompositorID,
-           content::SynchronousCompositor*,
-           CompositorIDComparator>
-      compositor_map_;
+  std::map<viz::FrameSinkId, content::SynchronousCompositor*> compositor_map_;
 
   bool is_paused_;
   bool view_visible_;
@@ -259,7 +261,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
 
   ParentCompositorDrawConstraints external_draw_constraints_;
 
-  base::WeakPtrFactory<CompositorFrameProducer> weak_ptr_factory_;
+  base::WeakPtrFactory<CompositorFrameProducer> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(BrowserViewRenderer);
 };

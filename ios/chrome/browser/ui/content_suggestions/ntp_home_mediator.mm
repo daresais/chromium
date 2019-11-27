@@ -18,7 +18,6 @@
 #import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/search_engines/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
-#include "ios/chrome/browser/signin/feature_flags.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
@@ -46,18 +45,16 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
 #import "ios/chrome/browser/url_loading/url_loading_service.h"
-#import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/chrome/common/favicon/favicon_attributes.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/signin_resources_provider.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#include "ios/web/public/referrer.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#include "ios/web/public/navigation/referrer.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -73,24 +70,18 @@ const char kNTPHelpURL[] =
 
 @interface NTPHomeMediator () <CRWWebStateObserver,
                                IdentityManagerObserverBridgeDelegate,
-                               SearchEngineObserving,
-                               WebStateListObserving> {
+                               SearchEngineObserving> {
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
-  // Observes the WebStateList so that this mediator can update the UI when the
-  // active WebState changes.
-  std::unique_ptr<WebStateListObserverBridge> _webStateListObserver;
   // Listen for default search engine changes.
   std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
   // Observes changes in identity and updates the Identity Disc.
-  std::unique_ptr<identity::IdentityManagerObserverBridge>
+  std::unique_ptr<signin::IdentityManagerObserverBridge>
       _identityObserverBridge;
   // Used to load URLs.
   UrlLoadingService* _urlLoadingService;
 }
 
 @property(nonatomic, strong) AlertCoordinator* alertCoordinator;
-// The WebStateList that is being observed by this mediator.
-@property(nonatomic, assign, readonly) WebStateList* webStateList;
 // TemplateURL used to get the search engine.
 @property(nonatomic, assign) TemplateURLService* templateURLService;
 // Authentication Service to get the current user's avatar.
@@ -106,22 +97,20 @@ const char kNTPHelpURL[] =
 
 @implementation NTPHomeMediator
 
-- (instancetype)initWithWebStateList:(WebStateList*)webStateList
-                  templateURLService:(TemplateURLService*)templateURLService
-                   urlLoadingService:(UrlLoadingService*)urlLoadingService
-                         authService:(AuthenticationService*)authService
-                     identityManager:(identity::IdentityManager*)identityManager
-                          logoVendor:(id<LogoVendor>)logoVendor {
+- (instancetype)initWithWebState:(web::WebState*)webState
+              templateURLService:(TemplateURLService*)templateURLService
+               urlLoadingService:(UrlLoadingService*)urlLoadingService
+                     authService:(AuthenticationService*)authService
+                 identityManager:(signin::IdentityManager*)identityManager
+                      logoVendor:(id<LogoVendor>)logoVendor {
   self = [super init];
   if (self) {
-    _webStateList = webStateList;
-    _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
-    _webStateList->AddObserver(_webStateListObserver.get());
+    _webState = webState;
     _templateURLService = templateURLService;
     _urlLoadingService = urlLoadingService;
     _authService = authService;
     _identityObserverBridge.reset(
-        new identity::IdentityManagerObserverBridge(identityManager, self));
+        new signin::IdentityManagerObserverBridge(identityManager, self));
     // Listen for default search engine changes.
     _searchEngineObserver = std::make_unique<SearchEngineObserverBridge>(
         self, self.templateURLService);
@@ -142,16 +131,9 @@ const char kNTPHelpURL[] =
   DCHECK(!_webStateObserver);
   DCHECK(self.suggestionsService);
 
-  [self.consumer setTabCount:self.webStateList->count()];
-  self.webState = self.webStateList->GetActiveWebState();
-
   _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
   if (self.webState) {
     self.webState->AddObserver(_webStateObserver.get());
-    web::NavigationManager* navigationManager =
-        self.webState->GetNavigationManager();
-    [self.consumer setCanGoForward:navigationManager->CanGoForward()];
-    [self.consumer setCanGoBack:navigationManager->CanGoBack()];
   }
 
   [self.consumer setLogoVendor:self.logoVendor];
@@ -172,7 +154,6 @@ const char kNTPHelpURL[] =
 }
 
 - (void)shutdown {
-  _webStateList->RemoveObserver(_webStateListObserver.get());
   [[NSNotificationCenter defaultCenter] removeObserver:self.consumer];
   _searchEngineObserver.reset();
   DCHECK(_webStateObserver);
@@ -462,7 +443,7 @@ const char kNTPHelpURL[] =
 
 - (void)removeMostVisited:(ContentSuggestionsMostVisitedItem*)item {
   base::RecordAction(base::UserMetricsAction("MostVisited_UrlBlacklisted"));
-  [self.suggestionsMediator blacklistMostVisitedURL:item.URL];
+  [self.suggestionsMediator blockMostVisitedURL:item.URL];
   [self showMostVisitedUndoForURL:item.URL];
 }
 
@@ -488,39 +469,6 @@ const char kNTPHelpURL[] =
     return YES;
   }
   return NO;
-}
-
-#pragma mark - WebStateListObserving
-
-- (void)webStateList:(WebStateList*)webStateList
-    didInsertWebState:(web::WebState*)webState
-              atIndex:(int)index
-           activating:(BOOL)activating {
-  [self.consumer setTabCount:self.webStateList->count()];
-}
-
-- (void)webStateList:(WebStateList*)webStateList
-    didDetachWebState:(web::WebState*)webState
-              atIndex:(int)atIndex {
-  [self.consumer setTabCount:self.webStateList->count()];
-}
-
-// If the actual webState associated with this mediator were passed in, this
-// would not be necessary.  However, since the active webstate can change when
-// the new tab page is created (and animated in), listen for changes here and
-// always display what's active.
-- (void)webStateList:(WebStateList*)webStateList
-    didChangeActiveWebState:(web::WebState*)newWebState
-                oldWebState:(web::WebState*)oldWebState
-                    atIndex:(int)atIndex
-                     reason:(int)reason {
-  if (newWebState) {
-    self.webState = newWebState;
-    web::NavigationManager* navigationManager =
-        newWebState->GetNavigationManager();
-    [self.consumer setCanGoForward:navigationManager->CanGoForward()];
-    [self.consumer setCanGoBack:navigationManager->CanGoBack()];
-  }
 }
 
 #pragma mark - SearchEngineObserving
@@ -601,7 +549,7 @@ const char kNTPHelpURL[] =
     NTPHomeMediator* strongSelf = weakSelf;
     if (!strongSelf)
       return;
-    [strongSelf.suggestionsMediator whitelistMostVisitedURL:copiedURL];
+    [strongSelf.suggestionsMediator allowMostVisitedURL:copiedURL];
   };
   action.title = l10n_util::GetNSString(IDS_NEW_TAB_UNDO_THUMBNAIL_REMOVE);
   action.accessibilityIdentifier = @"Undo";
@@ -651,10 +599,6 @@ const char kNTPHelpURL[] =
 // Fetches and update user's avatar on NTP, or use default avatar if user is
 // not signed in.
 - (void)updateAccountImage {
-  // Early return here to avoid doing all that work to fetch an image that
-  // won't be used.
-  if (!IsIdentityDiscFeatureEnabled())
-    return;
   UIImage* image;
   // Fetches user's identity from Authentication Service.
   ChromeIdentity* identity = self.authService->GetAuthenticatedIdentity();

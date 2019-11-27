@@ -5,9 +5,10 @@
 #include "build/build_config.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/trees/effect_node.h"
+#include "cc/trees/layer_tree_host.h"
+#include "cc/trees/scroll_and_scale_set.h"
 #include "cc/trees/transform_node.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -29,12 +30,6 @@ class WebLayerListTest : public PaintTestConfigurations, public testing::Test {
  public:
   static void ConfigureCompositingWebView(WebSettings* settings) {
     settings->SetPreferCompositingToLCDTextEnabled(true);
-  }
-
-  ~WebLayerListTest() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
   }
 
   void SetUp() override {
@@ -72,6 +67,12 @@ class WebLayerListTest : public PaintTestConfigurations, public testing::Test {
         ->content_layers.size();
   }
 
+  size_t ScrollbarLayerCount() {
+    return paint_artifact_compositor()
+        ->GetExtraDataForTesting()
+        ->scrollbar_layers.size();
+  }
+
   cc::Layer* ContentLayerAt(size_t index) {
     return paint_artifact_compositor()
         ->GetExtraDataForTesting()
@@ -92,7 +93,7 @@ class WebLayerListTest : public PaintTestConfigurations, public testing::Test {
   }
 
   cc::LayerTreeHost* LayerTreeHost() {
-    return web_widget_client_.layer_tree_view()->layer_tree_host();
+    return web_widget_client_.layer_tree_host();
   }
 
   Element* GetElementById(const AtomicString& id) {
@@ -107,7 +108,7 @@ class WebLayerListTest : public PaintTestConfigurations, public testing::Test {
 
  private:
   PaintArtifactCompositor* paint_artifact_compositor() {
-    return GetLocalFrameView()->GetPaintArtifactCompositorForTesting();
+    return GetLocalFrameView()->GetPaintArtifactCompositor();
   }
 
   frame_test_helpers::TestWebWidgetClient web_widget_client_;
@@ -141,6 +142,7 @@ TEST_P(WebLayerListTest, DidScrollCallbackAfterScrollableAreaChanges) {
   EXPECT_NE(nullptr, scrollable_area);
 
   auto initial_content_layer_count = ContentLayerCount();
+  auto initial_scrollbar_layer_count = ScrollbarLayerCount();
   auto initial_scroll_hit_test_layer_count = ScrollHitTestLayerCount();
 
   cc::Layer* overflow_scroll_layer = nullptr;
@@ -156,7 +158,11 @@ TEST_P(WebLayerListTest, DidScrollCallbackAfterScrollableAreaChanges) {
   // Ensure a synthetic impl-side scroll offset propagates to the scrollable
   // area using the DidScroll callback.
   EXPECT_EQ(ScrollOffset(), scrollable_area->GetScrollOffset());
-  overflow_scroll_layer->SetScrollOffsetFromImplSide(gfx::ScrollOffset(0, 1));
+  cc::ScrollAndScaleSet scroll_and_scale_set;
+  scroll_and_scale_set.scrolls.push_back(
+      {scrollable_area->GetCompositorElementId(), gfx::ScrollOffset(0, 1)});
+  overflow_scroll_layer->layer_tree_host()->ApplyScrollAndScale(
+      &scroll_and_scale_set);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(ScrollOffset(0, 1), scrollable_area->GetScrollOffset());
 
@@ -174,14 +180,20 @@ TEST_P(WebLayerListTest, DidScrollCallbackAfterScrollableAreaChanges) {
   // The web scroll layer has not been deleted yet and we should be able to
   // apply impl-side offsets without crashing.
   EXPECT_EQ(ContentLayerCount(), initial_content_layer_count);
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
+  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    EXPECT_EQ(ScrollbarLayerCount(), initial_scrollbar_layer_count);
     EXPECT_EQ(ScrollHitTestLayerCount(), initial_scroll_hit_test_layer_count);
+  }
   overflow_scroll_layer->SetScrollOffsetFromImplSide(gfx::ScrollOffset(0, 3));
 
   UpdateAllLifecyclePhases();
-  EXPECT_LT(ContentLayerCount(), initial_content_layer_count);
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
+  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    EXPECT_EQ(ContentLayerCount(), initial_content_layer_count);
+    EXPECT_LT(ScrollbarLayerCount(), initial_scrollbar_layer_count);
     EXPECT_LT(ScrollHitTestLayerCount(), initial_scroll_hit_test_layer_count);
+  } else {
+    EXPECT_LT(ContentLayerCount(), initial_content_layer_count);
+  }
 }
 
 TEST_P(WebLayerListTest, FrameViewScroll) {
@@ -217,7 +229,10 @@ TEST_P(WebLayerListTest, FrameViewScroll) {
   // Ensure a synthetic impl-side scroll offset propagates to the scrollable
   // area using the DidScroll callback.
   EXPECT_EQ(ScrollOffset(), scrollable_area->GetScrollOffset());
-  scroll_layer->SetScrollOffsetFromImplSide(gfx::ScrollOffset(0, 1));
+  cc::ScrollAndScaleSet scroll_and_scale_set;
+  scroll_and_scale_set.scrolls.push_back(
+      {scrollable_area->GetCompositorElementId(), gfx::ScrollOffset(0, 1)});
+  scroll_layer->layer_tree_host()->ApplyScrollAndScale(&scroll_and_scale_set);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(ScrollOffset(0, 1), scrollable_area->GetScrollOffset());
 }
@@ -269,7 +284,7 @@ class WebLayerListSimTest : public PaintTestConfigurations, public SimTest {
   }
 
   cc::PropertyTrees* GetPropertyTrees() {
-    return Compositor().layer_tree_view().layer_tree_host()->property_trees();
+    return Compositor().layer_tree_host().property_trees();
   }
 
   cc::TransformNode* GetTransformNode(const cc::Layer* layer) {
@@ -282,7 +297,7 @@ class WebLayerListSimTest : public PaintTestConfigurations, public SimTest {
   }
 
   PaintArtifactCompositor* paint_artifact_compositor() {
-    return MainFrame().GetFrameView()->GetPaintArtifactCompositorForTesting();
+    return MainFrame().GetFrameView()->GetPaintArtifactCompositor();
   }
 };
 
@@ -323,20 +338,20 @@ TEST_P(WebLayerListSimTest, LayerUpdatesDoNotInvalidateEarlierLayers) {
                                        CompositorElementIdNamespace::kPrimary));
 
   // Initially, neither a nor b should have a layer that should push properties.
-  auto* host = Compositor().layer_tree_view().layer_tree_host();
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(a_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(b_layer));
+  cc::LayerTreeHost& host = Compositor().layer_tree_host();
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(a_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(b_layer));
 
   // Modifying b should only cause the b layer to need to push properties.
   b_element->setAttribute(html_names::kStyleAttr, "opacity: 0.2");
   UpdateAllLifecyclePhases();
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(a_layer));
-  EXPECT_TRUE(host->LayersThatShouldPushProperties().count(b_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(a_layer));
+  EXPECT_TRUE(host.LayersThatShouldPushProperties().count(b_layer));
 
   // After a frame, no layers should need to push properties again.
   Compositor().BeginFrame();
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(a_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(b_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(a_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(b_layer));
 }
 
 TEST_P(WebLayerListSimTest, LayerUpdatesDoNotInvalidateLaterLayers) {
@@ -380,25 +395,25 @@ TEST_P(WebLayerListSimTest, LayerUpdatesDoNotInvalidateLaterLayers) {
                                        CompositorElementIdNamespace::kPrimary));
 
   // Initially, no layer should need to push properties.
-  auto* host = Compositor().layer_tree_view().layer_tree_host();
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(a_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(b_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(c_layer));
+  cc::LayerTreeHost& host = Compositor().layer_tree_host();
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(a_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(b_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(c_layer));
 
   // Modifying a and b (adding opacity to a and removing opacity from b) should
   // not cause the c layer to push properties.
   a_element->setAttribute(html_names::kStyleAttr, "opacity: 0.3");
   b_element->setAttribute(html_names::kStyleAttr, "");
   UpdateAllLifecyclePhases();
-  EXPECT_TRUE(host->LayersThatShouldPushProperties().count(a_layer));
-  EXPECT_TRUE(host->LayersThatShouldPushProperties().count(b_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(c_layer));
+  EXPECT_TRUE(host.LayersThatShouldPushProperties().count(a_layer));
+  EXPECT_TRUE(host.LayersThatShouldPushProperties().count(b_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(c_layer));
 
   // After a frame, no layers should need to push properties again.
   Compositor().BeginFrame();
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(a_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(b_layer));
-  EXPECT_FALSE(host->LayersThatShouldPushProperties().count(c_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(a_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(b_layer));
+  EXPECT_FALSE(host.LayersThatShouldPushProperties().count(c_layer));
 }
 
 TEST_P(WebLayerListSimTest,
@@ -418,14 +433,14 @@ TEST_P(WebLayerListSimTest,
   Compositor().BeginFrame();
 
   // Initially the host should not need to sync.
-  auto* layer_tree_host = Compositor().layer_tree_view().layer_tree_host();
-  EXPECT_FALSE(layer_tree_host->needs_full_tree_sync());
+  cc::LayerTreeHost& layer_tree_host = Compositor().layer_tree_host();
+  EXPECT_FALSE(layer_tree_host.needs_full_tree_sync());
   int sequence_number = GetPropertyTrees()->sequence_number;
   EXPECT_GT(sequence_number, 0);
 
   // A no-op update should not cause the host to need a full tree sync.
   UpdateAllLifecyclePhases();
-  EXPECT_FALSE(layer_tree_host->needs_full_tree_sync());
+  EXPECT_FALSE(layer_tree_host.needs_full_tree_sync());
   // It should also not cause a property tree update - the sequence number
   // should not change.
   EXPECT_EQ(sequence_number, GetPropertyTrees()->sequence_number);
@@ -571,6 +586,91 @@ TEST_P(WebLayerListSimTest, DirectTransformPropertyUpdate) {
   EXPECT_FALSE(transform_node->transform_changed);
 }
 
+// This test is similar to |DirectTransformPropertyUpdate| but tests that
+// the changed value of a directly updated transform is still set if some other
+// change causes PaintArtifactCompositor to run and do non-direct updates.
+TEST_P(WebLayerListSimTest, DirectTransformPropertyUpdateCausesChange) {
+  // TODO(crbug.com/765003): CAP may make different layerization decisions and
+  // we cannot guarantee that both divs will be composited in this test. When
+  // CAP gets closer to launch, this test should be updated to pass.
+  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
+    return;
+
+  InitializeWithHTML(R"HTML(
+      <!DOCTYPE html>
+      <style>
+        html { overflow: hidden; }
+        #outer {
+          width: 100px;
+          height: 100px;
+          will-change: transform;
+          transform: translate(1px, 2px);
+        }
+        #inner {
+          width: 100px;
+          height: 100px;
+          will-change: transform;
+          background: lightblue;
+          transform: translate(3px, 4px);
+        }
+      </style>
+      <div id='outer'>
+        <div id='inner'></div>
+      </div>
+  )HTML");
+
+  Compositor().BeginFrame();
+
+  auto* outer_element = GetElementById("outer");
+  auto* outer_element_layer = ContentLayerAt(ContentLayerCount() - 2);
+  DCHECK_EQ(outer_element_layer->element_id(),
+            CompositorElementIdFromUniqueObjectId(
+                outer_element->GetLayoutObject()->UniqueId(),
+                CompositorElementIdNamespace::kPrimary));
+  auto outer_transform_tree_index = outer_element_layer->transform_tree_index();
+  auto* outer_transform_node =
+      GetPropertyTrees()->transform_tree.Node(outer_transform_tree_index);
+
+  auto* inner_element = GetElementById("inner");
+  auto* inner_element_layer = ContentLayerAt(ContentLayerCount() - 1);
+  DCHECK_EQ(inner_element_layer->element_id(),
+            CompositorElementIdFromUniqueObjectId(
+                inner_element->GetLayoutObject()->UniqueId(),
+                CompositorElementIdNamespace::kPrimary));
+  auto inner_transform_tree_index = inner_element_layer->transform_tree_index();
+  auto* inner_transform_node =
+      GetPropertyTrees()->transform_tree.Node(inner_transform_tree_index);
+
+  // Initially, the transforms should be unchanged.
+  EXPECT_FALSE(outer_transform_node->transform_changed);
+  EXPECT_FALSE(inner_transform_node->transform_changed);
+  EXPECT_FALSE(paint_artifact_compositor()->NeedsUpdate());
+
+  // Modifying the outer transform in a simple way should allow for a direct
+  // update of the outer transform. Modifying the inner transform in a
+  // non-simple way should not allow for a direct update of the inner transform.
+  outer_element->setAttribute(html_names::kStyleAttr,
+                              "transform: translate(5px, 6px)");
+  inner_element->setAttribute(html_names::kStyleAttr,
+                              "transform: rotate(30deg)");
+  UpdateAllLifecyclePhasesExceptPaint();
+  EXPECT_TRUE(outer_transform_node->transform_changed);
+  EXPECT_FALSE(inner_transform_node->transform_changed);
+  EXPECT_TRUE(paint_artifact_compositor()->NeedsUpdate());
+
+  // After a PaintArtifactCompositor update, which was needed due to the inner
+  // element's transform change, both the inner and outer transform nodes
+  // should be marked as changed to ensure they result in damage.
+  UpdateAllLifecyclePhases();
+  EXPECT_TRUE(outer_transform_node->transform_changed);
+  EXPECT_TRUE(inner_transform_node->transform_changed);
+
+  // After a frame the |transform_changed| values should be reset.
+  Compositor().BeginFrame();
+  EXPECT_FALSE(outer_transform_node->transform_changed);
+  EXPECT_FALSE(inner_transform_node->transform_changed);
+}
+
 // This test ensures that the correct transform nodes are created and bits set
 // so that the browser controls movement adjustments needed by bottom-fixed
 // elements will work.
@@ -614,7 +714,6 @@ TEST_P(WebLayerListSimTest, AffectedByOuterViewportBoundsDelta) {
         GetPropertyTrees()->transform_tree.Node(transform_tree_index);
 
     DCHECK(transform_node);
-    EXPECT_FALSE(transform_node->moved_by_outer_viewport_bounds_delta_x);
     EXPECT_TRUE(transform_node->moved_by_outer_viewport_bounds_delta_y);
   }
 
@@ -630,7 +729,6 @@ TEST_P(WebLayerListSimTest, AffectedByOuterViewportBoundsDelta) {
         GetPropertyTrees()->transform_tree.Node(transform_tree_index);
 
     DCHECK(transform_node);
-    EXPECT_FALSE(transform_node->moved_by_outer_viewport_bounds_delta_x);
     EXPECT_FALSE(transform_node->moved_by_outer_viewport_bounds_delta_y);
   }
 }
@@ -871,7 +969,10 @@ TEST_P(WebLayerListSimTest, LayerSubtreeOverflowClipPropertyChanged) {
   // both layers.
   outer_element->setAttribute(html_names::kStyleAttr, "width: 200px;");
   UpdateAllLifecyclePhases();
-  EXPECT_TRUE(outer_element_layer->subtree_property_changed());
+  // The overflow clip does not affect |outer_element_layer|, so
+  // subtree_property_changed should be false for it. It does affect
+  // |inner_element_layer| though.
+  EXPECT_FALSE(outer_element_layer->subtree_property_changed());
   EXPECT_TRUE(inner_element_layer->subtree_property_changed());
 
   // After a frame the |subtree_property_changed| value should be reset.
@@ -1042,6 +1143,39 @@ TEST_P(WebLayerListSimTest, NonDrawableLayersIgnoredForRenderSurfaces) {
   auto* effect_node = GetPropertyTrees()->effect_tree.Node(effect_tree_index);
   EXPECT_EQ(effect_node->opacity, 0.5f);
   EXPECT_FALSE(effect_node->HasRenderSurface());
+}
+
+TEST_P(WebLayerListSimTest, NoRenderSurfaceWithAxisAlignedTransformAnimation) {
+  InitializeWithHTML(R"HTML(
+      <!DOCTYPE html>
+      <style>
+        @keyframes translation {
+          0% { transform: translate(10px, 11px); }
+          100% { transform: translate(20px, 21px); }
+        }
+        .animate {
+          animation-name: translation;
+          animation-duration: 1s;
+          width: 100px;
+          height: 100px;
+          overflow: hidden;
+        }
+        .compchild {
+          height: 200px;
+          width: 10px;
+          background: lightblue;
+          will-change: transform;
+        }
+      </style>
+      <div class="animate"><div class="compchild"></div></div>
+  )HTML");
+  Compositor().BeginFrame();
+  // No effect node with kClipAxisAlignment should be created because the
+  // animation is axis-aligned.
+  for (const auto& effect_node : GetPropertyTrees()->effect_tree.nodes()) {
+    EXPECT_NE(cc::RenderSurfaceReason::kClipAxisAlignment,
+              effect_node.render_surface_reason);
+  }
 }
 
 }  // namespace blink

@@ -13,6 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/extension_action/test_extension_action_api_observer.h"
+#include "chrome/browser/extensions/api/extension_action/test_icon_image_observer.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -234,8 +235,7 @@ class MultiActionAPITest
   }
 
   // Ensures the |action| is enabled on the tab with the given |tab_id|.
-  void EnsureActionIsEnabledOnActiveTab(ExtensionAction* action) {
-    const int tab_id = GetActiveTabId();
+  void EnsureActionIsEnabledOnTab(ExtensionAction* action, int tab_id) {
     if (action->GetIsVisible(tab_id))
       return;
     action->SetIsVisible(tab_id, true);
@@ -244,6 +244,11 @@ class MultiActionAPITest
     extensions::ExtensionActionAPI* extension_action_api =
         extensions::ExtensionActionAPI::Get(profile());
     extension_action_api->NotifyChange(action, GetActiveTab(), profile());
+  }
+
+  // Ensures the |action| is enabled on the currently-active tab.
+  void EnsureActionIsEnabledOnActiveTab(ExtensionAction* action) {
+    EnsureActionIsEnabledOnTab(action, GetActiveTabId());
   }
 
   // Returns the id of the currently-active tab.
@@ -260,39 +265,6 @@ class MultiActionAPITest
   ExtensionAction* GetExtensionAction(const Extension& extension) {
     auto* action_manager = ExtensionActionManager::Get(profile());
     return action_manager->GetExtensionAction(extension);
-  }
-
-  // Waits for the given |icon| to finish it's first load.
-  // TODO(devlin): It's unfortunate we need this here. Ideally, either this
-  // would be less convoluted, or would even be taken care of by the extension
-  // loading methods.
-  void WaitForIconLoaded(IconImage* icon) {
-    class IconImageWaiter : public IconImage::Observer {
-     public:
-      IconImageWaiter() : observer_(this) {}
-      ~IconImageWaiter() override = default;
-
-      void Wait(IconImage* icon) {
-        if (!icon->did_complete_initial_load()) {
-          observer_.Add(icon);
-          run_loop_.Run();
-        }
-      }
-
-     private:
-      // IconImage::Observer:
-      void OnExtensionIconImageChanged(IconImage* icon) override {
-        DCHECK(icon->did_complete_initial_load());
-        run_loop_.Quit();
-      }
-
-      base::RunLoop run_loop_;
-      ScopedObserver<IconImage, IconImage::Observer> observer_;
-
-      DISALLOW_COPY_AND_ASSIGN(IconImageWaiter);
-    };
-
-    IconImageWaiter().Wait(icon);
   }
 
  private:
@@ -637,7 +609,7 @@ IN_PROC_BROWSER_TEST_P(MultiActionAPICanvasTest, DynamicSetIcon) {
   ASSERT_TRUE(action->default_icon());
   // Wait for the default icon to finish loading; otherwise it may be empty
   // when we check it.
-  WaitForIconLoaded(action->default_icon_image());
+  TestIconImageObserver::WaitForIcon(action->default_icon_image());
 
   int tab_id = GetActiveTabId();
   EXPECT_TRUE(ActionHasDefaultState(*action, tab_id));
@@ -885,7 +857,7 @@ IN_PROC_BROWSER_TEST_P(MultiActionAPITest, GettersAndSetters) {
     ValuePair custom_badge_text2{"custom badge2", "'custom badge2'"};
 
     auto get_badge_text = [](ExtensionAction* action, int tab_id) {
-      return action->GetBadgeText(tab_id);
+      return action->GetExplicitlySetBadgeText(tab_id);
     };
 
     ActionTestHelper badge_text_helper(kApiName, "setBadgeText", "getBadgeText",
@@ -912,13 +884,128 @@ IN_PROC_BROWSER_TEST_P(MultiActionAPITest, GettersAndSetters) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+// Tests the functions to enable and disable extension actions.
+IN_PROC_BROWSER_TEST_P(MultiActionAPITest, EnableAndDisable) {
+  constexpr char kManifestTemplate[] =
+      R"({
+           "name": "enabled/disabled action test",
+           "version": "0.1",
+           "manifest_version": 2,
+           "%s": {},
+           "background": {"scripts": ["background.js"]}
+         })";
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      base::StringPrintf(kManifestTemplate, GetManifestKey(GetParam())));
+  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"),
+                     "// This space left blank.");
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+  ExtensionAction* action = GetExtensionAction(*extension);
+  ASSERT_TRUE(action);
+
+  const int tab_id1 = GetActiveTabId();
+  EnsureActionIsEnabledOnTab(action, tab_id1);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("chrome://newtab"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  const int tab_id2 = GetActiveTabId();
+  EnsureActionIsEnabledOnTab(action, tab_id2);
+
+  EXPECT_NE(tab_id1, tab_id2);
+
+  const char* enable_function = nullptr;
+  const char* disable_function = nullptr;
+  switch (GetParam()) {
+    case ActionInfo::TYPE_ACTION:
+    case ActionInfo::TYPE_BROWSER:
+      enable_function = "enable";
+      disable_function = "disable";
+      break;
+    case ActionInfo::TYPE_PAGE:
+      enable_function = "show";
+      disable_function = "hide";
+      break;
+  }
+
+  // Start by toggling the extension action on the current tab.
+  {
+    constexpr char kScriptTemplate[] =
+        R"(chrome.%s.%s(%d, () => {
+            chrome.test.assertNoLastError();
+            chrome.test.notifyPass();
+           });)";
+    RunTestAndWaitForSuccess(
+        profile(), extension->id(),
+        base::StringPrintf(kScriptTemplate, GetAPIName(GetParam()),
+                           disable_function, tab_id2));
+    EXPECT_FALSE(action->GetIsVisible(tab_id2));
+    EXPECT_TRUE(action->GetIsVisible(tab_id1));
+  }
+
+  {
+    constexpr char kScriptTemplate[] =
+        R"(chrome.%s.%s(%d, () => {
+            chrome.test.assertNoLastError();
+            chrome.test.notifyPass();
+           });)";
+    RunTestAndWaitForSuccess(
+        profile(), extension->id(),
+        base::StringPrintf(kScriptTemplate, GetAPIName(GetParam()),
+                           enable_function, tab_id2));
+    EXPECT_TRUE(action->GetIsVisible(tab_id2));
+    EXPECT_TRUE(action->GetIsVisible(tab_id1));
+  }
+
+  // Page actions can't be enabled/disabled globally, but others can. Try
+  // toggling global state by omitting the tab id if the type isn't a page
+  // action.
+  if (GetParam() == ActionInfo::TYPE_PAGE)
+    return;
+
+  // We need to undo the explicit enable from above, since tab-specific
+  // values take precedence.
+  action->ClearAllValuesForTab(tab_id2);
+  {
+    constexpr char kScriptTemplate[] =
+        R"(chrome.%s.%s(() => {
+            chrome.test.assertNoLastError();
+            chrome.test.notifyPass();
+           });)";
+    RunTestAndWaitForSuccess(
+        profile(), extension->id(),
+        base::StringPrintf(kScriptTemplate, GetAPIName(GetParam()),
+                           disable_function));
+    EXPECT_EQ(false, action->GetIsVisible(tab_id2));
+    EXPECT_EQ(false, action->GetIsVisible(tab_id1));
+  }
+
+  {
+    constexpr char kScriptTemplate[] =
+        R"(chrome.%s.%s(() => {
+            chrome.test.assertNoLastError();
+            chrome.test.notifyPass();
+           });)";
+    RunTestAndWaitForSuccess(
+        profile(), extension->id(),
+        base::StringPrintf(kScriptTemplate, GetAPIName(GetParam()),
+                           enable_function));
+    EXPECT_EQ(true, action->GetIsVisible(tab_id2));
+    EXPECT_EQ(true, action->GetIsVisible(tab_id1));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(All,
                          MultiActionAPITest,
                          testing::Values(ActionInfo::TYPE_ACTION,
                                          ActionInfo::TYPE_PAGE,
                                          ActionInfo::TYPE_BROWSER));
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          MultiActionAPICanvasTest,
                          testing::Values(ActionInfo::TYPE_ACTION,
                                          ActionInfo::TYPE_PAGE,

@@ -9,16 +9,17 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
 
 class AccountTrackerService;
 class GaiaCookieManagerService;
 
 namespace gaia {
-enum class GaiaSource;
+class GaiaSource;
 }
 
-namespace identity {
+namespace signin {
 
 // Concrete implementation of the AccountsCookieMutator interface.
 class AccountsCookieMutatorImpl : public AccountsCookieMutator {
@@ -40,12 +41,16 @@ class AccountsCookieMutatorImpl : public AccountsCookieMutator {
       AddAccountToCookieCompletedCallback completion_callback) override;
 
   void SetAccountsInCookie(
-      const std::vector<CoreAccountId>& account_ids,
+      const MultiloginParameters& parameters,
       gaia::GaiaSource source,
-      base::OnceCallback<void(signin::SetAccountsInCookieResult)>
+      base::OnceCallback<void(SetAccountsInCookieResult)>
           set_accounts_in_cookies_completed_callback) override;
 
   void TriggerCookieJarUpdate() override;
+
+#if defined(OS_IOS)
+  void ForceTriggerOnCookieChange() override;
+#endif
 
   void LogOutAllAccounts(gaia::GaiaSource source) override;
 
@@ -56,6 +61,6 @@ class AccountsCookieMutatorImpl : public AccountsCookieMutator {
   DISALLOW_COPY_AND_ASSIGN(AccountsCookieMutatorImpl);
 };
 
-}  // namespace identity
+}  // namespace signin
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_ACCOUNTS_COOKIE_MUTATOR_IMPL_H_

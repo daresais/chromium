@@ -8,8 +8,6 @@ import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
 import android.content.Intent;
 import android.net.Uri;
-import android.support.annotation.Nullable;
-import android.support.customtabs.CustomTabsIntent;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnLayoutChangeListener;
@@ -19,12 +17,16 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.RemoteViews;
 
+import androidx.annotation.Nullable;
+import androidx.browser.customtabs.CustomTabsIntent;
+
 import org.chromium.base.Log;
 import org.chromium.base.metrics.CachedMetrics;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.OverlayPanelManagerObserver;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
 import org.chromium.chrome.browser.dependency_injection.ActivityScope;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
@@ -51,7 +53,7 @@ public class CustomTabBottomBarDelegate implements FullscreenListener {
 
     private final ChromeActivity mActivity;
     private final ChromeFullscreenManager mFullscreenManager;
-    private final CustomTabIntentDataProvider mDataProvider;
+    private final BrowserServicesIntentDataProvider mDataProvider;
     private final CustomTabNightModeStateController mNightModeStateController;
     private final SystemNightModeMonitor mSystemNightModeMonitor;
 
@@ -79,15 +81,19 @@ public class CustomTabBottomBarDelegate implements FullscreenListener {
 
     @Inject
     public CustomTabBottomBarDelegate(ChromeActivity activity,
-            CustomTabIntentDataProvider dataProvider, ChromeFullscreenManager fullscreenManager,
+            BrowserServicesIntentDataProvider dataProvider,
+            ChromeFullscreenManager fullscreenManager,
             CustomTabNightModeStateController nightModeStateController,
-            SystemNightModeMonitor systemNightModeMonitor) {
+            SystemNightModeMonitor systemNightModeMonitor,
+            CustomTabCompositorContentInitializer compositorContentInitializer) {
         mActivity = activity;
         mDataProvider = dataProvider;
         mFullscreenManager = fullscreenManager;
         mNightModeStateController = nightModeStateController;
         mSystemNightModeMonitor = systemNightModeMonitor;
         fullscreenManager.addListener(this);
+
+        compositorContentInitializer.addCallback(this::addOverlayPanelManagerObserver);
     }
 
     /**
@@ -225,12 +231,8 @@ public class CustomTabBottomBarDelegate implements FullscreenListener {
         return mBottomBarView;
     }
 
-    public void addOverlayPanelManagerObserver() {
-        if (mActivity.getCompositorViewHolder().getLayoutManager() == null) return;
-        OverlayPanelManager manager =
-                mActivity.getCompositorViewHolder().getLayoutManager().getOverlayPanelManager();
-
-        manager.addObserver(new OverlayPanelManagerObserver() {
+    public void addOverlayPanelManagerObserver(LayoutManager layoutDriver) {
+        layoutDriver.getOverlayPanelManager().addObserver(new OverlayPanelManagerObserver() {
             @Override
             public void onOverlayPanelShown() {
                 if (mBottomBarView == null) return;

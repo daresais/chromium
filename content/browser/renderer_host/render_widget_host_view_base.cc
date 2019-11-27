@@ -331,6 +331,10 @@ bool RenderWidgetHostViewBase::IsMouseLocked() {
   return false;
 }
 
+bool RenderWidgetHostViewBase::GetIsMouseLockedUnadjustedMovementForTesting() {
+  return false;
+}
+
 bool RenderWidgetHostViewBase::LockKeyboard(
     base::Optional<base::flat_set<ui::DomCode>> codes) {
   NOTIMPLEMENTED_LOG_ONCE();
@@ -562,11 +566,6 @@ base::WeakPtr<RenderWidgetHostViewBase> RenderWidgetHostViewBase::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-void RenderWidgetHostViewBase::FocusedNodeTouched(
-    bool editable) {
-  DVLOG(1) << "FocusedNodeTouched: " << editable;
-}
-
 void RenderWidgetHostViewBase::GetScreenInfo(ScreenInfo* screen_info) {
   DisplayUtil::GetNativeViewScreenInfo(screen_info, GetNativeView());
 }
@@ -704,6 +703,11 @@ void RenderWidgetHostViewBase::Destroy() {
 
 bool RenderWidgetHostViewBase::CanSynchronizeVisualProperties() {
   return true;
+}
+
+std::vector<std::unique_ptr<ui::TouchEvent>>
+RenderWidgetHostViewBase::ExtractAndCancelActiveTouches() {
+  return {};
 }
 
 void RenderWidgetHostViewBase::TextInputStateChanged(

@@ -33,7 +33,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/storage_usage_info.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/buildflags/buildflags.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -92,7 +92,7 @@ class CookiesTreeModelTest : public testing::Test {
     scoped_refptr<content_settings::CookieSettings> cookie_settings =
         new content_settings::CookieSettings(
             HostContentSettingsMapFactory::GetForProfile(profile_.get()),
-            profile_->GetPrefs(),
+            profile_->GetPrefs(), profile_->IsIncognitoProfile(),
             kExtensionScheme);
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     special_storage_policy_ =
@@ -395,7 +395,7 @@ class CookiesTreeModelTest : public testing::Test {
 #endif
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   scoped_refptr<MockBrowsingDataCookieHelper>
       mock_browsing_data_cookie_helper_;
@@ -1629,7 +1629,7 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
   EXPECT_EQ(1u, origin->children().size());
   EXPECT_TRUE(origin->CanCreateContentException());
   EXPECT_CALL(observer, OnContentSettingsChanged(
-                            content_settings, CONTENT_SETTINGS_TYPE_COOKIES,
+                            content_settings, ContentSettingsType::COOKIES,
                             false, ContentSettingsPattern::FromURL(host),
                             ContentSettingsPattern::Wildcard(), false))
       .Times(2);

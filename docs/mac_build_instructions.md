@@ -103,7 +103,7 @@ $ gn gen out/Default
   The default will be a debug component build matching the current host
   operating system and CPU.
 * For more info on GN, run `gn help` on the command line or read the
-  [quick start guide](../tools/gn/docs/quick_start.md).
+  [quick start guide](https://gn.googlesource.com/gn/+/master/docs/quick_start.md).
 
 
 ### Faster builds
@@ -139,15 +139,6 @@ symbol_level = 0
 in your args.gn to disable debug symbols altogether.  This makes both full
 rebuilds and linking faster (at the cost of not getting symbolized backtraces
 in gdb).
-
-#### Jumbo/Unity builds
-
-Jumbo builds merge many translation units ("source files") and compile them
-together. Since a large portion of Chromium's code is in shared header files,
-this dramatically reduces the total amount of work needed. Check out the
-[Jumbo / Unity builds](jumbo.md) for more information.
-
-Enable jumbo builds by setting the GN arg `use_jumbo_build=true`.
 
 #### CCache
 

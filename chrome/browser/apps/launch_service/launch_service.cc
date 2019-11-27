@@ -5,6 +5,7 @@
 #include "chrome/browser/apps/launch_service/launch_service.h"
 
 #include "base/feature_list.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/launch_service/extension_app_launch_manager.h"
 #include "chrome/browser/apps/launch_service/launch_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,9 +24,10 @@ LaunchService* LaunchService::Get(Profile* profile) {
 
 LaunchService::LaunchService(Profile* profile) : profile_(profile) {
   DCHECK(profile_);
-  // LaunchService must have only one instance in original profile.
-  // Exclude secondary off-the-record profiles.
-  DCHECK(!profile_->IsOffTheRecord());
+
+  // LaunchService must have only one instance in original profile,
+  // apart from guest mode where the off-the-record profile is used.
+  DCHECK_EQ(profile_->IsGuestSession(), profile_->IsOffTheRecord());
 
   extension_app_launch_manager_ =
       std::make_unique<ExtensionAppLaunchManager>(profile);
@@ -49,6 +51,11 @@ LaunchManager& LaunchService::GetLaunchManagerForApp(
   return (!extension || extension->from_bookmark())
              ? *web_app_launch_manager_
              : *extension_app_launch_manager_;
+}
+
+content::WebContents* LaunchService::OpenApplication(
+    const AppLaunchParams& params) {
+  return GetLaunchManagerForApp(params.app_id).OpenApplication(params);
 }
 
 bool LaunchService::OpenApplicationWindow(

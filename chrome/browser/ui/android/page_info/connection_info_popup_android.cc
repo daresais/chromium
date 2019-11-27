@@ -59,11 +59,11 @@ ConnectionInfoPopupAndroid::ConnectionInfoPopupAndroid(
       SecurityStateTabHelper::FromWebContents(web_contents);
   DCHECK(helper);
 
-  presenter_.reset(new PageInfo(
+  presenter_ = std::make_unique<PageInfo>(
       this, Profile::FromBrowserContext(web_contents->GetBrowserContext()),
       TabSpecificContentSettings::FromWebContents(web_contents), web_contents,
       nav_entry->GetURL(), helper->GetSecurityLevel(),
-      *helper->GetVisibleSecurityState()));
+      *helper->GetVisibleSecurityState());
 }
 
 ConnectionInfoPopupAndroid::~ConnectionInfoPopupAndroid() {
@@ -99,8 +99,8 @@ void ConnectionInfoPopupAndroid::SetIdentityInfo(
       headline = identity_info.site_identity;
     }
 
-    ScopedJavaLocalRef<jstring> description =
-        ConvertUTF8ToJavaString(env, identity_info.identity_status_description);
+    ScopedJavaLocalRef<jstring> description = ConvertUTF8ToJavaString(
+        env, identity_info.identity_status_description_android);
     base::string16 certificate_label;
 
     // Only show the certificate viewer link if the connection actually used a

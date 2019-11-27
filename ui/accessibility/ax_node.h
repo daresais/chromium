@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/ax_tree_id.h"
 
 namespace ui {
 
@@ -25,22 +26,43 @@ struct AXLanguageInfo;
 // One node in an AXTree.
 class AX_EXPORT AXNode final {
  public:
+  // Defines the type used for AXNode IDs.
+  using AXID = int32_t;
+
+  // If a node is not yet or no longer valid, its ID should have a value of
+  // kInvalidAXID.
+  static constexpr AXID kInvalidAXID = 0;
+
   // Interface to the tree class that owns an AXNode. We use this instead
   // of letting AXNode have a pointer to its AXTree directly so that we're
   // forced to think twice before calling an AXTree interface that might not
   // be necessary.
   class OwnerTree {
    public:
-    // See AXTree.
+    struct Selection {
+      bool is_backward;
+      AXID anchor_object_id;
+      int anchor_offset;
+      ax::mojom::TextAffinity anchor_affinity;
+      AXID focus_object_id;
+      int focus_offset;
+      ax::mojom::TextAffinity focus_affinity;
+    };
+
+    // See AXTree::GetAXTreeID.
+    virtual AXTreeID GetAXTreeID() const = 0;
+    // See AXTree::GetTableInfo.
     virtual AXTableInfo* GetTableInfo(const AXNode* table_node) const = 0;
-    // See AXTree.
+    // See AXTree::GetFromId.
     virtual AXNode* GetFromId(int32_t id) const = 0;
 
     virtual int32_t GetPosInSet(const AXNode& node,
                                 const AXNode* ordered_set) = 0;
     virtual int32_t GetSetSize(const AXNode& node,
                                const AXNode* ordered_set) = 0;
+    virtual Selection GetUnignoredSelection() const = 0;
     virtual bool GetTreeUpdateInProgressState() const = 0;
+    virtual bool HasPaginationSupport() const = 0;
   };
 
   template <typename NodeType,
@@ -92,10 +114,15 @@ class AX_EXPORT AXNode final {
   AXNode* GetUnignoredChildAtIndex(size_t index) const;
   AXNode* GetUnignoredParent() const;
   size_t GetUnignoredIndexInParent() const;
+  size_t GetIndexInParent() const;
   AXNode* GetFirstUnignoredChild() const;
   AXNode* GetLastUnignoredChild() const;
+  AXNode* GetDeepestFirstUnignoredChild() const;
+  AXNode* GetDeepestLastUnignoredChild() const;
   AXNode* GetNextUnignoredSibling() const;
   AXNode* GetPreviousUnignoredSibling() const;
+  AXNode* GetNextUnignoredInTreeOrder() const;
+  AXNode* GetPreviousUnignoredInTreeOrder() const;
 
   using UnignoredChildIterator =
       ChildIteratorBase<AXNode,
@@ -341,6 +368,9 @@ class AX_EXPORT AXNode final {
   // This should only be called by the LabelLanguageForSubtree and is used as
   // part of the language detection feature.
   void SetLanguageInfo(std::unique_ptr<AXLanguageInfo> lang_info);
+
+  // Returns true if node has ignored state or ignored role.
+  bool IsIgnored() const;
 
  private:
   // Computes the text offset where each line starts by traversing all child

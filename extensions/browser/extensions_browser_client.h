@@ -18,6 +18,8 @@
 #include "extensions/browser/extensions_browser_api_provider.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/view_type.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/url_loader.mojom-forward.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/base/page_transition_types.h"
@@ -55,8 +57,6 @@ class Extension;
 class ExtensionCache;
 class ExtensionError;
 class ExtensionHostDelegate;
-class ExtensionApiFrameIdMap;
-class ExtensionApiFrameIdMapHelper;
 class ExtensionSet;
 class ExtensionSystem;
 class ExtensionSystemProvider;
@@ -155,11 +155,11 @@ class ExtensionsBrowserClient {
   // embedder's resource bundle (.pak) files. Used for component extensions.
   virtual void LoadResourceFromResourceBundle(
       const network::ResourceRequest& request,
-      network::mojom::URLLoaderRequest loader,
+      mojo::PendingReceiver<network::mojom::URLLoader> loader,
       const base::FilePath& resource_relative_path,
       int resource_id,
       const std::string& content_security_policy,
-      network::mojom::URLLoaderClientPtr client,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
       bool send_cors_header) = 0;
 
   // Returns true if the embedder wants to allow a chrome-extension:// resource
@@ -249,7 +249,8 @@ class ExtensionsBrowserClient {
   virtual void BroadcastEventToRenderers(
       events::HistogramValue histogram_value,
       const std::string& event_name,
-      std::unique_ptr<base::ListValue> args) = 0;
+      std::unique_ptr<base::ListValue> args,
+      bool dispatch_to_off_the_record_profiles) = 0;
 
   // Gets the single ExtensionCache instance shared across the browser process.
   virtual ExtensionCache* GetExtensionCache() = 0;
@@ -286,9 +287,6 @@ class ExtensionsBrowserClient {
   // Returns a new UpdateClient.
   virtual scoped_refptr<update_client::UpdateClient> CreateUpdateClient(
       content::BrowserContext* context);
-
-  virtual std::unique_ptr<ExtensionApiFrameIdMapHelper>
-  CreateExtensionApiFrameIdMapHelper(ExtensionApiFrameIdMap* map);
 
   virtual std::unique_ptr<content::BluetoothChooser> CreateBluetoothChooser(
       content::RenderFrameHost* frame,
@@ -338,6 +336,17 @@ class ExtensionsBrowserClient {
 
   // Returns the user agent used by the content module.
   virtual std::string GetUserAgent() const;
+
+  // Returns whether |scheme| should bypass extension-specific navigation checks
+  // (e.g. whether the |scheme| is allowed to initiate navigations to extension
+  // resources that are not declared as web accessible).
+  virtual bool ShouldSchemeBypassNavigationChecks(
+      const std::string& scheme) const;
+
+  // Returns true when we should enforce 'extraHeaders' option for any
+  // webRequest API callbacks so to mitigate CORS related compatibility issues.
+  virtual bool ShouldForceWebRequestExtraHeaders(
+      content::BrowserContext* context) const;
 
  private:
   std::vector<std::unique_ptr<ExtensionsBrowserAPIProvider>> providers_;

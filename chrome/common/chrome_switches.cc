@@ -137,8 +137,10 @@ const char kCrashOnHangThreads[]            = "crash-on-hang-threads";
 const char kCreateBrowserOnStartupForTests[] =
     "create-browser-on-startup-for-tests";
 
-// Specifies the HTTP endpoint which will be used to serve
+// Specifies the http:// endpoint which will be used to serve
 // devtools://devtools/custom/<path>
+// Or a file:// URL to specify a custom file path to load from for
+// devtools://devtools/bundled/<path>
 const char kCustomDevtoolsFrontend[] = "custom-devtools-frontend";
 
 // Enables a frame context menu item that toggles the frame in and out of glass
@@ -249,9 +251,6 @@ const char kDiskCacheSize[]                 = "disk-cache-size";
 
 const char kDnsLogDetails[]                 = "dns-log-details";
 
-// Enables new UI for net-error page.
-const char kNewNetErrorPageUI[] = "new-net-error-page-ui";
-
 // Requests that a running browser process dump its collected histograms to a
 // given file. The file is overwritten if it exists.
 const char kDumpBrowserHistograms[]         = "dump-browser-histograms";
@@ -345,6 +344,10 @@ const char kForceFirstRun[]                 = "force-first-run";
 // Forces Chrome to use a stacked tab strip layout.
 const char kForceStackedTabStripLayout[]    = "force-stacked-tab-strip-layout";
 
+// Forces web-application mode. This hides certain system UI elements and forces
+// the app to be installed if it hasn't been already.
+const char kForceWebAppMode[]               = "force-web-app-mode";
+
 // Specifies which page will be displayed in newly-opened tabs. We need this
 // for testing purposes so that the UI tests don't depend on what comes up for
 // http://google.com.
@@ -377,17 +380,6 @@ const char kKioskMode[]                     = "kiosk";
 // Enable automatically pressing the print button in print preview.
 const char kKioskModePrinting[]             = "kiosk-printing";
 
-// Launches an in-process instance of the simple_browser service on startup if
-// this Chrome build supports it. See |enable_simple_browser_service_in_process|
-// in chrome/common/features.gni.
-const char kLaunchInProcessSimpleBrowserSwitch[] =
-    "launch-in-process-simple-browser";
-
-// Launches a sandboxed out-of-process instance of the simple_browser service on
-// startup if this Chrome build supports it. See
-// |enable_simple_browser_service_out_of_process| in chrome/common/features.gni.
-const char kLaunchSimpleBrowserSwitch[] = "launch-simple-browser";
-
 // Loads the Media Router component extension on startup.
 const char kLoadMediaRouterComponentExtension[] =
     "load-media-router-component-extension";
@@ -409,6 +401,11 @@ const char kNativeMessagingConnectHost[] = "native-messaging-connect-host";
 // kNativeMessagingConnectHost switch.
 const char kNativeMessagingConnectExtension[] =
     "native-messaging-connect-extension";
+
+// If set when kNativeMessagingConnectHost and kNativeMessagingConnectExtension
+// are specified, is reflected to the native messaging host as a command line
+// parameter.
+const char kNativeMessagingConnectId[] = "native-messaging-connect-id";
 
 // Disables the default browser check. Useful for UI/browser tests where we
 // want to avoid having the default browser info-bar displayed.
@@ -650,6 +647,14 @@ const char kWebRtcRemoteEventLogUploadDelayMs[] =
 const char kWebRtcRemoteEventLogUploadNoSuppression[] =
     "webrtc-event-log-upload-no-suppression";
 
+// Enables a web-based tab strip. See https://crbug.com/989131. Note this
+// feature only works when the ENABLE_WEBUI_TAB_STRIP buildflag is enabled.
+//
+// This is a command-line switch instead of a base::Feature so that it
+// can be enabled on specific ChromeOS boards. This feature is always
+// disabled by default.
+const char kWebUITabStrip[] = "webui-tab-strip";
+
 // Specify the initial window position: --window-position=x,y
 const char kWindowPosition[]                = "window-position";
 
@@ -714,11 +719,6 @@ const char kDisableLoggingRedirect[] = "disable-logging-redirect";
 // Disables apps on the login screen. By default, they are allowed and can be
 // installed through policy.
 const char kDisableLoginScreenApps[] = "disable-login-screen-apps";
-
-// Provides the name of the mojo service running in a mash utility process.
-// NOTE: Used by the Chrome OS crash_reporter to identify mash processes. If you
-// change or remove the flag please update platform2/crash_reporter.
-const char kMashServiceName[] = "mash-service-name";
 
 // Use a short (1 second) timeout for merge session loader throttle testing.
 const char kShortMergeSessionTimeoutForTest[] =
@@ -837,6 +837,10 @@ const char kShowIcons[]                     = "show-icons";
 // Runs un-installation steps that were done by chrome first-run.
 const char kUninstall[]                     = "uninstall";
 
+// Indicates that this process is the product of a relaunch following migration
+// of User Data.
+const char kUserDataMigrated[] = "user-data-migrated";
+
 // Causes the process to run as a watcher process.
 const char kWatcherProcess[]                = "watcher";
 #endif  // defined(OS_WIN)
@@ -867,12 +871,11 @@ const char kEnableNewAppMenuIcon[] = "enable-new-app-menu-icon";
 const char kGuest[] = "guest";
 #endif
 
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && \
-    !defined(GOOGLE_CHROME_BUILD)
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 // Enables Machine level user cloud policy on Chromium build. This policy is
 // always enabled on the branded builds.
-const char kEnableMachineLevelUserCloudPolicy[] =
-    "enable-machine-level-user-cloud-policy";
+const char kEnableChromeBrowserCloudManagement[] =
+    "enable-chrome-browser-cloud-management";
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)

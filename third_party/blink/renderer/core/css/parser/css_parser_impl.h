@@ -26,7 +26,6 @@ class CSSParserTokenStream;
 class StyleRule;
 class StyleRuleBase;
 class StyleRuleCharset;
-class StyleRuleFontFeatureValues;
 class StyleRuleFontFace;
 class StyleRuleImport;
 class StyleRuleKeyframe;
@@ -88,7 +87,6 @@ class CSSParserImpl {
   static MutableCSSPropertyValueSet::SetResult ParseVariableValue(
       MutableCSSPropertyValueSet*,
       const AtomicString& property_name,
-      const PropertyRegistry*,
       const String&,
       bool important,
       const CSSParserContext*,
@@ -164,10 +162,6 @@ class CSSParserImpl {
   StyleRuleFontFace* ConsumeFontFaceRule(CSSParserTokenRange prelude,
                                          const RangeOffset& prelude_offset,
                                          CSSParserTokenStream& block);
-  StyleRuleFontFeatureValues* ConsumeFontFeatureValuesRule(
-      CSSParserTokenRange prelude,
-      const RangeOffset& prelude_offset,
-      CSSParserTokenStream& block);
   StyleRuleKeyframes* ConsumeKeyframesRule(bool webkit_prefixed,
                                            CSSParserTokenRange prelude,
                                            const RangeOffset& prelude_offset,

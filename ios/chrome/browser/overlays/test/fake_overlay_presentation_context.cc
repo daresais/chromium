@@ -14,37 +14,40 @@ FakeOverlayPresentationContext::~FakeOverlayPresentationContext() = default;
 
 FakeOverlayPresentationContext::PresentationState
 FakeOverlayPresentationContext::GetPresentationState(OverlayRequest* request) {
-  return presentation_states_[request];
+  return states_[request].presentation_state;
 }
 
 void FakeOverlayPresentationContext::SimulateDismissalForRequest(
     OverlayRequest* request,
     OverlayDismissalReason reason) {
-  DCHECK_EQ(PresentationState::kPresented, presentation_states_[request]);
+  FakeUIState& state = states_[request];
+  DCHECK_EQ(PresentationState::kPresented, state.presentation_state);
   switch (reason) {
     case OverlayDismissalReason::kUserInteraction:
-      presentation_states_[request] = PresentationState::kUserDismissed;
+      state.presentation_state = PresentationState::kUserDismissed;
       break;
     case OverlayDismissalReason::kHiding:
-      presentation_states_[request] = PresentationState::kHidden;
+      state.presentation_state = PresentationState::kHidden;
       break;
     case OverlayDismissalReason::kCancellation:
-      presentation_states_[request] = PresentationState::kCancelled;
+      state.presentation_state = PresentationState::kCancelled;
       break;
   }
-  std::move(overlay_callbacks_[request]).Run(reason);
+  std::move(state.dismissal_callback).Run(reason);
 }
 
-void FakeOverlayPresentationContext::SetIsActive(bool active) {
-  if (active_ == active)
+void FakeOverlayPresentationContext::SetPresentationCapabilities(
+    UIPresentationCapabilities capabilities) {
+  if (capabilities_ == capabilities)
     return;
 
   for (auto& observer : observers_) {
-    observer.OverlayPresentationContextWillChangeActivationState(this, active);
+    observer.OverlayPresentationContextWillChangePresentationCapabilities(
+        this, capabilities);
   }
-  active_ = active;
+  capabilities_ = capabilities;
   for (auto& observer : observers_) {
-    observer.OverlayPresentationContextDidChangeActivationState(this);
+    observer.OverlayPresentationContextDidChangePresentationCapabilities(this);
   }
 }
 
@@ -58,16 +61,32 @@ void FakeOverlayPresentationContext::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-bool FakeOverlayPresentationContext::IsActive() const {
-  return active_;
+OverlayPresentationContext::UIPresentationCapabilities
+FakeOverlayPresentationContext::GetPresentationCapabilities() const {
+  return capabilities_;
+}
+
+bool FakeOverlayPresentationContext::CanShowUIForRequest(
+    OverlayRequest* request,
+    UIPresentationCapabilities capabilities) const {
+  return capabilities !=
+         OverlayPresentationContext::UIPresentationCapabilities::kNone;
+}
+
+bool FakeOverlayPresentationContext::CanShowUIForRequest(
+    OverlayRequest* request) const {
+  return CanShowUIForRequest(request, capabilities_);
 }
 
 void FakeOverlayPresentationContext::ShowOverlayUI(
     OverlayPresenter* presenter,
     OverlayRequest* request,
+    OverlayPresentationCallback presentation_callback,
     OverlayDismissalCallback dismissal_callback) {
-  presentation_states_[request] = PresentationState::kPresented;
-  overlay_callbacks_[request] = std::move(dismissal_callback);
+  FakeUIState& state = states_[request];
+  state.presentation_state = PresentationState::kPresented;
+  state.presentation_callback = std::move(presentation_callback);
+  state.dismissal_callback = std::move(dismissal_callback);
 }
 
 void FakeOverlayPresentationContext::HideOverlayUI(OverlayPresenter* presenter,
@@ -78,10 +97,14 @@ void FakeOverlayPresentationContext::HideOverlayUI(OverlayPresenter* presenter,
 void FakeOverlayPresentationContext::CancelOverlayUI(
     OverlayPresenter* presenter,
     OverlayRequest* request) {
-  PresentationState& state = presentation_states_[request];
-  if (state == PresentationState::kPresented) {
+  FakeUIState& state = states_[request];
+  if (state.presentation_state == PresentationState::kPresented) {
     SimulateDismissalForRequest(request, OverlayDismissalReason::kCancellation);
   } else {
-    state = PresentationState::kCancelled;
+    state.presentation_state = PresentationState::kCancelled;
   }
 }
+
+FakeOverlayPresentationContext::FakeUIState::FakeUIState() = default;
+
+FakeOverlayPresentationContext::FakeUIState::~FakeUIState() = default;

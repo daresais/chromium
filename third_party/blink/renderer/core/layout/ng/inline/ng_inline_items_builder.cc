@@ -152,6 +152,8 @@ inline bool IsCollapsibleSpace(UChar c) {
 // It makes the line breaker easier to handle.
 inline bool IsControlItemCharacter(UChar c) {
   return c == kNewlineCharacter || c == kTabulationCharacter ||
+         // Make ZWNJ a control character so that it can prevent kerning.
+         c == kZeroWidthNonJoinerCharacter ||
          // Include ignorable character here to avoids shaping/rendering
          // these glyphs, and to help the line breaker to ignore them.
          ShouldIgnore(c);
@@ -347,6 +349,9 @@ bool NGInlineItemsBuilderTemplate<OffsetMappingBuilder>::AppendTextReusing(
           NOTREACHED();
           break;
       }
+    } else if (last_item->EndCollapseType() == NGInlineItem::kCollapsed) {
+      RestoreTrailingCollapsibleSpace(last_item);
+      return false;
     }
 
     // On nowrap -> wrap boundary, a break opporunity may be inserted.
@@ -454,6 +459,8 @@ void NGInlineItemsBuilderTemplate<OffsetMappingBuilder>::AppendText(
 
   // If not create a new item as needed.
   if (UNLIKELY(layout_text->IsWordBreak())) {
+    typename OffsetMappingBuilder::SourceNodeScope scope(&mapping_builder_,
+                                                         layout_text);
     AppendBreakOpportunity(layout_text);
     return;
   }
@@ -756,7 +763,9 @@ void NGInlineItemsBuilderTemplate<
         // breaker. Generate an opportunity to make it easy.
         InsertBreakOpportunityAfterLeadingPreservedSpaces(
             string, *style, layout_object, &start);
-      } else if (c == kTabulationCharacter) {
+        continue;
+      }
+      if (c == kTabulationCharacter) {
         wtf_size_t end = string.Find(
             [](UChar c) { return c != kTabulationCharacter; }, start + 1);
         if (end == kNotFound)
@@ -764,11 +773,14 @@ void NGInlineItemsBuilderTemplate<
         AppendTextItem(NGInlineItem::kControl,
                        StringView(string, start, end - start), layout_object);
         start = end;
-      } else {
+        continue;
+      }
+      // ZWNJ splits item, but it should be text.
+      if (c != kZeroWidthNonJoinerCharacter) {
         Append(NGInlineItem::kControl, c, layout_object);
         start++;
+        continue;
       }
-      continue;
     }
 
     wtf_size_t end = string.Find(IsControlItemCharacter, start + 1);
@@ -1177,10 +1189,34 @@ void NGInlineItemsBuilderTemplate<OffsetMappingBuilder>::ExitInline(
     LayoutObject* node) {
   DCHECK(node);
 
-  AppendOpaque(NGInlineItem::kCloseTag, node);
+  if (NeedsBoxInfo()) {
+    BoxInfo* current_box = &boxes_.back();
+    if (!current_box->should_create_box_fragment) {
+      // Set ShouldCreateBoxFragment if this inline box is empty so that we can
+      // compute its position/size correctly. Check this by looking for any
+      // non-empty items after the last |kOpenTag|.
+      const unsigned open_item_index = current_box->item_index;
+      DCHECK_GE(items_->size(), open_item_index + 1);
+      DCHECK_EQ((*items_)[open_item_index].Type(), NGInlineItem::kOpenTag);
+      for (unsigned i = items_->size() - 1;; --i) {
+        NGInlineItem& item = (*items_)[i];
+        if (i == open_item_index) {
+          DCHECK_EQ(i, current_box->item_index);
+          // TODO(kojii): <area> element fails to hit-test when we don't cull.
+          if (!IsA<HTMLAreaElement>(item.GetLayoutObject()->GetNode()))
+            item.SetShouldCreateBoxFragment();
+          break;
+        }
+        DCHECK_GT(i, current_box->item_index);
+        if (!item.IsEmptyItem())
+          break;
+      }
+    }
 
-  if (NeedsBoxInfo())
     boxes_.pop_back();
+  }
+
+  AppendOpaque(NGInlineItem::kCloseTag, node);
 
   Exit(node);
 }

@@ -12,10 +12,12 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/scoped_animation_disabler.h"
+#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/overview/cleanup_animation_observer.h"
 #include "ash/wm/overview/delayed_animation_observer_impl.h"
 #include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/overview/overview_grid.h"
 #include "ash/wm/overview/scoped_overview_animation_settings.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/splitview/split_view_utils.h"
@@ -48,11 +50,9 @@ const gfx::Transform& GetShiftTransform() {
 }  // namespace
 
 bool CanCoverAvailableWorkspace(aura::Window* window) {
-  SplitViewController* split_view_controller =
-      Shell::Get()->split_view_controller();
-  if (split_view_controller->InSplitViewMode())
+  if (SplitViewController::Get(window)->InSplitViewMode())
     return CanSnapInSplitview(window);
-  return wm::GetWindowState(window)->IsMaximizedOrFullscreenOrPinned();
+  return WindowState::Get(window)->IsMaximizedOrFullscreenOrPinned();
 }
 
 void FadeInWidgetAndMaybeSlideOnEnter(views::Widget* widget,
@@ -90,7 +90,8 @@ void FadeInWidgetAndMaybeSlideOnEnter(views::Widget* widget,
 }
 
 void FadeOutWidgetAndMaybeSlideOnExit(std::unique_ptr<views::Widget> widget,
-                                      OverviewAnimationType animation_type) {
+                                      OverviewAnimationType animation_type,
+                                      bool slide) {
   // The overview controller may be nullptr on shutdown.
   OverviewController* controller = Shell::Get()->overview_controller();
   if (!controller) {
@@ -113,8 +114,7 @@ void FadeOutWidgetAndMaybeSlideOnExit(std::unique_ptr<views::Widget> widget,
   controller->AddExitAnimationObserver(std::move(observer));
   widget_ptr->SetOpacity(0.f);
 
-  // Slide |widget| towards to top of screen if exit overview to home launcher.
-  if (animation_type == OVERVIEW_ANIMATION_EXIT_TO_HOME_LAUNCHER) {
+  if (slide) {
     gfx::Transform new_transform = widget_ptr->GetNativeWindow()->transform();
     new_transform.ConcatTransform(GetShiftTransform());
     widget_ptr->GetNativeWindow()->SetTransform(new_transform);
@@ -128,13 +128,12 @@ void ImmediatelyCloseWidgetOnExit(std::unique_ptr<views::Widget> widget) {
   widget.reset();
 }
 
-wm::WindowTransientDescendantIteratorRange GetVisibleTransientTreeIterator(
+WindowTransientDescendantIteratorRange GetVisibleTransientTreeIterator(
     aura::Window* window) {
   auto hide_predicate = [](aura::Window* window) {
     return window->GetProperty(kHideInOverviewKey);
   };
-  return wm::GetTransientTreeIterator(window,
-                                      base::BindRepeating(hide_predicate));
+  return GetTransientTreeIterator(window, base::BindRepeating(hide_predicate));
 }
 
 gfx::RectF GetTransformedBounds(aura::Window* transformed_window,
@@ -213,12 +212,80 @@ bool IsSlidingOutOverviewFromShelf() {
 }
 
 void MaximizeIfSnapped(aura::Window* window) {
-  auto* window_state = wm::GetWindowState(window);
+  auto* window_state = WindowState::Get(window);
   if (window_state && window_state->IsSnapped()) {
     ScopedAnimationDisabler disabler(window);
-    wm::WMEvent event(wm::WM_EVENT_MAXIMIZE);
+    WMEvent event(WM_EVENT_MAXIMIZE);
     window_state->OnWMEvent(&event);
   }
+}
+
+// Get the grid bounds if a window is snapped in splitview, or what they will be
+// when snapped based on |target_root| and |indicator_state|.
+gfx::Rect GetGridBoundsInScreenForSplitview(
+    aura::Window* target_root,
+    base::Optional<SplitViewDragIndicators::WindowDraggingState>
+        window_dragging_state) {
+  auto* split_view_controller = SplitViewController::Get(target_root);
+  auto state = split_view_controller->state();
+
+  // If we are in splitview mode already just use the given state, otherwise
+  // convert |window_dragging_state| to a split view state.
+  if (!split_view_controller->InSplitViewMode() && window_dragging_state) {
+    switch (*window_dragging_state) {
+      case SplitViewDragIndicators::WindowDraggingState::kToSnapLeft:
+        state = SplitViewController::State::kLeftSnapped;
+        break;
+      case SplitViewDragIndicators::WindowDraggingState::kToSnapRight:
+        state = SplitViewController::State::kRightSnapped;
+        break;
+      default:
+        break;
+    }
+  }
+
+  switch (state) {
+    case SplitViewController::State::kLeftSnapped:
+      return split_view_controller->GetSnappedWindowBoundsInScreen(
+          SplitViewController::RIGHT, /*window_for_minimum_size=*/nullptr);
+    case SplitViewController::State::kRightSnapped:
+      return split_view_controller->GetSnappedWindowBoundsInScreen(
+          SplitViewController::LEFT, /*window_for_minimum_size=*/nullptr);
+    default:
+      return screen_util::
+          GetDisplayWorkAreaBoundsInScreenForActiveDeskContainer(target_root);
+  }
+}
+
+base::Optional<gfx::RectF> GetSplitviewBoundsMaintainingAspectRatio(
+    aura::Window* window) {
+  if (!ShouldAllowSplitView())
+    return base::nullopt;
+  auto* overview_session =
+      Shell::Get()->overview_controller()->overview_session();
+  DCHECK(overview_session);
+  aura::Window* root_window = Shell::GetPrimaryRootWindow();
+  DCHECK(overview_session->GetGridWithRootWindow(root_window)
+             ->split_view_drag_indicators());
+  // TODO(sammiequon): This does not work for drag from top as they have
+  // different drag indicators object as regular overview.
+  auto window_dragging_state =
+      overview_session->GetGridWithRootWindow(root_window)
+          ->split_view_drag_indicators()
+          ->current_window_dragging_state();
+  if (!SplitViewController::Get(root_window)->InSplitViewMode() &&
+      SplitViewDragIndicators::GetSnapPosition(window_dragging_state) ==
+          SplitViewController::NONE) {
+    return base::nullopt;
+  }
+
+  return base::make_optional(gfx::RectF(GetGridBoundsInScreenForSplitview(
+      root_window, base::make_optional(window_dragging_state))));
+}
+
+bool ShouldUseTabletModeGridLayout() {
+  return base::FeatureList::IsEnabled(features::kNewOverviewLayout) &&
+         Shell::Get()->tablet_mode_controller()->InTabletMode();
 }
 
 }  // namespace ash

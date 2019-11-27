@@ -13,9 +13,9 @@
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "google_apis/gaia/core_account_id.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
+#include "google_apis/gaia/gaia_constants.h"
 
-namespace identity {
+namespace signin {
 
 AccountsMutatorImpl::AccountsMutatorImpl(
     ProfileOAuth2TokenService* token_service,
@@ -80,10 +80,10 @@ void AccountsMutatorImpl::RemoveAllAccounts(
 void AccountsMutatorImpl::InvalidateRefreshTokenForPrimaryAccount(
     signin_metrics::SourceForRefreshTokenOperation source) {
   DCHECK(primary_account_manager_->IsAuthenticated());
-  AccountInfo primary_account_info =
+  CoreAccountInfo primary_account_info =
       primary_account_manager_->GetAuthenticatedAccountInfo();
   AddOrUpdateAccount(primary_account_info.gaia, primary_account_info.email,
-                     OAuth2TokenServiceDelegate::kInvalidRefreshToken,
+                     GaiaConstants::kInvalidRefreshToken,
                      primary_account_info.is_under_advanced_protection, source);
 }
 
@@ -102,15 +102,8 @@ void AccountsMutatorImpl::MoveAccount(AccountsMutator* target,
   // to the device ID of the current mutator on the server. Reset the device ID
   // of the current mutator to avoid tying it with the new mutator. See
   // https://crbug.com/813928#c16
-  signin::RecreateSigninScopedDeviceId(pref_service_);
+  RecreateSigninScopedDeviceId(pref_service_);
 }
 #endif
 
-void AccountsMutatorImpl::LegacySetRefreshTokenForSupervisedUser(
-    const std::string& refresh_token) {
-  token_service_->UpdateCredentials(
-      CoreAccountId("managed_user@localhost"), refresh_token,
-      signin_metrics::SourceForRefreshTokenOperation::kSupervisedUser_InitSync);
-}
-
-}  // namespace identity
+}  // namespace signin

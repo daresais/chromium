@@ -21,6 +21,7 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -117,10 +118,10 @@ class AvailabilityChecker {
   // Don't call this directly, but use Start().
   explicit AvailabilityChecker(ResponseCallback callback)
       : callback_(std::move(callback)),
-        background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::USER_VISIBLE})),
-        watcher_(new base::FilePathWatcher()),
-        weak_ptr_factory_(this) {
+        background_task_runner_(base::CreateSequencedTaskRunner(
+            {base::ThreadPool(), base::MayBlock(),
+             base::TaskPriority::USER_VISIBLE})),
+        watcher_(new base::FilePathWatcher()) {
     auto watch_callback = base::BindRepeating(
         &AvailabilityChecker::OnFilePathChanged,
         base::SequencedTaskRunnerHandle::Get(), weak_ptr_factory_.GetWeakPtr());
@@ -208,7 +209,7 @@ class AvailabilityChecker {
   ResponseCallback callback_;
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
   std::unique_ptr<base::FilePathWatcher> watcher_;
-  base::WeakPtrFactory<AvailabilityChecker> weak_ptr_factory_;
+  base::WeakPtrFactory<AvailabilityChecker> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AvailabilityChecker);
 };

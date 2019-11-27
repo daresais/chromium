@@ -41,7 +41,6 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace media_router {
 
@@ -49,6 +48,16 @@ namespace {
 
 // This value is negative so that it doesn't overlap with a sink index.
 constexpr int kAlternativeSourceButtonId = -1;
+
+std::unique_ptr<views::Button> CreateSourcesButton(
+    views::ButtonListener* listener) {
+  auto sources_button = std::make_unique<views::MdTextButtonWithDownArrow>(
+      listener,
+      l10n_util::GetStringUTF16(IDS_MEDIA_ROUTER_ALTERNATIVE_SOURCES_BUTTON));
+  sources_button->SetID(kAlternativeSourceButtonId);
+  sources_button->SetEnabled(false);
+  return sources_button;
+}
 
 }  // namespace
 
@@ -130,20 +139,6 @@ base::string16 CastDialogView::GetWindowTitle() const {
   }
 }
 
-int CastDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
-}
-
-std::unique_ptr<views::View> CastDialogView::CreateExtraView() {
-  auto sources_button = std::make_unique<views::MdTextButtonWithDownArrow>(
-      this,
-      l10n_util::GetStringUTF16(IDS_MEDIA_ROUTER_ALTERNATIVE_SOURCES_BUTTON));
-  sources_button->SetID(kAlternativeSourceButtonId);
-  sources_button->SetEnabled(false);
-  sources_button_ = sources_button.get();
-  return sources_button;
-}
-
 bool CastDialogView::Close() {
   return Cancel();
 }
@@ -189,10 +184,9 @@ void CastDialogView::ButtonPressed(views::Button* sender,
     // SinkPressed() invokes a refresh of the sink list, which deletes the
     // sink button. So we must call this after the button is done handling the
     // press event.
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
-        base::BindOnce(&CastDialogView::SinkPressed, weak_factory_.GetWeakPtr(),
-                       sender->tag()));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(&CastDialogView::SinkPressed,
+                                  weak_factory_.GetWeakPtr(), sender->tag()));
   }
 }
 
@@ -267,7 +261,9 @@ CastDialogView::CastDialogView(views::View* anchor_view,
       selected_source_(SourceType::kTab),
       controller_(controller),
       profile_(profile),
-      metrics_(start_time) {
+      metrics_(start_time, profile) {
+  DialogDelegate::set_buttons(ui::DIALOG_BUTTON_NONE);
+  sources_button_ = DialogDelegate::SetExtraView(CreateSourcesButton(this));
   ShowNoSinksView();
 }
 
@@ -405,6 +401,9 @@ void CastDialogView::SinkPressed(size_t index) {
   } else if (sink.issue) {
     controller_->ClearIssue(sink.issue->id());
   } else {
+    // |sink| may get invalidated during CastDialogController::StartCasting()
+    // due to a model update, so we must use a copy of its |id| field.
+    const std::string sink_id = sink.id;
     base::Optional<MediaCastMode> cast_mode = GetCastModeToUse(sink);
     if (cast_mode) {
       // Starting local file casting may open a new tab synchronously on the UI
@@ -412,7 +411,7 @@ void CastDialogView::SinkPressed(size_t index) {
       // closing and getting destroyed.
       if (cast_mode.value() == LOCAL_FILE)
         set_close_on_deactivate(false);
-      controller_->StartCasting(sink.id, cast_mode.value());
+      controller_->StartCasting(sink_id, cast_mode.value());
       // Re-enable close on deactivate so the user can click elsewhere to close
       // the dialog.
       if (cast_mode.value() == LOCAL_FILE)
@@ -465,11 +464,10 @@ void CastDialogView::DisableUnsupportedSinks() {
 void CastDialogView::RecordSinkCountWithDelay() {
   // Record the number of sinks after three seconds. This is consistent with the
   // WebUI dialog.
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&CastDialogView::RecordSinkCount,
-                     weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSeconds(3));
+  base::PostDelayedTask(FROM_HERE, {content::BrowserThread::UI},
+                        base::BindOnce(&CastDialogView::RecordSinkCount,
+                                       weak_factory_.GetWeakPtr()),
+                        base::TimeDelta::FromSeconds(3));
 }
 
 void CastDialogView::RecordSinkCount() {

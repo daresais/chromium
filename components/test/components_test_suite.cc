@@ -27,6 +27,7 @@
 #include "components/test/ios_components_test_initializer.h"
 #else
 #include "content/public/common/content_client.h"
+#include "content/public/common/network_service_util.h"
 #include "content/public/test/content_test_suite_base.h"
 #include "content/public/test/test_content_client_initializer.h"
 #include "content/public/test/unittest_test_suite.h"
@@ -55,10 +56,12 @@ class ComponentsTestSuite : public base::TestSuite {
     mojo::core::Init();
 
     // Before registering any schemes, clear GURL's internal state.
-    url::Shutdown();
+    url::ResetForTests();
 
 #if !defined(OS_IOS)
     gl::GLSurfaceTestSupport::InitializeOneOff();
+
+    content::ForceInProcessNetworkService(true);
 
     // Setup content scheme statics.
     {
@@ -90,6 +93,7 @@ class ComponentsTestSuite : public base::TestSuite {
     url::AddStandardScheme("chrome-extension", url::SCHEME_WITH_HOST);
     url::AddStandardScheme("devtools", url::SCHEME_WITH_HOST);
     url::AddStandardScheme("chrome-search", url::SCHEME_WITH_HOST);
+    url::AddStandardScheme("chrome-distiller", url::SCHEME_WITH_HOST);
 
     ContentSettingsPattern::SetNonWildcardDomainNonPortSchemes(
         kNonWildcardDomainNonPortSchemes,
@@ -159,6 +163,6 @@ base::RunTestSuiteCallback GetLaunchCallback(int argc, char** argv) {
   return base::BindOnce(&content::UnitTestTestSuite::Run,
                         std::move(test_suite));
 #else
-  return base::Bind(&base::TestSuite::Run, std::move(test_suite));
+  return base::BindOnce(&base::TestSuite::Run, std::move(test_suite));
 #endif
 }

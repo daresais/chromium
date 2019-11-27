@@ -11,12 +11,12 @@
 #include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/browser/page_load_metrics/observers/ad_metrics/ads_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/ad_metrics/frame_data.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_test_waiter.h"
 #include "chrome/browser/subresource_filter/subresource_filter_browser_test_harness.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/page_load_metrics/browser/page_load_metrics_test_waiter.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
 #include "components/subresource_filter/core/common/test_ruleset_utils.h"
 #include "components/ukm/content/source_url_recorder.h"
@@ -483,8 +483,9 @@ class AdTaggingEventFromSubframeBrowserTest
       public ::testing::WithParamInterface<
           std::tuple<bool /* cross_origin */, bool /* from_ad_subframe */>> {};
 
+// crbug.com/997410. The test is flaky on multiple platforms.
 IN_PROC_BROWSER_TEST_P(AdTaggingEventFromSubframeBrowserTest,
-                       WindowOpenFromSubframe) {
+                       DISABLED_WindowOpenFromSubframe) {
   bool cross_origin;
   bool from_ad_subframe;
   std::tie(cross_origin, from_ad_subframe) = GetParam();
@@ -522,8 +523,9 @@ class AdTaggingEventWithScriptInStackBrowserTest
     : public AdTaggingBrowserTest,
       public ::testing::WithParamInterface<bool /* from_ad_script */> {};
 
+// crbug.com/998405. The test is flaky on multiple platforms.
 IN_PROC_BROWSER_TEST_P(AdTaggingEventWithScriptInStackBrowserTest,
-                       WindowOpenWithScriptInStack) {
+                       DISABLED_WindowOpenWithScriptInStack) {
   bool from_ad_script = GetParam();
   SCOPED_TRACE(::testing::Message() << "from_ad_script = " << from_ad_script);
 

@@ -28,6 +28,7 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 using net::DefineNetworkTrafficAnnotation;
 
@@ -91,7 +92,7 @@ net::NetworkTrafficAnnotationTag GetNetworkTrafficAnnotation(
 
 GCDApiFlowImpl::GCDApiFlowImpl(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    identity::IdentityManager* identity_manager)
+    signin::IdentityManager* identity_manager)
     : url_loader_factory_(url_loader_factory),
       identity_manager_(identity_manager) {}
 
@@ -102,16 +103,16 @@ void GCDApiFlowImpl::Start(std::unique_ptr<Request> request) {
   identity::ScopeSet oauth_scopes;
   oauth_scopes.insert(request_->GetOAuthScope());
   DCHECK(identity_manager_);
-  token_fetcher_ = std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+  token_fetcher_ = std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
       "cloud_print", identity_manager_, oauth_scopes,
       base::BindOnce(&GCDApiFlowImpl::OnAccessTokenFetchComplete,
                      base::Unretained(this)),
-      identity::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
+      signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
 }
 
 void GCDApiFlowImpl::OnAccessTokenFetchComplete(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   token_fetcher_.reset();
 
   if (error.state() != GoogleServiceAuthError::NONE) {
@@ -122,8 +123,7 @@ void GCDApiFlowImpl::OnAccessTokenFetchComplete(
   auto request = std::make_unique<network::ResourceRequest>();
   request->url = request_->GetURL();
 
-  request->load_flags =
-      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES;
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   request->headers.SetHeader(kCloudPrintOAuthHeaderKey,
                              GetOAuthHeaderValue(access_token_info.token));
@@ -147,7 +147,7 @@ void GCDApiFlowImpl::OnAccessTokenFetchComplete(
 
 void GCDApiFlowImpl::OnDownloadedToString(
     std::unique_ptr<std::string> response_body) {
-  const network::ResourceResponseHead* response_info =
+  const network::mojom::URLResponseHead* response_info =
       url_loader_->ResponseInfo();
 
   if (url_loader_->NetError() != net::OK || !response_info) {

@@ -15,14 +15,14 @@ class PictureInPictureServiceMock {
         blink.mojom.PictureInPictureService);
 
     this.interceptor_ =
-        new MojoInterfaceInterceptor(blink.mojom.PictureInPictureService.name);
+        new MojoInterfaceInterceptor(blink.mojom.PictureInPictureService.name, "context", true);
     this.interceptor_.oninterfacerequest =
         e => this.bindingSet_.addBinding(this, e.handle);
     this.interceptor_.start();
   }
 
   async startSession(playerId, surfaceId, naturalSize, showPlayPauseButton,
-        showMuteButton, observer, callback) {
+        observer, callback) {
     return { session: null, size: new gfx.mojom.Size() };
   }
 };

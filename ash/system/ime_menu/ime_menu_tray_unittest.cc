@@ -7,7 +7,7 @@
 #include "ash/accelerators/accelerator_controller_impl.h"
 #include "ash/ime/ime_controller.h"
 #include "ash/ime/test_ime_controller_client.h"
-#include "ash/public/interfaces/ime_info.mojom.h"
+#include "ash/public/mojom/ime_info.mojom.h"
 #include "ash/shell.h"
 #include "ash/system/ime_menu/ime_list_view.h"
 #include "ash/system/status_area_widget.h"
@@ -15,6 +15,7 @@
 #include "ash/test/ash_test_base.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ime/ime_bridge.h"
 #include "ui/base/ime/text_input_flags.h"
@@ -281,7 +282,7 @@ TEST_F(ImeMenuTrayTest, ShowingEmojiKeysetHidesBubble) {
   EXPECT_TRUE(IsBubbleShown());
 
   TestImeControllerClient client;
-  Shell::Get()->ime_controller()->SetClient(client.CreateInterfacePtr());
+  Shell::Get()->ime_controller()->SetClient(client.CreateRemote());
   GetTray()->ShowKeyboardWithKeyset(
       chromeos::input_method::mojom::ImeKeyset::kEmoji);
 

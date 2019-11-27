@@ -8,17 +8,20 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
+#include "chrome/browser/ui/views/bubble_menu_item_factory.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
-#include "chrome/browser/ui/views/extensions/extensions_menu_button.h"
+#include "chrome/browser/ui/views/extensions/extensions_menu_item_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/vector_icons/vector_icons.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/views/controls/button/image_button.h"
-#include "ui/views/controls/button/image_button_factory.h"
+#include "ui/views/animation/ink_drop_host_view.h"
+#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
@@ -26,19 +29,25 @@
 #include "ui/views/view_class_properties.h"
 
 namespace {
+// If true, allows more than one instance of the ExtensionsMenuView, which may
+// not be the active instance in g_extensions_dialog.
+bool g_allow_testing_dialogs = false;
+
 ExtensionsMenuView* g_extensions_dialog = nullptr;
 
 constexpr int EXTENSIONS_SETTINGS_ID = 42;
-
-gfx::ImageSkia CreateVectorIcon(const gfx::VectorIcon& icon) {
-  return gfx::CreateVectorIcon(
-      icon, 16,
-      ui::NativeTheme::GetInstanceForNativeUi()->SystemDarkModeEnabled()
-          ? gfx::kGoogleGrey500
-          : gfx::kChromeIconGrey);
-}
-
 }  // namespace
+
+constexpr gfx::Size ExtensionsMenuView::kExtensionsMenuIconSize;
+
+ExtensionsMenuView::ButtonListener::ButtonListener(Browser* browser)
+    : browser_(browser) {}
+
+void ExtensionsMenuView::ButtonListener::ButtonPressed(views::Button* sender,
+                                                       const ui::Event& event) {
+  DCHECK_EQ(sender->GetID(), EXTENSIONS_SETTINGS_ID);
+  chrome::ShowExtensions(browser_, std::string());
+}
 
 ExtensionsMenuView::ExtensionsMenuView(
     views::View* anchor_view,
@@ -48,10 +57,14 @@ ExtensionsMenuView::ExtensionsMenuView(
                                views::BubbleBorder::Arrow::TOP_RIGHT),
       browser_(browser),
       extensions_container_(extensions_container),
-      model_(ToolbarActionsModel::Get(browser_->profile())),
-      model_observer_(this) {
-  model_observer_.Add(model_);
+      toolbar_model_(ToolbarActionsModel::Get(browser_->profile())),
+      toolbar_model_observer_(this),
+      button_listener_(browser_) {
+  toolbar_model_observer_.Add(toolbar_model_);
+  browser_->tab_strip_model()->AddObserver(this);
   set_margins(gfx::Insets(0));
+
+  DialogDelegate::set_buttons(ui::DIALOG_BUTTON_NONE);
 
   EnableUpDownKeyboardAccelerators();
 
@@ -61,14 +74,13 @@ ExtensionsMenuView::ExtensionsMenuView(
 }
 
 ExtensionsMenuView::~ExtensionsMenuView() {
-  DCHECK_EQ(g_extensions_dialog, this);
+  if (!g_allow_testing_dialogs)
+    DCHECK_EQ(g_extensions_dialog, this);
   g_extensions_dialog = nullptr;
-}
+  extensions_menu_items_.clear();
 
-void ExtensionsMenuView::ButtonPressed(views::Button* sender,
-                                       const ui::Event& event) {
-  DCHECK_EQ(sender->GetID(), EXTENSIONS_SETTINGS_ID);
-  chrome::ShowExtensions(browser_, std::string());
+  // Note: No need to call TabStripModel::RemoveObserver(), because it's handled
+  // directly within TabStripModelObserver::~TabStripModelObserver().
 }
 
 base::string16 ExtensionsMenuView::GetWindowTitle() const {
@@ -79,12 +91,11 @@ bool ExtensionsMenuView::ShouldShowCloseButton() const {
   return true;
 }
 
-int ExtensionsMenuView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
-}
-
-bool ExtensionsMenuView::ShouldSnapFrameWidth() const {
-  return true;
+gfx::Size ExtensionsMenuView::CalculatePreferredSize() const {
+  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
+                        DISTANCE_BUBBLE_PREFERRED_WIDTH) -
+                    margins().width();
+  return gfx::Size(width, GetHeightForWidth(width));
 }
 
 void ExtensionsMenuView::Repopulate() {
@@ -101,18 +112,24 @@ void ExtensionsMenuView::Repopulate() {
   AddChildView(std::move(scroll_view));
 
   AddChildView(std::make_unique<views::Separator>());
-  auto icon_view = CreateFixedSizeIconView();
-  icon_view->SetImage(CreateVectorIcon(vector_icons::kSettingsIcon));
-  auto footer = std::make_unique<HoverButton>(
-      this, std::move(icon_view),
-      l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSION), base::string16());
-  footer->SetID(EXTENSIONS_SETTINGS_ID);
+
+  auto footer = CreateBubbleMenuItem(
+      EXTENSIONS_SETTINGS_ID, l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSION),
+      &button_listener_);
+  footer->SetImage(
+      views::Button::STATE_NORMAL,
+      gfx::CreateVectorIcon(vector_icons::kSettingsIcon, 16,
+                            GetNativeTheme()->GetSystemColor(
+                                ui::NativeTheme::kColorId_DefaultIconColor)));
+  footer->SetImageLabelSpacing(ChromeLayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_BUTTON_HORIZONTAL_PADDING));
   manage_extensions_button_for_testing_ = footer.get();
   AddChildView(std::move(footer));
 }
 
 std::unique_ptr<views::View>
 ExtensionsMenuView::CreateExtensionButtonsContainer() {
+  extensions_menu_items_.clear();
   content::WebContents* const web_contents =
       browser_->tab_strip_model()->GetActiveWebContents();
 
@@ -120,9 +137,9 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
   std::vector<std::unique_ptr<ToolbarActionViewController>> cant_access;
   std::vector<std::unique_ptr<ToolbarActionViewController>> wants_access;
   std::vector<std::unique_ptr<ToolbarActionViewController>> accessing_site_data;
-  for (auto action_id : model_->action_ids()) {
-    auto action = model_->CreateActionForId(browser_, extensions_container_,
-                                            false, action_id);
+  for (auto action_id : toolbar_model_->action_ids()) {
+    auto action = toolbar_model_->CreateActionForId(
+        browser_, extensions_container_, false, action_id);
     switch (action->GetPageInteractionStatus(web_contents)) {
       case ToolbarActionViewController::PageInteractionStatus::kNone:
         cant_access.push_back(std::move(action));
@@ -139,7 +156,6 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
   }
 
   auto extension_buttons = std::make_unique<views::View>();
-  extension_menu_button_container_for_testing_ = extension_buttons.get();
   extension_buttons->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical));
 
@@ -155,7 +171,8 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
         auto label = std::make_unique<views::Label>(
             l10n_util::GetStringUTF16(label_string_id),
             ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
-            ChromeTextStyle::STYLE_SECONDARY);
+            views::style::STYLE_SECONDARY);
+        label->SetMultiLine(true);
         label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
         const int horizontal_spacing =
             ChromeLayoutProvider::Get()->GetDistanceMetric(
@@ -179,9 +196,12 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
             });
 
         for (auto& controller : *controller_group) {
-          extension_buttons->AddChildView(
-              std::make_unique<ExtensionsMenuButton>(browser_,
-                                                     std::move(controller)));
+          std::unique_ptr<ExtensionsMenuItemView> extensions_menu_item =
+              std::make_unique<ExtensionsMenuItemView>(browser_,
+                                                       std::move(controller));
+
+          extensions_menu_items_.push_back(extensions_menu_item.get());
+          extension_buttons->AddChildView(std::move(extensions_menu_item));
         }
         controller_group->clear();
       };
@@ -191,6 +211,19 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
   add_group(&cant_access, IDS_EXTENSIONS_MENU_CANT_ACCESS_SITE_DATA);
 
   return extension_buttons;
+}
+
+void ExtensionsMenuView::TabChangedAt(content::WebContents* contents,
+                                      int index,
+                                      TabChangeType change_type) {
+  Repopulate();
+}
+
+void ExtensionsMenuView::OnTabStripModelChanged(
+    TabStripModel* tab_strip_model,
+    const TabStripModelChange& change,
+    const TabStripSelectionChange& selection) {
+  Repopulate();
 }
 
 // TODO(pbos): Revisit observed events below.
@@ -233,7 +266,14 @@ void ExtensionsMenuView::OnToolbarModelInitialized() {
 }
 
 void ExtensionsMenuView::OnToolbarPinnedActionsChanged() {
-  Repopulate();
+  for (auto* menu_item : extensions_menu_items_) {
+    menu_item->UpdatePinButton();
+  }
+}
+
+// static
+base::AutoReset<bool> ExtensionsMenuView::AllowInstancesForTesting() {
+  return base::AutoReset<bool>(&g_allow_testing_dialogs, true);
 }
 
 // static
@@ -255,16 +295,6 @@ bool ExtensionsMenuView::IsShowing() {
 void ExtensionsMenuView::Hide() {
   if (IsShowing())
     g_extensions_dialog->GetWidget()->Close();
-}
-
-// static
-std::unique_ptr<views::ImageView>
-ExtensionsMenuView::CreateFixedSizeIconView() {
-  // Note that this size is larger than the 16dp extension icons as it needs to
-  // accommodate 24dp click-to-script badging and surrounding shadows.
-  auto image_view = std::make_unique<views::ImageView>();
-  image_view->SetPreferredSize(gfx::Size(28, 28));
-  return image_view;
 }
 
 ExtensionsMenuView* ExtensionsMenuView::GetExtensionsMenuViewForTesting() {

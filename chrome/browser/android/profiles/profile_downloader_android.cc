@@ -33,7 +33,7 @@ namespace {
 class AccountInfoRetriever : public ProfileDownloaderDelegate {
  public:
   AccountInfoRetriever(Profile* profile,
-                       const std::string& account_id,
+                       const CoreAccountId& account_id,
                        const std::string& email,
                        const int desired_image_side_pixels,
                        bool is_pre_signin)
@@ -63,7 +63,7 @@ class AccountInfoRetriever : public ProfileDownloaderDelegate {
     return desired_image_side_pixels_;
   }
 
-  identity::IdentityManager* GetIdentityManager() override {
+  signin::IdentityManager* GetIdentityManager() override {
     return IdentityManagerFactory::GetForProfile(profile_);
   }
 
@@ -112,7 +112,7 @@ class AccountInfoRetriever : public ProfileDownloaderDelegate {
   Profile* profile_;
 
   // The account ID and email address of account to be loaded.
-  const std::string account_id_;
+  const CoreAccountId account_id_;
   const std::string email_;
 
   // Desired side length of the profile image (in pixels).
@@ -198,7 +198,8 @@ void JNI_ProfileDownloader_StartFetchingAccountInfoFor(
 
   auto maybe_account_info =
       IdentityManagerFactory::GetForProfile(profile)
-          ->FindAccountInfoForAccountWithRefreshTokenByEmailAddress(email);
+          ->FindExtendedAccountInfoForAccountWithRefreshTokenByEmailAddress(
+              email);
 
   if (!maybe_account_info.has_value()) {
     LOG(ERROR) << "Attempted to get AccountInfo for account not in the "

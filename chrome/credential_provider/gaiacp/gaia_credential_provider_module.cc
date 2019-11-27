@@ -61,7 +61,7 @@ CGaiaCredentialProviderModule::UpdateRegistryAppId(BOOL do_register) throw() {
       base::win::String16FromGUID(CLSID_GaiaCredentialProvider);
 
   auto filter_guid_string =
-      base::win::String16FromGUID(__uuidof(CGaiaCredentialProviderFilter));
+      base::win::String16FromGUID(CLSID_CGaiaCredentialProviderFilter);
 
   ATL::_ATL_REGMAP_ENTRY regmap[] = {
       {L"CP_CLASS_GUID", base::as_wcstr(provider_guid_string.c_str())},
@@ -103,7 +103,7 @@ BOOL CGaiaCredentialProviderModule::DllMain(HINSTANCE /*hinstance*/,
                            true,    // Enable thread id.
                            true,    // Enable timestamp.
                            false);  // Enable tickcount.
-      logging::SetEventSource("GCP", GCP_CATEGORY, MSG_LOG_MESSAGE);
+      logging::SetEventSource("GCPW", GCPW_CATEGORY, MSG_LOG_MESSAGE);
 
       base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
 

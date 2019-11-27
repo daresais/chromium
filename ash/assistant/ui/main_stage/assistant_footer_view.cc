@@ -8,6 +8,7 @@
 
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
+#include "ash/assistant/ui/assistant_view_ids.h"
 #include "ash/assistant/ui/main_stage/assistant_opt_in_view.h"
 #include "ash/assistant/ui/main_stage/suggestion_container_view.h"
 #include "ash/assistant/util/animation_util.h"
@@ -44,12 +45,13 @@ AssistantFooterView::AssistantFooterView(AssistantViewDelegate* delegate)
           /*animation_ended_callback=*/base::BindRepeating(
               &AssistantFooterView::OnAnimationEnded,
               base::Unretained(this)))) {
+  SetID(AssistantViewID::kFooterView);
   InitLayout();
-  delegate_->AddAssistantPrefsObserver(this);
+  AssistantState::Get()->AddObserver(this);
 }
 
 AssistantFooterView::~AssistantFooterView() {
-  delegate_->RemoveAssistantPrefsObserver(this);
+  AssistantState::Get()->RemoveObserver(this);
 }
 
 const char* AssistantFooterView::GetClassName() const {
@@ -69,7 +71,8 @@ void AssistantFooterView::InitLayout() {
 
   // Initial view state is based on user consent state.
   const bool consent_given =
-      delegate_->GetConsentStatus() ==
+      AssistantState::Get()->consent_status().value_or(
+          chromeos::assistant::prefs::ConsentStatus::kUnknown) ==
       chromeos::assistant::prefs::ConsentStatus::kActivityControlAccepted;
 
   // Suggestion container.
@@ -97,7 +100,7 @@ void AssistantFooterView::InitLayout() {
   AddChildView(opt_in_view_);
 }
 
-void AssistantFooterView::OnAssistantConsentStatusUpdated(int consent_status) {
+void AssistantFooterView::OnAssistantConsentStatusChanged(int consent_status) {
   using assistant::util::CreateLayerAnimationSequence;
   using assistant::util::CreateOpacityElement;
   using assistant::util::StartLayerAnimationSequence;
@@ -152,7 +155,8 @@ void AssistantFooterView::OnAnimationStarted(
 bool AssistantFooterView::OnAnimationEnded(
     const ui::CallbackLayerAnimationObserver& observer) {
   const bool consent_given =
-      delegate_->GetConsentStatus() ==
+      AssistantState::Get()->consent_status().value_or(
+          chromeos::assistant::prefs::ConsentStatus::kUnknown) ==
       chromeos::assistant::prefs::ConsentStatus::kActivityControlAccepted;
 
   // Only the view relevant to our consent state should process events.

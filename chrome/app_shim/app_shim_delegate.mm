@@ -30,8 +30,9 @@
 
   // If the AppShimController is ready, try to send a FocusApp. If that fails,
   // (e.g. if launching has not finished), enqueue the files.
-  if (appShimController_ && appShimController_->SendFocusApp(
-                                apps::APP_SHIM_FOCUS_OPEN_FILES, filePaths)) {
+  if (appShimController_ &&
+      appShimController_->SendFocusApp(
+          chrome::mojom::AppShimFocusType::kOpenFiles, filePaths)) {
     return;
   }
 
@@ -51,8 +52,9 @@
 
 - (BOOL)applicationOpenUntitledFile:(NSApplication*)app {
   if (appShimController_) {
-    return appShimController_->SendFocusApp(apps::APP_SHIM_FOCUS_REOPEN,
-                                            std::vector<base::FilePath>());
+    return appShimController_->SendFocusApp(
+        chrome::mojom::AppShimFocusType::kReopen,
+        std::vector<base::FilePath>());
   }
 
   return NO;
@@ -60,28 +62,9 @@
 
 - (void)applicationWillBecomeActive:(NSNotification*)notification {
   if (appShimController_) {
-    appShimController_->SendFocusApp(apps::APP_SHIM_FOCUS_NORMAL,
+    appShimController_->SendFocusApp(chrome::mojom::AppShimFocusType::kNormal,
                                      std::vector<base::FilePath>());
   }
-}
-
-- (NSApplicationTerminateReply)applicationShouldTerminate:
-    (NSApplication*)sender {
-  // Send a last message to the host indicating that the host should close all
-  // associated browser windows.
-  if (appShimController_)
-    appShimController_->host()->QuitApp();
-  return NSTerminateNow;
-}
-
-- (void)applicationWillHide:(NSNotification*)notification {
-  if (appShimController_)
-    appShimController_->host()->SetAppHidden(true);
-}
-
-- (void)applicationWillUnhide:(NSNotification*)notification {
-  if (appShimController_)
-    appShimController_->host()->SetAppHidden(false);
 }
 
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {

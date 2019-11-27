@@ -14,9 +14,11 @@
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/extensions/extensions_menu_button.h"
+#include "chrome/browser/ui/views/extensions/extensions_menu_item_view.h"
 #include "chrome/browser/ui/views/extensions/extensions_toolbar_button.h"
 #include "chrome/browser/ui/views/extensions/extensions_toolbar_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/hover_button_controller.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_actions_bar_bubble_views.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/chrome_paths.h"
@@ -24,9 +26,38 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
-#include "ui/views/test/button_test_api.h"
+#include "ui/views/layout/animating_layout_manager.h"
 #include "ui/views/test/widget_test.h"
-#include "ui/views/window/dialog_client_view.h"
+
+// Helper to wait until the hover card widget is visible.
+class AnimatingLayoutWaiter : public views::AnimatingLayoutManager::Observer {
+ public:
+  explicit AnimatingLayoutWaiter(
+      views::AnimatingLayoutManager* animating_layout)
+      : animating_layout_(animating_layout) {
+    observer_.Add(animating_layout_);
+  }
+
+  void Wait() {
+    if (!animating_layout_->is_animating())
+      return;
+    run_loop_.Run();
+  }
+
+  // views::AnimatingLayoutManager overrides:
+  void OnLayoutIsAnimatingChanged(views::AnimatingLayoutManager* source,
+                                  bool is_animating) override {
+    if (!is_animating)
+      run_loop_.Quit();
+  }
+
+ private:
+  views::AnimatingLayoutManager* const animating_layout_;
+  ScopedObserver<views::AnimatingLayoutManager,
+                 views::AnimatingLayoutManager::Observer>
+      observer_{this};
+  base::RunLoop run_loop_;
+};
 
 class ExtensionsMenuViewBrowserTest : public DialogBrowserTest {
  protected:
@@ -57,15 +88,9 @@ class ExtensionsMenuViewBrowserTest : public DialogBrowserTest {
         ->OnMousePressed(click_event);
   }
 
-  static std::vector<ExtensionsMenuButton*> GetExtensionMenuButtons() {
-    std::vector<ExtensionsMenuButton*> buttons;
-    for (auto* view : ExtensionsMenuView::GetExtensionsMenuViewForTesting()
-                          ->extension_menu_button_container_for_testing()
-                          ->children()) {
-      if (view->GetClassName() == ExtensionsMenuButton::kClassName)
-        buttons.push_back(static_cast<ExtensionsMenuButton*>(view));
-    }
-    return buttons;
+  static std::vector<ExtensionsMenuItemView*> GetExtensionsMenuItemView() {
+    return ExtensionsMenuView::GetExtensionsMenuViewForTesting()
+        ->extensions_menu_items_for_testing();
   }
 
   std::vector<ToolbarActionView*> GetToolbarActionViews() const {
@@ -87,12 +112,21 @@ class ExtensionsMenuViewBrowserTest : public DialogBrowserTest {
   }
 
   void TriggerSingleExtensionButton() {
-    auto buttons = GetExtensionMenuButtons();
-    ASSERT_EQ(1u, buttons.size());
-    ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
-                               base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON, 0);
-    views::test::ButtonTestApi test_api(buttons[0]);
-    test_api.NotifyClick(click_event);
+    auto menu_items = GetExtensionsMenuItemView();
+    ASSERT_EQ(1u, menu_items.size());
+    ui::MouseEvent click_event(ui::ET_MOUSE_RELEASED, gfx::Point(),
+                               gfx::Point(), base::TimeTicks(),
+                               ui::EF_LEFT_MOUSE_BUTTON, 0);
+    menu_items[0]
+        ->primary_action_button_for_testing()
+        ->button_controller()
+        ->OnMouseReleased(click_event);
+    AnimatingLayoutWaiter waiter(static_cast<views::AnimatingLayoutManager*>(
+        BrowserView::GetBrowserViewForBrowser(browser())
+            ->toolbar()
+            ->extensions_container()
+            ->GetLayoutManager()));
+    waiter.Wait();
   }
 
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -168,13 +202,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewBrowserTest,
-                       CreatesOneButtonPerExtension) {
+                       CreatesOneMenuItemPerExtension) {
   LoadTestExtension("extensions/uitest/long_name");
   LoadTestExtension("extensions/uitest/window_open");
   ShowUi("");
   VerifyUi();
   EXPECT_EQ(2u, extensions_.size());
-  EXPECT_EQ(extensions_.size(), GetExtensionMenuButtons().size());
+  EXPECT_EQ(extensions_.size(), GetExtensionsMenuItemView().size());
   DismissUi();
 }
 
@@ -187,10 +221,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewBrowserTest,
 
   ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                              base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON, 0);
-  views::test::ButtonTestApi test_api(
-      ExtensionsMenuView::GetExtensionsMenuViewForTesting()
-          ->manage_extensions_button_for_testing());
-  test_api.NotifyClick(click_event);
+  ExtensionsMenuView::GetExtensionsMenuViewForTesting()
+      ->manage_extensions_button_for_testing()
+      ->button_controller()
+      ->OnMouseReleased(click_event);
 
   // Clicking the Manage Extensions button should open chrome://extensions.
   EXPECT_EQ(
@@ -233,13 +267,10 @@ IN_PROC_BROWSER_TEST_P(ActivateWithReloadExtensionsMenuBrowserTest,
                                   ->action_bubble_public_for_testing();
   ASSERT_TRUE(action_bubble);
 
-  views::DialogClientView* const dialog_client_view =
-      action_bubble->GetDialogClientView();
-
   const bool accept_reload_dialog = GetParam();
   if (accept_reload_dialog) {
     content::TestNavigationObserver observer(web_contents);
-    dialog_client_view->AcceptWindow();
+    action_bubble->AcceptDialog();
     EXPECT_TRUE(web_contents->IsLoading());
     // Wait for reload to finish.
     observer.WaitForNavigationFinished();
@@ -247,7 +278,7 @@ IN_PROC_BROWSER_TEST_P(ActivateWithReloadExtensionsMenuBrowserTest,
     // After reload the extension should be allowed to run.
     EXPECT_FALSE(action_runner->WantsToRun(extension.get()));
   } else {
-    dialog_client_view->CancelWindow();
+    action_bubble->CancelDialog();
     EXPECT_FALSE(web_contents->IsLoading());
     EXPECT_TRUE(action_runner->WantsToRun(extension.get()));
   }

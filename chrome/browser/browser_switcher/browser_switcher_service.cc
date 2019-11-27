@@ -38,38 +38,41 @@ const base::TimeDelta kRefreshSitelistDelay = base::TimeDelta::FromMinutes(30);
 // How many times to re-try fetching the XML file for the sitelist.
 const int kFetchNumRetries = 1;
 
-// TODO(nicolaso): Add chrome_policy for this annotation once the policy is
-// implemented.
 constexpr net::NetworkTrafficAnnotationTag traffic_annotation =
     net::DefineNetworkTrafficAnnotation("browser_switcher_ieem_sitelist", R"(
         semantics {
-          sender: "Browser Switcher"
+          sender: "Legacy Browser Support "
           description:
-            "BrowserSwitcher may download Internet Explorer's Enterprise Mode "
-            "SiteList XML, to load the list of URLs to open in an alternative "
-            "browser. This is often on the organization's intranet.For more "
-            "information on Internet Explorer's Enterprise Mode, see: "
+            "Legacy Browser Support  may download Internet Explorer's "
+            "Enterprise Mode SiteList XML, to load the list of URLs to open in "
+            "an alternative browser. This is often on the organization's "
+            "intranet. For more information on Internet Explorer's Enterprise "
+            "Mode, see: "
             "https://docs.microsoft.com/internet-explorer/ie11-deploy-guide"
             "/what-is-enterprise-mode"
           trigger:
-            "This happens only once per profile, 60s after the first page "
-            "starts loading. The request may be retried once if it failed the "
-            "first time."
+            "1 minute after browser startup, and then refreshes every 30 "
+            "minutes afterwards. Only happens if Legacy Browser Support is "
+            "enabled via enterprise policies."
           data:
-            "Up to 2 (plus retries) HTTP or HTTPS GET requests to the URLs "
+            "Up to 3 (plus retries) HTTP or HTTPS GET requests to the URLs "
             "configured in Internet Explorer's SiteList policy, and Chrome's "
-            "BrowserSwitcherExternalSitelistUrl policy."
+            "BrowserSwitcherExternalSitelistUrl and "
+            "BrowserSwitcherExternalGreylistUrl policies."
           destination: OTHER
           destination_other:
-            "URL configured in Internet Explorer's SiteList policy, and URL "
-            "configured in Chrome's BrowserSwitcherExternalSitelistUrl policy. "
+            "URL configured in Internet Explorer's SiteList policy, and URLs "
+            "configured in Chrome's BrowserSwitcherExternalSitelistUrl and "
+            "BrowserSwitcherExternalGreylistUrl policies."
         }
         policy {
           cookies_allowed: NO
           setting: "This feature cannot be disabled by settings."
-          policy_exception_justification:
-            "This feature  still in development, and is disabled by default. "
-            "It needs to be enabled through policies."
+          chrome_policy: {
+            BrowserSwitcherEnabled: {
+              BrowserSwitcherEnabled: false
+            }
+          }
         })");
 
 }  // namespace
@@ -136,7 +139,7 @@ void XmlDownloader::FetchXml() {
     auto request = std::make_unique<network::ResourceRequest>();
     request->url = source.url;
     request->load_flags = net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
-    request->allow_credentials = false;
+    request->credentials_mode = network::mojom::CredentialsMode::kOmit;
     source.url_loader = network::SimpleURLLoader::Create(std::move(request),
                                                          traffic_annotation);
     source.url_loader->SetRetryOptions(
@@ -230,12 +233,11 @@ BrowserSwitcherService::BrowserSwitcherService(Profile* profile)
 BrowserSwitcherService::~BrowserSwitcherService() = default;
 
 void BrowserSwitcherService::Init() {
+  LoadRulesFromPrefs();
   StartDownload(fetch_delay());
 }
 
 void BrowserSwitcherService::StartDownload(base::TimeDelta delay) {
-  LoadRulesFromPrefs();
-
   // This destroys the previous XmlDownloader, which cancels any scheduled
   // refresh operations.
   sitelist_downloader_ = std::make_unique<XmlDownloader>(
@@ -258,6 +260,10 @@ BrowserSwitcherSitelist* BrowserSwitcherService::sitelist() {
 
 BrowserSwitcherPrefs& BrowserSwitcherService::prefs() {
   return prefs_;
+}
+
+Profile* BrowserSwitcherService::profile() {
+  return profile_;
 }
 
 XmlDownloader* BrowserSwitcherService::sitelist_downloader() {

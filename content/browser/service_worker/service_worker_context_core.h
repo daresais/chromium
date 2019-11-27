@@ -118,6 +118,7 @@ class CONTENT_EXPORT ServiceWorkerContextCore
       base::ObserverListThreadSafe<ServiceWorkerContextCoreObserver>*
           observer_list,
       ServiceWorkerContextWrapper* wrapper);
+  // TODO(https://crbug.com/877356): Remove this copy mechanism.
   ServiceWorkerContextCore(
       ServiceWorkerContextCore* old_context,
       ServiceWorkerContextWrapper* wrapper);
@@ -173,6 +174,8 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   // Runs the callback with true if there is a ProviderHost for |origin| of type
   // blink::mojom::ServiceWorkerProviderType::kForWindow which is a main
   // (top-level) frame. Reserved clients are ignored.
+  // TODO(crbug.com/824858): Make this synchronously return bool when the core
+  // thread is UI.
   void HasMainFrameProviderHost(const GURL& origin,
                                 BoolCallback callback) const;
 
@@ -189,6 +192,8 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   void RegisterServiceWorker(
       const GURL& script_url,
       const blink::mojom::ServiceWorkerRegistrationOptions& options,
+      blink::mojom::FetchClientSettingsObjectPtr
+          outside_fetch_client_settings_object,
       RegistrationCallback callback);
   void UnregisterServiceWorker(const GURL& scope,
                                UnregistrationCallback callback);
@@ -213,6 +218,8 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   void UpdateServiceWorker(ServiceWorkerRegistration* registration,
                            bool force_bypass_cache,
                            bool skip_script_comparison,
+                           blink::mojom::FetchClientSettingsObjectPtr
+                               outside_fetch_client_settings_object,
                            UpdateCallback callback);
 
   // Used in DevTools to update the service worker registrations without
@@ -277,20 +284,16 @@ class CONTENT_EXPORT ServiceWorkerContextCore
     return loader_factory_getter_.get();
   }
 
+  const scoped_refptr<blink::URLLoaderFactoryBundle>&
+  loader_factory_bundle_for_update_check() {
+    return loader_factory_bundle_for_update_check_;
+  }
+
   base::WeakPtr<ServiceWorkerContextCore> AsWeakPtr() {
     return weak_factory_.GetWeakPtr();
   }
 
   int GetNextEmbeddedWorkerId();
-
-  // Called when ServiceWorkerImportedScriptUpdateCheck is enabled.
-  // Returns a factory bundle suitable for the browser process to use to fetch
-  // a non-installed service worker main script or imported script during an
-  // update check. It must not be sent to a renderer process. The bundle does
-  // not support reconnection to the network service, so it should be used for
-  // only a single service worker update check.
-  scoped_refptr<blink::URLLoaderFactoryBundle>
-  GetLoaderFactoryBundleForUpdateCheck();
 
  private:
   friend class ServiceWorkerContextCoreTest;

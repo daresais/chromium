@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/mediastream/mock_media_stream_registry.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_registry.h"
 
 #include <memory>
 
 #include "base/strings/utf_string_conversions.h"
-#include "third_party/blink/public/platform/modules/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_media_stream_source.h"
 #include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
-#include "third_party/blink/public/web/modules/mediastream/mock_media_stream_video_source.h"
-#include "third_party/blink/public/web/modules/mediastream/video_track_adapter_settings.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_source.h"
+#include "third_party/blink/renderer/modules/mediastream/video_track_adapter_settings.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 
 namespace blink {
 
@@ -72,7 +72,7 @@ void MockMediaStreamRegistry::AddVideoTrack(
 
   blink_track.SetPlatformTrack(std::make_unique<MediaStreamVideoTrack>(
       native_source, adapter_settings, noise_reduction, is_screencast,
-      min_frame_rate, MediaStreamVideoSource::ConstraintsCallback(),
+      min_frame_rate, MediaStreamVideoSource::ConstraintsOnceCallback(),
       true /* enabled */));
   test_stream_.AddTrack(blink_track);
 }

@@ -20,7 +20,7 @@ ShelfApplicationMenuModel::ShelfApplicationMenuModel(
     Items items,
     ShelfItemDelegate* delegate)
     : ui::SimpleMenuModel(this), delegate_(delegate) {
-  AddItem(std::numeric_limits<int>::max(), title);
+  AddTitle(title);
   for (size_t i = 0; i < items.size(); i++)
     AddItemWithIcon(i, items[i].first, items[i].second);
   AddSeparator(ui::SPACING_SEPARATOR);
@@ -39,13 +39,11 @@ void ShelfApplicationMenuModel::ExecuteCommand(int command_id,
   DCHECK(IsCommandIdEnabled(command_id));
   // Have the delegate execute its own custom command id for the given item.
   if (delegate_) {
-    if (Shell::Get()->app_list_controller()) {
-      // Record app launch when selecting window to open from disambiguation
-      // menu.
-      Shell::Get()->app_list_controller()->RecordShelfAppLaunched(
-          base::nullopt /* recorded_app_list_view_state */,
-          base::nullopt /* recorded_home_launcher_shown */);
-    }
+    // Record app launch when selecting window to open from disambiguation
+    // menu.
+    Shell::Get()->app_list_controller()->RecordShelfAppLaunched(
+        base::nullopt /* recorded_app_list_view_state */,
+        base::nullopt /* recorded_home_launcher_shown */);
 
     // The display hosting the menu is irrelevant, windows activate in-place.
     delegate_->ExecuteCommand(false /*from_context_menu*/, command_id,

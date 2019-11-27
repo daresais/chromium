@@ -48,7 +48,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     String mCreditCardId;
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         mHelper = new AutofillTestHelper();
         // The user has a shipping address on disk.
         String billingAddressId = mHelper.setProfile(new AutofillProfile("", "https://example.com",
@@ -56,7 +56,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
                 "US", "555-555-5555", "", "en-US"));
         // Create an expired credit card
         mCreditCardId = mHelper.setCreditCard(new CreditCard("", "https://example.com", true, true,
-                "Jon Doe", "4111111111111111", "1111", "1", "2016", "visa", R.drawable.visa_card,
+                "Jon Doe", "4111111111111111", "1111", "1", "2016", "amex", R.drawable.amex_card,
                 CardType.UNKNOWN, billingAddressId, "" /* serverId */));
     }
 
@@ -68,8 +68,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPayWithExpiredCard_ValidExpiration()
-            throws InterruptedException, TimeoutException {
+    public void testPayWithExpiredCard_ValidExpiration() throws TimeoutException {
         mRule.triggerUIAndWait(mRule.getReadyToPay());
         mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
         mRule.setTextInExpiredCardUnmaskDialogAndWait(
@@ -89,8 +88,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPayWithExpiredCard_NewExpirationSaved()
-            throws InterruptedException, TimeoutException {
+    public void testPayWithExpiredCard_NewExpirationSaved() throws TimeoutException {
         mRule.triggerUIAndWait(mRule.getReadyToPay());
         mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
         mRule.setTextInExpiredCardUnmaskDialogAndWait(
@@ -111,7 +109,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCannotAddExpiredCard() throws InterruptedException, TimeoutException {
+    public void testCannotAddExpiredCard() throws TimeoutException {
         // If the current date is in January skip this test. It is not possible to select an expired
         // date in the card editor in January.
         Calendar now = Calendar.getInstance();
@@ -145,7 +143,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPromptErrorMessages() throws InterruptedException, TimeoutException {
+    public void testPromptErrorMessages() throws TimeoutException {
         // Click pay to get to the card unmask prompt.
         mRule.triggerUIAndWait(mRule.getReadyToPay());
         mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
@@ -203,8 +201,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     @MediumTest
     @Feature({"Payments"})
     @Test
-    public void testSoftwareKeyboardSubmitInCvcNumberField()
-            throws InterruptedException, TimeoutException {
+    public void testSoftwareKeyboardSubmitInCvcNumberField() throws TimeoutException {
         mRule.triggerUIAndWait(mRule.getReadyToPay());
         mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
 
@@ -223,8 +220,7 @@ public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCall
     @MediumTest
     @Feature({"Payments"})
     @Test
-    public void testNoSoftwareKeyboardSubmitInCvcNumberFieldIfInvalid()
-            throws InterruptedException, TimeoutException {
+    public void testNoSoftwareKeyboardSubmitInCvcNumberFieldIfInvalid() throws TimeoutException {
         mRule.triggerUIAndWait(mRule.getReadyToPay());
         mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
 

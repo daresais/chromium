@@ -30,7 +30,7 @@ namespace {
 class WebScriptExecutor : public PausableScriptExecutor::Executor {
  public:
   WebScriptExecutor(const HeapVector<ScriptSourceCode>& sources,
-                    int world_id,
+                    int32_t world_id,
                     bool user_gesture);
 
   Vector<v8::Local<v8::Value>> Execute(LocalFrame*) override;
@@ -42,21 +42,20 @@ class WebScriptExecutor : public PausableScriptExecutor::Executor {
 
  private:
   HeapVector<ScriptSourceCode> sources_;
-  int world_id_;
+  int32_t world_id_;
   bool user_gesture_;
 };
 
 WebScriptExecutor::WebScriptExecutor(
     const HeapVector<ScriptSourceCode>& sources,
-    int world_id,
+    int32_t world_id,
     bool user_gesture)
     : sources_(sources), world_id_(world_id), user_gesture_(user_gesture) {}
 
 Vector<v8::Local<v8::Value>> WebScriptExecutor::Execute(LocalFrame* frame) {
   std::unique_ptr<UserGestureIndicator> indicator;
   if (user_gesture_) {
-    indicator =
-        LocalFrame::NotifyUserActivation(frame, UserGestureToken::kNewGesture);
+    indicator = LocalFrame::NotifyUserActivation(frame);
   }
 
   Vector<v8::Local<v8::Value>> results;
@@ -87,9 +86,11 @@ class V8FunctionExecutor : public PausableScriptExecutor::Executor {
 
   Vector<v8::Local<v8::Value>> Execute(LocalFrame*) override;
 
+  void Trace(Visitor*) override;
+
  private:
-  ScopedPersistent<v8::Function> function_;
-  ScopedPersistent<v8::Value> receiver_;
+  TraceWrapperV8Reference<v8::Function> function_;
+  TraceWrapperV8Reference<v8::Value> receiver_;
   V8PersistentValueVector<v8::Value> args_;
 };
 
@@ -124,6 +125,12 @@ Vector<v8::Local<v8::Value>> V8FunctionExecutor::Execute(LocalFrame* frame) {
       results.push_back(single_result);
   }
   return results;
+}
+
+void V8FunctionExecutor::Trace(Visitor* visitor) {
+  visitor->Trace(function_);
+  visitor->Trace(receiver_);
+  PausableScriptExecutor::Executor::Trace(visitor);
 }
 
 }  // namespace

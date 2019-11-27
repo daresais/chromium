@@ -194,8 +194,7 @@ ScreenRotationAnimator::ScreenRotationAnimator(aura::Window* root_window)
       rotation_request_id_(0),
       metrics_reporter_(
           std::make_unique<ScreenRotationAnimationMetricsReporter>()),
-      disable_animation_timers_for_test_(false),
-      weak_factory_(this) {}
+      disable_animation_timers_for_test_(false) {}
 
 ScreenRotationAnimator::~ScreenRotationAnimator() {
   // To prevent a call to |AnimationEndedCallback()| from calling a method on
@@ -473,8 +472,8 @@ void ScreenRotationAnimator::AnimateRotation(
   // Add an observer so that the cloned/copied layers can be cleaned up with the
   // animation completes/aborts.
   ui::CallbackLayerAnimationObserver* observer =
-      new ui::CallbackLayerAnimationObserver(
-          base::Bind(&AnimationEndedCallback, weak_factory_.GetWeakPtr()));
+      new ui::CallbackLayerAnimationObserver(base::BindRepeating(
+          &AnimationEndedCallback, weak_factory_.GetWeakPtr()));
   if (new_layer_tree_owner_)
     new_layer_animation_sequence->AddObserver(observer);
   new_layer_animator->StartAnimation(new_layer_animation_sequence.release());

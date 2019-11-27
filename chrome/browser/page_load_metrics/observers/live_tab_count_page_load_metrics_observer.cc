@@ -10,7 +10,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/metrics/tab_count_metrics.h"
 #include "chrome/browser/page_load_metrics/observers/histogram_suffixes.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
 #include "components/tab_count_metrics/tab_count_metrics.h"
 
 #define LIVE_TAB_COUNT_PAGE_LOAD_HISTOGRAM(prefix, tab_count_bucket, sample, \
@@ -56,10 +56,9 @@ LiveTabCountPageLoadMetricsObserver::LiveTabCountPageLoadMetricsObserver() {}
 LiveTabCountPageLoadMetricsObserver::~LiveTabCountPageLoadMetricsObserver() {}
 
 void LiveTabCountPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_contentful_paint, GetDelegate())) {
     const std::string histogram_prefix(
         std::string(internal::kHistogramPrefixLiveTabCount)
             .append(internal::kHistogramFirstContentfulPaintSuffix));
@@ -73,10 +72,9 @@ void LiveTabCountPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
 
 void LiveTabCountPageLoadMetricsObserver::
     OnFirstMeaningfulPaintInMainFrameDocument(
-        const page_load_metrics::mojom::PageLoadTiming& timing,
-        const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_meaningful_paint, info)) {
+        const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_meaningful_paint, GetDelegate())) {
     const std::string histogram_prefix(
         std::string(internal::kHistogramPrefixLiveTabCount)
             .append(internal::kHistogramFirstMeaningfulPaintSuffix));
@@ -89,10 +87,9 @@ void LiveTabCountPageLoadMetricsObserver::
 }
 
 void LiveTabCountPageLoadMetricsObserver::OnFirstInputInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.interactive_timing->first_input_timestamp, extra_info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.interactive_timing->first_input_timestamp, GetDelegate())) {
     const std::string histogram_prefix(
         std::string(internal::kHistogramPrefixLiveTabCount)
             .append(internal::kHistogramFirstInputDelaySuffix));

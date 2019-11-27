@@ -22,6 +22,7 @@
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_embedder.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 #include "extensions/common/guest_view/extensions_guest_view_messages.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -102,7 +103,7 @@ bool MimeHandlerViewAttachHelper::OverrideBodyForInterceptedResponse(
       SkColorGetB(color), mime_type.c_str(), token.c_str());
   payload->assign(html_str);
   *data_pipe_size = kFullPageMimeHandlerViewDataPipeSize;
-  base::PostTaskWithTraitsAndReply(
+  base::PostTaskAndReply(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(CreateFullPageMimeHandlerView,
                      navigating_frame_tree_node_id, resource_url, mime_type,
@@ -161,7 +162,8 @@ void MimeHandlerViewAttachHelper::ResumeAttachOrDestroy(
   if (!guest_view)
     return;
   if (!plugin_rfh) {
-    mojom::MimeHandlerViewContainerManagerAssociatedPtr container_manager;
+    mojo::AssociatedRemote<mojom::MimeHandlerViewContainerManager>
+        container_manager;
     guest_view->GetEmbedderFrame()
         ->GetRemoteAssociatedInterfaces()
         ->GetInterface(&container_manager);

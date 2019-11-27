@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "ash/public/interfaces/cros_display_config.mojom.h"
+#include "ash/public/mojom/cros_display_config.mojom.h"
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -18,6 +18,11 @@
 #include "chrome/browser/chromeos/login/screens/recommend_apps/recommend_apps_fetcher.h"
 #include "components/arc/arc_features_parser.h"
 #include "extensions/browser/api/system_display/display_info_provider.h"
+#include "mojo/public/cpp/bindings/remote.h"
+
+namespace base {
+class Value;
+}
 
 namespace network {
 namespace mojom {
@@ -153,8 +158,8 @@ class RecommendAppsFetcherImpl : public RecommendAppsFetcher {
 
   ArcFeaturesGetter arc_features_getter_;
 
-  ash::mojom::CrosDisplayConfigControllerPtr cros_display_config_;
-  base::WeakPtrFactory<RecommendAppsFetcherImpl> weak_ptr_factory_;
+  mojo::Remote<ash::mojom::CrosDisplayConfigController> cros_display_config_;
+  base::WeakPtrFactory<RecommendAppsFetcherImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(RecommendAppsFetcherImpl);
 };

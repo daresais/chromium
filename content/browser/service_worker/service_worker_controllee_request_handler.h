@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "content/browser/loader/single_request_url_loader_factory.h"
 #include "content/browser/service_worker/service_worker_navigation_loader.h"
 #include "content/common/content_export.h"
 #include "content/public/common/resource_type.h"
@@ -25,6 +26,7 @@
 
 namespace content {
 
+class ResourceContext;
 class ServiceWorkerContextCore;
 class ServiceWorkerProviderHost;
 class ServiceWorkerRegistration;
@@ -32,8 +34,10 @@ class ServiceWorkerVersion;
 
 // Handles main resource requests for service worker clients (documents and
 // shared workers).
-class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler final
-    : public NavigationLoaderInterceptor {
+//
+// TODO(crbug.com/824858): Merge into ServiceWorkerNavigationLoaderInterceptor
+// after the service worker core thread changes to the UI thread.
+class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler final {
  public:
   // If |skip_service_worker| is true, service workers are bypassed for
   // request interception.
@@ -42,23 +46,26 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler final
       base::WeakPtr<ServiceWorkerProviderHost> provider_host,
       ResourceType resource_type,
       bool skip_service_worker);
-  ~ServiceWorkerControlleeRequestHandler() override;
-
-  // NavigationLoaderInterceptor overrides:
+  ~ServiceWorkerControlleeRequestHandler();
 
   // This could get called multiple times during the lifetime in redirect
   // cases. (In fallback-to-network cases we basically forward the request
   // to the request to the next request handler)
-  void MaybeCreateLoader(const network::ResourceRequest& tentative_request,
-                         BrowserContext* browser_context,
-                         ResourceContext* resource_context,
-                         LoaderCallback callback,
-                         FallbackCallback fallback_callback) override;
-  // Returns params with the ControllerServiceWorkerPtr if we have found
+  using ServiceWorkerLoaderCallback =
+      base::OnceCallback<void(SingleRequestURLLoaderFactory::RequestHandler)>;
+  void MaybeCreateLoader(
+      const network::ResourceRequest& tentative_request,
+      BrowserContext* browser_context,
+      ResourceContext* resource_context,
+      ServiceWorkerLoaderCallback callback,
+      NavigationLoaderInterceptor::FallbackCallback fallback_callback);
+  // Returns params with the ControllerServiceWorkerInfoPtr if we have found
   // a matching controller service worker for the |request| that is given
   // to MaybeCreateLoader(). Otherwise this returns base::nullopt.
-  base::Optional<SubresourceLoaderParams> MaybeCreateSubresourceLoaderParams()
-      override;
+  base::Optional<SubresourceLoaderParams> MaybeCreateSubresourceLoaderParams();
+
+  // Does all initialization of |provider_host_| for a request.
+  bool InitializeProvider(const network::ResourceRequest& tentative_request);
 
   // Exposed for testing.
   ServiceWorkerNavigationLoader* loader() {
@@ -104,13 +111,14 @@ class CONTENT_EXPORT ServiceWorkerControlleeRequestHandler final
   const bool skip_service_worker_;
 
   std::unique_ptr<ServiceWorkerNavigationLoaderWrapper> loader_wrapper_;
+  BrowserContext* browser_context_;
   ResourceContext* resource_context_;
   GURL stripped_url_;
   bool force_update_started_;
   base::TimeTicks registration_lookup_start_time_;
 
-  LoaderCallback loader_callback_;
-  FallbackCallback fallback_callback_;
+  ServiceWorkerLoaderCallback loader_callback_;
+  NavigationLoaderInterceptor::FallbackCallback fallback_callback_;
 
   base::WeakPtrFactory<ServiceWorkerControlleeRequestHandler> weak_factory_{
       this};

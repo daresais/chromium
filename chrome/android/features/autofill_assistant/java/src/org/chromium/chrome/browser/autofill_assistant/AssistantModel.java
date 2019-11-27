@@ -12,7 +12,8 @@ import org.chromium.chrome.browser.autofill_assistant.form.AssistantFormModel;
 import org.chromium.chrome.browser.autofill_assistant.header.AssistantHeaderModel;
 import org.chromium.chrome.browser.autofill_assistant.infobox.AssistantInfoBoxModel;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayModel;
-import org.chromium.chrome.browser.autofill_assistant.payment.AssistantPaymentRequestModel;
+import org.chromium.chrome.browser.autofill_assistant.user_data.AssistantCollectUserDataModel;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /**
@@ -25,12 +26,16 @@ class AssistantModel extends PropertyModel {
             new WritableBooleanPropertyKey();
     static final WritableBooleanPropertyKey VISIBLE = new WritableBooleanPropertyKey();
 
+    /** The web contents the Autofill Assistant is associated with. */
+    static final WritableObjectPropertyKey<WebContents> WEB_CONTENTS =
+            new WritableObjectPropertyKey<>();
+
     private final AssistantOverlayModel mOverlayModel;
     private final AssistantHeaderModel mHeaderModel = new AssistantHeaderModel();
     private final AssistantDetailsModel mDetailsModel = new AssistantDetailsModel();
     private final AssistantInfoBoxModel mInfoBoxModel = new AssistantInfoBoxModel();
-    private final AssistantPaymentRequestModel mPaymentRequestModel =
-            new AssistantPaymentRequestModel();
+    private final AssistantCollectUserDataModel mCollectUserDataModel =
+            new AssistantCollectUserDataModel();
     private final AssistantFormModel mFormModel = new AssistantFormModel();
     private final AssistantCarouselModel mSuggestionsModel = new AssistantCarouselModel();
     private final AssistantCarouselModel mActionsModel = new AssistantCarouselModel();
@@ -40,7 +45,7 @@ class AssistantModel extends PropertyModel {
     }
 
     AssistantModel(AssistantOverlayModel overlayModel) {
-        super(ALLOW_SOFT_KEYBOARD, VISIBLE, ALLOW_TALKBACK_ON_WEBSITE);
+        super(ALLOW_SOFT_KEYBOARD, VISIBLE, WEB_CONTENTS, ALLOW_TALKBACK_ON_WEBSITE);
         mOverlayModel = overlayModel;
     }
 
@@ -65,8 +70,8 @@ class AssistantModel extends PropertyModel {
     }
 
     @CalledByNative
-    public AssistantPaymentRequestModel getPaymentRequestModel() {
-        return mPaymentRequestModel;
+    public AssistantCollectUserDataModel getCollectUserDataModel() {
+        return mCollectUserDataModel;
     }
 
     @CalledByNative
@@ -100,5 +105,10 @@ class AssistantModel extends PropertyModel {
     @CalledByNative
     private boolean getVisible() {
         return get(VISIBLE);
+    }
+
+    @CalledByNative
+    private void setWebContents(WebContents contents) {
+        set(WEB_CONTENTS, contents);
     }
 }

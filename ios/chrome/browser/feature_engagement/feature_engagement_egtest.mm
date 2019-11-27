@@ -183,11 +183,9 @@ void EnableBadgedTranslateManualTrigger(
       "name:badged_translate_manual_trigger_trigger;comparator:==0;window:360;"
       "storage:360";
 
-  feature_list.InitWithFeaturesAndParameters(
-      {{feature_engagement::kIPHBadgedTranslateManualTriggerFeature,
-        badged_translate_manual_trigger_params},
-       {translate::kTranslateMobileManualTrigger, {}}},
-      {});
+  feature_list.InitAndEnableFeatureWithParameters(
+      feature_engagement::kIPHBadgedTranslateManualTriggerFeature,
+      badged_translate_manual_trigger_params);
 }
 
 // Enables the New Tab Tip to be triggered for |feature_list|.
@@ -390,7 +388,12 @@ std::unique_ptr<net::test_server::HttpResponse> LoadFrenchPage(
       assertWithMatcher:grey_notNil()];
 
   // Close tools menu by tapping reload.
-  [[[EarlGrey selectElementWithMatcher:chrome_test_util::ReloadButton()]
+  [[[EarlGrey
+      selectElementWithMatcher:grey_allOf(
+                                   chrome_test_util::ReloadButton(),
+                                   grey_ancestor(
+                                       chrome_test_util::ToolsMenuView()),
+                                   nil)]
          usingSearchAction:grey_scrollInDirection(kGREYDirectionUp, 150)
       onElementWithMatcher:chrome_test_util::ToolsMenuView()]
       performAction:grey_tap()];

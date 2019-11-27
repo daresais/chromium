@@ -101,9 +101,8 @@ base::string16 BackForwardMenuModel::GetLabelAt(int index) const {
   NavigationEntry* entry = GetNavigationEntry(index);
   base::string16 menu_text(entry->GetTitleForDisplay());
   menu_text = ui::EscapeMenuLabelAmpersands(menu_text);
-  menu_text =
-      gfx::ElideText(menu_text, gfx::FontList(), kMaxBackForwardMenuWidth,
-                     gfx::ELIDE_TAIL, gfx::Typesetter::NATIVE);
+  menu_text = gfx::ElideText(menu_text, gfx::FontList(),
+                             kMaxBackForwardMenuWidth, gfx::ELIDE_TAIL);
 
   return menu_text;
 }
@@ -127,7 +126,7 @@ int BackForwardMenuModel::GetGroupIdAt(int index) const {
   return false;
 }
 
-bool BackForwardMenuModel::GetIconAt(int index, gfx::Image* icon) {
+bool BackForwardMenuModel::GetIconAt(int index, gfx::Image* icon) const {
   if (!ItemHasIcon(index))
     return false;
 
@@ -138,7 +137,13 @@ bool BackForwardMenuModel::GetIconAt(int index, gfx::Image* icon) {
     NavigationEntry* entry = GetNavigationEntry(index);
     *icon = entry->GetFavicon().image;
     if (!entry->GetFavicon().valid && menu_model_delegate()) {
-      FetchFavicon(entry);
+      // FetchFavicon is not const because it caches the result, but GetIconAt
+      // is const because it is not be apparent to outside observers that an
+      // internal change is taking place. Compared to spreading const in
+      // unintuitive places (e.g. making menu_model_delegate() const but
+      // returning a non-const while sprinkling virtual on member variables),
+      // this const_cast is the lesser evil.
+      const_cast<BackForwardMenuModel*>(this)->FetchFavicon(entry);
     }
   }
 

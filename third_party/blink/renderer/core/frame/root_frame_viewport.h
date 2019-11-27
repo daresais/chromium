@@ -27,7 +27,7 @@ struct WebScrollIntoViewParams;
 // the layout viewport. Thus, we could say this class is a decorator on the
 // LocalFrameView scrollable area that adds pinch-zoom semantics to scrolling.
 class CORE_EXPORT RootFrameViewport final
-    : public GarbageCollectedFinalized<RootFrameViewport>,
+    : public GarbageCollected<RootFrameViewport>,
       public ScrollableArea {
   USING_GARBAGE_COLLECTED_MIXIN(RootFrameViewport);
 
@@ -86,16 +86,15 @@ class CORE_EXPORT RootFrameViewport final
   IntSize ClampScrollOffset(const IntSize&) const override;
   ScrollOffset ClampScrollOffset(const ScrollOffset&) const override;
   IntSize ContentsSize() const override;
+  bool ShouldScrollOnMainThread() const override;
   bool ScrollbarsCanBeActive() const override;
-  IntRect ScrollableAreaBoundingBox() const override;
   bool UserInputScrollable(ScrollbarOrientation) const override;
   bool ShouldPlaceVerticalScrollbarOnLeft() const override;
   void ScrollControlWasSetNeedsPaintInvalidation() override;
-  GraphicsLayer* LayerForContainer() const override;
-  GraphicsLayer* LayerForScrolling() const override;
-  GraphicsLayer* LayerForHorizontalScrollbar() const override;
-  GraphicsLayer* LayerForVerticalScrollbar() const override;
-  GraphicsLayer* LayerForScrollCorner() const override;
+  cc::Layer* LayerForScrolling() const override;
+  cc::Layer* LayerForHorizontalScrollbar() const override;
+  cc::Layer* LayerForVerticalScrollbar() const override;
+  cc::Layer* LayerForScrollCorner() const override;
   int HorizontalScrollbarHeight(
       OverlayScrollbarClipBehavior =
           kIgnorePlatformOverlayScrollbarSize) const override;
@@ -115,6 +114,7 @@ class CORE_EXPORT RootFrameViewport final
   void UpdateCompositorScrollAnimations() override;
   void CancelProgrammaticScrollAnimation() override;
   ScrollBehavior ScrollBehaviorStyle() const override;
+  WebColorScheme UsedColorScheme() const override;
   void ClearScrollableArea() override;
   LayoutBox* GetLayoutBox() const override;
   FloatQuad LocalToVisibleContentQuad(const FloatQuad&,
@@ -122,6 +122,10 @@ class CORE_EXPORT RootFrameViewport final
                                       unsigned = 0) const final;
   scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() const final;
   ScrollbarTheme& GetPageScrollbarTheme() const override;
+  const cc::SnapContainerData* GetSnapContainerData() const override;
+  void SetSnapContainerData(base::Optional<cc::SnapContainerData>) override;
+  base::Optional<FloatPoint> GetSnapPositionAndSetTarget(
+      const cc::SnapSelectionStrategy& strategy) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(RootFrameViewportTest, DistributeScrollOrder);

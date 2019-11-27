@@ -18,7 +18,6 @@
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/network/mime/content_type.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -319,7 +318,7 @@ void MediaRecorder::requestData(ExceptionState& exception_state) {
     return;
   }
   WriteData(nullptr /* data */, 0 /* length */, true /* lastInSlice */,
-            WTF::CurrentTimeMS());
+            base::Time::Now().ToDoubleT() * 1000.0);
 }
 
 bool MediaRecorder::isTypeSupported(ExecutionContext* context,
@@ -352,7 +351,7 @@ void MediaRecorder::ContextDestroyed(ExecutionContext*) {
     return;
 
   WriteData(nullptr /* data */, 0 /* length */, true /* lastInSlice */,
-            WTF::CurrentTimeMS());
+            base::Time::Now().ToDoubleT() * 1000.0);
 
   stopped_ = true;
   stream_.Clear();
@@ -404,7 +403,7 @@ void MediaRecorder::StopRecording() {
   recorder_handler_->Stop();
 
   WriteData(nullptr /* data */, 0 /* length */, true /* lastInSlice */,
-            WTF::CurrentTimeMS());
+            base::Time::Now().ToDoubleT() * 1000.0);
   ScheduleDispatchEvent(Event::Create(event_type_names::kStop));
 }
 

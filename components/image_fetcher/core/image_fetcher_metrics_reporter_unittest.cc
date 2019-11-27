@@ -17,18 +17,18 @@ const char kUmaClientName[] = "foo";
 const char kUmaClientNameOther[] = "bar";
 
 const char kImageFetcherEventHistogramName[] = "ImageFetcher.Events";
-const char kCacheLoadHistogramName[] =
-    "CachedImageFetcher.ImageLoadFromCacheTime";
+const char kCacheLoadHistogramName[] = "ImageFetcher.ImageLoadFromCacheTime";
 const char kCacheLoadHistogramNameJava[] =
-    "CachedImageFetcher.ImageLoadFromCacheTimeJava";
+    "ImageFetcher.ImageLoadFromCacheTimeJava";
 constexpr char kTotalFetchFromNativeHistogramNameJava[] =
-    "CachedImageFetcher.ImageLoadFromNativeTimeJava";
+    "ImageFetcher.ImageLoadFromNativeTimeJava";
 const char kNetworkLoadHistogramName[] =
-    "CachedImageFetcher.ImageLoadFromNetworkTime";
+    "ImageFetcher.ImageLoadFromNetworkTime";
 const char kNetworkLoadAfterCacheHitHistogram[] =
-    "CachedImageFetcher.ImageLoadFromNetworkAfterCacheHit";
+    "ImageFetcher.ImageLoadFromNetworkAfterCacheHit";
 const char kTimeSinceLastCacheLRUEviction[] =
-    "CachedImageFetcher.TimeSinceLastCacheLRUEviction";
+    "ImageFetcher.TimeSinceLastCacheLRUEviction";
+constexpr char kNetworkRequestStatusCodes[] = "ImageFetcher.RequestStatusCode";
 
 }  // namespace
 
@@ -154,6 +154,12 @@ TEST_F(ImageFetcherMetricsReporterTest,
   ImageFetcherMetricsReporter::ReportTimeSinceLastCacheLRUEviction(
       base::Time());
   histogram_tester().ExpectTotalCount(kTimeSinceLastCacheLRUEviction, 1);
+}
+
+TEST_F(ImageFetcherMetricsReporterTest, TestReportReponseStatusCode) {
+  ImageFetcherMetricsReporter::ReportRequestStatusCode(kUmaClientNameOther,
+                                                       200);
+  histogram_tester().ExpectTotalCount(kNetworkRequestStatusCodes, 1);
 }
 
 }  // namespace image_fetcher

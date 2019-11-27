@@ -12,14 +12,20 @@
 #include "ash/public/cpp/night_light_controller.h"
 #include "ash/session/session_observer.h"
 #include "ash/system/night_light/time_of_day.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "ui/aura/env_observer.h"
+#include "ui/message_center/public/cpp/notification_delegate.h"
 
 class PrefRegistrySimple;
 class PrefService;
+
+namespace message_center {
+class Notification;
+}  // namespace message_center
 
 namespace ash {
 
@@ -39,7 +45,8 @@ class ASH_EXPORT NightLightControllerImpl
       public WindowTreeHostManager::Observer,
       public aura::EnvObserver,
       public SessionObserver,
-      public chromeos::PowerManagerClient::Observer {
+      public chromeos::PowerManagerClient::Observer,
+      public message_center::NotificationObserver {
  public:
   enum class AnimationDuration {
     // Short animation (2 seconds) used for manual changes of NightLight status
@@ -104,6 +111,20 @@ class ASH_EXPORT NightLightControllerImpl
   // linear |temperature| value.
   static float GetNonLinearTemperature(float temperature);
 
+  // When reading ambient color temperature via powerd, it needs to be mapped
+  // to another temperature before it can be used to determine the RGB scale
+  // factors (i.e: CTM diagonal).  The mapping was computed according to
+  // internal user studies.
+  // The returned adjusted temperature is in Kelvin as well.
+  static float RemapAmbientColorTemperature(float temperature_in_kelvin);
+
+  // Given an overall temperature in Kelvin, returns the scale factors for R, G
+  // and B channel.
+  // |temperature_in_kelvin| is expected to be a remapped color temperature
+  // from the sensor using |RemapAmbientColorTemperature|.
+  static gfx::Vector3dF ColorScalesFromRemappedTemperatureInKevin(
+      float temperature_in_kelvin);
+
   AnimationDuration animation_duration() const { return animation_duration_; }
   AnimationDuration last_animation_duration() const {
     return last_animation_duration_;
@@ -119,6 +140,7 @@ class ASH_EXPORT NightLightControllerImpl
   ScheduleType GetScheduleType() const;
   TimeOfDay GetCustomStartTime() const;
   TimeOfDay GetCustomEndTime() const;
+  bool GetAmbientColorEnabled() const;
 
   // Set the desired NightLight settings in the current active user prefs.
   void SetEnabled(bool enabled, AnimationDuration animation_type);
@@ -147,9 +169,33 @@ class ASH_EXPORT NightLightControllerImpl
   // chromeos::PowerManagerClient::Observer:
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
 
+  // message_center::NotificationObserver:
+  void Close(bool by_user) override;
+  void Click(const base::Optional<int>& button_index,
+             const base::Optional<base::string16>& reply) override;
+
   void SetDelegateForTesting(std::unique_ptr<Delegate> delegate);
 
+  // Returns the Auto Night Light notification if any is currently shown, or
+  // nullptr.
+  message_center::Notification* GetAutoNightLightNotificationForTesting() const;
+
  private:
+  // Returns true if the user has ever changed the schedule type, which means we
+  // must respect the user's choice and let it overwrite Auto Night Light.
+  bool UserHasEverChangedSchedule() const;
+
+  // Returns true if the user has ever dismissed the Auto Night Light
+  // notification, in which case we never show it again.
+  bool UserHasEverDismissedAutoNightLightNotification() const;
+
+  // Shows the notification informing the user that Night Light has been turned
+  // on from sunset-to-sunrise as a result of Auto Night Light.
+  void ShowAutoNightLightNotification();
+
+  // Disables showing the Auto Night Light from now on.
+  void DisableShowingFutureAutoNightLightNotification();
+
   // Called only when the active user changes in order to see if we need to use
   // a previously cached geoposition value from the active user's prefs.
   void LoadCachedGeopositionIfNeeded();
@@ -159,7 +205,10 @@ class ASH_EXPORT NightLightControllerImpl
   // being able to retrieve a valid geoposition.
   void StoreCachedGeoposition(const SimpleGeoposition& position);
 
-  void RefreshLayersTemperature();
+  // Refreshes the displays color transforms based on the given
+  // |color_temperature|, which will be overridden to a value of 0 if NightLight
+  // is turned off.
+  void RefreshDisplaysTemperature(float color_temperature);
 
   void StartWatchingPrefsChanges();
 
@@ -171,6 +220,10 @@ class ASH_EXPORT NightLightControllerImpl
 
   // Called when the user pref for the enabled status of NightLight is changed.
   void OnEnabledPrefChanged();
+
+  // Called when the user pref for the enabled status of Ambient Color is
+  // changed.
+  void OnAmbientColorEnabledPrefChanged();
 
   // Called when the user pref for the color temperature is changed.
   void OnColorTemperaturePrefChanged();
@@ -220,6 +273,10 @@ class ASH_EXPORT NightLightControllerImpl
   // type is either kSunsetToSunrise or kCustom.
   base::OneShotTimer timer_;
 
+  // True only until Night Light is initialized from the very first user
+  // session. After that, it is set to false.
+  bool is_first_user_init_ = true;
+
   // True if the current geoposition value used by the Delegate is from a
   // previously cached value in the user prefs of any of the users in the
   // current session. It is reset to false once we receive a newly-updated
@@ -234,6 +291,8 @@ class ASH_EXPORT NightLightControllerImpl
   // NOTE: Prefs are how Chrome communicates changes to the NightLight settings
   // controlled by this class from the WebUI settings.
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
+
+  base::WeakPtrFactory<NightLightControllerImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NightLightControllerImpl);
 };

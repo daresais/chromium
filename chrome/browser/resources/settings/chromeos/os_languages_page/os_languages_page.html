@@ -36,15 +36,9 @@
       }
 
       .explain-selected {
-        color: var(--google-green-refresh-700);
+        color: var(--cros-success-color);
         font-weight: initial;
         margin-top: 4px;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        .explain-selected {
-          color: var(--google-green-refresh-300);
-        }
       }
 
       cr-action-menu.complex .dropdown-item {
@@ -93,20 +87,13 @@
       }
 
       .name-with-error-list div {
-        /* TODO(dbeam): does this need to differ from --settings-error-color? */
-        color: var(--google-red-500);
+        color: var(--cros-error-color);
         margin-top: 8px;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        .name-with-error-list div {
-          color: var(--settings-error-color);
-        }
       }
 
       iron-icon[icon='cr:error'] {
         @apply --cr-icon-height-width;
-        --iron-icon-fill-color: var(--settings-error-color);
+        --iron-icon-fill-color: var(--cros-error-color);
         margin-inline-end: 8px;
       }
 
@@ -133,6 +120,17 @@
         display: none;
       }
 
+      /* The default implementation of the actionable list item makes the entire
+      list item row a button such that clicking anywhere will activate the
+      action of the list item. The input method list behaves differently in that
+      clicking the list item sets that item as the input method, and the
+      selected list item should not react to selection after being selected.
+      Set the cursor to auto to override the default implementation which would
+      otherwise make the entire row appear clickable when it is not. */
+      div.list-item.selected[actionable] {
+        cursor: auto;
+      }
+
       #restartButton {
         margin-inline-start: var(--settings-controlled-by-spacing);
       }
@@ -144,7 +142,7 @@
 
     <div route-path="default">
 
-      <h2>$i18n{languagesListTitle}</h2>
+      <h2>$i18n{osLanguagesListTitle}</h2>
 
       <span class="settings-box first"
           hidden="[[isHelpTextHidden_(languages.enabled.*)]]">
@@ -153,7 +151,7 @@
           $i18n{learnMore}
         </a>
       </span>
-      <div class="list-frame vertical-list">
+      <div class="list-frame vertical-list" id="languagesList">
         <template is="dom-repeat" items="[[languages.enabled]]">
           <div class$="list-item [[getLanguageItemClass_(
               item.language.code, language.prospectiveUILanguage)]]">
@@ -191,15 +189,17 @@
 
       <h2>$i18n{inputMethodsListTitle}</h2>
 
-      <div class="list-frame vertical-list">
+      <div class="list-frame vertical-list" id="inputMethodsList">
         <template is="dom-repeat"
             items="[[languages.inputMethods.enabled]]">
           <div class$="list-item [[getInputMethodItemClass_(
-                  item.id, languages.inputMethods.currentId)]]"
-              on-click="onInputMethodTap_" on-keypress="onInputMethodTap_"
-              actionable tabindex="0">
+              item.id, languages.inputMethods.currentId)]]"
+              actionable on-click="onInputMethodTap_"
+              on-keypress="onInputMethodTap_" on-mousedown="onMouseDown_"
+              tabindex$="[[getInputMethodTabIndex_(
+                  item.id, languages.inputMethods.currentId)]]">
             <div class="start">
-              <div>[[item.displayName]]</div>
+              <div class="display-name">[[item.displayName]]</div>
               <div class="explain-selected"
                   hidden="[[!isCurrentInputMethod_(
                       item.id, languages.inputMethods.currentId)]]">
@@ -215,7 +215,8 @@
         </template>
         <cr-link-row class="hr list-item" id="manageInputMethods"
             on-click="onManageInputMethodsTap_"
-            label="$i18n{manageInputMethods}"></cr-link-row>
+            label="$i18n{manageInputMethods}"
+            role-description="$i18n{subpageArrowRoleDescription}"></cr-link-row>
       </div>
       <settings-toggle-button
           pref="{{prefs.settings.language.ime_menu_activated}}"
@@ -224,15 +225,16 @@
 
       <cr-lazy-render id="menu">
         <template>
-          <cr-action-menu class="complex" on-close="onCloseMenu_">
-            <cr-checkbox id="uiLanguageItem"
-                class="dropdown-item"
+          <cr-action-menu class="complex" on-close="onCloseMenu_"
+              role-description="$i18n{menu}">
+            <cr-checkbox id="uiLanguageItem" class="dropdown-item"
+                hidden="[[isGuest_]]"
+                disabled="[[disableUILanguageCheckbox_(
+                    detailLanguage_, languages.prospectiveUILanguage)]]"
                 checked="[[isProspectiveUILanguage_(
                     detailLanguage_.language.code,
                     languages.prospectiveUILanguage)]]"
-                on-change="onUILanguageChange_"
-                disabled="[[disableUILanguageCheckbox_(
-                    detailLanguage_, languages.prospectiveUILanguage)]]">
+                on-change="onUILanguageChange_">
               <span>$i18n{displayInThisLanguage}</span>
               <iron-icon class="policy" icon="cr20:domain" hidden$="[[
                   !detailLanguage_.language.isProhibitedLanguage]]">

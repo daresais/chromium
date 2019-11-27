@@ -67,15 +67,7 @@ class OffTheRecordProfileImpl : public Profile {
 #else
   policy::UserCloudPolicyManager* GetUserCloudPolicyManager() override;
 #endif  // defined(OS_CHROMEOS)
-  net::URLRequestContextGetter* GetRequestContext() override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
-  net::URLRequestContextGetter* CreateRequestContext(
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) override;
-  net::URLRequestContextGetter* CreateMediaRequestContext() override;
-  std::unique_ptr<service_manager::Service> HandleServiceRequest(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request) override;
   bool IsSameProfile(Profile* profile) override;
   base::Time GetStartTime() const override;
   ProfileKey* GetProfileKey() const override;
@@ -95,10 +87,12 @@ class OffTheRecordProfileImpl : public Profile {
 #endif  // defined(OS_CHROMEOS)
 
   GURL GetHomePage() override;
+  void SetCreationTimeForTesting(base::Time creation_time) override;
 
   // content::BrowserContext implementation:
   base::FilePath GetPath() override;
   base::FilePath GetPath() const override;
+  base::Time GetCreationTime() const override;
 #if !defined(OS_ANDROID)
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
@@ -111,6 +105,7 @@ class OffTheRecordProfileImpl : public Profile {
   content::BrowserPluginGuestManager* GetGuestManager() override;
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
+  content::StorageNotificationService* GetStorageNotificationService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionControllerDelegate* GetPermissionControllerDelegate()
       override;
@@ -127,6 +122,9 @@ class OffTheRecordProfileImpl : public Profile {
       std::vector<network::mojom::CorsOriginPatternPtr> block_patterns,
       base::OnceClosure closure) override;
   content::SharedCorsOriginAccessList* GetSharedCorsOriginAccessList() override;
+  bool ShouldEnableOutOfBlinkCors() override;
+  content::NativeFileSystemPermissionContext*
+  GetNativeFileSystemPermissionContext() override;
 
  private:
   void InitIoData();

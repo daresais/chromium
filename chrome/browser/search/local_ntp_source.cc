@@ -27,20 +27,17 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/background/ntp_background_data.h"
-#include "chrome/browser/search/background/ntp_background_service.h"
 #include "chrome/browser/search/background/ntp_background_service_factory.h"
 #include "chrome/browser/search/instant_io_context.h"
 #include "chrome/browser/search/local_ntp_js_integrity.h"
 #include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_data.h"
-#include "chrome/browser/search/one_google_bar/one_google_bar_service.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_service_factory.h"
 #include "chrome/browser/search/promos/promo_data.h"
 #include "chrome/browser/search/promos/promo_service.h"
 #include "chrome/browser/search/promos/promo_service_factory.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search/search_suggest/search_suggest_data.h"
-#include "chrome/browser/search/search_suggest/search_suggest_service.h"
 #include "chrome/browser/search/search_suggest/search_suggest_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_provider_logos/logo_service_factory.h"
@@ -76,6 +73,7 @@
 #include "ui/base/template_expressions.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/resources/grit/ui_resources.h"
+#include "ui/resources/grit/webui_resources.h"
 #include "url/gurl.h"
 
 using search_provider_logos::EncodedLogo;
@@ -113,12 +111,12 @@ const struct Resource{
 } kResources[] = {
     {"animations.css", IDR_LOCAL_NTP_ANIMATIONS_CSS, "text/css"},
     {"animations.js", IDR_LOCAL_NTP_ANIMATIONS_JS, "application/javascript"},
+    {"assert.js", IDR_WEBUI_JS_ASSERT, "application/javascript"},
     {"local-ntp-common.css", IDR_LOCAL_NTP_COMMON_CSS, "text/css"},
     {"customize.css", IDR_LOCAL_NTP_CUSTOMIZE_CSS, "text/css"},
     {"customize.js", IDR_LOCAL_NTP_CUSTOMIZE_JS, "application/javascript"},
     {"doodles.css", IDR_LOCAL_NTP_DOODLES_CSS, "text/css"},
     {"doodles.js", IDR_LOCAL_NTP_DOODLES_JS, "application/javascript"},
-    {"images/close_3_mask.png", IDR_CLOSE_3_MASK, "image/png"},
     {"images/ntp_default_favicon.png", IDR_NTP_DEFAULT_FAVICON, "image/png"},
     {"local-ntp.css", IDR_LOCAL_NTP_CSS, "text/css"},
     {"local-ntp.js", IDR_LOCAL_NTP_JS, "application/javascript"},
@@ -192,8 +190,6 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
               IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MD);
 
     // Custom Backgrounds
-    AddString(translated_strings.get(), "customizeButtonLabel",
-              IDS_NTP_CUSTOMIZE_BUTTON_LABEL);
     AddString(translated_strings.get(), "defaultWallpapers",
               IDS_NTP_CUSTOM_BG_CHROME_WALLPAPERS);
     AddString(translated_strings.get(), "uploadImage",
@@ -202,8 +198,6 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
               IDS_NTP_CUSTOM_BG_RESTORE_DEFAULT);
     AddString(translated_strings.get(), "selectChromeWallpaper",
               IDS_NTP_CUSTOM_BG_SELECT_A_COLLECTION);
-    AddString(translated_strings.get(), "dailyRefresh",
-              IDS_NTP_CUSTOM_BG_DAILY_REFRESH);
     AddString(translated_strings.get(), "selectionDone",
               IDS_NTP_CUSTOM_LINKS_DONE);
     AddString(translated_strings.get(), "selectionCancel",
@@ -299,6 +293,15 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
               IDS_NEW_TAB_VOICE_OTHER_ERROR);
     AddString(translated_strings.get(), "voiceCloseTooltip",
               IDS_NEW_TAB_VOICE_CLOSE_TOOLTIP);
+
+    // Realbox
+    AddString(translated_strings.get(), "realboxSeparator",
+              IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR);
+    AddString(translated_strings.get(), "removeSuggestion",
+              IDS_OMNIBOX_REMOVE_SUGGESTION);
+
+    // Promos
+    AddString(translated_strings.get(), "dismissPromo", IDS_NTP_DISMISS_PROMO);
   }
 
   return translated_strings;
@@ -309,10 +312,13 @@ std::string GetThemeCSS(Profile* profile) {
       ThemeService::GetThemeProviderForProfile(profile)
           .GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
 
-  return base::StringPrintf("html { background-color: #%02X%02X%02X; }",
-                            SkColorGetR(background_color),
-                            SkColorGetG(background_color),
-                            SkColorGetB(background_color));
+  // Required to prevent the default background color from flashing before the
+  // page is initialized (the body, which contains theme color, is hidden until
+  // initialization finishes). Removed after initialization.
+  return base::StringPrintf(
+      "html:not(.inited) { background-color: #%02X%02X%02X; }",
+      SkColorGetR(background_color), SkColorGetG(background_color),
+      SkColorGetB(background_color));
 }
 
 std::string ReadBackgroundImageData(const base::FilePath& profile_path) {
@@ -344,7 +350,7 @@ base::Value ConvertCollectionInfoToDict(
     dict.SetKey("collectionName", base::Value(collection.collection_name));
     dict.SetKey("previewImageUrl",
                 base::Value(collection.preview_image_url.spec()));
-    collections.GetList().push_back(std::move(dict));
+    collections.Append(std::move(dict));
   }
   return collections;
 }
@@ -361,12 +367,12 @@ base::Value ConvertCollectionImageToDict(
     dict.SetKey("collectionId", base::Value(image.collection_id));
     base::Value attributions(base::Value::Type::LIST);
     for (const auto& attribution : image.attribution) {
-      attributions.GetList().push_back(base::Value(attribution));
+      attributions.Append(base::Value(attribution));
     }
     dict.SetKey("attributions", std::move(attributions));
     dict.SetKey("attributionActionUrl",
                 base::Value(image.attribution_action_url.spec()));
-    images.GetList().push_back(std::move(dict));
+    images.Append(std::move(dict));
   }
   return images;
 }
@@ -398,8 +404,8 @@ scoped_refptr<base::RefCountedString> GetPromoString(
   if (promo.has_value()) {
     dict.SetString("promoHtml", promo->promo_html);
     dict.SetString("promoLogUrl", promo->promo_log_url.spec());
-  } else {
-    dict.SetString("promoHtml", std::string());
+    dict.SetString("promoId", promo->promo_id);
+    dict.SetBoolean("canOpenPrivilegedLinks", promo->can_open_privileged_links);
   }
 
   std::string js;
@@ -606,20 +612,22 @@ class LocalNtpSource::SearchConfigurationProvider
 
     if (is_google) {
       config_data.SetBoolean(
-          "enableShortcutsGrid",
-          base::FeatureList::IsEnabled(features::kGridLayoutForNtpShortcuts));
-      config_data.SetBoolean(
-          "hideShortcuts",
-          base::FeatureList::IsEnabled(features::kHideShortcutsOnNtp));
-      config_data.SetBoolean(
-          "showFakeboxPlaceholderOnFocus",
-          base::FeatureList::IsEnabled(
-              omnibox::kUIExperimentShowPlaceholderWhenCaretShowing));
-      config_data.SetBoolean(
           "richerPicker",
-          base::FeatureList::IsEnabled(features::kNtpCustomizationMenuV2));
+          base::FeatureList::IsEnabled(ntp_features::kCustomizationMenuV2));
       config_data.SetBoolean("chromeColors", base::FeatureList::IsEnabled(
-                                                 features::kChromeColors));
+                                                 ntp_features::kChromeColors));
+      config_data.SetBoolean("chromeColorsCustomColorPicker",
+                             base::FeatureList::IsEnabled(
+                                 ntp_features::kChromeColorsCustomColorPicker));
+      config_data.SetBoolean("realboxEnabled",
+                             ntp_features::IsRealboxEnabled());
+      config_data.SetBoolean("realboxMatchOmniboxTheme",
+                             base::FeatureList::IsEnabled(
+                                 ntp_features::kRealboxMatchOmniboxTheme));
+      config_data.SetBoolean(
+          "suggestionTransparencyEnabled",
+          base::FeatureList::IsEnabled(
+              omnibox::kOmniboxSuggestionTransparencyOptions));
     }
 
     // Serialize the dictionary.
@@ -770,15 +778,11 @@ LocalNtpSource::LocalNtpSource(Profile* profile)
     : profile_(profile),
       ntp_background_service_(
           NtpBackgroundServiceFactory::GetForProfile(profile_)),
-      ntp_background_service_observer_(this),
       one_google_bar_service_(
           OneGoogleBarServiceFactory::GetForProfile(profile_)),
-      one_google_bar_service_observer_(this),
       promo_service_(PromoServiceFactory::GetForProfile(profile_)),
-      promo_service_observer_(this),
       search_suggest_service_(
           SearchSuggestServiceFactory::GetForProfile(profile_)),
-      search_suggest_service_observer_(this),
       logo_service_(nullptr) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -820,11 +824,13 @@ std::string LocalNtpSource::GetSource() {
 }
 
 void LocalNtpSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path = content::URLDataSource::URLToRequestPath(url);
   std::string stripped_path = StripParameters(path);
   if (stripped_path == kConfigDataFilename) {
     std::string config_data_js = search_config_provider_->config_data_js();
@@ -838,8 +844,10 @@ void LocalNtpSource::StartDataRequest(
   }
 
   if (stripped_path == chrome::kChromeSearchLocalNtpBackgroundFilename) {
-    base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+    base::PostTaskAndReplyWithResult(
+        FROM_HERE,
+        {base::ThreadPool(), base::TaskPriority::USER_VISIBLE,
+         base::MayBlock()},
         base::BindOnce(&ReadBackgroundImageData, profile_->GetPath()),
         base::BindOnce(&ServeBackgroundImageData, callback));
     return;
@@ -960,6 +968,8 @@ void LocalNtpSource::StartDataRequest(
 
     replacements["animationsIntegrity"] =
         base::StrCat({kSha256, ANIMATIONS_JS_INTEGRITY});
+    replacements["assertIntegrity"] =
+        base::StrCat({kSha256, ASSERT_JS_INTEGRITY});
     replacements["configDataIntegrity"] = base::StrCat(
         {kSha256, search_config_provider_->config_data_integrity()});
     replacements["localNtpCustomizeIntegrity"] =
@@ -978,6 +988,8 @@ void LocalNtpSource::StartDataRequest(
 
     replacements["customizeMenu"] =
         l10n_util::GetStringUTF8(IDS_NTP_CUSTOM_BG_CUSTOMIZE_NTP_LABEL);
+    replacements["customizeButton"] =
+        l10n_util::GetStringUTF8(IDS_NTP_CUSTOMIZE_BUTTON_LABEL);
     replacements["cancelButton"] =
         l10n_util::GetStringUTF8(IDS_NTP_CUSTOM_BG_CANCEL);
     replacements["doneButton"] =
@@ -1010,6 +1022,12 @@ void LocalNtpSource::StartDataRequest(
         l10n_util::GetStringUTF8(IDS_NTP_CUSTOMIZE_3PT_THEME_UNINSTALL);
     replacements["backLabel"] =
         l10n_util::GetStringUTF8(IDS_NTP_CUSTOM_BG_BACK_LABEL);
+    replacements["refreshDaily"] =
+        l10n_util::GetStringUTF8(IDS_NTP_CUSTOM_BG_DAILY_REFRESH);
+    replacements["colorPickerLabel"] =
+        l10n_util::GetStringUTF8(IDS_NTP_CUSTOMIZE_COLOR_PICKER_LABEL);
+    replacements["defaultThemeLabel"] =
+        l10n_util::GetStringUTF8(IDS_NTP_CUSTOMIZE_DEFAULT_LABEL);
 
     replacements["bgPreloader"] = "";
     GURL custom_background_url = GetCustomBackgroundURL(profile_->GetPrefs());
@@ -1018,6 +1036,15 @@ void LocalNtpSource::StartDataRequest(
                                     custom_background_url.spec() +
                                     "\" as=\"image\">";
     }
+
+    bool realbox_enabled = ntp_features::IsRealboxEnabled();
+    replacements["hiddenIfRealboxEnabled"] = realbox_enabled ? "hidden" : "";
+    replacements["hiddenIfRealboxDisabled"] = realbox_enabled ? "" : "hidden";
+
+    bool use_google_g_icon =
+        base::FeatureList::IsEnabled(ntp_features::kRealboxUseGoogleGIcon);
+    replacements["realboxIconClass"] =
+        use_google_g_icon ? "google-g-icon" : "search-icon";
 
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
     base::StringPiece html = bundle.GetRawDataResource(IDR_LOCAL_NTP_HTML);
@@ -1092,9 +1119,10 @@ std::string LocalNtpSource::GetContentSecurityPolicy() {
   // 'strict-dynamic' allows those scripts to load dependencies not listed here.
   std::string script_src_csp = base::StringPrintf(
       "script-src 'strict-dynamic' 'sha256-%s' 'sha256-%s' 'sha256-%s' "
-      "'sha256-%s' 'sha256-%s' 'sha256-%s' 'sha256-%s';",
-      ANIMATIONS_JS_INTEGRITY, CUSTOMIZE_JS_INTEGRITY, DOODLES_JS_INTEGRITY,
-      LOCAL_NTP_JS_INTEGRITY, UTILS_JS_INTEGRITY, VOICE_JS_INTEGRITY,
+      "'sha256-%s' 'sha256-%s' 'sha256-%s' 'sha256-%s' 'sha256-%s';",
+      ANIMATIONS_JS_INTEGRITY, ASSERT_JS_INTEGRITY, CUSTOMIZE_JS_INTEGRITY,
+      DOODLES_JS_INTEGRITY, LOCAL_NTP_JS_INTEGRITY, UTILS_JS_INTEGRITY,
+      VOICE_JS_INTEGRITY,
       search_config_provider_->config_data_integrity().c_str());
 
   return GetContentSecurityPolicyObjectSrc() +
@@ -1336,6 +1364,10 @@ void LocalNtpSource::ServePromo(const base::Optional<PromoData>& data) {
   if (promo_service_->promo_status() == PromoService::Status::OK_WITH_PROMO) {
     UMA_HISTOGRAM_MEDIUM_TIMES(
         "NewTabPage.Promos.RequestLatency2.SuccessWithPromo", delta);
+  } else if (promo_service_->promo_status() ==
+             PromoService::Status::OK_BUT_BLOCKED) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "NewTabPage.Promos.RequestLatency2.SuccessButBlocked", delta);
   } else if (promo_service_->promo_status() ==
              PromoService::Status::OK_WITHOUT_PROMO) {
     UMA_HISTOGRAM_MEDIUM_TIMES(

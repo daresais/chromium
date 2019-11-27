@@ -20,6 +20,7 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/log/net_log.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
+#include "net/quic/quic_context.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "net/url_request/url_request_throttler_manager.h"
@@ -30,6 +31,7 @@
 
 #if BUILDFLAG(ENABLE_REPORTING)
 #include "net/network_error_logging/network_error_logging_service.h"
+#include "net/network_error_logging/persistent_reporting_and_nel_store.h"
 #include "net/reporting/reporting_service.h"
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
@@ -142,6 +144,12 @@ void URLRequestContextStorage::set_throttler_manager(
   throttler_manager_ = std::move(throttler_manager);
 }
 
+void URLRequestContextStorage::set_quic_context(
+    std::unique_ptr<QuicContext> quic_context) {
+  context_->set_quic_context(quic_context.get());
+  quic_context_ = std::move(quic_context);
+}
+
 void URLRequestContextStorage::set_http_user_agent_settings(
     std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings) {
   context_->set_http_user_agent_settings(http_user_agent_settings.get());
@@ -157,6 +165,13 @@ void URLRequestContextStorage::set_ftp_auth_cache(
 #endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
 #if BUILDFLAG(ENABLE_REPORTING)
+void URLRequestContextStorage::set_persistent_reporting_and_nel_store(
+    std::unique_ptr<PersistentReportingAndNelStore>
+        persistent_reporting_and_nel_store) {
+  persistent_reporting_and_nel_store_ =
+      std::move(persistent_reporting_and_nel_store);
+}
+
 void URLRequestContextStorage::set_reporting_service(
     std::unique_ptr<ReportingService> reporting_service) {
   context_->set_reporting_service(reporting_service.get());

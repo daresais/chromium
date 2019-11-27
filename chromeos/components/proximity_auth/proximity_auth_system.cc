@@ -83,8 +83,7 @@ ProximityAuthSystem::GetRemoteDevicesForUser(
   return remote_devices_map_.at(account_id);
 }
 
-void ProximityAuthSystem::OnAuthAttempted(const AccountId& /* account_id */) {
-  // TODO(tengs): There is no reason to pass the |account_id| argument anymore.
+void ProximityAuthSystem::OnAuthAttempted() {
   unlock_manager_->OnAuthAttempted(mojom::AuthType::USER_CLICK);
 }
 
@@ -120,12 +119,6 @@ ProximityAuthSystem::CreateRemoteDeviceLifeCycle(
     base::Optional<chromeos::multidevice::RemoteDeviceRef> local_device) {
   return std::make_unique<RemoteDeviceLifeCycleImpl>(
       remote_device, local_device, secure_channel_client_);
-}
-
-void ProximityAuthSystem::OnLifeCycleStateChanged(
-    RemoteDeviceLifeCycle::State old_state,
-    RemoteDeviceLifeCycle::State new_state) {
-  unlock_manager_->OnLifeCycleStateChanged();
 }
 
 void ProximityAuthSystem::OnScreenDidLock(
@@ -182,7 +175,6 @@ void ProximityAuthSystem::OnFocusedUserChanged(const AccountId& account_id) {
                  << account_id.Serialize();
     remote_device_life_cycle_ =
         CreateRemoteDeviceLifeCycle(remote_device, local_device);
-    remote_device_life_cycle_->AddObserver(this);
 
     // UnlockManager listens for Bluetooth power change events, and is therefore
     // responsible for starting RemoteDeviceLifeCycle when Bluetooth becomes

@@ -65,15 +65,18 @@ class TestSharedImageInterface : public gpu::SharedImageInterface {
   void DestroySharedImage(const gpu::SyncToken& sync_token,
                           const gpu::Mailbox& mailbox) override;
 
-#if defined(OS_WIN)
   SwapChainMailboxes CreateSwapChain(ResourceFormat format,
                                      const gfx::Size& size,
                                      const gfx::ColorSpace& color_space,
                                      uint32_t usage) override;
-
   void PresentSwapChain(const gpu::SyncToken& sync_token,
                         const gpu::Mailbox& mailbox) override;
-#endif  // OS_WIN
+
+#if defined(OS_FUCHSIA)
+  void RegisterSysmemBufferCollection(gfx::SysmemBufferCollectionId id,
+                                      zx::channel token) override;
+  void ReleaseSysmemBufferCollection(gfx::SysmemBufferCollectionId id) override;
+#endif  // defined(OS_FUCHSIA)
 
   gpu::SyncToken GenVerifiedSyncToken() override;
   gpu::SyncToken GenUnverifiedSyncToken() override;
@@ -91,6 +94,8 @@ class TestSharedImageInterface : public gpu::SharedImageInterface {
   bool CheckSharedImageExists(const gpu::Mailbox& mailbox) const;
 
  private:
+  mutable base::Lock lock_;
+
   uint64_t release_id_ = 0;
   gfx::Size most_recent_size_;
   gpu::SyncToken most_recent_generated_token_;

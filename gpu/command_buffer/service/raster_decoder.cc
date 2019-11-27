@@ -585,7 +585,10 @@ class RasterDecoderImpl final : public RasterDecoder,
   // Raster helpers.
   scoped_refptr<ServiceFontManager> font_manager_;
   std::unique_ptr<SharedImageRepresentationSkia> shared_image_;
-  sk_sp<SkSurface> sk_surface_;
+  base::Optional<SharedImageRepresentationSkia::ScopedWriteAccess>
+      scoped_shared_image_write_;
+  SkSurface* sk_surface_ = nullptr;
+  sk_sp<SkSurface> sk_surface_for_testing_;
   std::vector<GrBackendSemaphore> end_semaphores_;
   std::unique_ptr<cc::ServicePaintCache> paint_cache_;
 
@@ -807,11 +810,12 @@ void RasterDecoderImpl::Destroy(bool have_context) {
           SkSurface::BackendSurfaceAccess::kPresent, flush_info);
       DCHECK(result == GrSemaphoresSubmitted::kYes || end_semaphores_.empty());
       end_semaphores_.clear();
+      sk_surface_ = nullptr;
       if (shared_image_) {
-        shared_image_->EndWriteAccess(std::move(sk_surface_));
+        scoped_shared_image_write_.reset();
         shared_image_.reset();
       } else {
-        sk_surface_.reset();
+        sk_surface_for_testing_.reset();
       }
     }
     if (gr_context()) {
@@ -881,6 +885,7 @@ gl::GLSurface* RasterDecoderImpl::GetGLSurface() {
 }
 
 Capabilities RasterDecoderImpl::GetCapabilities() {
+  // TODO(enne): reconcile this with gles2_cmd_decoder's capability settings.
   Capabilities caps;
   caps.gpu_rasterization = supports_gpu_raster_;
   caps.supports_oop_raster = supports_oop_raster_;
@@ -925,6 +930,9 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
                  feature_info()->workarounds().max_3d_array_texture_size);
   }
   caps.sync_query = feature_info()->feature_flags().chromium_sync_query;
+  caps.msaa_is_slow = feature_info()->workarounds().msaa_is_slow;
+  caps.avoid_stencil_buffers =
+      feature_info()->workarounds().avoid_stencil_buffers;
 
   if (gr_context()) {
     caps.context_supports_distance_field_text =
@@ -1428,7 +1436,8 @@ void RasterDecoderImpl::SetUpForRasterCHROMIUMForTest() {
   // backed surface for OOP raster commands.
   auto info = SkImageInfo::MakeN32(10, 10, kPremul_SkAlphaType,
                                    SkColorSpace::MakeSRGB());
-  sk_surface_ = SkSurface::MakeRaster(info);
+  sk_surface_for_testing_ = SkSurface::MakeRaster(info);
+  sk_surface_ = sk_surface_for_testing_.get();
   raster_canvas_ = sk_surface_->getCanvas();
 }
 
@@ -1543,6 +1552,55 @@ error::Error RasterDecoderImpl::HandleEndQueryEXT(
   }
 
   query_manager_->EndQuery(query, submit_count);
+  return error::kNoError;
+}
+
+error::Error RasterDecoderImpl::HandleQueryCounterEXT(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile raster::cmds::QueryCounterEXT& c =
+      *static_cast<const volatile raster::cmds::QueryCounterEXT*>(cmd_data);
+  GLenum target = static_cast<GLenum>(c.target);
+  GLuint client_id = static_cast<GLuint>(c.id);
+  int32_t sync_shm_id = static_cast<int32_t>(c.sync_data_shm_id);
+  uint32_t sync_shm_offset = static_cast<uint32_t>(c.sync_data_shm_offset);
+  uint32_t submit_count = static_cast<GLuint>(c.submit_count);
+
+  if (target != GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "glQueryCounterEXT",
+                       "unknown query target");
+    return error::kNoError;
+  }
+
+  scoped_refptr<Buffer> buffer = GetSharedMemoryBuffer(sync_shm_id);
+  if (!buffer)
+    return error::kInvalidArguments;
+  QuerySync* sync = static_cast<QuerySync*>(
+      buffer->GetDataAddress(sync_shm_offset, sizeof(QuerySync)));
+  if (!sync)
+    return error::kOutOfBounds;
+
+  QueryManager::Query* query = query_manager_->GetQuery(client_id);
+  if (!query) {
+    if (!query_manager_->IsValidQuery(client_id)) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glQueryCounterEXT",
+                         "id not made by glGenQueriesEXT");
+      return error::kNoError;
+    }
+    query =
+        query_manager_->CreateQuery(target, client_id, std::move(buffer), sync);
+  } else {
+    if (query->target() != target) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glQueryCounterEXT",
+                         "target does not match");
+      return error::kNoError;
+    } else if (query->sync() != sync) {
+      DLOG(ERROR) << "Shared memory used by query not the same as before";
+      return error::kInvalidArguments;
+    }
+  }
+  query_manager_->QueryCounter(query, submit_count);
+
   return error::kNoError;
 }
 
@@ -1883,9 +1941,8 @@ void RasterDecoderImpl::DoCopySubTextureINTERNALGL(
                              gr_context());
 
   gles2::Texture::ImageState image_state;
-  gl::GLImage* image =
-      source_texture->GetLevelImage(source_target, 0, &image_state);
-  if (image) {
+  if (gl::GLImage* image =
+          source_texture->GetLevelImage(source_target, 0, &image_state)) {
     base::Optional<ScopedPixelUnpackState> pixel_unpack_state;
     if (image->GetType() == gl::GLImage::Type::MEMORY &&
         shared_context_state_->need_context_state_reset()) {
@@ -2175,7 +2232,7 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(
   // commands between BeginRaster and EndRaster will not flush).
   FlushToWorkAroundMacCrashes();
 
-  if (!gr_context()) {
+  if (!gr_context() || !supports_oop_raster_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glBeginRasterCHROMIUM",
                        "chromium_raster_transport not enabled via attribs");
     return;
@@ -2224,8 +2281,11 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(
 
   std::vector<GrBackendSemaphore> begin_semaphores;
   DCHECK(end_semaphores_.empty());
-  sk_surface_ = shared_image_->BeginWriteAccess(
-      final_msaa_count, surface_props, &begin_semaphores, &end_semaphores_);
+  DCHECK(!scoped_shared_image_write_);
+  scoped_shared_image_write_.emplace(shared_image_.get(), final_msaa_count,
+                                     surface_props, &begin_semaphores,
+                                     &end_semaphores_);
+  sk_surface_ = scoped_shared_image_write_->surface();
 
   if (!begin_semaphores.empty()) {
     bool result =
@@ -2236,6 +2296,7 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(
   if (!sk_surface_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glBeginRasterCHROMIUM",
                        "failed to create surface");
+    scoped_shared_image_write_.reset();
     shared_image_.reset();
     return;
   }
@@ -2363,12 +2424,15 @@ void RasterDecoderImpl::DoEndRasterCHROMIUM() {
   raster_canvas_ = nullptr;
 
   if (use_ddl_) {
+    TRACE_EVENT0("gpu",
+                 "RasterDecoderImpl::DoEndRasterCHROMIUM::DetachAndDrawDDL");
     auto ddl = recorder_->detach();
     recorder_ = nullptr;
     sk_surface_->draw(ddl.get());
   }
 
   {
+    TRACE_EVENT0("gpu", "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush");
     // This is a slow operation since skia will execute the GPU work for the
     // complete tile. Make sure the progress reporter is notified to avoid
     // hangs.
@@ -2381,24 +2445,18 @@ void RasterDecoderImpl::DoEndRasterCHROMIUM() {
     };
     AddVulkanCleanupTaskForSkiaFlush(
         shared_context_state_->vk_context_provider(), &flush_info);
-    if (use_ddl_) {
-      // TODO(penghuang): Switch to sk_surface_->flush() when skia flush bug is
-      // fixed. https://crbug.com/958055
-      auto result = gr_context()->flush(flush_info);
-      DCHECK(result == GrSemaphoresSubmitted::kYes || end_semaphores_.empty());
-    } else {
-      auto result = sk_surface_->flush(
-          SkSurface::BackendSurfaceAccess::kPresent, flush_info);
-      DCHECK(result == GrSemaphoresSubmitted::kYes || end_semaphores_.empty());
-    }
+    auto result = sk_surface_->flush(SkSurface::BackendSurfaceAccess::kPresent,
+                                     flush_info);
+    DCHECK(result == GrSemaphoresSubmitted::kYes || end_semaphores_.empty());
     end_semaphores_.clear();
   }
 
+  sk_surface_ = nullptr;
   if (!shared_image_) {
     // Test only path for  SetUpForRasterCHROMIUMForTest.
-    sk_surface_.reset();
+    sk_surface_for_testing_.reset();
   } else {
-    shared_image_->EndWriteAccess(std::move(sk_surface_));
+    scoped_shared_image_write_.reset();
     shared_image_.reset();
   }
 

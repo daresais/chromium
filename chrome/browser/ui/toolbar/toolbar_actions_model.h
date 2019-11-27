@@ -18,6 +18,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
 
@@ -30,7 +31,6 @@ class ToolbarActionViewController;
 namespace extensions {
 class ExtensionActionManager;
 class ExtensionMessageBubbleController;
-class ExtensionRegistry;
 }  // namespace extensions
 
 // Model for the browser actions toolbar. This is a per-profile instance, and
@@ -187,6 +187,9 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // Returns true if the action is pinned to the toolbar.
   bool IsActionPinned(const ActionId& action_id) const;
 
+  // Move the pinned action for |action_id| to |target_index|.
+  void MovePinnedAction(const ActionId& action_id, size_t target_index);
+
   // Returns the ordered list of ids of pinned actions.
   const std::vector<ActionId>& pinned_action_ids() const {
     return pinned_action_ids_;
@@ -319,11 +322,11 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
 
   ScopedObserver<extensions::ExtensionActionAPI,
                  extensions::ExtensionActionAPI::Observer>
-      extension_action_observer_;
+      extension_action_observer_{this};
 
   // Listen to extension load, unloaded notifications.
   ScopedObserver<extensions::ExtensionRegistry, ExtensionRegistryObserver>
-      extension_registry_observer_;
+      extension_registry_observer_{this};
 
   // For observing change of toolbar order preference by external entity (sync).
   PrefChangeRegistrar pref_change_registrar_;
@@ -331,7 +334,7 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
 
   ScopedObserver<extensions::LoadErrorReporter,
                  extensions::LoadErrorReporter::Observer>
-      load_error_reporter_observer_;
+      load_error_reporter_observer_{this};
 
   base::WeakPtrFactory<ToolbarActionsModel> weak_ptr_factory_{this};
 

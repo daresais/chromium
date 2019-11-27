@@ -21,14 +21,27 @@
 #include "chrome/browser/ui/views/sync/bubble_sync_promo_view_util.h"
 #endif
 
+namespace {
+
+std::unique_ptr<views::View> CreateManageCardsButton(
+    views::ButtonListener* listener) {
+  auto manage_cards_button = views::MdTextButton::CreateSecondaryUiButton(
+      listener, l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_CARDS));
+  manage_cards_button->SetID(autofill::DialogViewId::MANAGE_CARDS_BUTTON);
+  return manage_cards_button;
+}
+
+}  // namespace
+
 namespace autofill {
 
 SaveCardManageCardsBubbleViews::SaveCardManageCardsBubbleViews(
     views::View* anchor_view,
-    const gfx::Point& anchor_point,
     content::WebContents* web_contents,
     SaveCardBubbleController* controller)
-    : SaveCardBubbleViews(anchor_view, anchor_point, web_contents, controller) {
+    : SaveCardBubbleViews(anchor_view, web_contents, controller) {
+  DialogDelegate::set_buttons(ui::DIALOG_BUTTON_OK);
+  DialogDelegate::SetExtraView(CreateManageCardsButton(this));
 }
 
 std::unique_ptr<views::View>
@@ -54,7 +67,7 @@ SaveCardManageCardsBubbleViews::CreateFootnoteView() {
   params.dice_accounts_promo_message_resource_id =
       IDS_AUTOFILL_SYNC_PROMO_MESSAGE;
   params.dice_signin_button_prominent = false;
-  params.dice_text_style = ChromeTextStyle::STYLE_SECONDARY;
+  params.dice_text_style = views::style::STYLE_SECONDARY;
 
   auto promo_view = CreateBubbleSyncPromoView(
       controller()->GetProfile(), sync_promo_delegate_.get(),
@@ -64,17 +77,6 @@ SaveCardManageCardsBubbleViews::CreateFootnoteView() {
   InitFootnoteView(promo_view.get());
   return promo_view;
 #endif
-}
-
-std::unique_ptr<views::View> SaveCardManageCardsBubbleViews::CreateExtraView() {
-  auto manage_cards_button = views::MdTextButton::CreateSecondaryUiButton(
-      this, l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_CARDS));
-  manage_cards_button->SetID(DialogViewId::MANAGE_CARDS_BUTTON);
-  return manage_cards_button;
-}
-
-int SaveCardManageCardsBubbleViews::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK;
 }
 
 SaveCardManageCardsBubbleViews::~SaveCardManageCardsBubbleViews() {}

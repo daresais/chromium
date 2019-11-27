@@ -12,6 +12,7 @@
 #include "base/sequenced_task_runner.h"
 #include "content/common/content_export.h"
 #include "content/renderer/loader/child_url_loader_factory_bundle.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace content {
 
@@ -35,8 +36,9 @@ class CONTENT_EXPORT TrackedChildURLLoaderFactoryBundleInfo
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           pending_appcache_factory,
       SchemeMap pending_scheme_specific_factories,
-      OriginMap pending_initiator_specific_factories,
-      PossiblyAssociatedURLLoaderFactoryPtrInfo direct_network_factory_info,
+      OriginMap pending_isolated_world_factories,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory>
+          direct_network_factory_remote,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           pending_prefetch_loader_factory,
       std::unique_ptr<HostPtrAndTaskRunner> main_thread_host_bundle,

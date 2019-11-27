@@ -7,9 +7,9 @@
 #include <memory>
 
 #include "ash/display/display_util.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -50,7 +50,7 @@
 namespace ash {
 namespace {
 
-const char kWallpaperView[] = "WallpaperView";
+const char kWallpaperView[] = "WallpaperViewWidget";
 
 template <typename T>
 class Resetter {
@@ -547,8 +547,8 @@ TEST_F(WindowTreeHostManagerTest, MirrorToDockedWithFullscreen) {
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
   EXPECT_EQ(1U, display_manager()->GetNumDisplays());
 
-  wm::WindowState* window_state = wm::GetWindowState(w1.get());
-  const wm::WMEvent toggle_fullscreen_event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
+  WindowState* window_state = WindowState::Get(w1.get());
+  const WMEvent toggle_fullscreen_event(WM_EVENT_TOGGLE_FULLSCREEN);
   window_state->OnWMEvent(&toggle_fullscreen_event);
   EXPECT_TRUE(window_state->IsFullscreen());
   EXPECT_EQ("0,0 250x250", w1->bounds().ToString());
@@ -711,8 +711,8 @@ TEST_F(WindowTreeHostManagerTest, SwapPrimaryById) {
       Shell::Get()->window_tree_host_manager();
 
   UpdateDisplay("200x200,300x300");
-  const int shelf_inset_first = 200 - ShelfConstants::shelf_size();
-  const int shelf_inset_second = 300 - ShelfConstants::shelf_size();
+  const int shelf_inset_first = 200 - ShelfConfig::Get()->shelf_size();
+  const int shelf_inset_second = 300 - ShelfConfig::Get()->shelf_size();
   display::Display primary_display =
       display::Screen::GetScreen()->GetPrimaryDisplay();
   display::Display secondary_display = display_manager()->GetSecondaryDisplay();
@@ -1418,6 +1418,7 @@ class RootWindowTestObserver : public aura::WindowObserver {
     shelf_display_bounds_ = screen_util::GetDisplayBoundsWithShelf(window);
   }
 
+  // Returns the shelf display bounds, in screen coordinates.
   const gfx::Rect& shelf_display_bounds() const {
     return shelf_display_bounds_;
   }
@@ -1460,7 +1461,8 @@ TEST_F(WindowTreeHostManagerTest, ReplacePrimary) {
 
   display_info_list.push_back(new_first_display_info);
   display_manager()->OnNativeDisplaysChanged(display_info_list);
-  EXPECT_EQ("0,0 500x500", test_observer.shelf_display_bounds().ToString());
+  // The shelf is now on the second display.
+  EXPECT_EQ("400,0 500x500", test_observer.shelf_display_bounds().ToString());
   primary_root->RemoveObserver(&test_observer);
 }
 

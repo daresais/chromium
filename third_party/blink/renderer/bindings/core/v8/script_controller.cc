@@ -61,7 +61,7 @@
 #include "third_party/blink/renderer/core/loader/progress_tracker.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -69,7 +69,6 @@
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -164,7 +163,7 @@ void ScriptController::DisableEval(const String& error_message) {
 }
 
 void ScriptController::DisableEvalForIsolatedWorld(
-    int world_id,
+    int32_t world_id,
     const String& error_message) {
   DCHECK(DOMWrapperWorld::IsIsolatedWorldId(world_id));
   scoped_refptr<DOMWrapperWorld> world =
@@ -245,18 +244,26 @@ void ScriptController::ExecuteJavaScriptURL(
   bool should_bypass_main_world_content_security_policy =
       check_main_world_csp == kDoNotCheckContentSecurityPolicy ||
       ContentSecurityPolicy::ShouldBypassMainWorld(GetFrame()->GetDocument());
-  if (!GetFrame()->GetPage() ||
-      (!should_bypass_main_world_content_security_policy &&
-       !GetFrame()->GetDocument()->GetContentSecurityPolicy()->AllowInline(
-           ContentSecurityPolicy::InlineType::kNavigation, nullptr,
-           script_source, String() /* nonce */,
-           GetFrame()->GetDocument()->Url(), EventHandlerPosition().line_))) {
+  if (!GetFrame()->GetPage())
+    return;
+
+  if (!should_bypass_main_world_content_security_policy &&
+      !GetFrame()->GetDocument()->GetContentSecurityPolicy()->AllowInline(
+          ContentSecurityPolicy::InlineType::kNavigation, nullptr,
+          script_source, String() /* nonce */, GetFrame()->GetDocument()->Url(),
+          EventHandlerPosition().line_)) {
     return;
   }
 
-  bool had_navigation_before = GetFrame()->Loader().HasProvisionalNavigation();
-
   script_source = script_source.Substring(kJavascriptSchemeLength);
+  if (!should_bypass_main_world_content_security_policy) {
+    script_source = TrustedTypesCheckForJavascriptURLinNavigation(
+        script_source, GetFrame()->GetDocument());
+    if (script_source.IsEmpty())
+      return;
+  }
+
+  bool had_navigation_before = GetFrame()->Loader().HasProvisionalNavigation();
 
   v8::HandleScope handle_scope(GetIsolate());
 
@@ -296,7 +303,8 @@ void ScriptController::ExecuteJavaScriptURL(
   String result = ToCoreString(v8::Local<v8::String>::Cast(v8_result));
   WebNavigationParams::FillStaticResponse(params.get(), "text/html", "UTF-8",
                                           StringUTF8Adaptor(result));
-  GetFrame()->Loader().CommitNavigation(std::move(params), nullptr, true);
+  GetFrame()->Loader().CommitNavigation(std::move(params), nullptr,
+                                        base::DoNothing::Once(), true);
 }
 
 void ScriptController::ExecuteScriptInMainWorld(
@@ -360,7 +368,7 @@ v8::Local<v8::Value> ScriptController::EvaluateScriptInMainWorld(
 }
 
 v8::Local<v8::Value> ScriptController::ExecuteScriptInIsolatedWorld(
-    int world_id,
+    int32_t world_id,
     const ScriptSourceCode& source,
     const KURL& base_url,
     SanitizeScriptErrors sanitize_script_errors) {

@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.preferences.datareduction;
 
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Bundle;
 import android.support.graphics.drawable.VectorDrawableCompat;
@@ -19,10 +20,15 @@ import org.chromium.chrome.browser.datareduction.DataReductionProxyUma;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.infobar.PreviewsLitePageInfoBar;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
+import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings.ContentLengths;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
+
+import java.text.NumberFormat;
+import java.util.Locale;
 
 /**
  * Settings fragment that allows the user to configure Data Saver.
@@ -104,12 +110,21 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == R.id.menu_id_targeted_help) {
-            HelpAndFeedback.getInstance(getActivity())
-                    .show(getActivity(), getString(R.string.help_context_data_reduction),
-                            Profile.getLastUsedProfile(), null);
+            HelpAndFeedback.getInstance().show(getActivity(),
+                    getString(R.string.help_context_data_reduction), Profile.getLastUsedProfile(),
+                    null);
             return true;
         }
         return false;
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        // Force rebinding of preferences on orientation change, otherwise the usage chart will not
+        // be correctly redrawn: https://crbug.com/994668.
+        getListView().getAdapter().notifyDataSetChanged();
+
+        super.onConfigurationChanged(newConfig);
     }
 
     /**
@@ -134,8 +149,15 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
      */
     public static String generateSummary(Resources resources) {
         if (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()) {
-            String percent =
-                    DataReductionProxySettings.getInstance().getContentLengthPercentSavings();
+            ContentLengths length = DataReductionProxySettings.getInstance().getContentLengths();
+
+            // If received is less than show chart threshold than don't show summary.
+            if (ConversionUtils.bytesToKilobytes(length.getReceived())
+                    < DataReductionProxySettings.DATA_REDUCTION_SHOW_CHART_KB_THRESHOLD) {
+                return "";
+            }
+
+            String percent = generatePercentSavings(length);
             return resources.getString(
                     R.string.data_reduction_menu_item_summary_lite_mode, percent);
         } else {
@@ -143,9 +165,21 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
         }
     }
 
+    /**
+     * Returns formatted percent savings as string from ContentLengths
+     */
+    private static String generatePercentSavings(ContentLengths length) {
+        double savings = 0;
+        if (length.getOriginal() > 0L && length.getOriginal() > length.getReceived()) {
+            savings = (length.getOriginal() - length.getReceived()) / (double) length.getOriginal();
+        }
+        NumberFormat percentageFormatter = NumberFormat.getPercentInstance(Locale.getDefault());
+        return percentageFormatter.format(savings);
+    }
+
     private void createDataReductionSwitch(boolean isEnabled) {
-        final ChromeSwitchPreferenceCompat dataReductionSwitch =
-                new ChromeSwitchPreferenceCompat(getPreferenceManager().getContext(), null);
+        final ChromeSwitchPreference dataReductionSwitch =
+                new ChromeSwitchPreference(getPreferenceManager().getContext(), null);
         dataReductionSwitch.setKey(PREF_DATA_REDUCTION_SWITCH);
         dataReductionSwitch.setSummaryOn(R.string.text_on);
         dataReductionSwitch.setSummaryOff(R.string.text_off);

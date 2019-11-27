@@ -2,13 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import 'chrome://resources/cr_elements/cr_radio_group/cr_radio_group.m.js';
+// #import 'chrome://resources/cr_elements/cr_radio_button/cr_radio_button.m.js';
+//
+// #import {eventToPromise} from '../test_util.m.js';
+// #import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+// #import {pressAndReleaseKeyOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
+// clang-format on
+
 suite('cr-radio-group', () => {
   let radioGroup;
 
   /** @override */
   suiteSetup(() => {
-    return PolymerTest.importHtml(
-        'chrome://resources/cr_elements/cr_radio_button/cr_radio_button.html');
+    /* #ignore */ return PolymerTest.importHtml(
+        /* #ignore */ 'chrome://resources/cr_elements/cr_radio_button/' +
+        /* #ignore */ 'cr_radio_button.html');
   });
 
   setup(() => {

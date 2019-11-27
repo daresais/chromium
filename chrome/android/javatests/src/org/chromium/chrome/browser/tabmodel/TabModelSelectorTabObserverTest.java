@@ -16,8 +16,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.chrome.browser.tab.MockTab;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabBuilder;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tab.TabTestUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -110,7 +110,7 @@ public class TabModelSelectorTabObserverTest {
     @Test
     @SmallTest
     public void testObserverAddedBeforeInitialize() {
-        TabModelSelectorBase selector = new TabModelSelectorBase() {
+        TabModelSelectorBase selector = new TabModelSelectorBase(null, false) {
             @Override
             public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
                     boolean incognito) {
@@ -118,7 +118,7 @@ public class TabModelSelectorTabObserverTest {
             }
         };
         TestTabModelSelectorTabObserver observer = createTabModelSelectorTabObserver();
-        selector.initialize(false, mTestRule.getNormalTabModel(), mTestRule.getIncognitoTabModel());
+        selector.initialize(mTestRule.getNormalTabModel(), mTestRule.getIncognitoTabModel());
 
         Tab normalTab1 = createTestTab(false);
         addTab(mTestRule.getNormalTabModel(), normalTab1);
@@ -135,14 +135,7 @@ public class TabModelSelectorTabObserverTest {
     }
 
     private Tab createTestTab(boolean incognito) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(() -> {
-            Tab testTab = new TabBuilder()
-                                  .setIncognito(incognito)
-                                  .setWindow(mTestRule.getWindowAndroid())
-                                  .build();
-            testTab.initializeNative();
-            return testTab;
-        });
+        return ThreadUtils.runOnUiThreadBlockingNoException(() -> new MockTab(0, incognito));
     }
 
     private static void addTab(TabModel tabModel, Tab tab) {

@@ -10,6 +10,7 @@
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "chrome/test/pixel/browser_skia_gold_pixel_diff.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
@@ -21,10 +22,12 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
+#include "base/callback_helpers.h"
+#include "base/strings/strcat.h"
+#include "ui/compositor/test/draw_waiter_for_test.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/views/test/widget_test.h"
-#include "ui/views/widget/widget_observer.h"
 #endif
 
 namespace {
@@ -53,11 +56,18 @@ class WidgetCloser {
 
   DISALLOW_COPY_AND_ASSIGN(WidgetCloser);
 };
+
 #endif  // defined(TOOLKIT_VIEWS)
 
 }  // namespace
 
-TestBrowserDialog::TestBrowserDialog() = default;
+TestBrowserDialog::TestBrowserDialog() : TestBrowserUi() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          "browser-ui-tests-verify-pixels")) {
+    pixel_diff_ = std::make_unique<BrowserSkiaGoldPixelDiff>();
+  }
+}
+
 TestBrowserDialog::~TestBrowserDialog() = default;
 
 void TestBrowserDialog::PreShow() {
@@ -87,13 +97,34 @@ bool TestBrowserDialog::VerifyUi() {
   if (added.size() != 1)
     return false;
 
+  views::Widget* dialog_widget = *(added.begin());
+// TODO(https://crbug.com/958242) support Mac for pixel tests.
+#if !defined(OS_MACOSX)
+  if (pixel_diff_) {
+    dialog_widget->SetBlockCloseForTesting(true);
+    base::ScopedClosureRunner unblock_close(
+        base::BindOnce(&views::Widget::SetBlockCloseForTesting,
+                       base::Unretained(dialog_widget), false));
+    // Wait for painting complete.
+    auto* compositor = dialog_widget->GetCompositor();
+    ui::DrawWaiterForTest::WaitForCompositingEnded(compositor);
+
+    pixel_diff_->Init(dialog_widget, "BrowserUiDialog");
+    auto* test_info = testing::UnitTest::GetInstance()->current_test_info();
+    const std::string test_name =
+        base::StrCat({test_info->test_case_name(), "_", test_info->name()});
+    if (!pixel_diff_->CompareScreenshot(test_name,
+                                        dialog_widget->GetContentsView()))
+      return false;
+  }
+#endif  // OS_MACOSX
+
   if (!should_verify_dialog_bounds_)
     return true;
 
   // Verify that the dialog's dimensions do not exceed the display's work area
   // bounds, which may be smaller than its bounds(), e.g. in the case of the
   // docked magnifier or Chromevox being enabled.
-  views::Widget* dialog_widget = *(added.begin());
   const gfx::Rect dialog_bounds = dialog_widget->GetWindowBoundsInScreen();
   gfx::NativeWindow native_window = dialog_widget->GetNativeWindow();
   DCHECK(native_window);

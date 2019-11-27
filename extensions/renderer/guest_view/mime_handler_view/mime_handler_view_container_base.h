@@ -11,10 +11,10 @@
 #include "content/public/common/transferrable_url_loader.mojom.h"
 #include "extensions/common/api/mime_handler.mojom.h"
 #include "extensions/common/guest_view/mime_handler_view_uma_types.h"
-#include "extensions/common/mojo/guest_view.mojom.h"
+#include "extensions/common/mojom/guest_view.mojom.h"
 #include "extensions/renderer/guest_view/mime_handler_view/post_message_support.h"
 #include "ipc/ipc_message.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "third_party/blink/public/web/web_associated_url_loader_client.h"
 #include "ui/gfx/geometry/size.h"
@@ -22,12 +22,12 @@
 #include "v8/include/v8.h"
 
 namespace blink {
+class URLLoaderThrottle;
 class WebAssociatedURLLoader;
 }  // namespace blink
 
 namespace content {
 class RenderFrame;
-class URLLoaderThrottle;
 struct WebPluginInfo;
 }  // namespace content
 
@@ -56,7 +56,7 @@ class MimeHandlerViewContainerBase : public blink::WebAssociatedURLLoaderClient,
   // If the URL matches the same URL that this object has created and it hasn't
   // added a throttle yet, it will return a new one for the purpose of
   // intercepting it.
-  std::unique_ptr<content::URLLoaderThrottle> MaybeCreatePluginThrottle(
+  std::unique_ptr<blink::URLLoaderThrottle> MaybeCreatePluginThrottle(
       const GURL& url);
 
   // WebAssociatedURLLoaderClient overrides.
@@ -130,8 +130,8 @@ class MimeHandlerViewContainerBase : public blink::WebAssociatedURLLoaderClient,
   // The routing ID of the frame which contains the plugin element.
   const int32_t embedder_render_frame_routing_id_;
 
-  mojo::Binding<mime_handler::BeforeUnloadControl>
-      before_unload_control_binding_;
+  mojo::Receiver<mime_handler::BeforeUnloadControl>
+      before_unload_control_receiver_{this};
 
   base::WeakPtrFactory<MimeHandlerViewContainerBase> weak_factory_{this};
 

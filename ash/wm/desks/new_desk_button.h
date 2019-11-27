@@ -14,17 +14,37 @@
 
 namespace ash {
 
+class DesksBarItemBorder;
+
 // A button view that shows up in the top-right corner of the screen when
 // overview mode is on, which is used to create a new virtual desk.
 class ASH_EXPORT NewDeskButton
     : public views::LabelButton,
       public OverviewHighlightController::OverviewHighlightableView {
  public:
-  NewDeskButton(views::ButtonListener* listener);
+  explicit NewDeskButton(views::ButtonListener* listener);
   ~NewDeskButton() override = default;
+
+  // Update the button's enable/disable state based on current desks state.
+  void UpdateButtonState();
+
+  void OnButtonPressed();
+
+  void SetLabelVisible(bool visible);
+
+  // Gets the minimum size of this view to properly lay out all its contents.
+  // |compact| is set to true for compact mode or false for default mode.
+  // The view containing this object can use the size returned from this
+  // function to decide its own proper size or layout in default or compact
+  // mode.
+  gfx::Size GetMinSize(bool compact) const;
+
+  gfx::Size CalculatePreferredSize() const override;
+  void Layout() override;
 
   // LabelButton:
   const char* GetClassName() const override;
+  void OnPaintBackground(gfx::Canvas* canvas) override;
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
@@ -35,9 +55,25 @@ class ASH_EXPORT NewDeskButton
 
   // OverviewHighlightController::OverviewHighlightableView:
   views::View* GetView() override;
-  gfx::Rect GetHighlightBounds() override;
+  gfx::Rect GetHighlightBoundsInScreen() override;
+  gfx::RoundedCornersF GetRoundedCornersRadii() const override;
+  void MaybeActivateHighlightedView() override;
+  void MaybeCloseHighlightedView() override;
+  bool OnViewHighlighted() override;
+  void OnViewUnhighlighted() override;
+
+  SkColor GetBackgroundColorForTesting() const { return background_color_; }
+  bool IsLabelVisibleForTesting() const;
 
  private:
+  void UpdateBorderState();
+
+  // Owned by this View via `View::border_`. This is just a convenient pointer
+  // to it.
+  DesksBarItemBorder* border_ptr_;
+
+  SkColor background_color_;
+
   DISALLOW_COPY_AND_ASSIGN(NewDeskButton);
 };
 

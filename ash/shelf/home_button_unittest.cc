@@ -13,13 +13,13 @@
 #include "ash/assistant/assistant_ui_controller.h"
 #include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/test/test_assistant_service.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_constants.h"
+#include "ash/shelf/shelf_navigation_widget.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_view_test_api.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -27,7 +27,7 @@
 #include "base/run_loop.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/test/event_generator.h"
 
@@ -37,19 +37,27 @@ ui::GestureEvent CreateGestureEvent(ui::GestureEventDetails details) {
   return ui::GestureEvent(0, 0, ui::EF_NONE, base::TimeTicks(), details);
 }
 
-class HomeButtonTest : public AshTestBase {
+class HomeButtonTest : public AshTestBase,
+                       public testing::WithParamInterface<bool> {
  public:
   HomeButtonTest() = default;
   ~HomeButtonTest() override = default;
 
   // AshTestBase:
-  void SetUp() override { AshTestBase::SetUp(); }
+  void SetUp() override {
+    if (GetParam()) {
+      scoped_feature_list_.InitAndEnableFeature(
+          chromeos::features::kShelfHotseat);
+    } else {
+      scoped_feature_list_.InitAndDisableFeature(
+          chromeos::features::kShelfHotseat);
+    }
+
+    AshTestBase::SetUp();
+  }
 
   void SendGestureEvent(ui::GestureEvent* event) {
-    GetPrimaryShelf()
-        ->GetShelfViewForTesting()
-        ->GetHomeButton()
-        ->OnGestureEvent(event);
+    GetPrimaryShelf()->shelf_widget()->GetHomeButton()->OnGestureEvent(event);
   }
 
   void SendGestureEventToSecondaryDisplay(ui::GestureEvent* event) {
@@ -57,30 +65,43 @@ class HomeButtonTest : public AshTestBase {
     UpdateDisplay("1+1-1000x600,1002+0-600x400");
     // Send the gesture event to the secondary display.
     Shelf::ForWindow(Shell::GetAllRootWindows()[1])
-        ->GetShelfViewForTesting()
+        ->shelf_widget()
         ->GetHomeButton()
         ->OnGestureEvent(event);
   }
 
   const HomeButton* home_button() const {
-    return GetPrimaryShelf()->GetShelfViewForTesting()->GetHomeButton();
+    return GetPrimaryShelf()->shelf_widget()->GetHomeButton();
+  }
+
+  AssistantState* assistant_state() const { return AssistantState::Get(); }
+
+  PrefService* prefs() {
+    return Shell::Get()->session_controller()->GetPrimaryUserPrefService();
   }
 
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   DISALLOW_COPY_AND_ASSIGN(HomeButtonTest);
 };
 
-TEST_F(HomeButtonTest, SwipeUpToOpenFullscreenAppList) {
+// The parameter indicates whether the kShelfHotseat feature is enabled.
+INSTANTIATE_TEST_SUITE_P(All, HomeButtonTest, testing::Bool());
+
+TEST_P(HomeButtonTest, SwipeUpToOpenFullscreenAppList) {
   Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
 
-  // Start the drags from the center of the home button.
-  gfx::Point start = home_button()->GetCenterPoint();
-  views::View::ConvertPointToScreen(home_button(), &start);
+  // Start the drags from the center of the shelf.
+  const ShelfView* shelf_view = shelf->GetShelfViewForTesting();
+  gfx::Point start =
+      gfx::Point(shelf_view->width() / 2, shelf_view->height() / 2);
+  views::View::ConvertPointToScreen(shelf_view, &start);
   // Swiping up less than the threshold should trigger a peeking app list.
   gfx::Point end = start;
   end.set_y(shelf->GetIdealBounds().bottom() -
-            app_list::AppListView::kDragSnapToPeekingThreshold + 10);
+            AppListView::kDragSnapToPeekingThreshold + 10);
   GetEventGenerator()->GestureScrollSequence(
       start, end, base::TimeDelta::FromMilliseconds(100), 4 /* steps */);
   GetAppListTestHelper()->WaitUntilIdle();
@@ -94,7 +115,7 @@ TEST_F(HomeButtonTest, SwipeUpToOpenFullscreenAppList) {
 
   // Swiping above the threshold should trigger a fullscreen app list.
   end.set_y(shelf->GetIdealBounds().bottom() -
-            app_list::AppListView::kDragSnapToPeekingThreshold - 10);
+            AppListView::kDragSnapToPeekingThreshold - 10);
   GetEventGenerator()->GestureScrollSequence(
       start, end, base::TimeDelta::FromMilliseconds(100), 4 /* steps */);
   base::RunLoop().RunUntilIdle();
@@ -103,7 +124,7 @@ TEST_F(HomeButtonTest, SwipeUpToOpenFullscreenAppList) {
   GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
 }
 
-TEST_F(HomeButtonTest, ClickToOpenAppList) {
+TEST_P(HomeButtonTest, ClickToOpenAppList) {
   Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
 
@@ -138,7 +159,7 @@ TEST_F(HomeButtonTest, ClickToOpenAppList) {
   GetAppListTestHelper()->CheckState(ash::AppListViewState::kClosed);
 }
 
-TEST_F(HomeButtonTest, ButtonPositionInTabletMode) {
+TEST_P(HomeButtonTest, ButtonPositionInTabletMode) {
   // Finish all setup tasks. In particular we want to finish the
   // GetSwitchStates post task in (Fake)PowerManagerClient which is triggered
   // by TabletModeController otherwise this will cause tablet mode to exit
@@ -147,27 +168,51 @@ TEST_F(HomeButtonTest, ButtonPositionInTabletMode) {
 
   ShelfViewTestAPI test_api(GetPrimaryShelf()->GetShelfViewForTesting());
   Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
-  test_api.RunMessageLoopUntilAnimationsDone();
+
+  // When hotseat is enabled, home button position changes between in-app shelf
+  // and home shelf, so test in-app when hotseat is enabled.
+  if (GetParam()) {
+    // Wait for the navigation widget's animation.
+    test_api.RunMessageLoopUntilAnimationsDone(
+        GetPrimaryShelf()
+            ->shelf_widget()
+            ->navigation_widget()
+            ->get_bounds_animator_for_testing());
+
+    EXPECT_EQ(home_button()->bounds().x(), 0);
+
+    // Switch to in-app shelf.
+    std::unique_ptr<views::Widget> widget = CreateTestWidget();
+  }
+
+  // Wait for the navigation widget's animation.
+  test_api.RunMessageLoopUntilAnimationsDone(
+      GetPrimaryShelf()
+          ->shelf_widget()
+          ->navigation_widget()
+          ->get_bounds_animator_for_testing());
   EXPECT_GT(home_button()->bounds().x(), 0);
 
   Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
-  test_api.RunMessageLoopUntilAnimationsDone();
-  EXPECT_EQ(ShelfConstants::home_button_edge_spacing(),
-            home_button()->bounds().x());
+  test_api.RunMessageLoopUntilAnimationsDone(
+      GetPrimaryShelf()
+          ->shelf_widget()
+          ->navigation_widget()
+          ->get_bounds_animator_for_testing());
+
+  // Visual space around the home button is set at the widget level.
+  EXPECT_EQ(0, home_button()->bounds().x());
 }
 
-TEST_F(HomeButtonTest, LongPressGesture) {
-  ui::ScopedAnimationDurationScaleMode animation_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+TEST_P(HomeButtonTest, LongPressGesture) {
   // Simulate two user with primary user as active.
   CreateUserSessions(2);
 
-  // Enable voice interaction in system settings.
-  VoiceInteractionController::Get()->NotifySettingsEnabled(true);
-  VoiceInteractionController::Get()->NotifyFeatureAllowed(
+  // Enable the Assistant in system settings.
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled, true);
+  assistant_state()->NotifyFeatureAllowed(
       mojom::AssistantAllowedState::ALLOWED);
-  VoiceInteractionController::Get()->NotifyStatusChanged(
-      mojom::VoiceInteractionState::STOPPED);
+  assistant_state()->NotifyStatusChanged(mojom::AssistantState::READY);
 
   ui::GestureEvent long_press =
       CreateGestureEvent(ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
@@ -191,18 +236,18 @@ TEST_F(HomeButtonTest, LongPressGesture) {
                                                ->visibility());
 }
 
-TEST_F(HomeButtonTest, LongPressGestureWithSecondaryUser) {
+TEST_P(HomeButtonTest, LongPressGestureWithSecondaryUser) {
   // Disallowed by secondary user.
-  VoiceInteractionController::Get()->NotifyFeatureAllowed(
+  assistant_state()->NotifyFeatureAllowed(
       mojom::AssistantAllowedState::DISALLOWED_BY_NONPRIMARY_USER);
 
-  // Enable voice interaction in system settings.
-  VoiceInteractionController::Get()->NotifySettingsEnabled(true);
+  // Enable the Assistant in system settings.
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled, true);
 
   ui::GestureEvent long_press =
       CreateGestureEvent(ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
   SendGestureEvent(&long_press);
-  // Voice interaction is disabled for secondary user.
+  // The Assistant is disabled for secondary user.
   EXPECT_NE(AssistantVisibility::kVisible, Shell::Get()
                                                ->assistant_controller()
                                                ->ui_controller()
@@ -218,14 +263,14 @@ TEST_F(HomeButtonTest, LongPressGestureWithSecondaryUser) {
                                                ->visibility());
 }
 
-TEST_F(HomeButtonTest, LongPressGestureWithSettingsDisabled) {
+TEST_P(HomeButtonTest, LongPressGestureWithSettingsDisabled) {
   // Simulate two user with primary user as active.
   CreateUserSessions(2);
 
-  // Simulate a user who has already completed setup flow, but disabled voice
-  // interaction in settings.
-  VoiceInteractionController::Get()->NotifySettingsEnabled(false);
-  VoiceInteractionController::Get()->NotifyFeatureAllowed(
+  // Simulate a user who has already completed setup flow, but disabled the
+  // Assistant in settings.
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled, false);
+  assistant_state()->NotifyFeatureAllowed(
       mojom::AssistantAllowedState::ALLOWED);
 
   ui::GestureEvent long_press =

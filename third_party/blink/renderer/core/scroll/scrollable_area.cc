@@ -34,7 +34,7 @@
 #include "build/build_config.h"
 #include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/scrollbar.h"
-#include "cc/layers/picture_layer.h"
+#include "cc/input/snap_selection_strategy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -42,6 +42,8 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_shift_tracker.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
+#include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/scroll/programmatic_scroll_animator.h"
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
@@ -53,10 +55,11 @@
 
 namespace blink {
 
-int ScrollableArea::PixelsPerLineStep(ChromeClient* host) {
-  if (!host)
+int ScrollableArea::PixelsPerLineStep(LocalFrame* frame) {
+  if (!frame)
     return kPixelsPerLineStep;
-  return host->WindowToViewportScalar(kPixelsPerLineStep);
+  return frame->GetPage()->GetChromeClient().WindowToViewportScalar(
+      frame, kPixelsPerLineStep);
 }
 
 float ScrollableArea::MinFractionToStepWhenPaging() {
@@ -90,18 +93,18 @@ ScrollableArea::ScrollableArea()
       scrollbars_hidden_if_overlay_(true),
       scrollbar_captured_(false),
       mouse_over_scrollbar_(false),
+      has_been_disposed_(false),
       needs_show_scrollbar_layers_(false),
       uses_composited_scrolling_(false) {}
 
 ScrollableArea::~ScrollableArea() = default;
 
 void ScrollableArea::Dispose() {
+  if (HasBeenDisposed())
+    return;
   DisposeImpl();
-}
-
-void ScrollableArea::DisposeImpl() {
-  RunScrollCompleteCallbacks();
   fade_overlay_scrollbars_timer_.reset();
+  has_been_disposed_ = true;
 }
 
 void ScrollableArea::ClearScrollableArea() {
@@ -132,10 +135,6 @@ ProgrammaticScrollAnimator& ScrollableArea::GetProgrammaticScrollAnimator()
   }
 
   return *programmatic_scroll_animator_;
-}
-
-GraphicsLayer* ScrollableArea::LayerForContainer() const {
-  return LayerForScrolling() ? LayerForScrolling()->Parent() : nullptr;
 }
 
 ScrollbarOrientation ScrollableArea::ScrollbarOrientationFromDirection(
@@ -239,8 +238,11 @@ void ScrollableArea::SetScrollOffset(const ScrollOffset& offset,
 
   switch (scroll_type) {
     case kCompositorScroll:
-    case kClampingScroll:
       ScrollOffsetChanged(clamped_offset, scroll_type);
+      break;
+    case kClampingScroll:
+      GetScrollAnimator().AdjustAnimationAndSetScrollOffset(clamped_offset,
+                                                            scroll_type);
       break;
     case kAnchoringScroll:
       GetScrollAnimator().AdjustAnimationAndSetScrollOffset(clamped_offset,
@@ -300,12 +302,13 @@ void ScrollableArea::ProgrammaticScrollHelper(const ScrollOffset& offset,
   CancelScrollAnimation();
 
   ScrollCallback callback = std::move(on_finish);
-  if (RuntimeEnabledFeatures::UpdateHoverFromScrollAtBeginFrameEnabled()) {
+  if (RuntimeEnabledFeatures::UpdateHoverAtBeginFrameEnabled() ||
+      RuntimeEnabledFeatures::OverscrollCustomizationEnabled()) {
     callback = ScrollCallback(WTF::Bind(
         [](ScrollCallback original_callback,
            WeakPersistent<ScrollableArea> area) {
           if (area)
-            area->MarkHoverStateDirty();
+            area->OnScrollFinished();
           if (original_callback)
             std::move(original_callback).Run();
         },
@@ -380,16 +383,17 @@ void ScrollableArea::ScrollOffsetChanged(const ScrollOffset& offset,
   if (Scrollbar* vertical_scrollbar = this->VerticalScrollbar())
     vertical_scrollbar->OffsetDidChange();
 
-  if (GetScrollOffset() != old_offset) {
+  ScrollOffset delta = GetScrollOffset() - old_offset;
+  // TODO(skobes): Should we exit sooner when the offset has not changed?
+  bool offset_changed = !delta.IsZero();
+
+  if (offset_changed) {
     GetScrollAnimator().NotifyContentAreaScrolled(
         GetScrollOffset() - old_offset, scroll_type);
   }
 
-  if (GetLayoutBox() &&
-      (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled() ||
-       RuntimeEnabledFeatures::ElementTimingEnabled(
-           &GetLayoutBox()->GetDocument()))) {
-    if (GetScrollOffset() != old_offset && GetLayoutBox()->GetFrameView() &&
+  if (GetLayoutBox()) {
+    if (offset_changed && GetLayoutBox()->GetFrameView() &&
         GetLayoutBox()
             ->GetFrameView()
             ->GetPaintTimingDetector()
@@ -399,10 +403,9 @@ void ScrollableArea::ScrollOffsetChanged(const ScrollOffset& offset,
     }
   }
 
-  if (GetScrollOffset() != old_offset && GetLayoutBox() &&
-      GetLayoutBox()->GetFrameView()) {
+  if (offset_changed && GetLayoutBox() && GetLayoutBox()->GetFrameView()) {
     GetLayoutBox()->GetFrameView()->GetLayoutShiftTracker().NotifyScroll(
-        scroll_type);
+        scroll_type, delta);
   }
 
   GetScrollAnimator().SetCurrentOffset(offset);
@@ -428,6 +431,7 @@ void ScrollableArea::UpdateScrollOffsetFromInternals(const IntSize& offset) {
 }
 
 void ScrollableArea::RegisterScrollCompleteCallback(ScrollCallback callback) {
+  DCHECK(!HasBeenDisposed());
   pending_scroll_complete_callbacks_.push_back(std::move(callback));
 }
 
@@ -574,16 +578,12 @@ void ScrollableArea::RecalculateScrollbarOverlayColorTheme(
 void ScrollableArea::SetScrollbarNeedsPaintInvalidation(
     ScrollbarOrientation orientation) {
   if (orientation == kHorizontalScrollbar) {
-    if (GraphicsLayer* graphics_layer = LayerForHorizontalScrollbar()) {
-      graphics_layer->SetNeedsDisplay();
-      graphics_layer->SetContentsNeedsDisplay();
-    }
+    if (cc::Layer* layer = LayerForHorizontalScrollbar())
+      layer->SetNeedsDisplay();
     horizontal_scrollbar_needs_paint_invalidation_ = true;
   } else {
-    if (GraphicsLayer* graphics_layer = LayerForVerticalScrollbar()) {
-      graphics_layer->SetNeedsDisplay();
-      graphics_layer->SetContentsNeedsDisplay();
-    }
+    if (cc::Layer* layer = LayerForVerticalScrollbar())
+      layer->SetNeedsDisplay();
     vertical_scrollbar_needs_paint_invalidation_ = true;
   }
 
@@ -591,8 +591,8 @@ void ScrollableArea::SetScrollbarNeedsPaintInvalidation(
 }
 
 void ScrollableArea::SetScrollCornerNeedsPaintInvalidation() {
-  if (GraphicsLayer* graphics_layer = LayerForScrollCorner()) {
-    graphics_layer->SetNeedsDisplay();
+  if (cc::Layer* layer = LayerForScrollCorner()) {
+    layer->SetNeedsDisplay();
     return;
   }
   scroll_corner_needs_paint_invalidation_ = true;
@@ -658,21 +658,6 @@ void ScrollableArea::CancelProgrammaticScrollAnimation() {
     programmatic_scroll_animator->CancelAnimation();
 }
 
-bool ScrollableArea::ShouldScrollOnMainThread() const {
-  if (GraphicsLayer* layer = LayerForScrolling()) {
-    uint32_t reasons = layer->CcLayer()->GetMainThreadScrollingReasons();
-    // Should scroll on main thread unless the reason is the one that is set
-    // by the ScrollAnimator, in which case, the animation can still be
-    // scheduled on the compositor.
-    // TODO(ymalik): We have a non-transient "main thread scrolling reason"
-    // that doesn't actually cause shouldScrollOnMainThread() to be true.
-    // This is confusing and should be cleaned up.
-    return !!(reasons &
-              ~cc::MainThreadScrollingReason::kHandlingScrollFromMainThread);
-  }
-  return true;
-}
-
 bool ScrollableArea::ScrollbarsHiddenIfOverlay() const {
   return HasOverlayScrollbars() && scrollbars_hidden_if_overlay_;
 }
@@ -728,6 +713,10 @@ void ScrollableArea::ShowOverlayScrollbars() {
   }
 }
 
+const Document* ScrollableArea::GetDocument() const {
+  return &GetLayoutBox()->GetDocument();
+}
+
 IntSize ScrollableArea::ClampScrollOffset(const IntSize& scroll_offset) const {
   return scroll_offset.ShrunkTo(MaximumScrollOffsetInt())
       .ExpandedTo(MinimumScrollOffsetInt());
@@ -740,7 +729,7 @@ ScrollOffset ScrollableArea::ClampScrollOffset(
 }
 
 int ScrollableArea::LineStep(ScrollbarOrientation) const {
-  return PixelsPerLineStep(GetChromeClient());
+  return PixelsPerLineStep(GetLayoutBox()->GetFrame());
 }
 
 int ScrollableArea::PageStep(ScrollbarOrientation orientation) const {
@@ -810,17 +799,84 @@ CompositorElementId ScrollableArea::GetScrollbarElementId(
           ? CompositorElementIdNamespace::kHorizontalScrollbar
           : CompositorElementIdNamespace::kVerticalScrollbar;
   return CompositorElementIdFromUniqueObjectId(
-      scrollable_element_id.GetInternalValue(), element_id_namespace);
+      scrollable_element_id.GetStableId(), element_id_namespace);
 }
 
-void ScrollableArea::MarkHoverStateDirty() {
+void ScrollableArea::OnScrollFinished() {
   if (GetLayoutBox()) {
-    GetLayoutBox()
-        ->GetFrame()
-        ->LocalFrameRoot()
-        .GetEventHandler()
-        .MarkHoverStateDirty();
+    if (RuntimeEnabledFeatures::OverscrollCustomizationEnabled()) {
+      if (Node* node = GetLayoutBox()->GetNode())
+        node->GetDocument().EnqueueScrollEndEventForNode(node);
+    }
+    if (RuntimeEnabledFeatures::UpdateHoverAtBeginFrameEnabled()) {
+      GetLayoutBox()
+          ->GetFrame()
+          ->LocalFrameRoot()
+          .GetEventHandler()
+          .MarkHoverStateDirty();
+    }
   }
+}
+
+void ScrollableArea::SnapAfterScrollbarScrolling(
+    ScrollbarOrientation orientation) {
+  SnapAtCurrentPosition(orientation == kHorizontalScrollbar,
+                        orientation == kVerticalScrollbar);
+}
+
+bool ScrollableArea::SnapAtCurrentPosition(
+    bool scrolled_x,
+    bool scrolled_y,
+    base::ScopedClosureRunner on_finish) {
+  DCHECK(IsRootFrameViewport() || !GetLayoutBox()->IsGlobalRootScroller());
+  FloatPoint current_position = ScrollPosition();
+  return SnapForEndPosition(current_position, scrolled_x, scrolled_y,
+                            std::move(on_finish));
+}
+
+bool ScrollableArea::SnapForEndPosition(const FloatPoint& end_position,
+                                        bool scrolled_x,
+                                        bool scrolled_y,
+                                        base::ScopedClosureRunner on_finish) {
+  DCHECK(IsRootFrameViewport() || !GetLayoutBox()->IsGlobalRootScroller());
+  std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+      cc::SnapSelectionStrategy::CreateForEndPosition(
+          gfx::ScrollOffset(end_position), scrolled_x, scrolled_y);
+  return PerformSnapping(*strategy, std::move(on_finish));
+}
+
+bool ScrollableArea::SnapForDirection(const ScrollOffset& delta,
+                                      base::ScopedClosureRunner on_finish) {
+  DCHECK(IsRootFrameViewport() || !GetLayoutBox()->IsGlobalRootScroller());
+  FloatPoint current_position = ScrollPosition();
+  std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+      cc::SnapSelectionStrategy::CreateForDirection(
+          gfx::ScrollOffset(current_position),
+          gfx::ScrollOffset(delta.Width(), delta.Height()));
+  return PerformSnapping(*strategy, std::move(on_finish));
+}
+
+bool ScrollableArea::SnapForEndAndDirection(const ScrollOffset& delta) {
+  DCHECK(IsRootFrameViewport() || !GetLayoutBox()->IsGlobalRootScroller());
+  FloatPoint current_position = ScrollPosition();
+  std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+      cc::SnapSelectionStrategy::CreateForEndAndDirection(
+          gfx::ScrollOffset(current_position),
+          gfx::ScrollOffset(delta.Width(), delta.Height()));
+  return PerformSnapping(*strategy);
+}
+
+bool ScrollableArea::PerformSnapping(const cc::SnapSelectionStrategy& strategy,
+                                     base::ScopedClosureRunner on_finish) {
+  base::Optional<FloatPoint> snap_point = GetSnapPositionAndSetTarget(strategy);
+  if (!snap_point)
+    return false;
+  CancelScrollAnimation();
+  CancelProgrammaticScrollAnimation();
+  SetScrollOffset(ScrollPositionToOffset(snap_point.value()),
+                  kProgrammaticScroll, kScrollBehaviorSmooth,
+                  on_finish.Release());
+  return true;
 }
 
 void ScrollableArea::Trace(blink::Visitor* visitor) {
@@ -840,6 +896,19 @@ void ScrollableArea::InjectGestureScrollEvent(
   GetChromeClient()->InjectGestureScrollEvent(
       *GetLayoutBox()->GetFrame(), device, delta, granularity,
       GetCompositorElementId(), gesture_type);
+}
+
+ScrollableArea* ScrollableArea::GetForScrolling(const LayoutBox* layout_box) {
+  if (!layout_box)
+    return nullptr;
+
+  if (!layout_box->IsGlobalRootScroller())
+    return layout_box->GetScrollableArea();
+
+  // The global root scroller should be scrolled by the root frame view's
+  // ScrollableArea.
+  LocalFrame& root_frame = layout_box->GetFrame()->LocalFrameRoot();
+  return root_frame.View()->GetScrollableArea();
 }
 
 }  // namespace blink

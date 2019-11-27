@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/supports_user_data.h"
-#include "components/autofill/content/common/autofill_driver.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
 #include "components/password_manager/core/browser/password_manager.h"
@@ -54,17 +54,16 @@ class ContentPasswordManagerDriverFactory
   // chrome://password-manager-internals is available.
   void RequestSendLoggingAvailability();
 
-  // content::WebContentsObserver:
-  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
-  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
-  void DidFinishNavigation(
-      content::NavigationHandle* navigation_handle) override;
-
  private:
   ContentPasswordManagerDriverFactory(
       content::WebContents* web_contents,
       PasswordManagerClient* client,
       autofill::AutofillClient* autofill_client);
+
+  // content::WebContentsObserver:
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   std::map<content::RenderFrameHost*,
            std::unique_ptr<ContentPasswordManagerDriver>>

@@ -24,7 +24,7 @@
 #import "ios/web/navigation/wk_back_forward_list_item_holder.h"
 #import "ios/web/navigation/wk_navigation_util.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #import "ios/web/web_state/ui/controller/crw_legacy_native_content_controller.h"
 #import "ios/web/web_state/user_interaction_state.h"
 #import "ios/web/web_state/web_state_impl.h"
@@ -34,6 +34,7 @@
 #error "This file requires ARC support."
 #endif
 
+using web::wk_navigation_util::ExtractTargetURL;
 using web::wk_navigation_util::ExtractUrlFromPlaceholderUrl;
 using web::wk_navigation_util::IsPlaceholderUrl;
 using web::wk_navigation_util::IsRestoreSessionUrl;
@@ -143,6 +144,9 @@ enum class BackForwardNavigationType {
   [_delegate webRequestControllerStopLoading:self];
   web::NavigationItemImpl* item =
       self.navigationManagerImpl->GetLastCommittedItemImpl();
+  if (!item) {
+    return;
+  }
   auto navigationContext = web::NavigationContextImpl::CreateNavigationContext(
       self.webState, URL,
       /*has_user_gesture=*/true, item->GetTransitionType(),
@@ -305,15 +309,25 @@ enum class BackForwardNavigationType {
   ui::PageTransition transition =
       [self.navigationHandler pageTransitionFromNavigationType:navigationType];
 
-  if (web::GetWebClient()->IsSlimNavigationManagerEnabled() &&
-      navigationType == WKNavigationTypeBackForward &&
-      self.webView.backForwardList.currentItem) {
-    web::NavigationItem* currentItem = [[CRWNavigationItemHolder
-        holderForBackForwardListItem:self.webView.backForwardList.currentItem]
-        navigationItem];
-    if (currentItem) {
-      transition = ui::PageTransitionFromInt(transition |
-                                             currentItem->GetTransitionType());
+  WKBackForwardListItem* currentItem = self.webView.backForwardList.currentItem;
+  if (web::GetWebClient()->IsSlimNavigationManagerEnabled() && currentItem) {
+    // SlimNav target redirect pages should default to a RELOAD transition,
+    // because transition state is not persisted on restore.
+    GURL targetURL;
+    if (navigationType == WKNavigationTypeOther &&
+        IsRestoreSessionUrl(net::GURLWithNSURL(currentItem.URL)) &&
+        ExtractTargetURL(net::GURLWithNSURL(currentItem.URL), &targetURL) &&
+        targetURL == URL) {
+      DCHECK(ui::PageTransitionIsRedirect(transition));
+      transition = ui::PAGE_TRANSITION_RELOAD;
+    } else if (navigationType == WKNavigationTypeBackForward) {
+      web::NavigationItem* currentItem = [[CRWNavigationItemHolder
+          holderForBackForwardListItem:self.webView.backForwardList.currentItem]
+          navigationItem];
+      if (currentItem) {
+        transition = ui::PageTransitionFromInt(
+            transition | currentItem->GetTransitionType());
+      }
     }
   }
 
@@ -412,7 +426,11 @@ enum class BackForwardNavigationType {
   context->SetIsPost([self.navigationHandler isCurrentNavigationItemPOST]);
   context->SetIsSameDocument(sameDocumentNavigation);
 
-  if (!IsWKInternalUrl(requestURL) && !placeholderNavigation) {
+  // If WKWebView.loading is used for WebState::IsLoading, do not set it for
+  // renderer-initated navigation otherwise WebState::IsLoading will remain true
+  // after hash change in the web page.
+  if (!IsWKInternalUrl(requestURL) && !placeholderNavigation &&
+      (!web::features::UseWKWebViewLoading() || !rendererInitiated)) {
     self.webState->SetIsLoading(true);
   }
 
@@ -463,14 +481,26 @@ enum class BackForwardNavigationType {
     // loading placeholder URL.
     return;
   }
-
-  if (![self.navigationHandler.navigationStates
-              lastNavigationWithPendingItemInNavigationContext]) {
-    self.webState->SetIsLoading(false);
-  } else {
-    // There is another pending navigation, so the state is still loading.
+  if (!web::features::UseWKWebViewLoading()) {
+    if (![self.navigationHandler.navigationStates
+                lastNavigationWithPendingItemInNavigationContext]) {
+      self.webState->SetIsLoading(false);
+    } else {
+      // There is another pending navigation, so the state is still loading.
+    }
   }
+
   self.webState->OnPageLoaded(currentURL, YES);
+
+  if (context) {
+    if (context->IsRendererInitiated()) {
+      UMA_HISTOGRAM_TIMES("PLT.iOS.RendererInitiatedPageLoadTime",
+                          context->GetElapsedTimeSinceCreation());
+    } else {
+      UMA_HISTOGRAM_TIMES("PLT.iOS.BrowserInitiatedPageLoadTime",
+                          context->GetElapsedTimeSinceCreation());
+    }
+  }
 }
 
 // Reports Navigation.IOSWKWebViewSlowFastBackForward UMA. No-op if pending
@@ -640,6 +670,16 @@ enum class BackForwardNavigationType {
     web::NavigationItem* item = self.currentNavItem;
     GURL navigationURL = item ? item->GetURL() : GURL::EmptyGURL();
     GURL virtualURL = item ? item->GetVirtualURL() : GURL::EmptyGURL();
+
+    // Do not attempt to navigate to file URLs that are typed into the
+    // omnibox.
+    if (navigationURL.SchemeIsFile() &&
+        !web::GetWebClient()->IsAppSpecificURL(virtualURL) &&
+        !IsRestoreSessionUrl(navigationURL)) {
+      [_delegate webRequestControllerStopLoading:self];
+      return;
+    }
+
     // Set |item| to nullptr here to avoid any use-after-free issues, as it can
     // be cleared by the call to -registerLoadRequestForURL below.
     item = nullptr;
@@ -657,7 +697,13 @@ enum class BackForwardNavigationType {
 
     if (web::GetWebClient()->IsSlimNavigationManagerEnabled() &&
         self.navigationManagerImpl->IsRestoreSessionInProgress()) {
-      [_delegate webRequestControllerDisconnectScrollViewProxy:self];
+      if (self.navigationManagerImpl->ShouldBlockUrlDuringRestore(
+              navigationURL)) {
+        return;
+      }
+      [_delegate
+          webRequestControllerDisableNavigationGesturesUntilFinishNavigation:
+              self];
     }
 
     WKNavigation* navigation = nil;

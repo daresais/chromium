@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/peerconnection/media_stream_remote_video_source.h"
+#include "third_party/blink/renderer/modules/peerconnection/media_stream_remote_video_source.h"
 
 #include <stdint.h>
 #include <utility>
@@ -14,11 +14,11 @@
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
-#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/webrtc/track_observer.h"
-#include "third_party/blink/public/platform/modules/webrtc/webrtc_video_frame_adapter.h"
-#include "third_party/blink/public/platform/modules/webrtc/webrtc_video_utils.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/webrtc/webrtc_video_frame_adapter.h"
+#include "third_party/blink/renderer/platform/webrtc/webrtc_video_utils.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
@@ -100,9 +100,10 @@ void DoNothing(const scoped_refptr<rtc::RefCountInterface>& ref) {}
 void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
     const webrtc::VideoFrame& incoming_frame) {
   const bool render_immediately = incoming_frame.timestamp_us() == 0;
+  const base::TimeTicks current_time = base::TimeTicks::Now();
   const base::TimeDelta incoming_timestamp =
       render_immediately
-          ? base::TimeTicks::Now() - base::TimeTicks()
+          ? current_time - base::TimeTicks()
           : base::TimeDelta::FromMicroseconds(incoming_frame.timestamp_us());
   const base::TimeTicks render_time =
       render_immediately ? base::TimeTicks() + incoming_timestamp
@@ -208,8 +209,12 @@ void MediaStreamRemoteVideoSource::RemoteVideoSourceDelegate::OnFrame(
     video_frame->metadata()->SetTimeTicks(
         media::VideoFrameMetadata::REFERENCE_TIME, render_time);
   }
-  video_frame->metadata()->SetTimeTicks(media::VideoFrameMetadata::DECODE_TIME,
-                                        base::TimeTicks::Now());
+  video_frame->metadata()->SetTimeTicks(
+      media::VideoFrameMetadata::DECODE_END_TIME, current_time);
+
+  video_frame->metadata()->SetDouble(
+      media::VideoFrameMetadata::RTP_TIMESTAMP,
+      static_cast<double>(incoming_frame.timestamp()));
 
   PostCrossThreadTask(
       *io_task_runner_, FROM_HERE,
@@ -235,18 +240,18 @@ MediaStreamRemoteVideoSource::MediaStreamRemoteVideoSource(
 }
 
 MediaStreamRemoteVideoSource::~MediaStreamRemoteVideoSource() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!observer_);
 }
 
 void MediaStreamRemoteVideoSource::OnSourceTerminated() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   StopSourceImpl();
 }
 
 void MediaStreamRemoteVideoSource::StartSourceImpl(
     const VideoCaptureDeliverFrameCB& frame_callback) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!delegate_.get());
   delegate_ = base::MakeRefCounted<RemoteVideoSourceDelegate>(io_task_runner(),
                                                               frame_callback);
@@ -257,7 +262,7 @@ void MediaStreamRemoteVideoSource::StartSourceImpl(
 }
 
 void MediaStreamRemoteVideoSource::StopSourceImpl() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // StopSourceImpl is called either when MediaStreamTrack.stop is called from
   // JS or blink gc the MediaStreamSource object or when OnSourceTerminated()
   // is called. Garbage collection will happen after the PeerConnection no
@@ -279,7 +284,7 @@ MediaStreamRemoteVideoSource::SinkInterfaceForTesting() {
 
 void MediaStreamRemoteVideoSource::OnChanged(
     webrtc::MediaStreamTrackInterface::TrackState state) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   switch (state) {
     case webrtc::MediaStreamTrackInterface::kLive:
       SetReadyState(WebMediaStreamSource::kReadyStateLive);

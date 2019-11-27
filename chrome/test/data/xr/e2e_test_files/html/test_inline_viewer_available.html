@@ -30,8 +30,9 @@ identity reference space
       // TODO (crbug.com/934912): Consider improving flow once methods are
       // updated.
       let step = "supportsInline";
-      navigator.xr.supportsSession('inline')
-      .then(()=> {
+      navigator.xr.isSessionSupported('inline')
+      .then((supported)=> {
+        assert_true(supported);
         step = "requestSession";
         return navigator.xr.requestSession('inline');
       })
@@ -53,7 +54,7 @@ identity reference space
         }
 
         session.updateRenderState({
-            baseLayer: new XRWebGLLayer(session, gl, { compositionDisabled: true })
+            baseLayer: new XRWebGLLayer(session, gl)
         });
         session.requestAnimationFrame(onRequestAnimationFrame);
       })

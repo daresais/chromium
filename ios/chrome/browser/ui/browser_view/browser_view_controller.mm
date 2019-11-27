@@ -28,11 +28,9 @@
 #import "components/signin/ios/browser/manage_accounts_delegate.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/translate_manager.h"
-#include "components/unified_consent/feature.h"
 #include "ios/chrome/app/tests_hook.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/crash_report/breakpad_helper.h"
 #import "ios/chrome/browser/download/download_manager_tab_helper.h"
 #include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #include "ios/chrome/browser/feature_engagement/tracker_util.h"
@@ -42,6 +40,7 @@
 #import "ios/chrome/browser/geolocation/omnibox_geolocation_controller.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #import "ios/chrome/browser/language/url_language_histogram_factory.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/metrics/new_tab_page_uma.h"
 #import "ios/chrome/browser/metrics/size_class_recorder.h"
 #include "ios/chrome/browser/metrics/tab_usage_recorder.h"
@@ -167,7 +166,8 @@
 #import "ios/chrome/browser/web/repost_form_tab_helper.h"
 #import "ios/chrome/browser/web/sad_tab_tab_helper.h"
 #import "ios/chrome/browser/web/tab_id_tab_helper.h"
-#include "ios/chrome/browser/web_state_list/all_web_state_observation_forwarder.h"
+#import "ios/chrome/browser/web/web_state_delegate_tab_helper.h"
+#import "ios/chrome/browser/web_state_list/all_web_state_observation_forwarder.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler.h"
@@ -175,6 +175,7 @@
 #import "ios/chrome/browser/webui/net_export_tab_helper.h"
 #import "ios/chrome/browser/webui/net_export_tab_helper_delegate.h"
 #import "ios/chrome/browser/webui/show_mail_composer_context.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
@@ -182,18 +183,18 @@
 #include "ios/public/provider/chrome/browser/voice/voice_search_controller.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
+#include "ios/web/common/url_scheme_util.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #import "ios/web/public/deprecated/crw_native_content_holder.h"
 #import "ios/web/public/deprecated/crw_native_content_provider.h"
 #import "ios/web/public/deprecated/crw_web_controller_util.h"
-#include "ios/web/public/navigation_item.h"
+#include "ios/web/public/navigation/navigation_item.h"
 #include "ios/web/public/thread/web_thread.h"
-#include "ios/web/public/url_scheme_util.h"
+#import "ios/web/public/ui/context_menu_params.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
 #include "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/context_menu_params.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/web_state_delegate_bridge.h"
-#include "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state_delegate_bridge.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -252,7 +253,7 @@ void Record(WKWebViewLinkPreviewAction action) {
 
 // Returns the status bar background color.
 UIColor* StatusBarBackgroundColor() {
-  return [UIColor colorWithRed:0.11 green:0.11 blue:0.11 alpha:1.0];
+  return UIColor.blackColor;
 }
 
 // Duration of the toolbar animation.
@@ -374,12 +375,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // Identifier for each animation of an NTP opening.
   NSInteger _NTPAnimationIdentifier;
 
-  // Backing ivar for the public property, strong even though the property is
-  // weak, because things explode otherwise.
-  // Do not directly access this ivar outside of object initialization; use the
-  // -tabModel property.
-  TabModel* _strongTabModel;
-
   // Facade objects used by |_toolbarCoordinator|.
   // Must outlive |_toolbarCoordinator|.
   std::unique_ptr<LocationBarModelDelegateIOS> _locationBarModelDelegate;
@@ -427,9 +422,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   // Whether or not -shutdown has been called.
   BOOL _isShutdown;
-
-  // The ChromeBrowserState associated with this BVC.
-  ios::ChromeBrowserState* _browserState;  // weak
 
   // Whether or not Incognito* is enabled.
   BOOL _isOffTheRecord;
@@ -501,6 +493,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 // not active, the UI will not react to changes in the tab model, so generally
 // an inactive BVC should not be visible.
 @property(nonatomic, assign, getter=isActive) BOOL active;
+// The Browser whose UI is managed by this instance.
+@property(nonatomic, assign) Browser* browser;
 // Browser container view controller.
 @property(nonatomic, strong)
     BrowserContainerViewController* browserContainerViewController;
@@ -526,9 +520,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 @property(nonatomic, assign, getter=isDismissingModal) BOOL dismissingModal;
 // Whether web usage is enabled for the WebStates in |self.tabModel|.
 @property(nonatomic, assign, getter=isWebUsageEnabled) BOOL webUsageEnabled;
-// Returns YES if the toolbar has not been scrolled out by fullscreen.
-@property(nonatomic, assign, readonly, getter=isToolbarOnScreen)
-    BOOL toolbarOnScreen;
 // Whether a new tab animation is occurring.
 @property(nonatomic, assign, getter=isInNewTabAnimation) BOOL inNewTabAnimation;
 // Whether BVC prefers to hide the status bar. This value is used to determine
@@ -606,9 +597,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 // The webState of the active tab.
 @property(nonatomic, readonly) web::WebState* currentWebState;
 
-// Whether the safe area insets should be used to adjust the viewport.
-@property(nonatomic, readonly) BOOL usesSafeInsetsForViewportAdjustments;
-
 // Whether the keyboard observer helper is viewed
 @property(nonatomic, strong) KeyboardObserverHelper* observer;
 
@@ -630,14 +618,13 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 // In most cases, they will not, to improve startup performance.
 // In order to handle this, initialization of various aspects of BVC have been
 // broken out into the following functions, which have expectations (enforced
-// with DCHECKs) regarding |_browserState|, |self.tabModel|, and [self
+// with DCHECKs) regarding |self.browserState|, |self.tabModel|, and [self
 // isViewLoaded].
 
-// Updates non-view-related functionality with the given browser state and tab
+// Updates non-view-related functionality with the given browser and tab
 // model.
 // Does not matter whether or not the view has been loaded.
-- (void)updateWithTabModel:(TabModel*)model
-              browserState:(ios::ChromeBrowserState*)browserState;
+- (void)updateWithBrowser:(Browser*)browser;
 // On iOS7, iPad should match iOS6 status bar.  Install a simple black bar under
 // the status bar to mimic this layout.
 - (void)installFakeStatusBar;
@@ -647,7 +634,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 // Sets up the constraints on the toolbar.
 - (void)addConstraintsToToolbar;
 // Updates view-related functionality with the given tab model and browser
-// state. The view must have been loaded.  Uses |_browserState| and
+// state. The view must have been loaded.  Uses |self.browserState| and
 // |self.tabModel|.
 - (void)addUIFunctionalityForModelAndBrowserState;
 // Sets the correct frame and hierarchy for subviews and helper views.  Only
@@ -747,7 +734,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 // Send Tab To Self
 // ----------------
 // Sends the current tab to the target device.
-- (void)sendTabToSelfTargetDeviceID:(NSString*)targetDeviceID;
+- (void)sendTabToSelfTargetDeviceID:(NSString*)targetDeviceID
+                   targetDeviceName:(NSString*)targetDeviceName;
 
 @end
 
@@ -755,8 +743,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
 #pragma mark - Object lifecycle
 
-- (instancetype)initWithTabModel:(TabModel*)model
-                      browserState:(ios::ChromeBrowserState*)browserState
+- (instancetype)initWithBrowser:(Browser*)browser
                  dependencyFactory:
                      (BrowserViewControllerDependencyFactory*)factory
         applicationCommandEndpoint:
@@ -801,15 +788,15 @@ NSString* const kBrowserViewControllerSnackbarCategory =
         [[ToolbarCoordinatorAdaptor alloc] initWithDispatcher:self.dispatcher];
     self.toolbarInterface = _toolbarCoordinatorAdaptor;
 
-    _downloadManagerCoordinator = [[DownloadManagerCoordinator alloc]
-        initWithBaseViewController:_browserContainerViewController];
-    _downloadManagerCoordinator.presenter =
-        [[VerticalAnimationContainer alloc] init];
-
-    if (base::FeatureList::IsEnabled(dialogs::kNonModalDialogs)) {
-      _javaScriptDialogPresenter =
-          std::make_unique<OverlayJavaScriptDialogPresenter>();
-    } else {
+    // TODO(crbug.com/1024288): Remove these lines along the legacy code
+    // removal.
+    if (!IsDownloadInfobarMessagesUIEnabled()) {
+      _downloadManagerCoordinator = [[DownloadManagerCoordinator alloc]
+          initWithBaseViewController:_browserContainerViewController];
+      _downloadManagerCoordinator.presenter =
+          [[VerticalAnimationContainer alloc] init];
+    }
+    if (!base::FeatureList::IsEnabled(dialogs::kNonModalDialogs)) {
       _dialogPresenter = [[DialogPresenter alloc] initWithDelegate:self
                                           presentingViewController:self];
       _javaScriptDialogPresenter =
@@ -821,8 +808,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     _footerFullscreenProgress = 1.0;
 
     _observer = [[KeyboardObserverHelper alloc] init];
-    if (model && browserState)
-      [self updateWithTabModel:model browserState:browserState];
+    if (browser)
+      [self updateWithBrowser:browser];
   }
   return self;
 }
@@ -847,13 +834,14 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (id<ApplicationCommands,
       BrowserCommands,
       OmniboxFocuser,
+      PasswordBreachCommands,
       PopupMenuCommands,
       FakeboxFocuser,
       SnackbarCommands,
       ToolbarCommands>)dispatcher {
-  return static_cast<
-      id<ApplicationCommands, BrowserCommands, OmniboxFocuser,
-         PopupMenuCommands, FakeboxFocuser, SnackbarCommands, ToolbarCommands>>(
+  return static_cast<id<ApplicationCommands, BrowserCommands, OmniboxFocuser,
+                        PasswordBreachCommands, PopupMenuCommands,
+                        FakeboxFocuser, SnackbarCommands, ToolbarCommands>>(
       self.commandDispatcher);
 }
 
@@ -866,11 +854,11 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 }
 
 - (TabModel*)tabModel {
-  return _strongTabModel;
+  return self.browser ? self.browser->GetTabModel() : nil;
 }
 
 - (ios::ChromeBrowserState*)browserState {
-  return _browserState;
+  return self.browser ? self.browser->GetBrowserState() : nullptr;
 }
 
 #pragma mark - Private Properties
@@ -879,7 +867,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   if (!_sideSwipeController) {
     _sideSwipeController =
         [[SideSwipeController alloc] initWithTabModel:self.tabModel
-                                         browserState:_browserState];
+                                         browserState:self.browserState];
     [_sideSwipeController setSnapshotDelegate:self];
     _sideSwipeController.toolbarInteractionHandler = self.toolbarInterface;
     _sideSwipeController.primaryToolbarSnapshotProvider =
@@ -955,11 +943,9 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // supported.
   FullscreenController* fullscreenController =
       FullscreenControllerFactory::GetInstance()->GetForBrowserState(
-          _browserState);
+          self.browserState);
   ChromeBroadcaster* broadcaster = fullscreenController->broadcaster();
   if (_broadcasting) {
-    fullscreenController->SetWebStateList(self.tabModel.webStateList);
-
     _toolbarUIUpdater = [[LegacyToolbarUIUpdater alloc]
         initWithToolbarUI:[[ToolbarUIState alloc] init]
              toolbarOwner:self
@@ -974,8 +960,10 @@ NSString* const kBrowserViewControllerSnackbarCategory =
            webStateList:self.tabModel.webStateList];
     StartBroadcastingMainContentUI(self, broadcaster);
 
-    _fullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(self);
-    fullscreenController->AddObserver(_fullscreenUIUpdater.get());
+    fullscreenController->SetWebStateList(self.tabModel.webStateList);
+
+    _fullscreenUIUpdater =
+        std::make_unique<FullscreenUIUpdater>(fullscreenController, self);
     [self updateForFullscreenProgress:fullscreenController->GetProgress()];
   } else {
     StopBroadcastingToolbarUI(broadcaster);
@@ -986,7 +974,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     [_webMainContentUIForwarder disconnect];
     _webMainContentUIForwarder = nil;
 
-    fullscreenController->RemoveObserver(_fullscreenUIUpdater.get());
     _fullscreenUIUpdater = nullptr;
 
     fullscreenController->SetWebStateList(nullptr);
@@ -994,22 +981,18 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 }
 
 - (BOOL)isWebUsageEnabled {
-  return _browserState && !_isShutdown &&
+  return self.browserState && !_isShutdown &&
          WebStateListWebUsageEnablerFactory::GetInstance()
-             ->GetForBrowserState(_browserState)
+             ->GetForBrowserState(self.browserState)
              ->IsWebUsageEnabled();
 }
 
 - (void)setWebUsageEnabled:(BOOL)webUsageEnabled {
-  if (!_browserState || _isShutdown)
+  if (!self.browserState || _isShutdown)
     return;
   WebStateListWebUsageEnablerFactory::GetInstance()
-      ->GetForBrowserState(_browserState)
+      ->GetForBrowserState(self.browserState)
       ->SetWebUsageEnabled(webUsageEnabled);
-}
-
-- (BOOL)isToolbarOnScreen {
-  return [self nonFullscreenToolbarHeight] - [self currentHeaderOffset] > 0;
 }
 
 - (void)setInNewTabAnimation:(BOOL)inNewTabAnimation {
@@ -1087,15 +1070,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   return self.tabModel.webStateList
              ? self.tabModel.webStateList->GetActiveWebState()
              : nullptr;
-}
-
-- (BOOL)usesSafeInsetsForViewportAdjustments {
-  fullscreen::features::ViewportAdjustmentExperiment viewportExperiment =
-      fullscreen::features::GetActiveViewportExperiment();
-  return viewportExperiment ==
-             fullscreen::features::ViewportAdjustmentExperiment::SAFE_AREA ||
-         viewportExperiment ==
-             fullscreen::features::ViewportAdjustmentExperiment::HYBRID;
 }
 
 - (BubblePresenter*)bubblePresenter {
@@ -1254,22 +1228,15 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // prevent interaction with the web page.
   // TODO(crbug.com/637093): This coordinator should be managed by the
   // coordinator used to present BrowserViewController, when implemented.
-  if (active) {
-    [self.activityOverlayCoordinator stop];
-    self.activityOverlayCoordinator = nil;
-  } else if (!self.activityOverlayCoordinator) {
-    self.activityOverlayCoordinator =
-        [[ActivityOverlayCoordinator alloc] initWithBaseViewController:self];
-    [self.activityOverlayCoordinator start];
-  }
+  [self showActivityOverlay:!active];
 
-  if (_browserState) {
+  if (self.browserState) {
     ActiveStateManager* active_state_manager =
-        ActiveStateManager::FromBrowserState(_browserState);
+        ActiveStateManager::FromBrowserState(self.browserState);
     active_state_manager->SetActive(active);
 
     TextToSpeechPlaybackControllerFactory::GetInstance()
-        ->GetForBrowserState(_browserState)
+        ->GetForBrowserState(self.browserState)
         ->SetEnabled(_active);
   }
 
@@ -1378,13 +1345,13 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     self.inNewTabAnimation = YES;
     // Exit fullscreen if needed.
     FullscreenControllerFactory::GetInstance()
-        ->GetForBrowserState(_browserState)
+        ->GetForBrowserState(self.browserState)
         ->ExitFullscreen();
     const CGFloat kAnimatedViewSize = 50;
     BackgroundTabAnimationView* animatedView =
         [[BackgroundTabAnimationView alloc]
-            initWithFrame:CGRectMake(0, 0, kAnimatedViewSize,
-                                     kAnimatedViewSize)];
+            initWithFrame:CGRectMake(0, 0, kAnimatedViewSize, kAnimatedViewSize)
+                incognito:self.isOffTheRecord];
     __weak UIView* weakAnimatedView = animatedView;
     auto completionBlock = ^() {
       self.inNewTabAnimation = NO;
@@ -1405,21 +1372,21 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [_paymentRequestManager close];
   _paymentRequestManager = nil;
 
-  if (_browserState) {
+  if (self.browserState) {
     TextToSpeechPlaybackController* controller =
         TextToSpeechPlaybackControllerFactory::GetInstance()
-            ->GetForBrowserState(_browserState);
+            ->GetForBrowserState(self.browserState);
     if (controller)
       controller->SetWebStateList(nullptr);
 
     WebStateListWebUsageEnabler* webUsageEnabler =
         WebStateListWebUsageEnablerFactory::GetInstance()->GetForBrowserState(
-            _browserState);
+            self.browserState);
     if (webUsageEnabler)
       webUsageEnabler->SetWebStateList(nullptr);
 
     UrlLoadingNotifier* urlLoadingNotifier =
-        UrlLoadingNotifierFactory::GetForBrowserState(_browserState);
+        UrlLoadingNotifierFactory::GetForBrowserState(self.browserState);
     if (urlLoadingNotifier)
       urlLoadingNotifier->RemoveObserver(_URLLoadingObserverBridge.get());
   }
@@ -1437,7 +1404,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   self.tabStripCoordinator = nil;
   self.tabStripView = nil;
 
-  _browserState = nullptr;
+  self.tabModel.webStateList->RemoveObserver(_webStateListObserver.get());
+  self.browser = nullptr;
   self.bubblePresenter = nil;
 
   [self.commandDispatcher stopDispatchingToTarget:self];
@@ -1457,7 +1425,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // SideSwipeController is a tab model observer, so it needs to stop observing
   // before self.tabModel is released.
   _sideSwipeController = nil;
-  self.tabModel.webStateList->RemoveObserver(_webStateListObserver.get());
   _webStateListObserver.reset();
   _allWebStateObservationForwarder = nullptr;
   if (_voiceSearchController)
@@ -1528,7 +1495,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
                         action:@selector(shieldWasTapped:)
               forControlEvents:UIControlEventTouchUpInside];
   self.view.autoresizingMask = initialViewAutoresizing;
-  self.view.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+  self.view.backgroundColor = [UIColor colorNamed:kBackgroundColor];
 
   [self addChildViewController:self.browserContainerViewController];
   [self.view addSubview:self.contentArea];
@@ -1543,7 +1510,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [self addConstraintsToToolbar];
 
   // If the tab model and browser state are valid, finish initialization.
-  if (self.tabModel && _browserState)
+  if (self.tabModel && self.browserState)
     [self addUIFunctionalityForModelAndBrowserState];
 
   // Add a tap gesture recognizer to save the last tap location for the source
@@ -1592,6 +1559,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [self updateDialogPresenterActiveState];
   [self updateBroadcastState];
   [_toolbarUIUpdater updateState];
+  [self.infobarContainerCoordinator baseViewDidAppear];
 
   // |viewDidAppear| can be called after |browserState| is destroyed. Since
   // |presentBubblesIfEligible| requires that |self.browserState| is not NULL,
@@ -1634,7 +1602,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [self updateDialogPresenterActiveState];
   [self updateBroadcastState];
   web::WebState* activeWebState =
-      self.tabModel.webStateList->GetActiveWebState();
+      self.tabModel ? self.tabModel.webStateList->GetActiveWebState() : nullptr;
   if (activeWebState) {
     activeWebState->WasHidden();
     if (!self.presentedViewController)
@@ -1688,13 +1656,13 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
   [super traitCollectionDidChange:previousTraitCollection];
 
-  // After |-shutdown| is called, |_browserState| is invalid and will cause a
-  // crash.
-  if (!_browserState || _isShutdown)
+  // After |-shutdown| is called, |self.browserState| is invalid and will cause
+  // a crash.
+  if (!self.browserState || _isShutdown)
     return;
 
   FullscreenControllerFactory::GetInstance()
-      ->GetForBrowserState(_browserState)
+      ->GetForBrowserState(self.browserState)
       ->BrowserTraitCollectionChangedBegin();
 
   // TODO(crbug.com/527092): - traitCollectionDidChange: is not always forwarded
@@ -1709,7 +1677,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   self.secondaryToolbarNoFullscreenHeightConstraint.constant =
       [self secondaryToolbarHeightWithInset];
   [self updateFootersForFullscreenProgress:self.footerFullscreenProgress];
-  if (!self.usesSafeInsetsForViewportAdjustments && self.currentWebState) {
+  if (self.currentWebState) {
     UIEdgeInsets contentPadding =
         self.currentWebState->GetWebViewProxy().contentInset;
     contentPadding.bottom = AlignValueToPixel(
@@ -1742,7 +1710,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [self setNeedsStatusBarAppearanceUpdate];
 
   FullscreenControllerFactory::GetInstance()
-      ->GetForBrowserState(_browserState)
+      ->GetForBrowserState(self.browserState)
       ->BrowserTraitCollectionChangedEnd();
 }
 
@@ -1837,9 +1805,14 @@ NSString* const kBrowserViewControllerSnackbarCategory =
       // by the |completion| block below.
       UIView* launchScreenView = launchScreenController.view;
       launchScreenView.userInteractionEnabled = NO;
-      UIWindow* window = UIApplication.sharedApplication.keyWindow;
-      launchScreenView.frame = window.bounds;
-      [window addSubview:launchScreenView];
+      // TODO(crbug.com/1011155): Displaying the launch screen is a hack to hide
+      // the build up of the UI from the user. To implement the hack, this view
+      // controller uses information that it should not know or care about: this
+      // BVC is contained and its parent bounds to the full screen.
+      launchScreenView.frame = self.parentViewController.view.bounds;
+      [self.parentViewController.view addSubview:launchScreenView];
+      [launchScreenView setNeedsLayout];
+      [launchScreenView layoutIfNeeded];
 
       // Replace the completion handler sent to the superclass with one which
       // removes |launchScreenView| and resets the status bar. If |completion|
@@ -1856,30 +1829,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   if ([self.sideSwipeController inSwipe]) {
     [self.sideSwipeController resetContentView];
-  }
-
-  // TODO(crbug.com/959774): The logging below is to better understand a
-  // NSInvalidArgumentException crash with the note "Application tried to
-  // present modally an active controller <BrowserViewController: 0x13e88d000>".
-  // Code experiments showed that the referenced BrowserViewController is the
-  // presenter, not the presentee.
-  if (viewControllerToPresent.view.window) {
-    NSString* activeViewController =
-        NSStringFromClass([viewControllerToPresent class]);
-    NSString* presentingViewController = NSStringFromClass(
-        [viewControllerToPresent.presentingViewController class]);
-    NSString* parentViewController =
-        NSStringFromClass([viewControllerToPresent.parentViewController class]);
-    breakpad_helper::SetBVCPresentingActiveViewController(
-        activeViewController, presentingViewController, parentViewController);
-
-    ProceduralBlock finalCompletionHandlerCopy = [finalCompletionHandler copy];
-    finalCompletionHandler = ^{
-      if (finalCompletionHandlerCopy)
-        finalCompletionHandlerCopy();
-      // Remove the crash log since the presentation completed without a crash.
-      breakpad_helper::RemoveBVCPresentingActiveViewController();
-    };
   }
 
   // TODO(crbug.com/965688): An Infobar message is currently the only presented
@@ -1932,17 +1881,13 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
 #pragma mark - Private Methods: BVC Initialization
 
-- (void)updateWithTabModel:(TabModel*)model
-              browserState:(ios::ChromeBrowserState*)browserState {
-  DCHECK(model);
-  DCHECK(browserState);
-  DCHECK(!self.tabModel);
-  DCHECK(!_browserState);
-  _browserState = browserState;
-  _isOffTheRecord = browserState->IsOffTheRecord() ? YES : NO;
-  _strongTabModel = model;
+- (void)updateWithBrowser:(Browser*)browser {
+  DCHECK(browser);
+  DCHECK(!self.browser);
+  self.browser = browser;
+  _isOffTheRecord = self.browserState->IsOffTheRecord();
   WebStateListWebUsageEnablerFactory::GetInstance()
-      ->GetForBrowserState(_browserState)
+      ->GetForBrowserState(self.browserState)
       ->SetWebStateList(self.tabModel.webStateList);
 
   _webStateObserverBridge = std::make_unique<web::WebStateObserverBridge>(self);
@@ -1954,7 +1899,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   self.tabModel.webStateList->AddObserver(_webStateListObserver.get());
   _URLLoadingObserverBridge = std::make_unique<UrlLoadingObserverBridge>(self);
   UrlLoadingNotifier* urlLoadingNotifier =
-      UrlLoadingNotifierFactory::GetForBrowserState(_browserState);
+      UrlLoadingNotifierFactory::GetForBrowserState(self.browserState);
   urlLoadingNotifier->AddObserver(_URLLoadingObserverBridge.get());
 
   WebStateList* webStateList = self.tabModel.webStateList;
@@ -1966,7 +1911,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   // Set the TTS playback controller's WebStateList.
   TextToSpeechPlaybackControllerFactory::GetInstance()
-      ->GetForBrowserState(_browserState)
+      ->GetForBrowserState(self.browserState)
       ->SetWebStateList(self.tabModel.webStateList);
 
   // When starting the browser with an open tab, it is necessary to reset the
@@ -2012,7 +1957,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   self.helper = [_dependencyFactory newBrowserViewControllerHelper];
 
   PrimaryToolbarCoordinator* topToolbarCoordinator =
-      [[PrimaryToolbarCoordinator alloc] initWithBrowserState:_browserState];
+      [[PrimaryToolbarCoordinator alloc] initWithBrowser:self.browser];
   self.primaryToolbarCoordinator = topToolbarCoordinator;
   topToolbarCoordinator.delegate = self;
   topToolbarCoordinator.popupPresenterDelegate = self;
@@ -2023,7 +1968,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [topToolbarCoordinator start];
 
   SecondaryToolbarCoordinator* bottomToolbarCoordinator =
-      [[SecondaryToolbarCoordinator alloc] initWithBrowserState:_browserState];
+      [[SecondaryToolbarCoordinator alloc] initWithBrowser:self.browser];
   self.secondaryToolbarCoordinator = bottomToolbarCoordinator;
   bottomToolbarCoordinator.webStateList = self.tabModel.webStateList;
   bottomToolbarCoordinator.dispatcher = self.dispatcher;
@@ -2059,7 +2004,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   if (IsIPadIdiom()) {
     self.tabStripCoordinator =
         [[TabStripLegacyCoordinator alloc] initWithBaseViewController:self];
-    self.tabStripCoordinator.browserState = _browserState;
+    self.tabStripCoordinator.browserState = self.browserState;
     self.tabStripCoordinator.dispatcher = self.commandDispatcher;
     self.tabStripCoordinator.tabModel = self.tabModel;
     self.tabStripCoordinator.presentationProvider = self;
@@ -2076,7 +2021,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // Create the Infobar Container Coordinator.
   self.infobarContainerCoordinator = [[InfobarContainerCoordinator alloc]
       initWithBaseViewController:self
-                    browserState:_browserState
+                    browserState:self.browserState
                     webStateList:self.tabModel.webStateList];
   self.infobarContainerCoordinator.commandDispatcher = self.dispatcher;
   self.infobarContainerCoordinator.positioner = self;
@@ -2241,7 +2186,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 // Enable functionality that only makes sense if the views are loaded and
 // both browser state and tab model are valid.
 - (void)addUIFunctionalityForModelAndBrowserState {
-  DCHECK(_browserState);
+  DCHECK(self.browserState);
   DCHECK(_locationBarModel);
   DCHECK(self.tabModel);
   DCHECK([self isViewLoaded]);
@@ -2253,21 +2198,24 @@ NSString* const kBrowserViewControllerSnackbarCategory =
       initWithBaseViewController:self];
   _activityServiceCoordinator.dispatcher = self.commandDispatcher;
   _activityServiceCoordinator.tabModel = self.tabModel;
-  _activityServiceCoordinator.browserState = _browserState;
+  _activityServiceCoordinator.browserState = self.browserState;
   _activityServiceCoordinator.positionProvider =
       [self.primaryToolbarCoordinator activityServicePositioner];
   _activityServiceCoordinator.presentationProvider = self;
 
-  // DownloadManagerCoordinator is already created.
-  DCHECK(_downloadManagerCoordinator);
-  _downloadManagerCoordinator.webStateList = self.tabModel.webStateList;
-  _downloadManagerCoordinator.bottomMarginHeightAnchor =
-      [NamedGuide guideWithName:kSecondaryToolbarGuide view:self.contentArea]
-          .heightAnchor;
+  // TODO(crbug.com/1024288): Remove these lines along the legacy code removal.
+  if (!IsDownloadInfobarMessagesUIEnabled()) {
+    // DownloadManagerCoordinator is already created.
+    DCHECK(_downloadManagerCoordinator);
+    _downloadManagerCoordinator.webStateList = self.tabModel.webStateList;
+    _downloadManagerCoordinator.bottomMarginHeightAnchor =
+        [NamedGuide guideWithName:kSecondaryToolbarGuide view:self.contentArea]
+            .heightAnchor;
+  }
 
-  self.popupMenuCoordinator = [[PopupMenuCoordinator alloc]
-      initWithBaseViewController:self
-                    browserState:self.browserState];
+  self.popupMenuCoordinator =
+      [[PopupMenuCoordinator alloc] initWithBaseViewController:self
+                                                       browser:self.browser];
   self.popupMenuCoordinator.bubblePresenter = self.bubblePresenter;
   self.popupMenuCoordinator.dispatcher = self.commandDispatcher;
   self.popupMenuCoordinator.webStateList = self.tabModel.webStateList;
@@ -2281,7 +2229,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   _sadTabCoordinator = [[SadTabCoordinator alloc]
       initWithBaseViewController:self.browserContainerViewController
-                    browserState:_browserState];
+                    browserState:self.browserState];
   _sadTabCoordinator.dispatcher = self.dispatcher;
   _sadTabCoordinator.overscrollDelegate = self;
 
@@ -2297,7 +2245,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   _paymentRequestManager = [[PaymentRequestManager alloc]
       initWithBaseViewController:self
-                    browserState:_browserState
+                    browserState:self.browserState
                       dispatcher:self.dispatcher];
   [_paymentRequestManager setLocationBarModel:_locationBarModel.get()];
   [_paymentRequestManager setActiveWebState:self.currentWebState];
@@ -2363,6 +2311,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     }
     NSArray<GuideName*>* guideNames = @[
       kContentAreaGuide,
+      kBadgeOverflowMenuGuide,
       kOmniboxGuide,
       kOmniboxLeadingImageGuide,
       kOmniboxTextFieldGuide,
@@ -2499,7 +2448,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   if (_bookmarkInteractionController)
     return;
   _bookmarkInteractionController = [[BookmarkInteractionController alloc]
-      initWithBrowserState:_browserState
+      initWithBrowserState:self.browserState
           parentController:self
                 dispatcher:self.dispatcher
               webStateList:self.tabModel.webStateList];
@@ -2527,7 +2476,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (void)updateToolbar {
   // If the BVC has been partially torn down for low memory, wait for the
   // view rebuild to handle toolbar updates.
-  if (!(self.helper && _browserState))
+  if (!(self.helper && self.browserState))
     return;
 
   web::WebState* webState = self.currentWebState;
@@ -2746,7 +2695,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   // There should be no pre-rendered Tabs in TabModel.
   PrerenderService* prerenderService =
-      PrerenderServiceFactory::GetForBrowserState(_browserState);
+      PrerenderServiceFactory::GetForBrowserState(self.browserState);
   DCHECK(!prerenderService ||
          !prerenderService->IsWebStatePrerendered(webState));
 
@@ -2775,13 +2724,18 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
   if (reading_list::IsOfflinePageWithoutNativeContentEnabled()) {
     OfflinePageTabHelper::CreateForWebState(
-        webState, ReadingListModelFactory::GetForBrowserState(_browserState));
+        webState,
+        ReadingListModelFactory::GetForBrowserState(self.browserState));
   }
 
-  // DownloadManagerTabHelper cannot function without delegate.
-  DCHECK(_downloadManagerCoordinator);
-  DownloadManagerTabHelper::CreateForWebState(webState,
-                                              _downloadManagerCoordinator);
+  // TODO(crbug.com/1024288): Remove these lines along the legacy code removal.
+  if (!IsDownloadInfobarMessagesUIEnabled()) {
+    // DownloadManagerTabHelper cannot function without delegate.
+    DCHECK(_downloadManagerCoordinator);
+    DownloadManagerTabHelper::CreateForWebState(webState,
+                                                _downloadManagerCoordinator);
+  }
+
   NewTabPageTabHelper::CreateForWebState(webState, self);
 
   // The language detection helper accepts a callback from the translate
@@ -2868,7 +2822,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
         ios::GetChromeBrowserProvider()->GetVoiceSearchProvider();
     if (provider) {
       _voiceSearchController =
-          provider->CreateVoiceSearchController(_browserState);
+          provider->CreateVoiceSearchController(self.browserState);
       if (self.primaryToolbarCoordinator) {
         _voiceSearchController->SetDispatcher(
             static_cast<id<LoadQueryCommands>>(self.commandDispatcher));
@@ -2883,7 +2837,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   base::RecordAction(UserMetricsAction("MobileReadingListAdd"));
 
   ReadingListModel* readingModel =
-      ReadingListModelFactory::GetForBrowserState(_browserState);
+      ReadingListModelFactory::GetForBrowserState(self.browserState);
   readingModel->AddEntry(URL, base::SysNSStringToUTF8(title),
                          reading_list::ADDED_VIA_CURRENT_APP);
 
@@ -2896,14 +2850,16 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
 #pragma mark - Private Methods: Send Tab To Self
 
-- (void)sendTabToSelfTargetDeviceID:(NSString*)targetDeviceID {
-  send_tab_to_self::CreateNewEntry(_browserState, targetDeviceID);
+- (void)sendTabToSelfTargetDeviceID:(NSString*)targetDeviceID
+                   targetDeviceName:(NSString*)targetDeviceName {
+  send_tab_to_self::CreateNewEntry(self.browserState, targetDeviceID);
 
   [self.dispatcher triggerToolsMenuButtonAnimation];
 
   TriggerHapticFeedbackForNotification(UINotificationFeedbackTypeSuccess);
-  [self showSnackbar:l10n_util::GetNSString(
-                         IDS_IOS_SEND_TAB_TO_SELF_SNACKBAR_MESSAGE)];
+  [self showSnackbar:l10n_util::GetNSStringF(
+                         IDS_IOS_SEND_TAB_TO_SELF_SNACKBAR_MESSAGE,
+                         base::SysNSStringToUTF16(targetDeviceName))];
 }
 
 #pragma mark - ** Protocol Implementations and Helpers **
@@ -2953,39 +2909,40 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (UIEdgeInsets)snapshotGenerator:(SnapshotGenerator*)snapshotGenerator
     snapshotEdgeInsetsForWebState:(web::WebState*)webState {
   DCHECK(webState);
-  // The NTP's snapshot should be inset |headerHeight| from the top to remove
-  // the fake NTP toolbar from the snapshot.
-  NewTabPageTabHelper* NTPHelper = NewTabPageTabHelper::FromWebState(webState);
-  BOOL isNTPActive = NTPHelper && NTPHelper->IsActive();
-  // When using frame-based viewport adjustment calculations out of web//, the
-  // WebState view's superview is used as the base snapshot view.  The content
-  // area is |headerHeight| from the top of its superview, so snapshots should
-  // be inset from this amount.
-  bool usesContentInset = ios::GetChromeBrowserProvider()
-                              ->GetFullscreenProvider()
-                              ->IsInitialized() ||
-                          webState->GetWebViewProxy().shouldUseViewContentInset;
-  // When the tab strip is present, there is no inset for the content area of
-  // the NTP.
-  if ([self canShowTabStrip] && isNTPActive) {
-    return UIEdgeInsetsZero;
-  }
-  if (isNTPActive || !usesContentInset) {
-    return UIEdgeInsetsMake(self.headerHeight, 0.0, self.bottomToolbarHeight,
-                            0.0);
-  }
 
-  // For all other scenarios, the content area is inset from the snapshot base
-  // view by the web view proxy's contentInset.
-  return webState->GetWebViewProxy().contentInset;
+  FullscreenController* fullscreenController =
+      FullscreenControllerFactory::GetForBrowserState(self.browserState);
+  UIEdgeInsets maxViewportInsets = fullscreenController->GetMaxViewportInsets();
+
+  NewTabPageTabHelper* NTPHelper = NewTabPageTabHelper::FromWebState(webState);
+  if (NTPHelper && NTPHelper->IsActive()) {
+    // If the NTP is active, then it's used as the base view for snapshotting.
+    // When the tab strip is visible, the NTP is laid out below the toolbars, so
+    // it should not be inset while snapshotting.  When the tab strip is not
+    // used, the NTP is laid out fullscreen and the top portion of the view will
+    // be obstructed by the toolbars when the snapshot is displayed in the tab
+    // grid.  In that case, the NTP should be inset by the maximum viewport
+    /// insets.
+    return [self canShowTabStrip] ? UIEdgeInsetsZero : maxViewportInsets;
+  } else {
+    // If the NTP is inactive, the WebState's view is used as the base view for
+    // snapshotting.  If fullscreen is implemented by resizing the scroll view,
+    // then the WebState view is already laid out within the visible viewport
+    // and doesn't need to be inset.  If fullscreen uses the content inset, then
+    // the WebState view is laid out fullscreen and should be inset by the
+    // viewport insets.
+    return fullscreenController->ResizesScrollView() ? UIEdgeInsetsZero
+                                                     : maxViewportInsets;
+  }
 }
 
 - (NSArray<UIView*>*)snapshotGenerator:(SnapshotGenerator*)snapshotGenerator
            snapshotOverlaysForWebState:(web::WebState*)webState {
   DCHECK(webState);
-  DCHECK(self.tabModel.webStateList->GetIndexOfWebState(webState) !=
-         WebStateList::kInvalidIndex);
-  if (!self.webUsageEnabled)
+  WebStateList* webStateList = self.tabModel.webStateList;
+  DCHECK_NE(webStateList->GetIndexOfWebState(webState),
+            WebStateList::kInvalidIndex);
+  if (!self.webUsageEnabled || webState != webStateList->GetActiveWebState())
     return @[];
 
   NSMutableArray<UIView*>* overlays = [NSMutableArray array];
@@ -3043,14 +3000,9 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (UIView*)snapshotGenerator:(SnapshotGenerator*)snapshotGenerator
          baseViewForWebState:(web::WebState*)webState {
   NewTabPageTabHelper* NTPHelper = NewTabPageTabHelper::FromWebState(webState);
-  if (NTPHelper && NTPHelper->IsActive()) {
+  if (NTPHelper && NTPHelper->IsActive())
     return _ntpCoordinatorsForWebStates[webState].viewController.view;
-  }
-  UIView* webStateView = webState->GetView();
-  DCHECK(webStateView);
-  // |webStateView| is resized because of fullscreen. Using its superview when
-  // possible ensures that the snapshot has a consistent size.
-  return webStateView.superview ?: webStateView;
+  return webState->GetView();
 }
 
 #pragma mark - SnapshotGeneratorDelegate helpers
@@ -3095,6 +3047,14 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     createNewWebStateForURL:(const GURL&)URL
                   openerURL:(const GURL&)openerURL
             initiatedByUser:(BOOL)initiatedByUser {
+  // Under some circumstances, this callback may be triggered from WebKit
+  // synchronously as part of handling some other WebStateList mutation
+  // (typically deleting a WebState and then activating another as a side
+  // effect). See crbug.com/988504 for details. In this case, the request to
+  // create a new WebState is silently dropped.
+  if (self.tabModel.webStateList && self.tabModel.webStateList->IsMutating())
+    return nil;
+
   // Check if requested web state is a popup and block it if necessary.
   if (!initiatedByUser) {
     auto* helper = BlockedPopupTabHelper::FromWebState(webState);
@@ -3186,7 +3146,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     return;
   }
 
-  DCHECK(_browserState);
+  DCHECK(self.browserState);
 
   _contextMenuCoordinator = [[ContextMenuCoordinator alloc]
       initWithBaseViewController:self
@@ -3337,7 +3297,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
     [_contextMenuCoordinator addItemWithTitle:title action:action];
 
     TemplateURLService* service =
-        ios::TemplateURLServiceFactory::GetForBrowserState(_browserState);
+        ios::TemplateURLServiceFactory::GetForBrowserState(self.browserState);
     if (search_engines::SupportsSearchByImage(service)) {
       const TemplateURL* defaultURL = service->GetDefaultSearchProvider();
       title = l10n_util::GetNSStringF(IDS_IOS_CONTEXT_MENU_SEARCHWEBFORIMAGE,
@@ -3389,6 +3349,11 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
 - (web::JavaScriptDialogPresenter*)javaScriptDialogPresenterForWebState:
     (web::WebState*)webState {
+  if (base::FeatureList::IsEnabled(dialogs::kNonModalDialogs)) {
+    return WebStateDelegateTabHelper::FromWebState(webState)
+        ->GetJavaScriptDialogPresenter(webState);
+  }
+  DCHECK(_javaScriptDialogPresenter.get());
   return _javaScriptDialogPresenter.get();
 }
 
@@ -3397,10 +3362,20 @@ NSString* const kBrowserViewControllerSnackbarCategory =
                       proposedCredential:(NSURLCredential*)proposedCredential
                        completionHandler:(void (^)(NSString* username,
                                                    NSString* password))handler {
-  [self.dialogPresenter runAuthDialogForProtectionSpace:protectionSpace
-                                     proposedCredential:proposedCredential
-                                               webState:webState
-                                      completionHandler:handler];
+  DCHECK(handler);
+  if (base::FeatureList::IsEnabled(dialogs::kNonModalDialogs)) {
+    web::WebStateDelegate::AuthCallback callback =
+        base::BindRepeating(^(NSString* user, NSString* password) {
+          handler(user, password);
+        });
+    WebStateDelegateTabHelper::FromWebState(webState)->OnAuthRequired(
+        webState, protectionSpace, proposedCredential, callback);
+  } else {
+    [self.dialogPresenter runAuthDialogForProtectionSpace:protectionSpace
+                                       proposedCredential:proposedCredential
+                                                 webState:webState
+                                        completionHandler:handler];
+  }
 }
 
 - (BOOL)webState:(web::WebState*)webState
@@ -3429,7 +3404,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   web::NavigationManager::WebLoadParams loadParams =
       ImageSearchParamGenerator::LoadParamsForImageData(
           data, imageURL,
-          ios::TemplateURLServiceFactory::GetForBrowserState(_browserState));
+          ios::TemplateURLServiceFactory::GetForBrowserState(
+              self.browserState));
   [self searchByImageWithWebLoadParams:loadParams inNewTab:YES];
 }
 
@@ -3487,7 +3463,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   if (isUserInitiated) {
     // Send either the "New Tab Opened" or "New Incognito Tab" opened to the
     // feature_engagement::Tracker based on |inIncognito|.
-    feature_engagement::NotifyNewTabEvent(_browserState, self.isOffTheRecord);
+    feature_engagement::NotifyNewTabEvent(self.browserState,
+                                          self.isOffTheRecord);
   }
 }
 
@@ -3556,11 +3533,11 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // Stop any Find in Page searches and close the find bar when navigating to a
   // new page.
   [self closeFindInPage];
+  [self.tabModel saveSessionImmediately:NO];
 }
 
 - (void)webState:(web::WebState*)webState didLoadPageWithSuccess:(BOOL)success {
   [_toolbarUIUpdater updateState];
-  [self.tabModel saveSessionImmediately:NO];
   if ([self canShowTabStrip]) {
     UIUserInterfaceSizeClass sizeClass =
         self.view.window.traitCollection.horizontalSizeClass;
@@ -3658,12 +3635,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   OverscrollActionsTabHelper* activeTabHelper =
       OverscrollActionsTabHelper::FromWebState(currentWebState);
   if (controller == activeTabHelper->GetOverscrollActionsController()) {
-    if (!base::ios::IsRunningOnIOS12OrLater() &&
-        self.currentWebState->GetContentsMimeType() == "application/pdf") {
-      return self.headerHeight - self.view.safeAreaInsets.top;
-    } else {
-      return self.headerHeight;
-    }
+    return self.headerHeight;
   } else
     return 0;
 }
@@ -3680,7 +3652,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
       !reading_list::IsOfflinePageWithoutNativeContentEnabled()) {
     // Only allow offline URL that are fully specified.
     return reading_list::IsOfflineURLValid(
-        url, ReadingListModelFactory::GetForBrowserState(_browserState));
+        url, ReadingListModelFactory::GetForBrowserState(self.browserState));
   }
   return NO;
 }
@@ -3694,7 +3666,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   if (!reading_list::IsOfflinePageWithoutNativeContentEnabled() &&
       url_host == kChromeUIOfflineHost && [self hasControllerForURL:url]) {
     StaticHtmlNativeContent* staticNativeController =
-        [[OfflinePageNativeContent alloc] initWithBrowserState:_browserState
+        [[OfflinePageNativeContent alloc] initWithBrowserState:self.browserState
                                                       webState:webState
                                                            URL:url];
     [self setOverScrollActionControllerToStaticNativeContent:
@@ -3761,22 +3733,12 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 #pragma mark - ToolbarHeightProviderForFullscreen
 
 - (CGFloat)collapsedTopToolbarHeight {
-  if (IsVisibleURLNewTabPage(self.currentWebState) && ![self canShowTabStrip]) {
-    // When the NTP is displayed in a horizontally compact environment, the top
-    // toolbars are hidden.
-    return 0;
-  }
   return self.view.safeAreaInsets.top +
          ToolbarCollapsedHeight(
              self.traitCollection.preferredContentSizeCategory);
 }
 
 - (CGFloat)expandedTopToolbarHeight {
-  if (IsVisibleURLNewTabPage(self.currentWebState) && ![self canShowTabStrip]) {
-    // When the NTP is displayed in a horizontally compact environment, the top
-    // toolbars are hidden.
-    return 0;
-  }
   return [self primaryToolbarHeightWithInset] +
          ([self canShowTabStrip] ? self.tabStripView.frame.size.height : 0.0) +
          self.headerOffset;
@@ -3784,13 +3746,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 
 - (CGFloat)bottomToolbarHeight {
   return [self secondaryToolbarHeightWithInset];
-}
-
-#pragma mark - Toolbar height helpers
-
-- (CGFloat)nonFullscreenToolbarHeight {
-  return MAX(
-      0, [self expandedTopToolbarHeight] - [self collapsedTopToolbarHeight]);
 }
 
 #pragma mark - FullscreenUIElement methods
@@ -3842,23 +3797,37 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   }];
 }
 
+- (void)updateForFullscreenMinViewportInsets:(UIEdgeInsets)minViewportInsets
+                           maxViewportInsets:(UIEdgeInsets)maxViewportInsets {
+  FullscreenController* controller =
+      FullscreenControllerFactory::GetForBrowserState(self.browserState);
+  [self updateForFullscreenProgress:controller->GetProgress()];
+}
+
 #pragma mark - FullscreenUIElement helpers
+
+// Returns the height difference between the fully expanded and fully collapsed
+// primary toolbar.
+- (CGFloat)primaryToolbarHeightDelta {
+  FullscreenController* controller =
+      FullscreenControllerFactory::GetForBrowserState(self.browserState);
+  CGFloat fullyExpandedHeight = controller->GetMaxViewportInsets().top;
+  CGFloat fullyCollapsedHeight = controller->GetMinViewportInsets().top;
+  return std::max(0.0, fullyExpandedHeight - fullyCollapsedHeight);
+}
 
 // Translates the header views up and down according to |progress|, where a
 // progress of 1.0 fully shows the headers and a progress of 0.0 fully hides
 // them.
 - (void)updateHeadersForFullscreenProgress:(CGFloat)progress {
   CGFloat offset =
-      AlignValueToPixel((1.0 - progress) * [self nonFullscreenToolbarHeight]);
+      AlignValueToPixel((1.0 - progress) * [self primaryToolbarHeightDelta]);
   [self setFramesForHeaders:[self headerViews] atOffset:offset];
 }
 
 // Translates the footer view up and down according to |progress|, where a
 // progress of 1.0 fully shows the footer and a progress of 0.0 fully hides it.
 - (void)updateFootersForFullscreenProgress:(CGFloat)progress {
-  // If the bottom toolbar is locked into place, reset |progress| to 1.0.
-  if (base::FeatureList::IsEnabled(fullscreen::features::kLockBottomToolbar))
-    progress = 1.0;
 
   self.footerFullscreenProgress = progress;
 
@@ -3900,27 +3869,11 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   // returns the height of the toolbar extending below this view controller's
   // safe area, so the unsafe top height must be added.
   CGFloat top = AlignValueToPixel(
-      self.headerHeight + (progress - 1.0) * [self nonFullscreenToolbarHeight]);
-  // If the bottom toolbar is locked into place, use 1.0 instead of |progress|.
-  CGFloat bottomProgress =
-      base::FeatureList::IsEnabled(fullscreen::features::kLockBottomToolbar)
-          ? 1.0
-          : progress;
-  CGFloat bottom = AlignValueToPixel(bottomProgress *
-                                     [self secondaryToolbarHeightWithInset]);
+      self.headerHeight + (progress - 1.0) * [self primaryToolbarHeightDelta]);
+  CGFloat bottom =
+      AlignValueToPixel(progress * [self secondaryToolbarHeightWithInset]);
 
-  if (self.usesSafeInsetsForViewportAdjustments) {
-    if (fullscreen::features::GetActiveViewportExperiment() ==
-        fullscreen::features::ViewportAdjustmentExperiment::HYBRID) {
-      [self updateWebViewFrameForBottomOffset:bottom];
-    }
-
-    [self updateBrowserSafeAreaForTopToolbarHeight:top
-                               bottomToolbarHeight:bottom];
-  } else {
-    [self updateContentPaddingForTopToolbarHeight:top
-                              bottomToolbarHeight:bottom];
-  }
+  [self updateContentPaddingForTopToolbarHeight:top bottomToolbarHeight:bottom];
 }
 
 // Updates the frame of the web view so that it's |offset| from the bottom of
@@ -3990,7 +3943,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (UIEdgeInsets)viewportInsetsForView:(UIView*)view {
   DCHECK(view);
   UIEdgeInsets viewportInsets = FullscreenControllerFactory::GetInstance()
-                                    ->GetForBrowserState(_browserState)
+                                    ->GetForBrowserState(self.browserState)
                                     ->GetCurrentViewportInsets();
   // TODO(crbug.com/917548): Use BVC for viewport inset coordinate space rather
   // than the content area.
@@ -4039,28 +3992,45 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 }
 
 - (void)focusNextTab {
-  int activeIndex = self.tabModel.webStateList->active_index();
-  if (activeIndex < self.tabModel.webStateList->count()) {
-    self.tabModel.webStateList->ActivateWebStateAt(activeIndex + 1);
+  WebStateList* webStateList = self.tabModel.webStateList;
+  if (!webStateList)
+    return;
+
+  int activeIndex = webStateList->active_index();
+  if (activeIndex == WebStateList::kInvalidIndex)
+    return;
+
+  // If the active index isn't the last index, activate the next index.
+  // (the last index is always |count() - 1|).
+  // Otherwise activate the first index.
+  if (activeIndex < (webStateList->count() - 1)) {
+    webStateList->ActivateWebStateAt(activeIndex + 1);
   } else {
-    self.tabModel.webStateList->ActivateWebStateAt(0);
+    webStateList->ActivateWebStateAt(0);
   }
 }
 
 - (void)focusPreviousTab {
-  int activeIndex = self.tabModel.webStateList->active_index();
+  WebStateList* webStateList = self.tabModel.webStateList;
+  if (!webStateList)
+    return;
 
+  int activeIndex = webStateList->active_index();
+  if (activeIndex == WebStateList::kInvalidIndex)
+    return;
+
+  // If the active index isn't the first index, activate the prior index.
+  // Otherwise index the last index (|count() - 1|).
   if (activeIndex > 0) {
-    self.tabModel.webStateList->ActivateWebStateAt(activeIndex - 1);
+    webStateList->ActivateWebStateAt(activeIndex - 1);
   } else {
-    self.tabModel.webStateList->ActivateWebStateAt(
-        self.tabModel.webStateList->count() - 1);
+    webStateList->ActivateWebStateAt(webStateList->count() - 1);
   }
 }
 
 - (void)reopenClosedTab {
   sessions::TabRestoreService* const tabRestoreService =
-      IOSChromeTabRestoreServiceFactory::GetForBrowserState(_browserState);
+      IOSChromeTabRestoreServiceFactory::GetForBrowserState(self.browserState);
   if (!tabRestoreService || tabRestoreService->entries().empty())
     return;
 
@@ -4100,7 +4070,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
                      }];
   }
   [[OmniboxGeolocationController sharedInstance]
-      locationBarDidBecomeFirstResponder:_browserState];
+      locationBarDidBecomeFirstResponder:self.browserState];
 
   [self.primaryToolbarCoordinator transitionToLocationBarFocusedState:YES];
 }
@@ -4125,7 +4095,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
         [self.typingShield setHidden:YES];
       }];
   [[OmniboxGeolocationController sharedInstance]
-      locationBarDidResignFirstResponder:_browserState];
+      locationBarDidResignFirstResponder:self.browserState];
 
   // If a load was cancelled by an omnibox edit, but nothing is loading when
   // editing ends (i.e., editing was cancelled), restart the cancelled load.
@@ -4170,7 +4140,11 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 }
 
 - (void)reload {
-  if (self.currentWebState) {
+  if ([self isNTPActiveForCurrentWebState]) {
+    NewTabPageCoordinator* coordinator =
+        _ntpCoordinatorsForWebStates[self.currentWebState];
+    [coordinator reload];
+  } else if (self.currentWebState) {
     // |check_for_repost| is true because the reload is explicitly initiated
     // by the user.
     self.currentWebState->GetNavigationManager()->Reload(
@@ -4339,15 +4313,18 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 }
 
 - (void)closeCurrentTab {
-  int active_index = self.tabModel.webStateList->active_index();
+  WebStateList* webStateList = self.tabModel.webStateList;
+  if (!webStateList)
+    return;
+
+  int active_index = webStateList->active_index();
   if (active_index == WebStateList::kInvalidIndex)
     return;
 
   UIView* snapshotView = [self.contentArea snapshotViewAfterScreenUpdates:NO];
   snapshotView.frame = self.contentArea.frame;
 
-  self.tabModel.webStateList->CloseWebStateAt(active_index,
-                                              WebStateList::CLOSE_USER_ACTION);
+  webStateList->CloseWebStateAt(active_index, WebStateList::CLOSE_USER_ACTION);
 
   if (![self canShowTabStrip]) {
     [self.contentArea addSubview:snapshotView];
@@ -4358,7 +4335,7 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 }
 
 - (void)prepareForPopupMenuPresentation:(PopupMenuCommandType)type {
-  DCHECK(_browserState);
+  DCHECK(self.browserState);
   DCHECK(self.visible || self.dismissingModal);
 
   // Dismiss the omnibox (if open).
@@ -4383,12 +4360,24 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   [self searchByImageWithWebLoadParams:
             ImageSearchParamGenerator::LoadParamsForImage(
                 image, ios::TemplateURLServiceFactory::GetForBrowserState(
-                           _browserState))
+                           self.browserState))
                               inNewTab:NO];
 }
 
 - (void)sendTabToSelf:(SendTabToSelfCommand*)command {
-  [self sendTabToSelfTargetDeviceID:[command targetDeviceID]];
+  [self sendTabToSelfTargetDeviceID:[command targetDeviceID]
+                   targetDeviceName:[command targetDeviceName]];
+}
+
+- (void)showActivityOverlay:(BOOL)show {
+  if (!show) {
+    [self.activityOverlayCoordinator stop];
+    self.activityOverlayCoordinator = nil;
+  } else if (!self.activityOverlayCoordinator) {
+    self.activityOverlayCoordinator =
+        [[ActivityOverlayCoordinator alloc] initWithBaseViewController:self];
+    [self.activityOverlayCoordinator start];
+  }
 }
 
 #pragma mark - FindInPageResponseDelegate
@@ -4780,8 +4769,8 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   return [self userAgentType] == web::UserAgentType::DESKTOP;
 }
 
-- (BOOL)preloadHasNativeControllerForURL:(const GURL&)url {
-  return [self hasControllerForURL:url];
+- (web::WebState*)webStateToReplace {
+  return self.currentWebState;
 }
 
 #pragma mark - NetExportTabHelperDelegate
@@ -4966,14 +4955,6 @@ NSString* const kBrowserViewControllerSnackbarCategory =
       baseViewController:self];
 }
 
-- (void)showSyncSettings {
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    [self.dispatcher showGoogleServicesSettingsFromViewController:self];
-  } else {
-    [self.dispatcher showSyncSettingsFromViewController:self];
-  }
-}
-
 - (void)showSyncPassphraseSettings {
   [self.dispatcher showSyncPassphraseSettingsFromViewController:self];
 }
@@ -4989,10 +4970,10 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   if (NTPHelper->IsActive()) {
     DCHECK(!_ntpCoordinatorsForWebStates[webState]);
     NewTabPageCoordinator* newTabPageCoordinator =
-        [[NewTabPageCoordinator alloc] initWithBrowserState:_browserState];
+        [[NewTabPageCoordinator alloc] initWithBrowserState:self.browserState];
     newTabPageCoordinator.dispatcher = self.dispatcher;
     newTabPageCoordinator.toolbarDelegate = self.toolbarInterface;
-    newTabPageCoordinator.webStateList = self.tabModel.webStateList;
+    newTabPageCoordinator.webState = webState;
     _ntpCoordinatorsForWebStates[webState] = newTabPageCoordinator;
   } else {
     DCHECK(_ntpCoordinatorsForWebStates[webState]);

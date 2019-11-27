@@ -8,10 +8,8 @@ import static org.chromium.chrome.browser.preferences.SearchUtils.handleSearchNa
 
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.res.Resources;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
 import android.support.graphics.drawable.VectorDrawableCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.preference.Preference;
@@ -34,6 +32,8 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -41,19 +41,19 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.browserservices.permissiondelegation.TrustedWebActivityPermissionManager;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
-import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreferenceCompat;
-import org.chromium.chrome.browser.preferences.ChromeBasePreferenceCompat;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
+import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
+import org.chromium.chrome.browser.preferences.ChromeBasePreference;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.ExpandablePreferenceGroup;
 import org.chromium.chrome.browser.preferences.LocationSettings;
-import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegateCompat;
+import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.preferences.SearchUtils;
 import org.chromium.chrome.browser.preferences.website.Website.StoredDataClearedCallback;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.ui.widget.Toast;
 
@@ -253,8 +253,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     }
 
     private CharSequence getHeaderTitle(int resourceId, int count) {
-        SpannableStringBuilder spannable =
-                new SpannableStringBuilder(getResources().getString(resourceId));
+        SpannableStringBuilder spannable = new SpannableStringBuilder(getString(resourceId));
         String prefCount = String.format(Locale.getDefault(), " - %d", count);
         spannable.append(prefCount);
 
@@ -286,7 +285,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
 
         int contentType = mCategory.getContentSettingsType();
         mRequiresTriStateSetting =
-                PrefServiceBridge.getInstance().requiresTriStateContentSetting(contentType);
+                WebsitePreferenceBridge.requiresTriStateContentSetting(contentType);
 
         ViewGroup view = (ViewGroup) super.onCreateView(inflater, container, savedInstanceState);
 
@@ -341,11 +340,14 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
-        PreferenceUtils.addPreferencesFromResource(this, R.xml.website_preferences);
+        // Handled in onActivityCreated. Moving the addPreferencesFromResource call up to here
+        // causes animation jank (crbug.com/985734).
     }
 
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
+        PreferenceUtils.addPreferencesFromResource(this, R.xml.website_preferences);
+
         String title = getArguments().getString(EXTRA_TITLE);
         if (title != null) getActivity().setTitle(title);
 
@@ -363,9 +365,6 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     @Override
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
         menu.clear();
-        // We don't need the options menu in touchless mode (crbug/962562).
-        if (FeatureUtilities.isNoTouchModeEnabled()) return;
-
         inflater.inflate(R.menu.website_preferences_menu, menu);
 
         mSearchItem = menu.findItem(R.id.search);
@@ -389,7 +388,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
             if (mCategory.showSites(SiteSettingsCategory.Type.PROTECTED_MEDIA)) {
                 helpContextResId = R.string.help_context_protected_content;
             }
-            HelpAndFeedback.getInstance(getActivity()).show(
+            HelpAndFeedback.getInstance().show(
                     getActivity(), getString(helpContextResId), Profile.getLastUsedProfile(), null);
             return true;
         }
@@ -451,8 +450,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                 });
         builder.setNegativeButton(R.string.cancel, null);
         builder.setTitle(R.string.storage_clear_site_storage_title);
-        Resources res = getResources();
-        String dialogFormattedText = res.getString(R.string.storage_clear_dialog_text,
+        String dialogFormattedText = getString(R.string.storage_clear_dialog_text,
                 Formatter.formatShortFileSize(getActivity(), totalUsage));
         builder.setMessage(dialogFormattedText);
         builder.create().show();
@@ -461,8 +459,6 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     // OnPreferenceChangeListener:
     @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
-        PrefServiceBridge prefServiceBridge = PrefServiceBridge.getInstance();
-
         if (BINARY_TOGGLE_KEY.equals(preference.getKey())) {
             assert !mCategory.isManaged();
 
@@ -474,12 +470,10 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                     continue;
                 }
 
-                prefServiceBridge.setCategoryEnabled(
+                WebsitePreferenceBridge.setCategoryEnabled(
                         SiteSettingsCategory.contentSettingsType(type), (boolean) newValue);
 
-                // Third-party cookies toggle doesn't exist in touchless. Refer to crbug/951850.
-                if (type == SiteSettingsCategory.Type.COOKIES
-                        && !FeatureUtilities.isNoTouchModeEnabled()) {
+                if (type == SiteSettingsCategory.Type.COOKIES) {
                     updateThirdPartyCookiesCheckBox();
                 } else if (type == SiteSettingsCategory.Type.NOTIFICATIONS) {
                     updateNotificationsVibrateCheckBox();
@@ -489,8 +483,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
 
             // Categories that support adding exceptions also manage the 'Add site' preference.
             // This should only be used for settings that have host-pattern based exceptions.
-            if (mCategory.showSites(SiteSettingsCategory.Type.AUTOPLAY)
-                    || mCategory.showSites(SiteSettingsCategory.Type.BACKGROUND_SYNC)
+            if (mCategory.showSites(SiteSettingsCategory.Type.BACKGROUND_SYNC)
                     || (mCategory.showSites(SiteSettingsCategory.Type.COOKIES)
                             && ChromeFeatureList.isEnabled(
                                     ChromeFeatureList.ANDROID_SITE_SETTINGS_UI_REFRESH))
@@ -509,8 +502,8 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                 }
             }
 
-            ChromeSwitchPreferenceCompat binaryToggle =
-                    (ChromeSwitchPreferenceCompat) getPreferenceScreen().findPreference(
+            ChromeSwitchPreference binaryToggle =
+                    (ChromeSwitchPreference) getPreferenceScreen().findPreference(
                             BINARY_TOGGLE_KEY);
             updateAllowedHeader(mAllowedSiteCount, !binaryToggle.isChecked());
 
@@ -518,12 +511,14 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         } else if (TRI_STATE_TOGGLE_KEY.equals(preference.getKey())) {
             @ContentSettingValues
             int setting = (int) newValue;
-            prefServiceBridge.setContentSetting(mCategory.getContentSettingsType(), setting);
+            WebsitePreferenceBridge.setContentSetting(mCategory.getContentSettingsType(), setting);
             getInfoForOrigins();
         } else if (THIRD_PARTY_COOKIES_TOGGLE_KEY.equals(preference.getKey())) {
-            prefServiceBridge.setBlockThirdPartyCookiesEnabled(((boolean) newValue));
+            PrefServiceBridge.getInstance().setBoolean(
+                    Pref.BLOCK_THIRD_PARTY_COOKIES, ((boolean) newValue));
         } else if (NOTIFICATIONS_VIBRATE_TOGGLE_KEY.equals(preference.getKey())) {
-            prefServiceBridge.setNotificationsVibrateEnabled((boolean) newValue);
+            PrefServiceBridge.getInstance().setBoolean(
+                    Pref.NOTIFICATIONS_VIBRATE_ENABLED, (boolean) newValue);
         }
         return true;
     }
@@ -532,28 +527,23 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         int resource = 0;
         if (mCategory.showSites(SiteSettingsCategory.Type.AUTOMATIC_DOWNLOADS)) {
             resource = R.string.website_settings_add_site_description_automatic_downloads;
-        } else if (mCategory.showSites(SiteSettingsCategory.Type.AUTOPLAY)) {
-            resource = R.string.website_settings_add_site_description_autoplay;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.BACKGROUND_SYNC)) {
             resource = R.string.website_settings_add_site_description_background_sync;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.JAVASCRIPT)) {
-            resource = PrefServiceBridge.getInstance().isCategoryEnabled(
-                               ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT)
+            resource = WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.JAVASCRIPT)
                     ? R.string.website_settings_add_site_description_javascript_block
                     : R.string.website_settings_add_site_description_javascript_allow;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.SOUND)) {
-            resource = PrefServiceBridge.getInstance().isCategoryEnabled(
-                               ContentSettingsType.CONTENT_SETTINGS_TYPE_SOUND)
+            resource = WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.SOUND)
                     ? R.string.website_settings_add_site_description_sound_block
                     : R.string.website_settings_add_site_description_sound_allow;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.COOKIES)) {
-            resource = PrefServiceBridge.getInstance().isCategoryEnabled(
-                               ContentSettingsType.CONTENT_SETTINGS_TYPE_COOKIES)
+            resource = WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.COOKIES)
                     ? R.string.website_settings_add_site_description_cookies_block
                     : R.string.website_settings_add_site_description_cookies_allow;
         }
         assert resource > 0;
-        return getResources().getString(resource);
+        return getString(resource);
     }
 
     // OnPreferenceClickListener:
@@ -585,12 +575,12 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     // AddExceptionPreference.SiteAddedCallback:
     @Override
     public void onAddSite(String hostname) {
-        int setting = (PrefServiceBridge.getInstance().isCategoryEnabled(
-                              mCategory.getContentSettingsType()))
+        int setting =
+                (WebsitePreferenceBridge.isCategoryEnabled(mCategory.getContentSettingsType()))
                 ? ContentSettingValues.BLOCK
                 : ContentSettingValues.ALLOW;
 
-        PrefServiceBridge.getInstance().nativeSetContentSettingForPattern(
+        WebsitePreferenceBridge.setContentSettingForPattern(
                 mCategory.getContentSettingsType(), hostname, setting);
         Toast.makeText(getActivity(),
                 String.format(getActivity().getString(
@@ -623,26 +613,22 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         boolean exception = false;
         if (mCategory.showSites(SiteSettingsCategory.Type.SOUND)) {
             exception = true;
-        } else if (mCategory.showSites(SiteSettingsCategory.Type.AUTOPLAY)
-                && !PrefServiceBridge.getInstance().isCategoryEnabled(
-                           ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOPLAY)) {
-            exception = true;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.JAVASCRIPT)
                 && (ChromeFeatureList.isEnabled(ChromeFeatureList.ANDROID_SITE_SETTINGS_UI_REFRESH)
-                        || !PrefServiceBridge.getInstance().isCategoryEnabled(
-                                ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT))) {
+                        || !WebsitePreferenceBridge.isCategoryEnabled(
+                                ContentSettingsType.JAVASCRIPT))) {
             exception = true;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.COOKIES)
                 && ChromeFeatureList.isEnabled(
                         ChromeFeatureList.ANDROID_SITE_SETTINGS_UI_REFRESH)) {
             exception = true;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.BACKGROUND_SYNC)
-                && !PrefServiceBridge.getInstance().isCategoryEnabled(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC)) {
+                && !WebsitePreferenceBridge.isCategoryEnabled(
+                        ContentSettingsType.BACKGROUND_SYNC)) {
             exception = true;
         } else if (mCategory.showSites(SiteSettingsCategory.Type.AUTOMATIC_DOWNLOADS)
-                && !PrefServiceBridge.getInstance().isCategoryEnabled(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS)) {
+                && !WebsitePreferenceBridge.isCategoryEnabled(
+                        ContentSettingsType.AUTOMATIC_DOWNLOADS)) {
             exception = true;
         }
         if (exception) {
@@ -817,8 +803,8 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                             TRI_STATE_TOGGLE_KEY);
             return (triStateToggle.getCheckedSetting() == ContentSettingValues.BLOCK);
         } else {
-            ChromeSwitchPreferenceCompat binaryToggle =
-                    (ChromeSwitchPreferenceCompat) getPreferenceScreen().findPreference(
+            ChromeSwitchPreference binaryToggle =
+                    (ChromeSwitchPreference) getPreferenceScreen().findPreference(
                             BINARY_TOGGLE_KEY);
             if (binaryToggle != null) return !binaryToggle.isChecked();
         }
@@ -826,14 +812,13 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     }
 
     private void configureGlobalToggles() {
-        PrefServiceBridge prefServiceBridge = PrefServiceBridge.getInstance();
         int contentType = mCategory.getContentSettingsType();
         PreferenceScreen screen = getPreferenceScreen();
 
         // Find all preferences on the current preference screen. Some preferences are
         // not needed for the current category and will be removed in the steps below.
-        ChromeSwitchPreferenceCompat binaryToggle =
-                (ChromeSwitchPreferenceCompat) screen.findPreference(BINARY_TOGGLE_KEY);
+        ChromeSwitchPreference binaryToggle =
+                (ChromeSwitchPreference) screen.findPreference(BINARY_TOGGLE_KEY);
         TriStateSiteSettingsPreference triStateToggle =
                 (TriStateSiteSettingsPreference) screen.findPreference(TRI_STATE_TOGGLE_KEY);
         Preference thirdPartyCookies = screen.findPreference(THIRD_PARTY_COOKIES_TOGGLE_KEY);
@@ -879,9 +864,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         }
 
         // Configure/hide the third-party cookies toggle, as needed.
-        // We don't need this toggle in touchless. Refer to crbug/951850.
-        if (mCategory.showSites(SiteSettingsCategory.Type.COOKIES)
-                && !FeatureUtilities.isNoTouchModeEnabled()) {
+        if (mCategory.showSites(SiteSettingsCategory.Type.COOKIES)) {
             thirdPartyCookies.setOnPreferenceChangeListener(this);
             updateThirdPartyCookiesCheckBox();
         } else {
@@ -930,10 +913,8 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         }
 
         // Show the link to system settings since permission is disabled.
-        ChromeBasePreferenceCompat osWarning =
-                new ChromeBasePreferenceCompat(getStyledContext(), null);
-        ChromeBasePreferenceCompat osWarningExtra =
-                new ChromeBasePreferenceCompat(getStyledContext(), null);
+        ChromeBasePreference osWarning = new ChromeBasePreference(getStyledContext(), null);
+        ChromeBasePreference osWarningExtra = new ChromeBasePreference(getStyledContext(), null);
         mCategory.configurePermissionIsOffPreferences(
                 osWarning, osWarningExtra, getActivity(), true);
         if (osWarning.getTitle() != null) {
@@ -948,26 +929,26 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
             TriStateSiteSettingsPreference triStateToggle, int contentType) {
         triStateToggle.setOnPreferenceChangeListener(this);
         @ContentSettingValues
-        int setting = PrefServiceBridge.getInstance().getContentSetting(contentType);
+        int setting = WebsitePreferenceBridge.getContentSetting(contentType);
         int[] descriptionIds =
                 ContentSettingsResources.getTriStateSettingDescriptionIDs(contentType);
         triStateToggle.initialize(setting, descriptionIds);
     }
 
-    private void configureBinaryToggle(ChromeSwitchPreferenceCompat binaryToggle, int contentType) {
+    private void configureBinaryToggle(ChromeSwitchPreference binaryToggle, int contentType) {
         binaryToggle.setOnPreferenceChangeListener(this);
         binaryToggle.setTitle(ContentSettingsResources.getTitle(contentType));
 
         // Set summary on or off.
         if (mCategory.showSites(SiteSettingsCategory.Type.DEVICE_LOCATION)
-                && PrefServiceBridge.getInstance().isLocationAllowedByPolicy()) {
+                && WebsitePreferenceBridge.isLocationAllowedByPolicy()) {
             binaryToggle.setSummaryOn(ContentSettingsResources.getGeolocationAllowedSummary());
         } else {
             binaryToggle.setSummaryOn(ContentSettingsResources.getEnabledSummary(contentType));
         }
         binaryToggle.setSummaryOff(ContentSettingsResources.getDisabledSummary(contentType));
 
-        binaryToggle.setManagedPreferenceDelegate(new ManagedPreferenceDelegateCompat() {
+        binaryToggle.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
             @Override
             public boolean isPreferenceControlledByPolicy(Preference preference) {
                 // TODO(bauerb): Align the ManagedPreferenceDelegate and
@@ -986,29 +967,30 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
             binaryToggle.setChecked(
                     LocationSettings.getInstance().isChromeLocationSettingEnabled());
         } else {
-            binaryToggle.setChecked(PrefServiceBridge.getInstance().isCategoryEnabled(contentType));
+            binaryToggle.setChecked(WebsitePreferenceBridge.isCategoryEnabled(contentType));
         }
     }
 
     private void updateThirdPartyCookiesCheckBox() {
-        ChromeBaseCheckBoxPreferenceCompat thirdPartyCookiesPref =
-                (ChromeBaseCheckBoxPreferenceCompat) getPreferenceScreen().findPreference(
+        ChromeBaseCheckBoxPreference thirdPartyCookiesPref =
+                (ChromeBaseCheckBoxPreference) getPreferenceScreen().findPreference(
                         THIRD_PARTY_COOKIES_TOGGLE_KEY);
         thirdPartyCookiesPref.setChecked(
-                PrefServiceBridge.getInstance().isBlockThirdPartyCookiesEnabled());
-        thirdPartyCookiesPref.setEnabled(PrefServiceBridge.getInstance().isCategoryEnabled(
-                ContentSettingsType.CONTENT_SETTINGS_TYPE_COOKIES));
-        thirdPartyCookiesPref.setManagedPreferenceDelegate(
-                preference -> PrefServiceBridge.getInstance().isBlockThirdPartyCookiesManaged());
+                PrefServiceBridge.getInstance().getBoolean(Pref.BLOCK_THIRD_PARTY_COOKIES));
+        thirdPartyCookiesPref.setEnabled(
+                WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.COOKIES));
+        thirdPartyCookiesPref.setManagedPreferenceDelegate(preference
+                -> PrefServiceBridge.getInstance().isManagedPreference(
+                        Pref.BLOCK_THIRD_PARTY_COOKIES));
     }
 
     private void updateNotificationsVibrateCheckBox() {
-        ChromeBaseCheckBoxPreferenceCompat preference =
-                (ChromeBaseCheckBoxPreferenceCompat) getPreferenceScreen().findPreference(
+        ChromeBaseCheckBoxPreference preference =
+                (ChromeBaseCheckBoxPreference) getPreferenceScreen().findPreference(
                         NOTIFICATIONS_VIBRATE_TOGGLE_KEY);
         if (preference != null) {
-            preference.setEnabled(PrefServiceBridge.getInstance().isCategoryEnabled(
-                    ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
+            preference.setEnabled(
+                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.NOTIFICATIONS));
         }
     }
 

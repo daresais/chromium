@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/modules/webaudio/convolver_options.h"
 #include "third_party/blink/renderer/platform/audio/reverb.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 
 // Note about empirical tuning:
 // The maximum FFT size affects reverb performance and accuracy.
@@ -102,6 +103,8 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
   DCHECK(IsMainThread());
 
   if (!buffer) {
+    BaseAudioContext::GraphAutoLocker context_locker(Context());
+    MutexLocker locker(process_lock_);
     reverb_.reset();
     shared_buffer_ = nullptr;
     return;
@@ -132,6 +135,12 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
         "The buffer must have 1, 2, or 4 channels, not " +
             String::Number(number_of_channels));
     return;
+  }
+
+  {
+    // Get some statistics on the size of the impulse response.
+    UMA_HISTOGRAM_LONG_TIMES("WebAudio.ConvolverNode.ImpulseResponseLength",
+                             base::TimeDelta::FromSecondsD(buffer->duration()));
   }
 
   // Wrap the AudioBuffer by an AudioBus. It's an efficient pointer set and not
@@ -237,8 +246,6 @@ void ConvolverHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
 
   DCHECK(input);
   DCHECK_EQ(input, &this->Input(0));
-  if (input != &this->Input(0))
-    return;
 
   if (shared_buffer_) {
     unsigned number_of_output_channels = ComputeNumberOfOutputChannels(
@@ -318,6 +325,14 @@ void ConvolverNode::setNormalize(bool normalize) {
 void ConvolverNode::Trace(Visitor* visitor) {
   visitor->Trace(buffer_);
   AudioNode::Trace(visitor);
+}
+
+void ConvolverNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void ConvolverNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

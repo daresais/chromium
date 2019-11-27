@@ -381,7 +381,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationPortMappedBrowserTest,
   // This corresponds to "Open link in new tab".
   content::ContextMenuParams params;
   params.is_editable = false;
-  params.media_type = blink::WebContextMenuData::kMediaTypeNone;
+  params.media_type = blink::ContextMenuDataMediaType::kNone;
   params.page_url = initial_url;
   params.link_url = new_tab_url;
 
@@ -954,8 +954,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest, ChromeSchemeNavFromSadTab) {
   process->Shutdown(-1);
   crash_observer.Wait();
 
-  // Attempt to navigate to a chrome://... URL.  This used to hang and never
-  // commit in PlzNavigate mode.
+  // Attempt to navigate to a chrome://... URL.
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIVersionURL));
 }
 
@@ -1391,8 +1390,9 @@ IN_PROC_BROWSER_TEST_F(HistoryManipulationInterventionBrowserTest,
 
   // Attempting to go back should skip |skippable_url| and go to about:blank.
   ASSERT_TRUE(chrome::CanGoBack(browser()));
+  content::TestNavigationObserver observer(main_contents);
   chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);
-  content::WaitForLoadStop(main_contents);
+  observer.Wait();
   ASSERT_EQ(GURL("about:blank"), main_contents->GetLastCommittedURL());
 }
 

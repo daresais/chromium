@@ -179,8 +179,10 @@ void ProfileOAuth2TokenServiceIOSDelegate::LoadCredentials(
     const CoreAccountId& primary_account_id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  DCHECK_EQ(LOAD_CREDENTIALS_NOT_STARTED, load_credentials_state());
-  set_load_credentials_state(LOAD_CREDENTIALS_IN_PROGRESS);
+  DCHECK_EQ(signin::LoadCredentialsState::LOAD_CREDENTIALS_NOT_STARTED,
+            load_credentials_state());
+  set_load_credentials_state(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS);
 
   // Clean-up stale data from prefs.
   ClearExcludedSecondaryAccounts();
@@ -188,14 +190,16 @@ void ProfileOAuth2TokenServiceIOSDelegate::LoadCredentials(
   if (primary_account_id.empty()) {
     // On startup, always fire refresh token loaded even if there is nothing
     // to load (not authenticated).
-    set_load_credentials_state(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+    set_load_credentials_state(
+        signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
     FireRefreshTokensLoaded();
     return;
   }
 
   ReloadCredentials();
 
-  set_load_credentials_state(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+  set_load_credentials_state(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
   FireRefreshTokensLoaded();
 }
 
@@ -203,7 +207,7 @@ void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // Get the list of new account ids.
-  std::set<std::string> new_account_ids;
+  std::set<CoreAccountId> new_account_ids;
   for (const auto& new_account : provider_->GetAllAccounts()) {
     DCHECK(!new_account.gaia.empty());
     DCHECK(!new_account.email.empty());
@@ -212,7 +216,7 @@ void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials() {
     // the GAIA ID is available if any client of this token service starts
     // a fetch access token operation when it receives a
     // |OnRefreshTokenAvailable| notification.
-    std::string account_id = account_tracker_service_->SeedAccountInfo(
+    CoreAccountId account_id = account_tracker_service_->SeedAccountInfo(
         AccountInfoFromDeviceAccount(new_account));
     new_account_ids.insert(account_id);
   }

@@ -23,8 +23,8 @@
 #include "extensions/browser/api/file_handlers/mime_util.h"
 #include "extensions/browser/entry_info.h"
 #include "net/base/filename_util.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 using content::BrowserThread;
 using storage::FileSystemURL;
@@ -115,11 +115,12 @@ FileManagerPrivateInternalExecuteTaskFunction::Run() {
 }
 
 void FileManagerPrivateInternalExecuteTaskFunction::OnTaskExecuted(
-    extensions::api::file_manager_private::TaskResult result) {
+    extensions::api::file_manager_private::TaskResult result,
+    std::string failure_reason) {
   auto result_list = extensions::api::file_manager_private_internal::
       ExecuteTask::Results::Create(result);
   if (result == extensions::api::file_manager_private::TASK_RESULT_FAILED) {
-    Respond(Error("Task result failed"));
+    Respond(Error("Task result failed: " + failure_reason));
   } else {
     Respond(ArgumentList(std::move(result_list)));
   }

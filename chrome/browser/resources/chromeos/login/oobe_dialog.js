@@ -56,7 +56,18 @@ Polymer({
       observer: 'onfullScreenDialogChanged_',
     },
 
-    android: {
+    /**
+     * Shows overlay on top of the bottom buttons.
+     */
+    showButtonsOverlay: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * If true footer would be shrunk as much as possible to fit container.
+     */
+    footerShrinkable: {
       type: Boolean,
       value: false,
     },
@@ -78,6 +89,14 @@ Polymer({
         Oobe.getInstance().displayType == DISPLAY_TYPE.OOBE;
     if (isOobe || document.documentElement.hasAttribute('full-screen-dialog'))
       this.fullScreenDialog = true;
+  },
+
+  /**
+   * Scroll to the bottom of footer container.
+   */
+  scrollToBottom: function() {
+    var el = this.$$('#top-scroll-container');
+    el.scrollTop = el.scrollHeight;
   },
 
   /**

@@ -20,17 +20,18 @@
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/web_applications/components/install_options.h"
+#include "chrome/browser/web_applications/components/external_install_options.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/test/test_pending_app_manager.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_paths.h"
 #include "services/network/test/test_cookie_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
 
 namespace chromeos {
 
@@ -42,9 +43,9 @@ const char kTestUrl1[] = "https://test-url-1.com/";
 const char kTestInstallUrl1[] = "https://test-url-1.com/install";
 const char kTestUrl2[] = "https://test-url-2.com/";
 
-web_app::InstallOptions GetInstallOptionsForUrl(const GURL& url) {
-  web_app::InstallOptions options(
-      url, web_app::LaunchContainer::kWindow,
+web_app::ExternalInstallOptions GetInstallOptionsForUrl(const GURL& url) {
+  web_app::ExternalInstallOptions options(
+      url, blink::mojom::DisplayMode::kStandalone,
       web_app::ExternalInstallSource::kInternalDefault);
   options.override_previous_user_uninstall = true;
   options.bypass_service_worker_check = true;
@@ -78,12 +79,12 @@ class FakeCookieManager : public network::TestCookieManager {
               !std::get<2>(params).exclude_httponly());
     EXPECT_EQ(expect_same_site_context,
               std::get<2>(params).same_site_cookie_context());
-    net::CanonicalCookie::CookieInclusionStatus status =
-        net::CanonicalCookie::CookieInclusionStatus::INCLUDE;
+    net::CanonicalCookie::CookieInclusionStatus status;
 
-    if (!success)
-      status =
-          net::CanonicalCookie::CookieInclusionStatus::EXCLUDE_UNKNOWN_ERROR;
+    if (!success) {
+      status.AddExclusionReason(
+          net::CanonicalCookie::CookieInclusionStatus::EXCLUDE_UNKNOWN_ERROR);
+    }
 
     std::move(std::get<3>(params)).Run(status);
   }
@@ -184,7 +185,8 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
   };
 
   AndroidSmsAppSetupControllerImplTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::TimeSource::MOCK_TIME),
+      : task_environment_(
+            content::BrowserTaskEnvironment::TimeSource::MOCK_TIME),
         host_content_settings_map_(
             HostContentSettingsMapFactory::GetForProfile(&profile_)) {}
 
@@ -193,7 +195,7 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
   // testing::Test:
   void SetUp() override {
     host_content_settings_map_->ClearSettingsForOneType(
-        ContentSettingsType::CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+        ContentSettingsType::NOTIFICATIONS);
     fake_cookie_manager_ = std::make_unique<FakeCookieManager>();
     auto test_pwa_delegate =
         std::make_unique<TestPwaDelegate>(fake_cookie_manager_.get());
@@ -224,7 +226,7 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
     base::HistogramTester histogram_tester;
 
     test_pending_app_manager_->SetInstallResultCode(
-        web_app::InstallResultCode::kFailedUnknownReason);
+        web_app::InstallResultCode::kGetWebApplicationInfoFailed);
 
     setup_controller_->SetUpApp(
         app_url, install_url,
@@ -254,15 +256,15 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
                 install_requests.size());
       EXPECT_EQ(GetInstallOptionsForUrl(install_url), install_requests.back());
 
-      thread_bundle_.FastForwardBy(
+      task_environment_.FastForwardBy(
           AndroidSmsAppSetupControllerImpl::kInstallRetryDelay *
           (1 << retry_count));
     }
 
     // Send success code for last attempt.
     test_pending_app_manager_->SetInstallResultCode(
-        web_app::InstallResultCode::kSuccess);
-    thread_bundle_.FastForwardBy(
+        web_app::InstallResultCode::kSuccessNewInstall);
+    task_environment_.FastForwardBy(
         AndroidSmsAppSetupControllerImpl::kInstallRetryDelay *
         (1 << (num_failure_tries - 1)));
 
@@ -317,9 +319,10 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
     }
 
     if (num_expected_app_installs) {
-      histogram_tester.ExpectBucketCount("AndroidSms.PWAInstallationResult",
-                                         web_app::InstallResultCode::kSuccess,
-                                         num_expected_app_installs);
+      histogram_tester.ExpectBucketCount(
+          "AndroidSms.PWAInstallationResult",
+          web_app::InstallResultCode::kSuccessNewInstall,
+          num_expected_app_installs);
       histogram_tester.ExpectBucketCount(
           "AndroidSms.EffectivePWAInstallationSuccess", true, 1);
     }
@@ -397,8 +400,7 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
   ContentSetting GetNotificationSetting(const GURL& url) {
     std::unique_ptr<base::Value> notification_settings_value =
         host_content_settings_map_->GetWebsiteSetting(
-            url, GURL() /* top_level_url */,
-            ContentSettingsType::CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+            url, GURL() /* top_level_url */, ContentSettingsType::NOTIFICATIONS,
             content_settings::ResourceIdentifier(), nullptr);
     return static_cast<ContentSetting>(notification_settings_value->GetInt());
   }
@@ -423,7 +425,7 @@ class AndroidSmsAppSetupControllerImplTest : public testing::Test {
     std::move(quit_closure).Run();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   base::Optional<bool> last_set_up_app_result_;
   base::Optional<bool> last_delete_cookie_result_;

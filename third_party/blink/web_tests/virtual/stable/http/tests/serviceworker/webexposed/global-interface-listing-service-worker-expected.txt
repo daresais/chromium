@@ -69,8 +69,10 @@ interface BroadcastChannel : EventTarget
     setter onmessage
     setter onmessageerror
 interface ByteLengthQueuingStrategy
+    attribute @@toStringTag
+    getter highWaterMark
+    getter size
     method constructor
-    method size
 interface CSSSkewX : CSSTransformComponent
     attribute @@toStringTag
     getter ax
@@ -137,8 +139,10 @@ interface CloseEvent : Event
     getter wasClean
     method constructor
 interface CountQueuingStrategy
+    attribute @@toStringTag
+    getter highWaterMark
+    getter size
     method constructor
-    method size
 interface Crypto
     attribute @@toStringTag
     getter subtle
@@ -817,6 +821,7 @@ interface OffscreenCanvasRenderingContext2D
     method fillText
     method getImageData
     method getLineDash
+    method getTransform
     method isPointInPath
     method isPointInStroke
     method lineTo
@@ -919,9 +924,11 @@ interface PerformanceEntry
     method toJSON
 interface PerformanceMark : PerformanceEntry
     attribute @@toStringTag
+    getter detail
     method constructor
 interface PerformanceMeasure : PerformanceEntry
     attribute @@toStringTag
+    getter detail
     method constructor
 interface PerformanceObserver
     static getter supportedEntryTypes
@@ -1021,6 +1028,13 @@ interface ReadableStream
     method pipeThrough
     method pipeTo
     method tee
+interface ReadableStreamDefaultReader
+    attribute @@toStringTag
+    getter closed
+    method cancel
+    method constructor
+    method read
+    method releaseLock
 interface Request
     attribute @@toStringTag
     getter bodyUsed
@@ -1080,6 +1094,16 @@ interface SecurityPolicyViolationEvent : Event
     getter statusCode
     getter violatedDirective
     method constructor
+interface ServiceWorker : EventTarget
+    attribute @@toStringTag
+    getter onerror
+    getter onstatechange
+    getter scriptURL
+    getter state
+    method constructor
+    method postMessage
+    setter onerror
+    setter onstatechange
 interface ServiceWorkerGlobalScope : WorkerGlobalScope
     attribute @@toStringTag
     method constructor
@@ -1928,6 +1952,7 @@ interface WebGL2RenderingContext
     method isVertexArray
     method lineWidth
     method linkProgram
+    method makeXRCompatible
     method pauseTransformFeedback
     method pixelStorei
     method polygonOffset
@@ -2420,6 +2445,7 @@ interface WebGLRenderingContext
     method isTexture
     method lineWidth
     method linkProgram
+    method makeXRCompatible
     method pixelStorei
     method polygonOffset
     method readPixels
@@ -2544,7 +2570,6 @@ interface WorkerGlobalScope : EventTarget
     getter self
     method atob
     method btoa
-    method cancelAnimationFrame
     method clearInterval
     method clearTimeout
     method constructor
@@ -2552,7 +2577,6 @@ interface WorkerGlobalScope : EventTarget
     method fetch
     method importScripts
     method queueMicrotask
-    method requestAnimationFrame
     method setInterval
     method setTimeout
     setter onerror
@@ -2600,6 +2624,16 @@ interface WritableStream
     method abort
     method constructor
     method getWriter
+interface WritableStreamDefaultWriter
+    attribute @@toStringTag
+    getter closed
+    getter desiredSize
+    getter ready
+    method abort
+    method close
+    method constructor
+    method releaseLock
+    method write
 [GLOBAL OBJECT]
     attribute console
     attribute globalThis
@@ -2621,7 +2655,7 @@ interface WritableStream
     getter onpush
     getter onsync
     getter registration
-    method fetch
+    getter serviceWorker
     method gc
     method skipWaiting
     setter onabortpayment

@@ -112,12 +112,6 @@ AtomicString SameOriginAttribution(Frame* observer_frame,
   return SameOriginKeyword();
 }
 
-bool IsSameOrigin(const AtomicString& key) {
-  DCHECK(IsMainThread());
-  return key == SameOriginKeyword() || key == SameOriginDescendantKeyword() ||
-         key == SameOriginAncestorKeyword() || key == SelfKeyword();
-}
-
 }  // namespace
 
 static base::TimeTicks ToTimeOrigin(LocalDOMWindow* window) {
@@ -291,25 +285,20 @@ std::pair<AtomicString, DOMWindow*> WindowPerformance::SanitizedAttribution(
   return std::make_pair(kCrossOriginAttribution, nullptr);
 }
 
-void WindowPerformance::ReportLongTask(
-    base::TimeTicks start_time,
-    base::TimeTicks end_time,
-    ExecutionContext* task_context,
-    bool has_multiple_contexts,
-    const SubTaskAttribution::EntriesVector& sub_task_attributions) {
+void WindowPerformance::ReportLongTask(base::TimeTicks start_time,
+                                       base::TimeTicks end_time,
+                                       ExecutionContext* task_context,
+                                       bool has_multiple_contexts) {
   if (!GetFrame())
     return;
   std::pair<AtomicString, DOMWindow*> attribution =
       WindowPerformance::SanitizedAttribution(
           task_context, has_multiple_contexts, GetFrame());
   DOMWindow* culprit_dom_window = attribution.second;
-  SubTaskAttribution::EntriesVector empty_vector;
   if (!culprit_dom_window || !culprit_dom_window->GetFrame() ||
       !culprit_dom_window->GetFrame()->DeprecatedLocalOwner()) {
-    AddLongTaskTiming(
-        start_time, end_time, attribution.first, g_empty_string, g_empty_string,
-        g_empty_string,
-        IsSameOrigin(attribution.first) ? sub_task_attributions : empty_vector);
+    AddLongTaskTiming(start_time, end_time, attribution.first, g_empty_string,
+                      g_empty_string, g_empty_string);
   } else {
     HTMLFrameOwnerElement* frame_owner =
         culprit_dom_window->GetFrame()->DeprecatedLocalOwner();
@@ -317,8 +306,7 @@ void WindowPerformance::ReportLongTask(
         start_time, end_time, attribution.first,
         GetFrameAttribute(frame_owner, html_names::kSrcAttr, false),
         GetFrameAttribute(frame_owner, html_names::kIdAttr, false),
-        GetFrameAttribute(frame_owner, html_names::kNameAttr, true),
-        IsSameOrigin(attribution.first) ? sub_task_attributions : empty_vector);
+        GetFrameAttribute(frame_owner, html_names::kNameAttr, true));
   }
 }
 
@@ -391,21 +379,17 @@ void WindowPerformance::AddElementTiming(const AtomicString& name,
                                          const String& url,
                                          const FloatRect& rect,
                                          base::TimeTicks start_time,
-                                         base::TimeTicks response_end,
+                                         base::TimeTicks load_time,
                                          const AtomicString& identifier,
                                          const IntSize& intrinsic_size,
                                          const AtomicString& id,
                                          Element* element) {
-  DCHECK(RuntimeEnabledFeatures::ElementTimingEnabled(GetExecutionContext()));
   PerformanceElementTiming* entry = PerformanceElementTiming::Create(
       name, url, rect, MonotonicTimeToDOMHighResTimeStamp(start_time),
-      MonotonicTimeToDOMHighResTimeStamp(response_end), identifier,
+      MonotonicTimeToDOMHighResTimeStamp(load_time), identifier,
       intrinsic_size.Width(), intrinsic_size.Height(), id, element);
-  if (HasObserverFor(PerformanceEntry::kElement)) {
-    UseCounter::Count(GetExecutionContext(),
-                      WebFeature::kElementTimingExplicitlyRequested);
+  if (HasObserverFor(PerformanceEntry::kElement))
     NotifyObserversOfEntry(*entry);
-  }
   if (!IsElementTimingBufferFull())
     AddElementTimingBuffer(*entry);
 }
@@ -425,30 +409,32 @@ void WindowPerformance::DispatchFirstInputTiming(
   first_input_timing_ = entry;
 }
 
-void WindowPerformance::AddLayoutJankFraction(double jank_fraction,
-                                              bool input_detected,
-                                              base::TimeTicks input_timestamp) {
-  DCHECK(RuntimeEnabledFeatures::LayoutInstabilityAPIEnabled(
-      GetExecutionContext()));
+void WindowPerformance::AddLayoutShiftValue(double value,
+                                            bool input_detected,
+                                            base::TimeTicks input_timestamp) {
   auto* entry = MakeGarbageCollected<LayoutShift>(
-      now(), jank_fraction, input_detected,
+      now(), value, input_detected,
       input_detected ? MonotonicTimeToDOMHighResTimeStamp(input_timestamp)
                      : 0.0);
   if (HasObserverFor(PerformanceEntry::kLayoutShift))
     NotifyObserversOfEntry(*entry);
-  AddLayoutJankBuffer(*entry);
+  AddLayoutShiftBuffer(*entry);
 }
 
 void WindowPerformance::OnLargestContentfulPaintUpdated(
     base::TimeTicks paint_time,
     uint64_t paint_size,
-    base::TimeTicks response_end,
+    base::TimeTicks load_time,
     const AtomicString& id,
     const String& url,
     Element* element) {
+  double render_timestamp = MonotonicTimeToDOMHighResTimeStamp(paint_time);
+  double load_timestamp = MonotonicTimeToDOMHighResTimeStamp(load_time);
+  double start_timestamp =
+      render_timestamp != 0.0 ? render_timestamp : load_timestamp;
   auto* entry = MakeGarbageCollected<LargestContentfulPaint>(
-      MonotonicTimeToDOMHighResTimeStamp(paint_time), paint_size,
-      MonotonicTimeToDOMHighResTimeStamp(response_end), id, url, element);
+      start_timestamp, render_timestamp, paint_size, load_timestamp, id, url,
+      element);
   if (HasObserverFor(PerformanceEntry::kLargestContentfulPaint))
     NotifyObserversOfEntry(*entry);
   AddLargestContentfulPaint(entry);

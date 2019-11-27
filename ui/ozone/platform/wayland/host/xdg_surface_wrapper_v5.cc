@@ -80,6 +80,14 @@ void XDGSurfaceWrapperV5::SetWindowGeometry(const gfx::Rect& bounds) {
                                   bounds.width(), bounds.height());
 }
 
+void XDGSurfaceWrapperV5::SetMinSize(int32_t width, int32_t height) {}
+
+void XDGSurfaceWrapperV5::SetMaxSize(int32_t width, int32_t height) {}
+
+void XDGSurfaceWrapperV5::SetAppId(const std::string& app_id) {
+  xdg_surface_set_app_id(xdg_surface_.get(), app_id.c_str());
+}
+
 // static
 void XDGSurfaceWrapperV5::Configure(void* data,
                                     xdg_surface* obj,
@@ -87,7 +95,7 @@ void XDGSurfaceWrapperV5::Configure(void* data,
                                     int32_t height,
                                     wl_array* states,
                                     uint32_t serial) {
-  XDGSurfaceWrapperV5* surface = static_cast<XDGSurfaceWrapperV5*>(data);
+  auto* surface = static_cast<XDGSurfaceWrapperV5*>(data);
 
   bool is_maximized =
       CheckIfWlArrayHasValue(states, XDG_SURFACE_STATE_MAXIMIZED);
@@ -99,11 +107,14 @@ void XDGSurfaceWrapperV5::Configure(void* data,
   surface->pending_configure_serial_ = serial;
   surface->wayland_window_->HandleSurfaceConfigure(width, height, is_maximized,
                                                    is_fullscreen, is_activated);
+  surface->AckConfigure();
 }
 
 // static
 void XDGSurfaceWrapperV5::Close(void* data, xdg_surface* obj) {
-  NOTIMPLEMENTED();
+  auto* surface = static_cast<XDGSurfaceWrapperV5*>(data);
+  DCHECK(surface);
+  surface->wayland_window_->OnCloseRequest();
 }
 
 }  // namespace ui

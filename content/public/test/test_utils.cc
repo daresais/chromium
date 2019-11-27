@@ -11,14 +11,14 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task/sequence_manager/sequence_manager.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/task_observer.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -34,6 +34,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/url_constants.h"
@@ -71,12 +72,12 @@ void DeferredQuitRunLoop(const base::Closure& quit_task,
 }
 
 // Monitors if any task is processed by the message loop.
-class TaskObserver : public base::MessageLoop::TaskObserver {
+class TaskObserver : public base::TaskObserver {
  public:
   TaskObserver() : processed_(false) {}
   ~TaskObserver() override {}
 
-  // MessageLoop::TaskObserver overrides.
+  // TaskObserver overrides.
   void WillProcessTask(const base::PendingTask& pending_task) override {}
   void DidProcessTask(const base::PendingTask& pending_task) override {
     processed_ = true;
@@ -190,8 +191,8 @@ bool AreAllSitesIsolatedForTesting() {
 
 bool AreDefaultSiteInstancesEnabled() {
   return !AreAllSitesIsolatedForTesting() &&
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableDefaultSiteInstance);
+         base::FeatureList::IsEnabled(
+             features::kProcessSharingWithDefaultSiteInstances);
 }
 
 void IsolateAllSitesForTesting(base::CommandLine* command_line) {
@@ -199,9 +200,8 @@ void IsolateAllSitesForTesting(base::CommandLine* command_line) {
 }
 
 void ResetSchemesAndOriginsWhitelist() {
-  url::Shutdown();
+  url::ResetForTests();
   RegisterContentSchemes(false);
-  url::Initialize();
 }
 
 GURL GetWebUIURL(const std::string& host) {
@@ -226,7 +226,8 @@ WebContents* CreateAndAttachInnerContents(RenderFrameHost* rfh) {
 
   // Attach. |inner_contents| becomes owned by |outer_contents|.
   WebContents* inner_contents = inner_contents_ptr.get();
-  outer_contents->AttachInnerWebContents(std::move(inner_contents_ptr), rfh);
+  outer_contents->AttachInnerWebContents(std::move(inner_contents_ptr), rfh,
+                                         false /* is_full_page */);
 
   return inner_contents;
 }
@@ -342,7 +343,7 @@ void InProcessUtilityThreadHelper::JoinAllUtilityThreads() {
 }
 
 void InProcessUtilityThreadHelper::CheckHasRunningChildProcess() {
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(
           &InProcessUtilityThreadHelper::CheckHasRunningChildProcessOnIO,
@@ -457,10 +458,10 @@ GURL EffectiveURLContentBrowserClient::GetEffectiveURL(
 }
 
 bool EffectiveURLContentBrowserClient::DoesSiteRequireDedicatedProcess(
-    BrowserOrResourceContext browser_or_resource_context,
+    BrowserContext* browser_context,
     const GURL& effective_site_url) {
-  GURL expected_effective_site_url = SiteInstance::GetSiteForURL(
-      browser_or_resource_context.ToBrowserContext(), url_to_modify_);
+  GURL expected_effective_site_url =
+      SiteInstance::GetSiteForURL(browser_context, url_to_modify_);
 
   return requires_dedicated_process_ &&
          expected_effective_site_url == effective_site_url;

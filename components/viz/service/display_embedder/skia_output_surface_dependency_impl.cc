@@ -8,6 +8,7 @@
 #include "build/build_config.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
 #include "gpu/command_buffer/service/scheduler.h"
+#include "gpu/ipc/scheduler_sequence.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "ui/gl/init/gl_factory.h"
 
@@ -22,16 +23,18 @@ SkiaOutputSurfaceDependencyImpl::SkiaOutputSurfaceDependencyImpl(
 
 SkiaOutputSurfaceDependencyImpl::~SkiaOutputSurfaceDependencyImpl() = default;
 
-void SkiaOutputSurfaceDependencyImpl::ScheduleGpuTask(
-    base::OnceClosure task,
-    std::vector<gpu::SyncToken> sync_tokens) {
-  gpu_service_impl_->scheduler()->ScheduleTask(
-      gpu::Scheduler::Task(gpu_service_impl_->skia_output_surface_sequence_id(),
-                           std::move(task), std::move(sync_tokens)));
+std::unique_ptr<gpu::SingleTaskSequence>
+SkiaOutputSurfaceDependencyImpl::CreateSequence() {
+  return std::make_unique<gpu::SchedulerSequence>(
+      gpu_service_impl_->GetGpuScheduler());
 }
 
 bool SkiaOutputSurfaceDependencyImpl::IsUsingVulkan() {
   return gpu_service_impl_->is_using_vulkan();
+}
+
+bool SkiaOutputSurfaceDependencyImpl::IsUsingDawn() {
+  return gpu_service_impl_->is_using_dawn();
 }
 
 gpu::SharedImageManager*
@@ -63,13 +66,13 @@ SkiaOutputSurfaceDependencyImpl::GetVulkanContextProvider() {
   return gpu_service_impl_->vulkan_context_provider();
 }
 
+DawnContextProvider* SkiaOutputSurfaceDependencyImpl::GetDawnContextProvider() {
+  return gpu_service_impl_->dawn_context_provider();
+}
+
 const gpu::GpuPreferences&
 SkiaOutputSurfaceDependencyImpl::GetGpuPreferences() {
   return gpu_service_impl_->gpu_preferences();
-}
-
-gpu::SequenceId SkiaOutputSurfaceDependencyImpl::GetSequenceId() {
-  return gpu_service_impl_->skia_output_surface_sequence_id();
 }
 
 const gpu::GpuFeatureInfo&
@@ -79,6 +82,10 @@ SkiaOutputSurfaceDependencyImpl::GetGpuFeatureInfo() {
 
 gpu::MailboxManager* SkiaOutputSurfaceDependencyImpl::GetMailboxManager() {
   return gpu_service_impl_->mailbox_manager();
+}
+
+gpu::ImageFactory* SkiaOutputSurfaceDependencyImpl::GetGpuImageFactory() {
+  return gpu_service_impl_->gpu_image_factory();
 }
 
 bool SkiaOutputSurfaceDependencyImpl::IsOffscreen() {
@@ -99,6 +106,22 @@ scoped_refptr<gl::GLSurface> SkiaOutputSurfaceDependencyImpl::CreateGLSurface(
   }
 }
 
+base::ScopedClosureRunner SkiaOutputSurfaceDependencyImpl::CacheGLSurface(
+    gl::GLSurface* surface) {
+  gpu_service_impl_->main_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&gl::GLSurface::AddRef, base::Unretained(surface)));
+  auto release_callback = base::BindOnce(
+      [](const scoped_refptr<base::TaskRunner>& runner,
+         gl::GLSurface* surface) {
+        runner->PostTask(FROM_HERE, base::BindOnce(&gl::GLSurface::Release,
+                                                   base::Unretained(surface)));
+      },
+      base::WrapRefCounted(gpu_service_impl_->main_runner()),
+      base::Unretained(surface));
+  return base::ScopedClosureRunner(std::move(release_callback));
+}
+
 void SkiaOutputSurfaceDependencyImpl::PostTaskToClientThread(
     base::OnceClosure closure) {
   client_thread_task_runner_->PostTask(FROM_HERE, std::move(closure));
@@ -115,5 +138,27 @@ void SkiaOutputSurfaceDependencyImpl::DidCreateAcceleratedSurfaceChildWindow(
   gpu_service_impl_->SendCreatedChildWindow(parent_window, child_window);
 }
 #endif
+
+void SkiaOutputSurfaceDependencyImpl::RegisterDisplayContext(
+    gpu::DisplayContext* display_context) {
+  gpu_service_impl_->RegisterDisplayContext(display_context);
+}
+
+void SkiaOutputSurfaceDependencyImpl::UnregisterDisplayContext(
+    gpu::DisplayContext* display_context) {
+  gpu_service_impl_->UnregisterDisplayContext(display_context);
+}
+
+void SkiaOutputSurfaceDependencyImpl::DidLoseContext(
+    bool offscreen,
+    gpu::error::ContextLostReason reason,
+    const GURL& active_url) {
+  gpu_service_impl_->DidLoseContext(offscreen, reason, active_url);
+}
+
+base::TimeDelta
+SkiaOutputSurfaceDependencyImpl::GetGpuBlockedTimeSinceLastSwap() {
+  return gpu_service_impl_->GetGpuScheduler()->TakeTotalBlockingTime();
+}
 
 }  // namespace viz

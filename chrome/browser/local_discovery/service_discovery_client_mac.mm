@@ -13,7 +13,7 @@
 #include "base/bind.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
@@ -34,6 +34,7 @@ using local_discovery::ServiceResolverImplMac;
 
 - (id)initWithContainer:
         (ServiceWatcherImplMac::NetServiceBrowserContainer*)serviceWatcherImpl;
+- (void)clearDiscoveredServices;
 
 @end
 
@@ -171,7 +172,7 @@ void ServiceDiscoveryClientMac::StartThreadIfNotStarted() {
     service_discovery_thread_.reset(
         new base::Thread(kServiceDiscoveryThreadName));
     // Only TYPE_UI uses an NSRunLoop.
-    base::Thread::Options options(base::MessageLoop::TYPE_UI, 0);
+    base::Thread::Options options(base::MessagePumpType::UI, 0);
     service_discovery_thread_->StartWithOptions(options);
   }
 }
@@ -196,6 +197,10 @@ ServiceWatcherImplMac::NetServiceBrowserContainer::
   // already gone.
   // https://crbug.com/657495, https://openradar.appspot.com/28943305
   [browser_ setDelegate:nil];
+
+  // Ensure the delegate clears all references to itself, which it had added as
+  // discovered services were reported to it.
+  [delegate_ clearDiscoveredServices];
 }
 
 void ServiceWatcherImplMac::NetServiceBrowserContainer::Start() {
@@ -459,6 +464,14 @@ ServiceResolverImplMac::GetContainerForTesting() {
   return self;
 }
 
+- (void)clearDiscoveredServices {
+  for (NSNetService* netService in services_.get()) {
+    [netService stopMonitoring];
+    [netService setDelegate:nil];
+  }
+  [services_ removeAllObjects];
+}
+
 - (void)netServiceBrowser:(NSNetServiceBrowser*)netServiceBrowser
            didFindService:(NSNetService*)netService
                moreComing:(BOOL)moreServicesComing {
@@ -481,7 +494,9 @@ ServiceResolverImplMac::GetContainerForTesting() {
         base::SysNSStringToUTF8([netService name]));
 
     // Stop monitoring this service for updates.
-    [[services_ objectAtIndex:index] stopMonitoring];
+    DCHECK_EQ(netService, [services_ objectAtIndex:index]);
+    [netService stopMonitoring];
+    [netService setDelegate:nil];
     [services_ removeObjectAtIndex:index];
   }
 }

@@ -16,14 +16,9 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.RemoteException;
-import android.support.annotation.Nullable;
-import android.support.customtabs.trusted.TrustedWebActivityService;
-import android.support.customtabs.trusted.TrustedWebActivityServiceConnectionManager;
-import android.support.customtabs.trusted.TrustedWebActivityServiceWrapper;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityUmaRecorder.DelegatedNotificationSmallIconFallback;
 import org.chromium.chrome.browser.browserservices.permissiondelegation.NotificationPermissionUpdater;
 import org.chromium.chrome.browser.notifications.NotificationBuilderBase;
@@ -36,6 +31,11 @@ import java.util.Set;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
+
+import androidx.annotation.Nullable;
+import androidx.browser.trusted.TrustedWebActivityService;
+import androidx.browser.trusted.TrustedWebActivityServiceConnectionManager;
+import androidx.browser.trusted.TrustedWebActivityServiceWrapper;
 
 /**
  * Uses a Trusted Web Activity client to display notifications.
@@ -68,7 +68,9 @@ public class TrustedWebActivityClient {
      * @return Whether a Trusted Web Activity client was found to show the notification.
      */
     public boolean twaExistsForScope(Uri scope) {
-        return mConnection.serviceExistsForScope(scope, new Origin(scope).toString());
+        Origin origin = Origin.create(scope);
+        if (origin == null) return false;
+        return mConnection.serviceExistsForScope(scope, origin.toString());
     }
 
     /**
@@ -98,7 +100,7 @@ public class TrustedWebActivityClient {
             NotificationBuilderBase builder, NotificationUmaTracker notificationUmaTracker) {
         Resources res = ContextUtils.getApplicationContext().getResources();
         String channelDisplayName = res.getString(R.string.notification_category_group_general);
-        Origin origin = new Origin(scope);
+        Origin origin = Origin.createOrThrow(scope);
 
         mConnection.execute(scope, origin.toString(), service -> {
             if (!service.areNotificationsEnabled(channelDisplayName)) {
@@ -133,7 +135,7 @@ public class TrustedWebActivityClient {
         }
 
         int id = service.getSmallIconId();
-        if (id == TrustedWebActivityService.NO_ID) {
+        if (id == TrustedWebActivityService.SMALL_ICON_NOT_SET) {
             recordFallback(FALLBACK_ICON_NOT_PROVIDED);
             return;
         }
@@ -163,7 +165,8 @@ public class TrustedWebActivityClient {
      * @param platformId The id of the notification to cancel.
      */
     public void cancelNotification(Uri scope, String platformTag, int platformId) {
-        mConnection.execute(scope, new Origin(scope).toString(),
+        Origin origin = Origin.createOrThrow(scope);
+        mConnection.execute(scope, origin.toString(),
                 service -> service.cancel(platformTag, platformId));
     }
 
@@ -189,12 +192,10 @@ public class TrustedWebActivityClient {
      */
     public static @Nullable Intent createLaunchIntentForTwa(Context appContext, String url,
             List<ResolveInfo> resolveInfosForUrl) {
-        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.TRUSTED_WEB_ACTIVITY)) return null;
-
-        Origin origin = new Origin(url);
+        Origin origin = Origin.createOrThrow(url);
 
         // Trusted Web Activities only work with https so we can shortcut here.
-        if (!origin.uri().getScheme().equals(UrlConstants.HTTPS_SCHEME)) return null;
+        if (!UrlConstants.HTTPS_SCHEME.equals(origin.uri().getScheme())) return null;
 
         Set<String> verifiedPackages = TrustedWebActivityServiceConnectionManager
                 .getVerifiedPackages(appContext, origin.toString());

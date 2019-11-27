@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_IMPRESSION_HISTORY_TRACKER_H_
 #define CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_IMPRESSION_HISTORY_TRACKER_H_
 
-#include <deque>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/clock.h"
@@ -32,24 +32,16 @@ class ImpressionHistoryTracker : public UserActionHandler {
       std::map<SchedulerClientType, std::unique_ptr<ClientState>>;
   using InitCallback = base::OnceCallback<void(bool)>;
 
-  class Delegate {
-   public:
-    Delegate() = default;
-    virtual ~Delegate() = default;
-
-    // Called when the impression data is updated.
-    virtual void OnImpressionUpdated() = 0;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Delegate);
-  };
-
   // Initializes the impression tracker.
-  virtual void Init(Delegate* delegate, InitCallback callback) = 0;
+  virtual void Init(InitCallback callback) = 0;
 
   // Add a new impression, called after the notification is shown.
-  virtual void AddImpression(SchedulerClientType type,
-                             const std::string& guid) = 0;
+  virtual void AddImpression(
+      SchedulerClientType type,
+      const std::string& guid,
+      const Impression::ImpressionResultMap& impression_map,
+      const Impression::CustomData& custom_data,
+      const base::Optional<base::TimeDelta>& custom_suppression_duration) = 0;
 
   // Analyzes the impression history for all notification clients, and adjusts
   // the |current_max_daily_show|.
@@ -59,6 +51,10 @@ class ImpressionHistoryTracker : public UserActionHandler {
   virtual void GetClientStates(
       std::map<SchedulerClientType, const ClientState*>* client_states)
       const = 0;
+
+  // Queries impression based on guid, returns nullptr if no impression is
+  // found.
+  virtual const Impression* GetImpression(const std::string& guid) const = 0;
 
   // Queries the impression detail of a given |SchedulerClientType|.
   virtual void GetImpressionDetail(
@@ -86,20 +82,21 @@ class ImpressionHistoryTrackerImpl : public ImpressionHistoryTracker {
 
  private:
   // ImpressionHistoryTracker implementation.
-  void Init(Delegate* delegate, InitCallback callback) override;
+  void Init(InitCallback callback) override;
   void AddImpression(SchedulerClientType type,
-                     const std::string& guid) override;
+                     const std::string& guid,
+                     const Impression::ImpressionResultMap& impression_mapping,
+                     const Impression::CustomData& custom_data,
+                     const base::Optional<base::TimeDelta>&
+                         custom_suppression_duration) override;
   void AnalyzeImpressionHistory() override;
   void GetClientStates(std::map<SchedulerClientType, const ClientState*>*
                            client_states) const override;
+  const Impression* GetImpression(const std::string& guid) const override;
   void GetImpressionDetail(
       SchedulerClientType type,
       ImpressionDetail::ImpressionDetailCallback callback) override;
-  void OnClick(SchedulerClientType type, const std::string& guid) override;
-  void OnActionClick(SchedulerClientType type,
-                     const std::string& guid,
-                     ActionButtonType button_type) override;
-  void OnDismiss(SchedulerClientType type, const std::string& guid) override;
+  void OnUserAction(const UserActionData& action_data) override;
 
   // Called after |store_| is initialized.
   void OnStoreInitialized(InitCallback callback,
@@ -112,21 +109,28 @@ class ImpressionHistoryTrackerImpl : public ImpressionHistoryTracker {
 
   // Helper method to prune impressions created before |start_time|. Assumes
   // |impressions| are sorted by creation time.
-  static void PruneImpressionByCreateTime(std::deque<Impression*>* impressions,
-                                          const base::Time& start_time);
+  static void PruneImpressionByCreateTime(
+      base::circular_deque<Impression*>* impressions,
+      const base::Time& start_time);
 
   // Analyzes the impression history for a particular client.
   void AnalyzeImpressionHistory(ClientState* client_state);
 
+  // Check consecutive user actions, and generate impression result if no less
+  // than |num_actions| count of user actions.
+  void CheckConsecutiveDismiss(ClientState* client_state,
+                               base::circular_deque<Impression*>* impressions,
+                               size_t num_actions);
+
+  // Generates user impression result.
+  void GenerateImpressionResult(Impression* impression);
+
+  // Updates notification throttling based on the impression result.
+  void UpdateThrottling(ClientState* client_state, Impression* impression);
+
   // Applies a positive impression result to this notification type.
   void ApplyPositiveImpression(ClientState* client_state,
                                Impression* impression);
-
-  // Applies negative impression on this notification type when |num_actions|
-  // consecutive negative impression result are generated.
-  void ApplyNegativeImpressions(ClientState* client_state,
-                                std::deque<Impression*>* impressions,
-                                size_t num_actions);
 
   // Applies one negative impression.
   void ApplyNegativeImpression(ClientState* client_state,
@@ -145,9 +149,6 @@ class ImpressionHistoryTrackerImpl : public ImpressionHistoryTracker {
   void SetNeedsUpdate(SchedulerClientType type, bool needs_update);
   bool NeedsUpdate(SchedulerClientType type) const;
 
-  // Notifies the delegate about impression data update.
-  void NotifyImpressionUpdate();
-
   // Finds an impression that needs to update based on notification id.
   Impression* FindImpressionNeedsUpdate(const std::string& notification_guid);
 
@@ -162,7 +163,7 @@ class ImpressionHistoryTrackerImpl : public ImpressionHistoryTracker {
   ClientStates client_states_;
 
   // Notification guid to Impression map.
-  // TODO(xingliu): Remove this.
+  // TODO(xingliu): Consider to remove this.
   std::map<std::string, Impression*> impression_map_;
 
   // The storage that persists data.
@@ -178,8 +179,6 @@ class ImpressionHistoryTrackerImpl : public ImpressionHistoryTracker {
 
   // If the database needs an update when any of the impression data is updated.
   std::map<SchedulerClientType, bool> need_update_db_;
-
-  Delegate* delegate_;
 
   // The clock to provide the current timestamp.
   base::Clock* clock_;

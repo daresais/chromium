@@ -6,11 +6,12 @@ package org.chromium.chrome.browser.usage_stats;
 
 import android.app.Activity;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.BuildInfo;
 import org.chromium.base.Log;
 import org.chromium.base.Promise;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.Pref;
@@ -68,12 +69,12 @@ public class UsageStatsService {
         mSuspensionTracker = new SuspensionTracker(mBridge, mNotificationSuspender);
         mTokenTracker = new TokenTracker(mBridge);
         mPageViewObservers = new ArrayList<>();
+        mClient = AppHooks.get().createDigitalWellbeingClient();
 
         mSuspensionTracker.getAllSuspendedWebsites().then(
                 (suspendedSites) -> { notifyObserversOfSuspensions(suspendedSites, true); });
 
         mOptInState = getOptInState();
-        mClient = AppHooks.get().createDigitalWellbeingClient();
     }
 
     /* package */ NotificationSuspender getNotificationSuspender() {
@@ -205,6 +206,18 @@ public class UsageStatsService {
             // Retry once; if the subsequent attempt fails, log the failure and move on.
             mEventTracker.clearRange(startTimeMs, endTimeMs).except((exceptionInner) -> {
                 Log.e(TAG, "Failed to clear range of events for history deletion");
+            });
+        });
+    }
+
+    public void onHistoryDeletedForDomains(List<String> fqdns) {
+        ThreadUtils.assertOnUiThread();
+        UsageStatsMetricsReporter.reportMetricsEvent(UsageStatsMetricsEvent.CLEAR_HISTORY_DOMAIN);
+        mClient.notifyHistoryDeletion(fqdns);
+        mEventTracker.clearDomains(fqdns).except((exception) -> {
+            // Retry once; if the subsequent attempt fails, log the failure and move on.
+            mEventTracker.clearDomains(fqdns).except((exceptionInner) -> {
+                Log.e(TAG, "Failed to clear domain events for history deletion");
             });
         });
     }

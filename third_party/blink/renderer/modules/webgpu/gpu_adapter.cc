@@ -5,26 +5,43 @@
 #include "third_party/blink/renderer/modules/webgpu/gpu_adapter.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu_request_adapter_options.h"
 
 namespace blink {
 
 // static
 GPUAdapter* GPUAdapter::Create(
     const String& name,
+    uint32_t adapter_service_id,
+    const WGPUDeviceProperties& properties,
     scoped_refptr<DawnControlClientHolder> dawn_control_client) {
-  return MakeGarbageCollected<GPUAdapter>(name, std::move(dawn_control_client));
+  return MakeGarbageCollected<GPUAdapter>(name, adapter_service_id, properties,
+                                          std::move(dawn_control_client));
 }
 
 GPUAdapter::GPUAdapter(
     const String& name,
+    uint32_t adapter_service_id,
+    const WGPUDeviceProperties& properties,
     scoped_refptr<DawnControlClientHolder> dawn_control_client)
-    : DawnObjectBase(std::move(dawn_control_client)), name_(name) {}
+    : DawnObjectBase(dawn_control_client),
+      name_(name),
+      adapter_properties_(properties) {}
 
 const String& GPUAdapter::name() const {
   return name_;
 }
 
+ScriptValue GPUAdapter::extensions(ScriptState* script_state) const {
+  V8ObjectBuilder object_builder(script_state);
+  object_builder.AddBoolean("textureCompressionBC",
+                            adapter_properties_.textureCompressionBC);
+  return object_builder.GetScriptValue();
+}
+
+// TODO(jiawei.shao@intel.com) request device with adapter_server_id
 ScriptPromise GPUAdapter::requestDevice(ScriptState* script_state,
                                         const GPUDeviceDescriptor* descriptor) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);

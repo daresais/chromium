@@ -216,10 +216,11 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
   if (!should_send_key_events_to_js &&
       frame_->GetDocument()->IsInWebAppScope()) {
     DCHECK(frame_->View());
-    WebDisplayMode display_mode = frame_->View()->DisplayMode();
-    should_send_key_events_to_js = display_mode == kWebDisplayModeMinimalUi ||
-                                   display_mode == kWebDisplayModeStandalone ||
-                                   display_mode == kWebDisplayModeFullscreen;
+    blink::mojom::DisplayMode display_mode = frame_->View()->DisplayMode();
+    should_send_key_events_to_js =
+        display_mode == blink::mojom::DisplayMode::kMinimalUi ||
+        display_mode == blink::mojom::DisplayMode::kStandalone ||
+        display_mode == blink::mojom::DisplayMode::kFullscreen;
   }
 
   // We have 2 level of not exposing key event to js, not send and send but not
@@ -271,6 +272,11 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
   keydown->SetTarget(node);
 
   keydown->SetStopPropagation(!send_key_event);
+
+  // If this keydown did not involve a meta-key press, update the keyboard event
+  // state and trigger :focus-visible matching if necessary.
+  if (!keydown->ctrlKey() && !keydown->altKey() && !keydown->metaKey())
+    node->UpdateHadKeyboardEvent(*keydown);
 
   DispatchEventResult dispatch_result = node->DispatchEvent(*keydown);
   if (dispatch_result != DispatchEventResult::kNotCanceled)

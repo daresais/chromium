@@ -18,12 +18,14 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.blink_public.platform.WebDisplayMode;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.browser.WebappTestPage;
+import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.util.browser.webapps.WebappTestPage;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ScreenOrientationValues;
 import org.chromium.net.test.EmbeddedTestServerRule;
@@ -48,6 +50,11 @@ public class WebApkUpdateManagerTest {
     private static final String WEBAPK_ID = "webapk_id";
     private static final String WEBAPK_MANIFEST_URL =
             "/chrome/test/data/banners/manifest_one_icon.json";
+
+    // manifest_one_icon_maskable.json is the same as manifest_one_icon.json except that it has an
+    // additional icon of purpose maskable and of same size.
+    private static final String WEBAPK_MANIFEST_WITH_MASKABLE_ICON_URL =
+            "/chrome/test/data/banners/manifest_maskable.json";
 
     // Data contained in {@link WEBAPK_MANIFEST_URL}.
     private static final String WEBAPK_START_URL =
@@ -107,6 +114,7 @@ public class WebApkUpdateManagerTest {
         public int orientation;
         public long themeColor;
         public long backgroundColor;
+        public boolean isPrimaryIconMaskable;
     }
 
     public CreationData defaultCreationData() {
@@ -125,6 +133,7 @@ public class WebApkUpdateManagerTest {
         creationData.orientation = WEBAPK_ORIENTATION;
         creationData.themeColor = WEBAPK_THEME_COLOR;
         creationData.backgroundColor = WEBAPK_BACKGROUND_COLOR;
+        creationData.isPrimaryIconMaskable = false;
         return creationData;
     }
 
@@ -140,7 +149,7 @@ public class WebApkUpdateManagerTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         RecordHistogram.setDisabledForTests(false);
     }
 
@@ -152,14 +161,15 @@ public class WebApkUpdateManagerTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             WebApkInfo info = WebApkInfo.create(
-                    WEBAPK_ID, "", creationData.scope, null, null, null, creationData.name,
+                    "", creationData.scope, null, null, null, creationData.name,
                     creationData.shortName, creationData.displayMode, creationData.orientation, 0,
-                    creationData.themeColor, creationData.backgroundColor, 0, "",
+                    creationData.themeColor, creationData.backgroundColor, 0,
+                    creationData.isPrimaryIconMaskable, false /* isSplashIconMaskable */, "",
                     WebApkVersion.REQUEST_UPDATE_FOR_SHELL_APK_VERSION, creationData.manifestUrl,
-                    creationData.startUrl, WebApkInfo.WebApkDistributor.BROWSER,
-                    creationData.iconUrlToMurmur2HashMap, null, null /*shareTargetActivityName*/,
-                    false /* forceNavigation */, false /* isSplashProvidedByWebApk */,
-                    null /* shareData */
+                    creationData.startUrl, WebApkDistributor.BROWSER,
+                    creationData.iconUrlToMurmur2HashMap, null, false /* forceNavigation */,
+                    false /* isSplashProvidedByWebApk */, null /* shareData */,
+                    1 /* webApkVersionCode */
 
             );
             updateManager.updateIfNeeded(mTab, info);
@@ -217,5 +227,34 @@ public class WebApkUpdateManagerTest {
         WebappTestPage.navigateToServiceWorkerPageWithManifest(
                 mTestServerRule.getServer(), mTab, WEBAPK_MANIFEST_URL);
         Assert.assertFalse(checkUpdateNeeded(creationData));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"WebApk"})
+    @Features.EnableFeatures(ChromeFeatureList.WEBAPK_ADAPTIVE_ICON)
+    public void testNewMaskableIconShouldUpdateWhenFeatureEnabled() throws Exception {
+        testNewMaskableIconShouldUpdate();
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"WebApk"})
+    @Features.DisableFeatures(ChromeFeatureList.WEBAPK_ADAPTIVE_ICON)
+    public void testNewMaskableIconShouldUpdateWhenFeatureDisabled() throws Exception {
+        testNewMaskableIconShouldUpdate();
+    }
+
+    private void testNewMaskableIconShouldUpdate() throws Exception {
+        CreationData creationData = defaultCreationData();
+        creationData.startUrl = mTestServerRule.getServer().getURL(
+                "/chrome/test/data/banners/manifest_test_page.html");
+        creationData.isPrimaryIconMaskable = true;
+
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEBAPK_MANIFEST_URL);
+
+        Assert.assertEquals(
+                ShortcutHelper.doesAndroidSupportMaskableIcons(), checkUpdateNeeded(creationData));
     }
 }

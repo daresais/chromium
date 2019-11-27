@@ -15,19 +15,16 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.preference.Preference;
-import android.preference.PreferenceFragment;
-import android.preference.PreferenceScreen;
 import android.provider.Settings;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
+import android.support.v7.preference.PreferenceFragmentCompat;
 
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.DisableIf;
@@ -40,7 +37,7 @@ import org.chromium.chrome.browser.accessibility.FontSizePrefs;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
 import org.chromium.chrome.browser.preferences.website.PermissionInfo;
-import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
+import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridgeJni;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -56,8 +53,6 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.UiUtils;
 import org.chromium.policy.test.annotations.Policies;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.text.NumberFormat;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -85,22 +80,6 @@ public class PreferencesTest {
         return (Preferences) activity;
     }
 
-    public static void clickPreference(PreferenceFragment fragment, Preference preference) {
-        try {
-            Method performClick = Preference.class.getDeclaredMethod("performClick",
-                    PreferenceScreen.class);
-            performClick.invoke(preference, fragment.getPreferenceScreen());
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } catch (IllegalArgumentException e) {
-            throw new RuntimeException(e);
-        } catch (NoSuchMethodException e) {
-            throw new RuntimeException(e);
-        } catch (InvocationTargetException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     /**
      * Change search engine and make sure it works correctly.
      */
@@ -118,8 +97,7 @@ public class PreferencesTest {
 
         // Set the second search engine as the default using TemplateUrlService.
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            SearchEnginePreference pref =
-                    (SearchEnginePreference) prefActivity.getMainFragmentCompat();
+            SearchEnginePreference pref = (SearchEnginePreference) prefActivity.getMainFragment();
             pref.setValueForTesting("1");
 
             // Ensure that the second search engine in the list is selected.
@@ -139,7 +117,7 @@ public class PreferencesTest {
             // first and ensure that location permission is NOT granted.
             String keyword3 = pref.getKeywordFromIndexForTesting(3);
             String url = templateUrlService.getSearchEngineUrlFromTemplateUrl(keyword3);
-            WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
+            WebsitePreferenceBridgeJni.get().setGeolocationSettingForOrigin(
                     url, url, ContentSettingValues.BLOCK, false);
             keyword3 = pref.setValueForTesting("3");
             Assert.assertEquals(keyword3,
@@ -156,11 +134,11 @@ public class PreferencesTest {
             // setting to allow for search engine 3 before changing to search engine 2.
             // Otherwise the block setting will cause the content setting for search engine 2
             // to be reset when we switch to it.
-            WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
+            WebsitePreferenceBridgeJni.get().setGeolocationSettingForOrigin(
                     url, url, ContentSettingValues.ALLOW, false);
             keyword2 = pref.getKeywordFromIndexForTesting(2);
             url = templateUrlService.getSearchEngineUrlFromTemplateUrl(keyword2);
-            WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
+            WebsitePreferenceBridgeJni.get().setGeolocationSettingForOrigin(
                     url, url, ContentSettingValues.ALLOW, false);
             keyword2 = pref.setValueForTesting("2");
             Assert.assertEquals(keyword2,
@@ -182,18 +160,14 @@ public class PreferencesTest {
     @Policies.Add({ @Policies.Item(key = "DefaultSearchProviderEnabled", string = "false") })
     public void testSearchEnginePreference_DisabledIfNoDefaultSearchEngine() throws Exception {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            try {
-                ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
-                        .handleSynchronousStartup();
-            } catch (ProcessInitException e) {
-                Assert.fail("Unable to initialize process: " + e);
-            }
+            ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
+                    .handleSynchronousStartup();
         });
 
         ensureTemplateUrlServiceLoaded();
         CriteriaHelper.pollUiThread(Criteria.equals(true, new Callable<Boolean>() {
             @Override
-            public Boolean call() throws Exception {
+            public Boolean call() {
                 return TemplateUrlServiceFactory.get().isDefaultSearchManaged();
             }
         }));
@@ -204,12 +178,12 @@ public class PreferencesTest {
         final MainPreferences mainPreferences =
                 ActivityUtils.waitForFragmentToAttach(preferenceActivity, MainPreferences.class);
 
-        final Preference searchEnginePref =
+        final android.support.v7.preference.Preference searchEnginePref =
                 waitForPreference(mainPreferences, MainPreferences.PREF_SEARCH_ENGINE);
 
         CriteriaHelper.pollUiThread(Criteria.equals(null, new Callable<Object>() {
             @Override
-            public Object call() throws Exception {
+            public Object call() {
                 return searchEnginePref.getFragment();
             }
         }));
@@ -241,15 +215,13 @@ public class PreferencesTest {
 
         // Set the first search engine as the default using TemplateUrlService.
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            SearchEnginePreference pref =
-                    (SearchEnginePreference) prefActivity.getMainFragmentCompat();
+            SearchEnginePreference pref = (SearchEnginePreference) prefActivity.getMainFragment();
             pref.setValueForTesting("0");
         });
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             // Ensure that the first search engine in the list is selected.
-            SearchEnginePreference pref =
-                    (SearchEnginePreference) prefActivity.getMainFragmentCompat();
+            SearchEnginePreference pref = (SearchEnginePreference) prefActivity.getMainFragment();
             Assert.assertNotNull(pref);
             Assert.assertEquals("0", pref.getValueForTesting());
 
@@ -319,11 +291,11 @@ public class PreferencesTest {
         String accessibilityPrefClassname = AccessibilityPreferences.class.getName();
         AccessibilityPreferences accessibilityPref = (AccessibilityPreferences) startPreferences(
                 InstrumentationRegistry.getInstrumentation(), accessibilityPrefClassname)
-                                                             .getMainFragmentCompat();
+                                                             .getMainFragment();
         SeekBarPreference textScalePref = (SeekBarPreference) accessibilityPref.findPreference(
                 AccessibilityPreferences.PREF_TEXT_SCALE);
-        ChromeBaseCheckBoxPreferenceCompat forceEnableZoomPref =
-                (ChromeBaseCheckBoxPreferenceCompat) accessibilityPref.findPreference(
+        ChromeBaseCheckBoxPreference forceEnableZoomPref =
+                (ChromeBaseCheckBoxPreference) accessibilityPref.findPreference(
                         AccessibilityPreferences.PREF_FORCE_ENABLE_ZOOM);
         NumberFormat percentFormat = NumberFormat.getPercentInstance();
         // Arbitrary value 0.4f to be larger and smaller than threshold.
@@ -365,11 +337,11 @@ public class PreferencesTest {
     @Test
     @SmallTest
     @Feature({"Accessibility"})
-    public void testCaptionPreferences() throws Exception {
+    public void testCaptionPreferences() {
         String accessibilityPrefClassname = AccessibilityPreferences.class.getName();
         AccessibilityPreferences accessibilityPref = (AccessibilityPreferences) startPreferences(
                 InstrumentationRegistry.getInstrumentation(), accessibilityPrefClassname)
-                                                             .getMainFragmentCompat();
+                                                             .getMainFragment();
         android.support.v7.preference.Preference captionsPref =
                 accessibilityPref.findPreference(AccessibilityPreferences.PREF_CAPTIONS);
         Assert.assertNotNull(captionsPref);
@@ -388,19 +360,15 @@ public class PreferencesTest {
     @Test
     @SmallTest
     @Policies.Add({ @Policies.Item(key = "PasswordManagerEnabled", string = "false") })
-    public void testSavePasswordsPreferences_ManagedAndDisabled() throws ExecutionException {
-        TestThreadUtils.runOnUiThreadBlocking(() -> {
-            try {
-                ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
-            } catch (ProcessInitException e) {
-                Assert.fail("Unable to initialize process: " + e);
-            }
-        });
+    public void testSavePasswordsPreferences_ManagedAndDisabled() {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> { ChromeBrowserInitializer.getInstance().handleSynchronousStartup(); });
 
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return PrefServiceBridge.getInstance().isRememberPasswordsManaged();
+                return PrefServiceBridge.getInstance().isManagedPreference(
+                        Pref.REMEMBER_PASSWORDS_ENABLED);
             }
         });
 
@@ -428,13 +396,14 @@ public class PreferencesTest {
     }
 
     private static void userSetForceEnableZoom(final AccessibilityPreferences accessibilityPref,
-            final ChromeBaseCheckBoxPreferenceCompat forceEnableZoomPref, final boolean enabled) {
+            final ChromeBaseCheckBoxPreference forceEnableZoomPref, final boolean enabled) {
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
                 () -> { accessibilityPref.onPreferenceChange(forceEnableZoomPref, enabled); });
     }
 
-    private static Preference waitForPreference(final PreferenceFragment prefFragment,
-            final String preferenceKey) throws ExecutionException {
+    private static android.support.v7.preference.Preference waitForPreference(
+            final PreferenceFragmentCompat prefFragment, final String preferenceKey)
+            throws ExecutionException {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
@@ -442,11 +411,12 @@ public class PreferencesTest {
             }
         });
 
-        return TestThreadUtils.runOnUiThreadBlocking(new Callable<Preference>() {
-            @Override
-            public Preference call() throws Exception {
-                return prefFragment.findPreference(preferenceKey);
-            }
-        });
+        return TestThreadUtils.runOnUiThreadBlocking(
+                new Callable<android.support.v7.preference.Preference>() {
+                    @Override
+                    public android.support.v7.preference.Preference call() {
+                        return prefFragment.findPreference(preferenceKey);
+                    }
+                });
     }
 }

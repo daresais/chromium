@@ -10,12 +10,6 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Process;
-import android.support.customtabs.CustomTabsCallback;
-import android.support.customtabs.CustomTabsClient;
-import android.support.customtabs.CustomTabsIntent;
-import android.support.customtabs.CustomTabsServiceConnection;
-import android.support.customtabs.CustomTabsSession;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.support.test.InstrumentationRegistry;
 
 import org.junit.Assert;
@@ -30,6 +24,13 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsClient;
+import androidx.browser.customtabs.CustomTabsIntent;
+import androidx.browser.customtabs.CustomTabsServiceConnection;
+import androidx.browser.customtabs.CustomTabsSession;
+import androidx.browser.customtabs.CustomTabsSessionToken;
 
 /**
  * Utility class that contains convenience calls related with custom tabs testing.
@@ -76,7 +77,7 @@ public class CustomTabsTestUtils {
     }
 
     public static ClientAndSession bindWithCallback(final CustomTabsCallback callback)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         final AtomicReference<CustomTabsSession> sessionReference = new AtomicReference<>();
         final AtomicReference<CustomTabsClient> clientReference = new AtomicReference<>();
         final CallbackHelper waitForConnection = new CallbackHelper();
@@ -99,8 +100,7 @@ public class CustomTabsTestUtils {
     }
 
     /** Calls warmup() and waits for all the tasks to complete. Fails the test otherwise. */
-    public static CustomTabsConnection warmUpAndWait()
-            throws InterruptedException, TimeoutException {
+    public static CustomTabsConnection warmUpAndWait() throws TimeoutException {
         CustomTabsConnection connection = setUpConnection();
         final CallbackHelper startupCallbackHelper = new CallbackHelper();
         CustomTabsSession session = bindWithCallback(new CustomTabsCallback() {
@@ -127,7 +127,7 @@ public class CustomTabsTestUtils {
     }
 
     public static void setHideCctTopBarOnModuleManagedUrls(Intent intent, boolean hideCctTopBar)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         CustomTabsConnection connection = warmUpAndWait();
         CustomTabsSessionToken token = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
         connection.newSession(token);

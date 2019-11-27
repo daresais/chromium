@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/allocator/partition_allocator/partition_alloc.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -208,12 +209,7 @@ ParkableStringImpl::~ParkableStringImpl() {
   if (!may_be_parked())
     return;
 
-#if DCHECK_IS_ON()
-  {
-    MutexLocker locker(mutex_);
-    DCHECK_EQ(0, lock_depth_);
-  }
-#endif
+  DCHECK_EQ(0, lock_depth_for_testing());
   AsanUnpoisonString(string_);
   DCHECK(state_ == State::kParked || state_ == State::kUnparked);
 
@@ -361,7 +357,7 @@ ParkableStringImpl::AgeOrParkResult ParkableStringImpl::MaybeAgeOrParkString() {
   DCHECK(!is_parked());
 
   Status status = CurrentStatus();
-  if (is_young()) {
+  if (is_young_) {
     if (status == Status::kUnreferencedExternally)
       is_young_ = false;
   } else {
@@ -402,7 +398,7 @@ bool ParkableStringImpl::Park(ParkingMode mode) {
 void ParkableStringImpl::ParkInternal(ParkingMode mode) {
   mutex_.AssertAcquired();
   DCHECK_EQ(State::kUnparked, state_);
-  DCHECK(!is_young());
+  DCHECK(!is_young_);
   DCHECK(CanParkNow());
 
   // Parking can proceed synchronously.
@@ -448,7 +444,7 @@ ParkableStringImpl::Status ParkableStringImpl::CurrentStatus() const {
 }
 
 bool ParkableStringImpl::CanParkNow() const {
-  return CurrentStatus() == Status::kUnreferencedExternally && !is_young();
+  return CurrentStatus() == Status::kUnreferencedExternally && !is_young_;
 }
 
 void ParkableStringImpl::Unpark() {

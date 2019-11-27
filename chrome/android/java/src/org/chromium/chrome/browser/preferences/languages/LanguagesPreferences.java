@@ -4,13 +4,15 @@
 
 package org.chromium.chrome.browser.preferences.languages;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceFragmentCompat;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
@@ -36,16 +38,17 @@ public class LanguagesPreferences
                 (LanguageListPreference) findPreference(PREFERRED_LANGUAGES_KEY);
         mLanguageListPref.registerActivityLauncher(this);
 
-        ChromeSwitchPreferenceCompat translateSwitch =
-                (ChromeSwitchPreferenceCompat) findPreference(TRANSLATE_SWITCH_KEY);
-        boolean isTranslateEnabled = PrefServiceBridge.getInstance().isTranslateEnabled();
+        ChromeSwitchPreference translateSwitch =
+                (ChromeSwitchPreference) findPreference(TRANSLATE_SWITCH_KEY);
+        boolean isTranslateEnabled =
+                PrefServiceBridge.getInstance().getBoolean(Pref.OFFER_TRANSLATE_ENABLED);
         translateSwitch.setChecked(isTranslateEnabled);
 
         translateSwitch.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
             @Override
             public boolean onPreferenceChange(Preference preference, Object newValue) {
                 boolean enabled = (boolean) newValue;
-                PrefServiceBridge.getInstance().setTranslateEnabled(enabled);
+                PrefServiceBridge.getInstance().setBoolean(Pref.OFFER_TRANSLATE_ENABLED, enabled);
                 LanguagesManager.recordAction(enabled ? LanguagesManager.LanguageSettingsActionType
                                                                 .ENABLE_TRANSLATE_GLOBALLY
                                                       : LanguagesManager.LanguageSettingsActionType
@@ -53,8 +56,9 @@ public class LanguagesPreferences
                 return true;
             }
         });
-        translateSwitch.setManagedPreferenceDelegate(
-                preference -> PrefServiceBridge.getInstance().isTranslateManaged());
+        translateSwitch.setManagedPreferenceDelegate(preference
+                -> PrefServiceBridge.getInstance().isManagedPreference(
+                        Pref.OFFER_TRANSLATE_ENABLED));
         LanguagesManager.recordImpression(LanguagesManager.LanguageSettingsPageType.PAGE_MAIN);
     }
 
@@ -67,7 +71,7 @@ public class LanguagesPreferences
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_ADD_LANGUAGES && resultCode == getActivity().RESULT_OK) {
+        if (requestCode == REQUEST_CODE_ADD_LANGUAGES && resultCode == Activity.RESULT_OK) {
             String code = data.getStringExtra(AddLanguageFragment.INTENT_NEW_ACCEPT_LANGUAGE);
             LanguagesManager.getInstance().addToAcceptLanguages(code);
             LanguagesManager.recordAction(

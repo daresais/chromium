@@ -39,6 +39,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/current_module.h"
 #include "base/win/embedded_i18n/language_selector.h"
+#include "build/branding_buildflags.h"
 #include "chrome/common/chrome_version.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/gaia_resources.h"
@@ -50,6 +51,9 @@ namespace credential_provider {
 const wchar_t kDefaultProfilePictureFileExtension[] = L".jpg";
 
 namespace {
+
+// Minimum supported version of Chrome for GCPW.
+constexpr char kMinimumSupportedChromeVersionStr[] = "77.0.3865.65";
 
 constexpr char kSentinelFilename[] = "gcpw_startup.sentinel";
 constexpr base::FilePath::CharType kCredentialProviderFolder[] =
@@ -771,7 +775,7 @@ std::string GetDictStringUTF8(const std::unique_ptr<base::Value>& dict,
 }
 
 base::FilePath::StringType GetInstallParentDirectoryName() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return FILE_PATH_LITERAL("Google");
 #else
   return FILE_PATH_LITERAL("Chromium");
@@ -788,6 +792,10 @@ base::string16 GetWindowsVersion() {
     return release_id;
 
   return L"Unknown";
+}
+
+base::Version GetMinimumSupportedChromeVersion() {
+  return base::Version(kMinimumSupportedChromeVersionStr);
 }
 
 FakesForTesting::FakesForTesting() {}

@@ -17,30 +17,20 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "printing/backend/cups_ipp_advanced_caps.h"
+#include "printing/backend/cups_ipp_constants.h"
 #include "printing/backend/cups_printer.h"
 #include "printing/backend/print_backend_consts.h"
 #include "printing/units.h"
 
+#if defined(OS_CHROMEOS)
+#include "printing/printing_features_chromeos.h"
+#endif  // defined(OS_CHROMEOS)
+
 namespace printing {
-
-// property names
-constexpr char kIppCollate[] = "sheet-collate";  // RFC 3381
-constexpr char kIppCopies[] = CUPS_COPIES;
-constexpr char kIppColor[] = CUPS_PRINT_COLOR_MODE;
-constexpr char kIppMedia[] = CUPS_MEDIA;
-constexpr char kIppDuplex[] = CUPS_SIDES;
-constexpr char kIppResolution[] = "printer-resolution";            // RFC 2911
-constexpr char kIppRequestingUserName[] = "requesting-user-name";  // RFC 8011
-constexpr char kIppPin[] = "job-password";                       // PWG 5100.11
-constexpr char kIppPinEncryption[] = "job-password-encryption";  // PWG 5100.11
-
-// collation values
-constexpr char kCollated[] = "collated";
-constexpr char kUncollated[] = "uncollated";
 
 #if defined(OS_CHROMEOS)
 constexpr int kPinMinimumLength = 4;
-constexpr char kPinEncryptionNone[] = "none";
 #endif  // defined(OS_CHROMEOS)
 
 namespace {
@@ -139,13 +129,14 @@ gfx::Size DimensionsToMicrons(base::StringPiece value) {
 
 // We read the media name expressed by |value| and return a Paper
 // with the vendor_id and size_um members populated.
-// We don't handle l10n here, so we don't populate the display_name
-// member, deferring that to the caller.
+// We don't handle l10n here. We do populate the display_name member
+// with the prettified vendor ID, but fully expect the caller to clobber
+// this if a better localization exists.
 PrinterSemanticCapsAndDefaults::Paper ParsePaper(base::StringPiece value) {
   // <name>_<width>x<height>{in,mm}
   // e.g. na_letter_8.5x11in, iso_a4_210x297mm
 
-  const std::vector<base::StringPiece> pieces = base::SplitStringPiece(
+  std::vector<base::StringPiece> pieces = base::SplitStringPiece(
       value, "_", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   // we expect at least a display string and a dimension string
   if (pieces.size() < 2)
@@ -156,6 +147,9 @@ PrinterSemanticCapsAndDefaults::Paper ParsePaper(base::StringPiece value) {
   PrinterSemanticCapsAndDefaults::Paper paper;
   paper.vendor_id = value.as_string();
   paper.size_um = DimensionsToMicrons(dimensions);
+  // Omits the final token describing the media dimensions.
+  pieces.pop_back();
+  paper.display_name = base::JoinString(pieces, " ");
 
   return paper;
 }
@@ -294,8 +288,15 @@ PrinterSemanticCapsAndDefaults::Papers SupportedPapers(
       printer.GetSupportedOptionValueStrings(kIppMedia);
   PrinterSemanticCapsAndDefaults::Papers parsed_papers;
   parsed_papers.reserve(papers.size());
-  for (base::StringPiece paper : papers)
-    parsed_papers.push_back(ParsePaper(paper));
+  for (base::StringPiece paper : papers) {
+    PrinterSemanticCapsAndDefaults::Paper parsed = ParsePaper(paper);
+    // If a paper fails to parse reasonably, we should avoid propagating
+    // it - e.g. CUPS is known to give out empty vendor IDs at times:
+    // https://crbug.com/920295#c23
+    if (!parsed.display_name.empty()) {
+      parsed_papers.push_back(parsed);
+    }
+  }
 
   return parsed_papers;
 }
@@ -353,6 +354,8 @@ void CapsAndDefaultsFromPrinter(const CupsOptionProvider& printer,
 
 #if defined(OS_CHROMEOS)
   printer_info->pin_supported = PinSupported(printer);
+  if (base::FeatureList::IsEnabled(printing::kAdvancedPpdAttributes))
+    ExtractAdvancedCapabilities(printer, printer_info);
 #endif  // defined(OS_CHROMEOS)
 
   ExtractCopies(printer, printer_info);

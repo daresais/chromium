@@ -18,7 +18,7 @@
 #include "third_party/blink/renderer/core/script/document_write_intervention.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/allowed_by_nosniff.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata.h"
@@ -347,7 +347,8 @@ ClassicScript* ClassicPendingScript::GetSource(const KURL& document_url) const {
   // If the MIME check fails, which is considered as load failure.
   if (!AllowedByNosniff::MimeTypeAsScript(
           fetcher->GetUseCounter(), &fetcher->GetConsoleLogger(),
-          resource->GetResponse(), AllowedByNosniff::MimeTypeCheck::kLax)) {
+          resource->GetResponse(),
+          AllowedByNosniff::MimeTypeCheck::kLaxForElement)) {
     return nullptr;
   }
 

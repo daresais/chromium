@@ -8,14 +8,17 @@
 #import <map>
 #import <string>
 
+#include "base/ios/ios_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/app/main_controller.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
+#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view_constants.h"
 #import "ios/chrome/browser/ui/authentication/signin_earl_grey_ui.h"
 #import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
 #import "ios/chrome/browser/ui/history/history_ui_constants.h"
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_constants.h"
+#import "ios/chrome/browser/ui/table_view/feature_flags.h"
 #import "ios/chrome/browser/ui/table_view/table_view_model.h"
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller_constants.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
@@ -25,6 +28,7 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/public/provider/chrome/browser/signin/fake_chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
@@ -41,13 +45,6 @@ const char kURLOfTestPage[] = "http://testPage";
 const char kHTMLOfTestPage[] =
     "<head><title>TestPageTitle</title></head><body>hello</body>";
 NSString* const kTitleOfTestPage = @"TestPageTitle";
-
-// Closes all tabs in the normal TabModel.
-void CloseAllNormalTabs() {
-  TabModel* tabModel = chrome_test_util::GetMainController()
-                           .interfaceProvider.mainInterface.tabModel;
-  [tabModel closeAllTabs];
-}
 
 // Makes sure at least one tab is opened and opens the recent tab panel.
 void OpenRecentTabsPanel() {
@@ -135,34 +132,6 @@ id<GREYMatcher> TitleOfTestPage() {
                             testPageURL.GetContent())];
 }
 
-// Tests restoring a tab from incognito when the normal WebStateList is empty.
-- (void)testRestoreTabFromIncognitoWithNoNormalTabsOpen {
-  const GURL testPageURL = web::test::HttpServer::MakeUrl(kURLOfTestPage);
-
-  // Open the test page in a new tab.
-  [ChromeEarlGrey loadURL:testPageURL];
-  [ChromeEarlGrey waitForWebStateContainingText:"hello"];
-
-  // Open a new incognito tab, then close the non-OTR tab.
-  [ChromeEarlGrey openNewIncognitoTab];
-  CloseAllNormalTabs();
-
-  // Open the Recent Tabs panel and check that the test page is present.
-  OpenRecentTabsPanel();
-  [[EarlGrey selectElementWithMatcher:TitleOfTestPage()]
-      assertWithMatcher:grey_notNil()];
-
-  // Tap on the entry for the test page in the Recent Tabs panel and check that
-  // a tab containing the test page was opened in the main WebStateList.
-  GREYAssertTrue([ChromeEarlGrey mainTabCount] == 0,
-                 @"Unexpected tabs in the main WebStateList");
-  [[EarlGrey selectElementWithMatcher:TitleOfTestPage()]
-      performAction:grey_tap()];
-  [ChromeEarlGrey waitForMainTabCount:1];
-  GREYAssertTrue([ChromeEarlGrey incognitoTabCount] == 1,
-                 @"Unexpected tab added to the incognito WebStateList");
-}
-
 // Tests that tapping "Show Full History" open the history.
 - (void)testOpenHistory {
   OpenRecentTabsPanel();
@@ -199,7 +168,7 @@ id<GREYMatcher> TitleOfTestPage() {
   // Sign-in promo should be visible with cold state.
   [SigninEarlGreyUI checkSigninPromoVisibleWithMode:SigninPromoViewModeColdState
                                         closeButton:NO];
-  ChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
+  FakeChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
   ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()->AddIdentity(
       identity);
   // Sign-in promo should be visible with warm state.
@@ -227,7 +196,7 @@ id<GREYMatcher> TitleOfTestPage() {
   [SigninEarlGreyUI checkSigninPromoNotVisible];
 
   // Add an account.
-  ChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
+  FakeChromeIdentity* identity = [SigninEarlGreyUtils fakeIdentity1];
   ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()->AddIdentity(
       identity);
 
@@ -239,6 +208,37 @@ id<GREYMatcher> TitleOfTestPage() {
   [self closeRecentTabs];
   ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()
       ->RemoveIdentity(identity);
+}
+
+// Tests that the VC can be dismissed by swiping down.
+- (void)testSwipeDownDismiss {
+  if (!base::ios::IsRunningOnOrLater(13, 0, 0)) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on iOS 12 and lower.");
+  }
+  if (!IsCollectionsCardPresentationStyleEnabled()) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on when feature flag is off.");
+  }
+  OpenRecentTabsPanel();
+
+  // Check that the TableView is presented.
+  [[EarlGrey selectElementWithMatcher:
+                 grey_accessibilityID(
+                     kRecentTabsTableViewControllerAccessibilityIdentifier)]
+      assertWithMatcher:grey_notNil()];
+
+  // Swipe TableView down.
+  [[EarlGrey selectElementWithMatcher:
+                 grey_accessibilityID(
+                     kRecentTabsTableViewControllerAccessibilityIdentifier)]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+
+  // Check that the TableView has been dismissed.
+  [[EarlGrey selectElementWithMatcher:
+                 grey_accessibilityID(
+                     kRecentTabsTableViewControllerAccessibilityIdentifier)]
+      assertWithMatcher:grey_nil()];
+
+  [ChromeEarlGrey closeCurrentTab];
 }
 
 @end

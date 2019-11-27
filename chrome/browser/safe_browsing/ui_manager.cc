@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread.h"
@@ -18,14 +17,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/safe_browsing/safe_browsing_subresource_tab_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/features.h"
 #include "components/safe_browsing/ping_manager.h"
+#include "components/security_interstitials/content/security_interstitial_tab_helper.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -104,10 +104,6 @@ void SafeBrowsingUIManager::CreateAndSendHitReport(
 void SafeBrowsingUIManager::ShowBlockingPageForResource(
     const UnsafeResource& resource) {
   SafeBrowsingBlockingPage::ShowBlockingPage(this, resource);
-}
-
-bool SafeBrowsingUIManager::SafeBrowsingInterstitialsAreCommittedNavigations() {
-  return base::FeatureList::IsEnabled(kCommittedSBInterstitials);
 }
 
 // static
@@ -211,6 +207,22 @@ void SafeBrowsingUIManager::OnBlockingPageDone(
 GURL SafeBrowsingUIManager::GetMainFrameWhitelistUrlForResourceForTesting(
     const security_interstitials::UnsafeResource& resource) {
   return GetMainFrameWhitelistUrlForResource(resource);
+}
+
+BaseBlockingPage* SafeBrowsingUIManager::CreateBlockingPageForSubresource(
+    content::WebContents* contents,
+    const GURL& blocked_url,
+    const UnsafeResource& unsafe_resource) {
+  SafeBrowsingSubresourceTabHelper::CreateForWebContents(contents);
+  // This blocking page is only used to retrieve the HTML for the page, so we
+  // set |should_trigger_reporting| to false. Reports for subresources are
+  // triggered when creating the blocking page that gets associated in
+  // SafeBrowsingSubresourceTabHelper.
+  SafeBrowsingBlockingPage* blocking_page =
+      SafeBrowsingBlockingPage::CreateBlockingPage(
+          this, contents, blocked_url, unsafe_resource,
+          /*should_trigger_reporting=*/false);
+  return blocking_page;
 }
 
 }  // namespace safe_browsing

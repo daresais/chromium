@@ -5,6 +5,7 @@
 #include "ui/accessibility/ax_role_properties.h"
 
 #include "build/build_config.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 
 namespace ui {
 
@@ -137,12 +138,34 @@ bool IsControl(const ax::mojom::Role role) {
 
 bool IsDocument(const ax::mojom::Role role) {
   switch (role) {
+    case ax::mojom::Role::kDocument:
     case ax::mojom::Role::kRootWebArea:
     case ax::mojom::Role::kWebArea:
       return true;
     default:
       return false;
   }
+}
+
+bool IsDialog(const ax::mojom::Role role) {
+  switch (role) {
+    case ax::mojom::Role::kAlertDialog:
+    case ax::mojom::Role::kDialog:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsPlainTextField(const AXNodeData& data) {
+  // We need to check both the role and editable state, because some ARIA text
+  // fields may in fact not be editable, whilst some editable fields might not
+  // have the role.
+  return !data.HasState(ax::mojom::State::kRichlyEditable) &&
+         (data.role == ax::mojom::Role::kTextField ||
+          data.role == ax::mojom::Role::kTextFieldWithComboBox ||
+          data.role == ax::mojom::Role::kSearchBox ||
+          data.GetBoolAttribute(ax::mojom::BoolAttribute::kEditableRoot));
 }
 
 bool IsHeading(const ax::mojom::Role role) {
@@ -167,6 +190,13 @@ bool IsHeadingOrTableHeader(const ax::mojom::Role role) {
   }
 }
 
+bool IsIgnored(const AXNodeData& data) {
+  if (data.HasState(ax::mojom::State::kIgnored) ||
+      data.role == ax::mojom::Role::kIgnored)
+    return true;
+  return false;
+}
+
 bool IsImage(const ax::mojom::Role role) {
   switch (role) {
     case ax::mojom::Role::kCanvas:
@@ -175,11 +205,14 @@ bool IsImage(const ax::mojom::Role role) {
     case ax::mojom::Role::kImage:
     case ax::mojom::Role::kImageMap:
     case ax::mojom::Role::kSvgRoot:
-    case ax::mojom::Role::kVideo:
       return true;
     default:
       return false;
   }
+}
+
+bool IsImageOrVideo(const ax::mojom::Role role) {
+  return IsImage(role) || role == ax::mojom::Role::kVideo;
 }
 
 bool IsInvokable(const AXNodeData& data) {

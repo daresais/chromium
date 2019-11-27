@@ -7,12 +7,12 @@
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/performance_manager/public/graph/graph_operations.h"
 #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
 #include "chrome/browser/resource_coordinator/tab_load_tracker.h"
 #include "chrome/browser/resource_coordinator/tab_manager_stats_collector.h"
 #include "chrome/browser/resource_coordinator/tab_manager_web_contents_data.h"
 #include "chrome/browser/resource_coordinator/utils.h"
+#include "components/performance_manager/public/graph/graph_operations.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -43,10 +43,10 @@ void TabManager::ResourceCoordinatorSignalObserver::OnPageAlmostIdleChanged(
   if (!page_node->IsPageAlmostIdle())
     return;
   // Forward the notification over to the UI thread.
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(&OnPageAlmostIdleOnUi, tab_manager_,
-                                          page_node->GetContentProxy(),
-                                          page_node->GetNavigationID()));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&OnPageAlmostIdleOnUi, tab_manager_,
+                                page_node->GetContentsProxy(),
+                                page_node->GetNavigationID()));
 }
 
 void TabManager::ResourceCoordinatorSignalObserver::
@@ -60,11 +60,10 @@ void TabManager::ResourceCoordinatorSignalObserver::
           process_node);
   for (auto* page_node : associated_page_nodes) {
     // Forward the notification over to the UI thread.
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
-        base::BindOnce(&OnExpectedTaskQueueingDurationSampleOnUi, tab_manager_,
-                       page_node->GetContentProxy(),
-                       page_node->GetNavigationID(), duration));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(&OnExpectedTaskQueueingDurationSampleOnUi,
+                                  tab_manager_, page_node->GetContentsProxy(),
+                                  page_node->GetNavigationID(), duration));
   }
 }
 

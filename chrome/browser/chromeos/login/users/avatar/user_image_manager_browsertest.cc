@@ -210,7 +210,7 @@ class UserImageManagerTest : public LoginManagerTest,
     fake_gaia_.fake_gaia()->IssueOAuthToken(kRandomTokenStrForTesting,
                                             token_info);
     fake_gaia_.fake_gaia()->MapEmailToGaiaId(
-        kTestUserEmail1, identity::GetTestGaiaIdForEmail(kTestUserEmail1));
+        kTestUserEmail1, signin::GetTestGaiaIdForEmail(kTestUserEmail1));
   }
 
   void TearDownOnMainThread() override {
@@ -273,8 +273,8 @@ class UserImageManagerTest : public LoginManagerTest,
 
   void UpdatePrimaryAccountInfo(Profile* profile) {
     auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-    identity::SetRefreshTokenForPrimaryAccount(identity_manager,
-                                               kRandomTokenStrForTesting);
+    signin::SetRefreshTokenForPrimaryAccount(identity_manager,
+                                             kRandomTokenStrForTesting);
     CoreAccountInfo core_info = identity_manager->GetPrimaryAccountInfo();
     AccountInfo account_info;
     account_info.email = core_info.email;
@@ -289,7 +289,7 @@ class UserImageManagerTest : public LoginManagerTest,
     account_info.picture_url =
         embedded_test_server()->GetURL("/avatar.jpg").spec();
     account_info.is_child_account = false;
-    identity::UpdateAccountInfoForAccount(identity_manager, account_info);
+    signin::UpdateAccountInfoForAccount(identity_manager, account_info);
   }
 
   // Completes the download of the currently logged-in user's profile image.
@@ -333,13 +333,13 @@ class UserImageManagerTest : public LoginManagerTest,
 
   const AccountId test_account_id1_ = AccountId::FromUserEmailGaiaId(
       kTestUserEmail1,
-      identity::GetTestGaiaIdForEmail(kTestUserEmail1));
+      signin::GetTestGaiaIdForEmail(kTestUserEmail1));
   const AccountId test_account_id2_ = AccountId::FromUserEmailGaiaId(
       kTestUserEmail2,
-      identity::GetTestGaiaIdForEmail(kTestUserEmail2));
+      signin::GetTestGaiaIdForEmail(kTestUserEmail2));
   const AccountId enterprise_account_id_ = AccountId::FromUserEmailGaiaId(
       FakeGaiaMixin::kEnterpriseUser1,
-      identity::GetTestGaiaIdForEmail(FakeGaiaMixin::kEnterpriseUser1));
+      signin::GetTestGaiaIdForEmail(FakeGaiaMixin::kEnterpriseUser1));
   const cryptohome::AccountIdentifier cryptohome_id_ =
       cryptohome::CreateAccountIdentifierFromAccountId(enterprise_account_id_);
 
@@ -527,7 +527,15 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest,
 
 // Verifies that SaveUserImageFromProfileImage() correctly downloads, sets and
 // persists the chosen user image.
-IN_PROC_BROWSER_TEST_F(UserImageManagerTest, SaveUserImageFromProfileImage) {
+// TODO(crbug.com/998369): Flaky on Linux TSAN and ASAN.
+#if defined(OS_CHROMEOS)
+#define MAYBE_SaveUserImageFromProfileImage \
+  DISABLED_SaveUserImageFromProfileImage
+#else
+#define MAYBE_SaveUserImageFromProfileImage SaveUserImageFromProfileImage
+#endif
+IN_PROC_BROWSER_TEST_F(UserImageManagerTest,
+                       MAYBE_SaveUserImageFromProfileImage) {
   const user_manager::User* user =
       user_manager::UserManager::Get()->FindUser(test_account_id1_);
   ASSERT_TRUE(user);
@@ -702,8 +710,7 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerPolicyTest, PRE_SetAndClear) {
 // Verifies that the user image can be set through policy. Also verifies that
 // after the policy has been cleared, the user is able to choose a different
 // image.
-// http://crbug.com/396352
-IN_PROC_BROWSER_TEST_F(UserImageManagerPolicyTest, DISABLED_SetAndClear) {
+IN_PROC_BROWSER_TEST_F(UserImageManagerPolicyTest, SetAndClear) {
   const user_manager::User* user =
       user_manager::UserManager::Get()->FindUser(enterprise_account_id_);
   ASSERT_TRUE(user);

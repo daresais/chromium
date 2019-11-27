@@ -22,7 +22,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -76,7 +76,6 @@ class TestWebApkInstaller : public WebApkInstaller {
       : WebApkInstaller(browser_context), test_space_status_(status) {}
 
   void InstallOrUpdateWebApk(const std::string& package_name,
-                             int version,
                              const std::string& token) override {
     PostTaskToRunSuccessCallback();
   }
@@ -114,7 +113,7 @@ class WebApkInstallerRunner {
 
     // WebApkInstaller owns itself.
     WebApkInstaller::InstallAsyncForTesting(
-        installer.release(), info, SkBitmap(), SkBitmap(),
+        installer.release(), info, SkBitmap(), false, SkBitmap(),
         base::BindOnce(&WebApkInstallerRunner::OnCompleted,
                        base::Unretained(this)));
 
@@ -164,8 +163,8 @@ class UpdateRequestStorer {
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
     WebApkInstaller::StoreUpdateRequestToFile(
-        update_request_path, ShortcutInfo((GURL())), SkBitmap(), SkBitmap(), "",
-        "", std::map<std::string, std::string>(), false,
+        update_request_path, ShortcutInfo((GURL())), SkBitmap(), false,
+        SkBitmap(), "", "", std::map<std::string, std::string>(), false,
         WebApkUpdateReason::PRIMARY_ICON_HASH_DIFFERS,
         base::BindOnce(&UpdateRequestStorer::OnComplete,
                        base::Unretained(this)));
@@ -216,8 +215,9 @@ class BuildProtoRunner {
     SkBitmap primary_icon(gfx::test::CreateBitmap(144, 144));
     SkBitmap badge_icon(gfx::test::CreateBitmap(72, 72));
     WebApkInstaller::BuildProto(
-        info, primary_icon, badge_icon, "" /* package_name */, "" /* version */,
-        icon_url_to_murmur2_hash, is_manifest_stale,
+        info, primary_icon, false /* is_primary_icon_maskable */, badge_icon,
+        "" /* package_name */, "" /* version */, icon_url_to_murmur2_hash,
+        is_manifest_stale,
         base::BindOnce(&BuildProtoRunner::OnBuiltWebApkProto,
                        base::Unretained(this)));
 
@@ -269,7 +269,7 @@ class WebApkInstallerTest : public ::testing::Test {
       WebApkResponseBuilder;
 
   WebApkInstallerTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
   ~WebApkInstallerTest() override {}
 
   void SetUp() override {
@@ -337,7 +337,7 @@ class WebApkInstallerTest : public ::testing::Test {
   }
 
   std::unique_ptr<TestingProfile> profile_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   net::EmbeddedTestServer test_server_;
 
   // Builds response to the WebAPK creation request.

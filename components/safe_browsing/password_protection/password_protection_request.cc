@@ -49,6 +49,10 @@ namespace {
 // the size of the report. UMA suggests 99.9% will have < 200 domains.
 const int kMaxReusedDomains = 200;
 
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+// The maximum time to wait for DOM features to be collected, in milliseconds.
+const int kDomFeatureTimeoutMs = 3000;
+
 // Parameters chosen to ensure privacy is preserved by visual features.
 const int kMinWidthForVisualFeatures = 576;
 const int kMinHeightForVisualFeatures = 576;
@@ -62,6 +66,7 @@ std::unique_ptr<VisualFeatures> ExtractVisualFeatures(
   visual_utils::GetBlurredImage(screenshot, features->mutable_image());
   return features;
 }
+#endif
 
 }  // namespace
 
@@ -72,19 +77,18 @@ PasswordProtectionRequest::PasswordProtectionRequest(
     const GURL& password_form_frame_url,
     const std::string& username,
     PasswordType password_type,
-    bool is_account_syncing,
     const std::vector<std::string>& matching_domains,
     LoginReputationClientRequest::TriggerType type,
     bool password_field_exists,
     PasswordProtectionService* pps,
     int request_timeout_in_ms)
-    : web_contents_(web_contents),
+    : content::WebContentsObserver(web_contents),
+      web_contents_(web_contents),
       main_frame_url_(main_frame_url),
       password_form_action_(password_form_action),
       password_form_frame_url_(password_form_frame_url),
       username_(username),
       password_type_(password_type),
-      is_primary_account_syncing_(is_account_syncing),
       matching_domains_(matching_domains),
       trigger_type_(type),
       password_field_exists_(password_field_exists),
@@ -128,8 +132,7 @@ void PasswordProtectionRequest::CheckWhitelist() {
   // check is required.
   auto result_callback = base::Bind(&OnWhitelistCheckDoneOnIO, GetWeakPtr());
   tracker_.PostTask(
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}).get(),
-      FROM_HERE,
+      base::CreateSingleThreadTaskRunner({BrowserThread::IO}).get(), FROM_HERE,
       base::BindOnce(&AllowlistCheckerClient::StartCheckCsdWhitelist,
                      password_protection_service_->database_manager(),
                      main_frame_url_, result_callback));
@@ -140,7 +143,7 @@ void PasswordProtectionRequest::OnWhitelistCheckDoneOnIO(
     base::WeakPtr<PasswordProtectionRequest> weak_request,
     bool match_whitelist) {
   // Don't access weak_request on IO thread. Move it back to UI thread first.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PasswordProtectionRequest::OnWhitelistCheckDone,
                      weak_request, match_whitelist));
@@ -148,10 +151,18 @@ void PasswordProtectionRequest::OnWhitelistCheckDoneOnIO(
 
 void PasswordProtectionRequest::OnWhitelistCheckDone(bool match_whitelist) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (match_whitelist)
+  if (match_whitelist) {
+    if (password_protection_service_->CanSendSamplePing()) {
+      FillRequestProto(/*is_sampled_ping=*/true);
+    }
     Finish(RequestOutcome::MATCHED_WHITELIST, nullptr);
-  else
+  } else {
+    // In case the request to Safe Browsing takes too long,
+    // we set a timer to cancel that request and return an "unspecified verdict"
+    // so that the navigation isn't blocked indefinitely.
+    StartTimeout();
     CheckCachedVerdicts();
+  }
 }
 
 void PasswordProtectionRequest::CheckCachedVerdicts() {
@@ -163,32 +174,62 @@ void PasswordProtectionRequest::CheckCachedVerdicts() {
 
   std::unique_ptr<LoginReputationClientResponse> cached_response =
       std::make_unique<LoginReputationClientResponse>();
+  ReusedPasswordAccountType password_account_type =
+      password_protection_service_
+          ->GetPasswordProtectionReusedPasswordAccountType(password_type_,
+                                                           username_);
+
   auto verdict = password_protection_service_->GetCachedVerdict(
-      main_frame_url_, trigger_type_, password_type_, cached_response.get());
-  if (verdict != LoginReputationClientResponse::VERDICT_TYPE_UNSPECIFIED)
+      main_frame_url_, trigger_type_, password_account_type,
+      cached_response.get());
+
+  if (verdict != LoginReputationClientResponse::VERDICT_TYPE_UNSPECIFIED) {
+    set_request_outcome(RequestOutcome::RESPONSE_ALREADY_CACHED);
     Finish(RequestOutcome::RESPONSE_ALREADY_CACHED, std::move(cached_response));
-  else
-    FillRequestProto();
+  } else {
+    FillRequestProto(/*is_sampled_ping=*/false);
+  }
 }
 
-void PasswordProtectionRequest::FillRequestProto() {
+void PasswordProtectionRequest::FillRequestProto(bool is_sampled_ping) {
   request_proto_->set_page_url(main_frame_url_.spec());
-  password_protection_service_->FillUserPopulation(trigger_type_,
-                                                   request_proto_.get());
-  request_proto_->set_stored_verdict_cnt(
-      password_protection_service_->GetStoredVerdictCount(trigger_type_));
   LoginReputationClientRequest::Frame* main_frame =
       request_proto_->add_frames();
   main_frame->set_url(main_frame_url_.spec());
   main_frame->set_frame_index(0 /* main frame */);
   password_protection_service_->FillReferrerChain(
       main_frame_url_, SessionID::InvalidValue(), main_frame);
+
+  // If a sample ping is send, only the URL and referrer chain is sent in the
+  // request.
+  if (is_sampled_ping) {
+    LogPasswordProtectionSampleReportSent();
+    request_proto_->set_report_type(
+        LoginReputationClientRequest::SAMPLE_REPORT);
+    request_proto_->clear_trigger_type();
+    if (main_frame->referrer_chain_size() > 0) {
+      password_protection_service_->SanitizeReferrerChain(
+          main_frame->mutable_referrer_chain());
+    }
+    SendRequest();
+    return;
+  } else {
+    request_proto_->set_report_type(LoginReputationClientRequest::FULL_REPORT);
+  }
+
+  password_protection_service_->FillUserPopulation(trigger_type_,
+                                                   request_proto_.get());
+  request_proto_->set_stored_verdict_cnt(
+      password_protection_service_->GetStoredVerdictCount(trigger_type_));
+
   bool clicked_through_interstitial =
       password_protection_service_->UserClickedThroughSBInterstitial(
           web_contents_);
   request_proto_->set_clicked_through_interstitial(
       clicked_through_interstitial);
   request_proto_->set_content_type(web_contents_->GetContentsMimeType());
+
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   if (password_protection_service_->IsExtendedReporting() &&
       !password_protection_service_->IsIncognito()) {
     gfx::Size content_area_size =
@@ -196,6 +237,7 @@ void PasswordProtectionRequest::FillRequestProto() {
     request_proto_->set_content_area_height(content_area_size.height());
     request_proto_->set_content_area_width(content_area_size.width());
   }
+#endif
 
   switch (trigger_type_) {
     case LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE: {
@@ -228,7 +270,11 @@ void PasswordProtectionRequest::FillRequestProto() {
             password_protection_service_->GetSyncAccountType());
         LogSyncAccountType(reuse_event->sync_account_type());
       }
-      if (password_protection_service_->IsExtendedReporting() &&
+
+      bool saved_password_experiment_on = base::FeatureList::IsEnabled(
+          safe_browsing::kPasswordProtectionForSavedPasswords);
+      if ((password_protection_service_->IsExtendedReporting() ||
+           saved_password_experiment_on) &&
           !password_protection_service_->IsIncognito()) {
         for (const auto& domain : matching_domains_) {
           reuse_event->add_domains_matching_password(domain);
@@ -239,35 +285,58 @@ void PasswordProtectionRequest::FillRequestProto() {
       }
       if (base::FeatureList::IsEnabled(
               safe_browsing::kPasswordProtectionForSignedInUsers)) {
-        ReusedPasswordAccountType* reused_password_account_type =
-            reuse_event->mutable_reused_password_account_type();
-        // TODO(crbug/914410): Add account_type.
-        reused_password_account_type->set_is_account_syncing(
-            is_primary_account_syncing_);
+        ReusedPasswordAccountType password_account_type_to_add =
+            password_protection_service_
+                ->GetPasswordProtectionReusedPasswordAccountType(password_type_,
+                                                                 username_);
+        *reuse_event->mutable_reused_password_account_type() =
+            password_account_type_to_add;
       }
-
       break;
     }
     default:
       NOTREACHED();
   }
 
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   // Get the page DOM features.
   content::RenderFrameHost* rfh = web_contents_->GetMainFrame();
   password_protection_service_->GetPhishingDetector(rfh->GetRemoteInterfaces(),
                                                     &phishing_detector_);
+  dom_features_collection_complete_ = false;
   phishing_detector_->StartPhishingDetection(
       main_frame_url_,
       base::BindRepeating(&PasswordProtectionRequest::OnGetDomFeatures,
                           GetWeakPtr()));
+  base::PostDelayedTask(
+      FROM_HERE, {BrowserThread::UI},
+      base::BindOnce(&PasswordProtectionRequest::OnGetDomFeatureTimeout,
+                     GetWeakPtr()),
+      base::TimeDelta::FromMilliseconds(kDomFeatureTimeoutMs));
   dom_feature_start_time_ = base::TimeTicks::Now();
+#else
+  SendRequest();
+#endif
 }
 
-void PasswordProtectionRequest::OnGetDomFeatures(const std::string& verdict) {
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+void PasswordProtectionRequest::OnGetDomFeatures(
+    mojom::PhishingDetectorResult result,
+    const std::string& verdict) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (dom_features_collection_complete_)
+    return;
+
+  UMA_HISTOGRAM_ENUMERATION("PasswordProtection.RendererDomFeatureResult",
+                            result);
+
+  if (result != mojom::PhishingDetectorResult::SUCCESS &&
+      result != mojom::PhishingDetectorResult::INVALID_SCORE)
+    return;
+
+  dom_features_collection_complete_ = true;
   ClientPhishingRequest dom_features_request;
-  bool parsed = dom_features_request.ParseFromString(verdict);
-  UMA_HISTOGRAM_BOOLEAN("PasswordProtection.DomFeatureParsing", parsed);
-  if (parsed) {
+  if (dom_features_request.ParseFromString(verdict)) {
     for (const ClientPhishingRequest::Feature& feature :
          dom_features_request.feature_map()) {
       DomFeatures::Feature* new_feature =
@@ -293,6 +362,18 @@ void PasswordProtectionRequest::OnGetDomFeatures(const std::string& verdict) {
   UMA_HISTOGRAM_TIMES("PasswordProtection.DomFeatureExtractionDuration",
                       base::TimeTicks::Now() - dom_feature_start_time_);
 
+  MaybeCollectVisualFeatures();
+}
+
+void PasswordProtectionRequest::OnGetDomFeatureTimeout() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (!dom_features_collection_complete_) {
+    dom_features_collection_complete_ = true;
+    MaybeCollectVisualFeatures();
+  }
+}
+
+void PasswordProtectionRequest::MaybeCollectVisualFeatures() {
   // Once the DOM features are collected, either collect visual features, or go
   // straight to sending the ping.
   if (trigger_type_ == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE &&
@@ -326,9 +407,9 @@ void PasswordProtectionRequest::CollectVisualFeatures() {
 
 void PasswordProtectionRequest::OnScreenshotTaken(const SkBitmap& screenshot) {
   // Do the feature extraction on a worker thread, to avoid blocking the UI.
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&ExtractVisualFeatures, screenshot),
       base::BindOnce(&PasswordProtectionRequest::OnVisualFeatureCollectionDone,
@@ -346,6 +427,7 @@ void PasswordProtectionRequest::OnVisualFeatureCollectionDone(
 
   SendRequest();
 }
+#endif
 
 void PasswordProtectionRequest::SendRequest() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -359,8 +441,6 @@ void PasswordProtectionRequest::SendRequest() {
     return;
   }
 
-  // In case the request take too long, we set a timer to cancel this request.
-  StartTimeout();
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("password_protection_request", R"(
         semantics {
@@ -416,7 +496,7 @@ void PasswordProtectionRequest::StartTimeout() {
   // The weak pointer used for the timeout will be invalidated (and
   // hence would prevent the timeout) if the check completes on time and
   // execution reaches Finish().
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PasswordProtectionRequest::Cancel, GetWeakPtr(), true),
       base::TimeDelta::FromMilliseconds(request_timeout_in_ms_));
@@ -447,6 +527,7 @@ void PasswordProtectionRequest::OnURLLoaderComplete(
   if (response_body && response->ParseFromString(*response_body)) {
     WebUIInfoSingleton::GetInstance()->AddToPGResponses(web_ui_token_,
                                                         *response);
+    set_request_outcome(RequestOutcome::SUCCEEDED);
     Finish(RequestOutcome::SUCCEEDED, std::move(response));
   } else {
     Finish(RequestOutcome::RESPONSE_MALFORMED, nullptr);
@@ -464,17 +545,21 @@ void PasswordProtectionRequest::Finish(
   if (outcome != RequestOutcome::CANCELED) {
     ReusedPasswordAccountType password_account_type =
         password_protection_service_
-            ->GetPasswordProtectionReusedPasswordAccountType(
-                password_type_,
-                (password_protection_service_->GetAccountInfo()).hosted_domain);
+            ->GetPasswordProtectionReusedPasswordAccountType(password_type_,
+                                                             username_);
     if (trigger_type_ == LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE) {
       LogPasswordOnFocusRequestOutcome(outcome);
     } else {
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
       LogPasswordEntryRequestOutcome(outcome, password_account_type);
+#endif
+
+#if defined(SYNC_PASSWORD_REUSE_WARNING_ENABLED)
       if (password_type_ == PasswordType::PRIMARY_ACCOUNT_PASSWORD) {
         password_protection_service_->MaybeLogPasswordReuseLookupEvent(
-            web_contents_, outcome, response.get());
+            web_contents_, outcome, password_type_, response.get());
       }
+#endif
     }
 
     if (outcome == RequestOutcome::SUCCEEDED && response) {
@@ -482,7 +567,6 @@ void PasswordProtectionRequest::Finish(
                                    response->verdict_type());
     }
   }
-
   password_protection_service_->RequestFinished(this, outcome,
                                                 std::move(response));
 }
@@ -492,8 +576,9 @@ void PasswordProtectionRequest::Cancel(bool timed_out) {
   url_loader_.reset();
   // If request is canceled because |password_protection_service_| is shutting
   // down, ignore all these deferred navigations.
-  if (!timed_out)
+  if (!timed_out) {
     throttles_.clear();
+  }
 
   Finish(timed_out ? RequestOutcome::TIMEDOUT : RequestOutcome::CANCELED,
          nullptr);
@@ -507,6 +592,10 @@ void PasswordProtectionRequest::HandleDeferredNavigations() {
       throttle->ResumeNavigation();
   }
   throttles_.clear();
+}
+
+void PasswordProtectionRequest::WebContentsDestroyed() {
+  Cancel(/*timed_out=*/false);
 }
 
 }  // namespace safe_browsing

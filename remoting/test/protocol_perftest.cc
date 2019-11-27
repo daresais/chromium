@@ -10,13 +10,14 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/task_runner_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/base/network_change_notifier.h"
@@ -52,7 +53,7 @@
 
 namespace remoting {
 
-using base::test::ScopedTaskEnvironment;
+using base::test::TaskEnvironment;
 using protocol::ChannelConfig;
 
 namespace {
@@ -108,18 +109,18 @@ class ProtocolPerfTest
       public HostStatusObserver {
  public:
   ProtocolPerfTest()
-      : task_environment_(ScopedTaskEnvironment::MainThreadType::IO),
+      : task_environment_(TaskEnvironment::MainThreadType::IO),
         host_thread_("host"),
         capture_thread_("capture"),
         encode_thread_("encode"),
         decode_thread_("decode") {
     host_thread_.StartWithOptions(
-        base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+        base::Thread::Options(base::MessagePumpType::IO, 0));
     capture_thread_.Start();
     encode_thread_.Start();
     decode_thread_.Start();
 
-    network_change_notifier_ = net::NetworkChangeNotifier::Create();
+    network_change_notifier_ = net::NetworkChangeNotifier::CreateIfNeeded();
 
     desktop_environment_factory_.reset(
         new FakeDesktopEnvironmentFactory(capture_thread_.task_runner()));
@@ -318,8 +319,8 @@ class ProtocolPerfTest
         protocol::GetSharedSecretHash(kHostId, kHostPin);
     std::unique_ptr<protocol::AuthenticatorFactory> auth_factory =
         protocol::Me2MeHostAuthenticatorFactory::CreateWithPin(
-            true, kHostOwner, kHostOwner, host_cert, key_pair,
-            std::vector<std::string>(), host_pin_hash, nullptr);
+            kHostOwner, host_cert, key_pair, std::vector<std::string>(),
+            host_pin_hash, nullptr);
     host_->SetAuthenticatorFactory(std::move(auth_factory));
 
     host_->status_monitor()->AddStatusObserver(this);
@@ -380,7 +381,7 @@ class ProtocolPerfTest
   void MeasureTotalLatency(bool use_webrtc);
   void MeasureScrollPerformance(bool use_webrtc);
 
-  ScopedTaskEnvironment task_environment_;
+  TaskEnvironment task_environment_;
 
   scoped_refptr<FakeNetworkDispatcher> fake_network_dispatcher_;
 

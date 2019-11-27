@@ -29,6 +29,17 @@ FeatureList* g_feature_list_instance = nullptr;
 // Tracks whether the FeatureList instance was initialized via an accessor.
 bool g_initialized_from_accessor = false;
 
+#if DCHECK_IS_ON()
+const char* g_reason_overrides_disallowed = nullptr;
+
+void DCheckOverridesAllowed() {
+  const bool feature_overrides_allowed = !g_reason_overrides_disallowed;
+  DCHECK(feature_overrides_allowed) << g_reason_overrides_disallowed;
+}
+#else
+void DCheckOverridesAllowed() {}
+#endif
+
 // An allocator entry for a feature in shared memory. The FeatureEntry is
 // followed by a base::Pickle object that contains the feature and trial name.
 struct FeatureEntry {
@@ -75,6 +86,19 @@ bool IsValidFeatureOrFieldTrialName(const std::string& name) {
   return IsStringASCII(name) && name.find_first_of(",<*") == std::string::npos;
 }
 
+// TODO(crbug.com/1018667): Remove this function once the DCHECK has been turned
+// into an equality check.
+bool MatchesSelfOrAncestor(const FieldTrialList* expected,
+                           const FieldTrialList* actual) {
+  if (expected == actual)
+    return true;
+
+  if (actual == nullptr)
+    return false;
+
+  return MatchesSelfOrAncestor(expected, actual->GetPreviousGlobal());
+}
+
 }  // namespace
 
 #if defined(DCHECK_IS_CONFIGURABLE)
@@ -85,6 +109,23 @@ const Feature kDCheckIsFatalFeature{"DcheckIsFatal",
 FeatureList::FeatureList() = default;
 
 FeatureList::~FeatureList() = default;
+
+FeatureList::ScopedDisallowOverrides::ScopedDisallowOverrides(
+    const char* reason)
+#if DCHECK_IS_ON()
+    : previous_reason_(g_reason_overrides_disallowed) {
+  g_reason_overrides_disallowed = reason;
+}
+#else
+{
+}
+#endif
+
+FeatureList::ScopedDisallowOverrides::~ScopedDisallowOverrides() {
+#if DCHECK_IS_ON()
+  g_reason_overrides_disallowed = previous_reason_;
+#endif
+}
 
 void FeatureList::InitializeFromCommandLine(
     const std::string& enable_features,
@@ -161,6 +202,14 @@ void FeatureList::RegisterFieldTrialOverride(const std::string& feature_name,
   RegisterOverride(feature_name, override_state, field_trial);
 }
 
+void FeatureList::RegisterExtraFeatureOverrides(
+    const std::vector<FeatureOverrideInfo>& extra_overrides) {
+  for (const FeatureOverrideInfo& override_info : extra_overrides) {
+    RegisterOverride(override_info.first.get().name, override_info.second,
+                     /* field_trial = */ nullptr);
+  }
+}
+
 void FeatureList::AddFeaturesToAllocator(PersistentMemoryAllocator* allocator) {
   DCHECK(initialized_);
 
@@ -223,6 +272,15 @@ std::vector<StringPiece> FeatureList::SplitFeatureListString(
 // static
 bool FeatureList::InitializeInstance(const std::string& enable_features,
                                      const std::string& disable_features) {
+  return InitializeInstance(enable_features, disable_features,
+                            std::vector<FeatureOverrideInfo>());
+}
+
+// static
+bool FeatureList::InitializeInstance(
+    const std::string& enable_features,
+    const std::string& disable_features,
+    const std::vector<FeatureOverrideInfo>& extra_overrides) {
   // We want to initialize a new instance here to support command-line features
   // in testing better. For example, we initialize a dummy instance in
   // base/test/test_suite.cc, and override it in content/browser/
@@ -247,6 +305,7 @@ bool FeatureList::InitializeInstance(const std::string& enable_features,
 
   std::unique_ptr<FeatureList> feature_list(new FeatureList);
   feature_list->InitializeFromCommandLine(enable_features, disable_features);
+  feature_list->RegisterExtraFeatureOverrides(extra_overrides);
   FeatureList::SetInstance(std::move(feature_list));
   return !instance_existed_before;
 }
@@ -367,6 +426,7 @@ void FeatureList::RegisterOverride(StringPiece feature_name,
                                    OverrideState overridden_state,
                                    FieldTrial* field_trial) {
   DCHECK(!initialized_);
+  DCheckOverridesAllowed();
   if (field_trial) {
     DCHECK(IsValidFeatureOrFieldTrialName(field_trial->trial_name()))
         << field_trial->trial_name();
@@ -392,8 +452,11 @@ void FeatureList::GetFeatureOverridesImpl(std::string* enable_overrides,
   // active one. If not, it likely indicates that this FeatureList has override
   // entries from a freed FieldTrial, which may be caused by an incorrect test
   // set up.
-  if (field_trial_list_)
-    DCHECK_EQ(field_trial_list_, FieldTrialList::GetInstance());
+  // TODO(crbug.com/1018667): Turn the DCHECK below into a equality check.
+  if (field_trial_list_) {
+    DCHECK(MatchesSelfOrAncestor(field_trial_list_,
+                                 FieldTrialList::GetInstance()));
+  }
 
   enable_overrides->clear();
   disable_overrides->clear();

@@ -54,7 +54,7 @@ constexpr net::BackoffEntry::Policy kRequestAccessTokenBackoffPolicy = {
 }  // namespace
 
 SyncAuthManager::SyncAuthManager(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     const AccountStateChangedCallback& account_state_changed,
     const CredentialsChangedCallback& credentials_changed)
     : identity_manager_(identity_manager),
@@ -81,6 +81,13 @@ void SyncAuthManager::RegisterForAuthNotifications() {
   // Also initialize the sync account here, but *without* notifying the
   // SyncService.
   sync_account_ = DetermineAccountToUse();
+}
+
+bool SyncAuthManager::IsActiveAccountInfoFullyLoaded() const {
+  // The result of DetermineAccountToUse() is influenced by refresh tokens being
+  // loaded due to how IdentityManager::ComputeUnconsentedPrimaryAccountInfo()
+  // is implemented, which requires a refresh token.
+  return identity_manager_->AreRefreshTokensLoaded();
 }
 
 SyncAccountInfo SyncAuthManager::GetActiveAccountInfo() const {
@@ -369,8 +376,26 @@ void SyncAuthManager::OnRefreshTokenRemovedForAccount(
   credentials_changed_callback_.Run();
 }
 
+void SyncAuthManager::OnRefreshTokensLoaded() {
+  DCHECK(IsActiveAccountInfoFullyLoaded());
+
+  if (UpdateSyncAccountIfNecessary()) {
+    // |account_state_changed_callback_| has already been called, no need to
+    // consider calling it again.
+    return;
+  }
+
+  if (sync_account_.account_info.account_id.empty()) {
+    // Nothing actually changed, so |account_state_changed_callback_| hasn't
+    // been called yet. However, this is the first time we can reliably tell the
+    // user is signed out, exposed via IsActiveAccountInfoFullyLoaded(), so
+    // let's treat it as account state change.
+    account_state_changed_callback_.Run();
+  }
+}
+
 void SyncAuthManager::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   UpdateSyncAccountIfNecessary();
 }
@@ -385,9 +410,7 @@ void SyncAuthManager::ResetRequestAccessTokenBackoffForTest() {
 
 SyncAccountInfo SyncAuthManager::DetermineAccountToUse() const {
   DCHECK(registered_for_auth_notifications_);
-  return syncer::DetermineAccountToUse(
-      identity_manager_,
-      base::FeatureList::IsEnabled(switches::kSyncSupportSecondaryAccount));
+  return syncer::DetermineAccountToUse(identity_manager_);
 }
 
 bool SyncAuthManager::UpdateSyncAccountIfNecessary() {
@@ -414,12 +437,14 @@ bool SyncAuthManager::UpdateSyncAccountIfNecessary() {
   // Sign out of the old account (if any).
   if (!sync_account_.account_info.account_id.empty()) {
     sync_account_ = SyncAccountInfo();
+    // Let the client (SyncService) know of the removed account *before*
+    // throwing away the access token, so it can do "unregister" tasks.
+    account_state_changed_callback_.Run();
     // Also clear any pending request or auth errors we might have, since they
     // aren't meaningful anymore.
     partial_token_status_ = SyncTokenStatus();
     ClearAccessTokenAndRequest();
     SetLastAuthError(GoogleServiceAuthError::AuthErrorNone());
-    account_state_changed_callback_.Run();
   }
 
   // Sign in to the new account (if any).
@@ -462,12 +487,12 @@ void SyncAuthManager::RequestAccessToken() {
           {GaiaConstants::kChromeSyncOAuth2Scope},
           base::BindOnce(&SyncAuthManager::AccessTokenFetched,
                          base::Unretained(this)),
-          identity::AccessTokenFetcher::Mode::kWaitUntilRefreshTokenAvailable);
+          signin::AccessTokenFetcher::Mode::kWaitUntilRefreshTokenAvailable);
 }
 
 void SyncAuthManager::AccessTokenFetched(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   DCHECK(registered_for_auth_notifications_);
 
   DCHECK(ongoing_access_token_fetch_);

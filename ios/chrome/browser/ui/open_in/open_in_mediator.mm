@@ -11,7 +11,7 @@
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/web/public/browser_state.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
@@ -37,6 +37,11 @@
   self = [super init];
   if (self) {
     _webStateList = webStateList;
+    // Set the delegates for all existing webstates in the |_webStateList|.
+    for (int i = 0; i < _webStateList->count(); i++) {
+      web::WebState* webState = _webStateList->GetWebStateAt(i);
+      OpenInTabHelper::FromWebState(webState)->SetDelegate(self);
+    }
     _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
     _webStateList->AddObserver(_webStateListObserver.get());
   }
@@ -69,7 +74,6 @@
               atIndex:(int)index
            activating:(BOOL)activating {
   DCHECK_EQ(_webStateList, webStateList);
-
   OpenInTabHelper::FromWebState(webState)->SetDelegate(self);
 }
 

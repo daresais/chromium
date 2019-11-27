@@ -17,11 +17,16 @@ import org.chromium.base.Callback;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
+import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
@@ -38,7 +43,12 @@ import java.util.concurrent.atomic.AtomicReference;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ChromeHttpAuthHandlerTest {
     @Rule
-    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+    public ChromeActivityTestRule<? extends ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule(ChromeTabbedActivity.class);
+
+    @Rule
+    public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
+
     private EmbeddedTestServer mTestServer;
 
     @Before
@@ -48,7 +58,7 @@ public class ChromeHttpAuthHandlerTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mTestServer != null) mTestServer.stopAndDestroyServer();
     }
 
@@ -74,8 +84,10 @@ public class ChromeHttpAuthHandlerTest {
     public void authDialogDismissOnTabSwitched() throws Exception {
         ChromeHttpAuthHandler handler = triggerAuth();
         verifyAuthDialogVisibility(handler, true);
-        ChromeTabUtils.newTabFromMenu(
-                InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
+        TestThreadUtils.runOnUiThreadBlocking(
+                ()
+                        -> mActivityTestRule.getActivity().getTabCreator(false).launchUrl(
+                                "about:blank", TabLaunchType.FROM_CHROME_UI));
         verifyAuthDialogVisibility(handler, false);
     }
 
@@ -93,7 +105,7 @@ public class ChromeHttpAuthHandlerTest {
     @MediumTest
     @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     public void authDialogSuppressedOnBackgroundTab() throws Exception {
-        Tab firstTab = mActivityTestRule.getActivity().getActivityTab();
+        TabImpl firstTab = (TabImpl) mActivityTestRule.getActivity().getActivityTab();
         ChromeTabUtils.newTabFromMenu(
                 InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
         // If the first tab was closed due to OOM, then just exit the test.
@@ -121,7 +133,7 @@ public class ChromeHttpAuthHandlerTest {
 
         String url = mTestServer.getURL("/auth-basic");
         ChromeTabUtils.loadUrlOnUiThread(tab, url);
-        handlerCallback.waitForCallback();
+        handlerCallback.waitForFirst();
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { ChromeHttpAuthHandler.setTestCreationCallback(null); });
         return handlerRef.get();

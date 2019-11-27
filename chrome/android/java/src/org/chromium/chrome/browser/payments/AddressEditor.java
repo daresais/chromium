@@ -6,10 +6,11 @@ package org.chromium.chrome.browser.payments;
 
 import android.app.ProgressDialog;
 import android.os.Handler;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Pair;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.chrome.R;
@@ -473,7 +474,7 @@ public class AddressEditor
         // For tests, the time-out is set to 0. In this case, we should not
         // fetch the admin-areas, and show a text-field instead.
         // This is to have the tests independent of the network status.
-        if (PersonalDataManager.getInstance().getRequestTimeoutMS() == 0) {
+        if (PersonalDataManager.getRequestTimeoutMS() == 0) {
             onSubKeysReceived(null, null);
             return;
         }

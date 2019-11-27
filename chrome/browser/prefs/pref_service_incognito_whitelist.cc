@@ -10,7 +10,7 @@
 #include "build/build_config.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
-#include "components/google/core/browser/google_pref_names.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/rappor/rappor_pref_names.h"
 #include "components/reading_list/core/reading_list_pref_names.h"
@@ -61,6 +61,7 @@ const char* const kPersistentPrefNames[] = {
     ash::prefs::kAccessibilitySwitchAccessPreviousSetting,
     ash::prefs::kAccessibilitySwitchAccessAutoScanEnabled,
     ash::prefs::kAccessibilitySwitchAccessAutoScanSpeedMs,
+    ash::prefs::kAccessibilitySwitchAccessAutoScanKeyboardSpeedMs,
     ash::prefs::kAccessibilityDictationEnabled,
     ash::prefs::kDockedMagnifierEnabled,
     ash::prefs::kDockedMagnifierScale,
@@ -170,10 +171,6 @@ const char* const kPersistentPrefNames[] = {
     prefs::kDevToolsDiscoverTCPTargetsEnabled,
     prefs::kDevToolsTCPDiscoveryConfig,
 
-    // Google URL prefs don't store user data and just keep track of the URL.
-    prefs::kLastKnownGoogleURL,
-    prefs::kLastPromptedGoogleURL,
-
 #if defined(OS_WIN)
     // The total number of times that network profile warning is shown is
     // aggregated between regular and incognito modes.
@@ -211,6 +208,11 @@ const char* const kPersistentPrefNames[] = {
     ukm::prefs::kUkmClientId,
     ukm::prefs::kUkmUnsentLogStore,
     ukm::prefs::kUkmSessionId,
+
+    // Cookie controls preference is, as in an initial release, surfaced only in
+    // the incognito mode and therefore should be persisted between incognito
+    // sessions.
+    prefs::kCookieControlsMode,
 };
 
 }  // namespace

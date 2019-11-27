@@ -7,13 +7,13 @@
 #include <memory>
 #include <string>
 
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/mock_login_display_host.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_api_unittest.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/auth/user_context.h"
@@ -61,6 +61,10 @@ class LoginApiUnittest : public ExtensionApiUnittest {
         std::make_unique<chromeos::MockLoginDisplayHost>();
     mock_existing_user_controller_ =
         std::make_unique<MockExistingUserController>();
+
+    // Run pending async tasks resulting from profile construction to ensure
+    // these are complete before the test begins.
+    base::RunLoop().RunUntilIdle();
   }
 
   void TearDown() override {
@@ -162,24 +166,6 @@ TEST_F(LoginApiUnittest, FetchDataForNextLoginAttemptClearsPref) {
 
   ASSERT_EQ("", local_state->GetString(
                     prefs::kLoginExtensionApiDataForNextLoginAttempt));
-}
-
-// Test that calling |login.isRunningInLoginProfile()| returns 'false' when the
-// extension is not running in the login screen profile.
-TEST_F(LoginApiUnittest, IsRunningInLoginProfileNotInProfile) {
-  ASSERT_FALSE(RunFunctionAndReturnValue(
-                   new LoginIsRunningInLoginProfileFunction(), "[]")
-                   ->GetBool());
-}
-
-// Test that calling |login.isRunningInLoginProfile()| returns 'true' when the
-// extension is running in the login screen profile.
-TEST_F(LoginApiUnittest, IsRunningInLoginProfileInProfile) {
-  LoginIsRunningInLoginProfileFunction* function =
-      new LoginIsRunningInLoginProfileFunction();
-  function->set_profile_id(chromeos::ProfileHelper::Get()->GetSigninProfile());
-
-  ASSERT_TRUE(RunFunctionAndReturnValue(function, "[]")->GetBool());
 }
 
 }  // namespace extensions

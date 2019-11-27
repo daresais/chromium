@@ -9,7 +9,6 @@
 #include <utility>
 #include "content/browser/service_worker/service_worker_cache_writer.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
-#include "content/browser/service_worker/service_worker_storage.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/browser/url_loader_factory_getter.h"
 #include "content/common/service_worker/service_worker_utils.h"
@@ -24,7 +23,7 @@ using FinishedReason = ServiceWorkerInstalledScriptReader::FinishedReason;
 
 ServiceWorkerInstalledScriptLoader::ServiceWorkerInstalledScriptLoader(
     uint32_t options,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     std::unique_ptr<ServiceWorkerResponseReader> response_reader,
     scoped_refptr<ServiceWorkerVersion>
         version_for_main_script_http_response_info,
@@ -125,11 +124,6 @@ void ServiceWorkerInstalledScriptLoader::FollowRedirect(
     const base::Optional<GURL>& new_url) {
   // This class never returns a redirect response to its client, so should never
   // be asked to follow one.
-  NOTREACHED();
-}
-
-void ServiceWorkerInstalledScriptLoader::ProceedWithResponse() {
-  // This function should only be called for navigations.
   NOTREACHED();
 }
 

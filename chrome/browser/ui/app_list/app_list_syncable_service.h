@@ -27,14 +27,11 @@
 
 class AppListModelUpdater;
 class AppServiceAppModelBuilder;
-class ArcAppModelBuilder;
 class ChromeAppListItem;
-class CrostiniAppModelBuilder;
-class ExtensionAppModelBuilder;
-class InternalAppModelBuilder;
 class Profile;
 
 namespace extensions {
+class ExtensionRegistry;
 class ExtensionSystem;
 }
 
@@ -94,9 +91,8 @@ class AppListSyncableService : public syncer::SyncableService,
 
   using SyncItemMap = std::map<std::string, std::unique_ptr<SyncItem>>;
 
-  // Populates the model when |extension_system| is ready.
-  AppListSyncableService(Profile* profile,
-                         extensions::ExtensionSystem* extension_system);
+  // Populates the model when |profile|'s extension system is ready.
+  explicit AppListSyncableService(Profile* profile);
 
   ~AppListSyncableService() override;
 
@@ -218,6 +214,11 @@ class AppListSyncableService : public syncer::SyncableService,
   // item and returns false.
   bool RemoveDefaultApp(const ChromeAppListItem* item, SyncItem* sync_item);
 
+  // Returns whether the delete-sync-item request was for a default app. If
+  // true, the |sync_item| is set to REMOVE_DEFAULT and bounced back to the
+  // sync server. The caller should abort deleting the |sync_item|.
+  bool InterceptDeleteDefaultApp(SyncItem* sync_item);
+
   // Deletes a sync item from |sync_items_| and sends a DELETE action.
   void DeleteSyncItem(const std::string& item_id);
 
@@ -311,16 +312,11 @@ class AppListSyncableService : public syncer::SyncableService,
 
   Profile* profile_;
   extensions::ExtensionSystem* extension_system_;
+  extensions::ExtensionRegistry* extension_registry_;
   std::unique_ptr<AppListModelUpdater> model_updater_;
   std::unique_ptr<ModelUpdaterObserver> model_updater_observer_;
 
   std::unique_ptr<AppServiceAppModelBuilder> app_service_apps_builder_;
-  // TODO(crbug.com/826982): delete all the other FooModelBuilder's, after
-  // folding them into the App Service.
-  std::unique_ptr<ExtensionAppModelBuilder> ext_apps_builder_;
-  std::unique_ptr<ArcAppModelBuilder> arc_apps_builder_;
-  std::unique_ptr<CrostiniAppModelBuilder> crostini_apps_builder_;
-  std::unique_ptr<InternalAppModelBuilder> internal_apps_builder_;
   std::unique_ptr<syncer::SyncChangeProcessor> sync_processor_;
   std::unique_ptr<syncer::SyncErrorFactory> sync_error_handler_;
   SyncItemMap sync_items_;
@@ -330,14 +326,13 @@ class AppListSyncableService : public syncer::SyncableService,
   syncer::SyncableService::StartSyncFlare flare_;
   bool initial_sync_data_processed_;
   bool first_app_list_sync_;
-  const bool is_app_service_enabled_;
   std::string oem_folder_name_;
   base::OnceClosure wait_until_ready_to_sync_cb_;
 
   // List of observers.
   base::ObserverList<Observer>::Unchecked observer_list_;
 
-  base::WeakPtrFactory<AppListSyncableService> weak_ptr_factory_;
+  base::WeakPtrFactory<AppListSyncableService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AppListSyncableService);
 };

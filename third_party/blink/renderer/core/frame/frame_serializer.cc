@@ -30,6 +30,8 @@
 
 #include "third_party/blink/renderer/core/frame/frame_serializer.h"
 
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/css/css_font_face_rule.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/css/css_image_value.h"
@@ -66,7 +68,7 @@
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -145,16 +147,16 @@ bool SerializerMarkupAccumulator::ShouldIgnoreAttribute(
 
 bool SerializerMarkupAccumulator::ShouldIgnoreElement(
     const Element& element) const {
-  if (IsHTMLScriptElement(element))
+  if (IsA<HTMLScriptElement>(element))
     return true;
-  if (IsHTMLNoScriptElement(element))
+  if (IsA<HTMLNoScriptElement>(element))
     return true;
-  if (IsHTMLMetaElement(element) &&
-      ToHTMLMetaElement(element).ComputeEncoding().IsValid()) {
+  auto* meta = DynamicTo<HTMLMetaElement>(element);
+  if (meta && meta->ComputeEncoding().IsValid()) {
     return true;
   }
   // This is done in serializing document.StyleSheets.
-  if (IsHTMLStyleElement(element))
+  if (IsA<HTMLStyleElement>(element))
     return true;
   return delegate_.ShouldIgnoreElement(element);
 }
@@ -163,7 +165,7 @@ AtomicString SerializerMarkupAccumulator::AppendElement(
     const Element& element) {
   AtomicString prefix = MarkupAccumulator::AppendElement(element);
 
-  if (IsHTMLHeadElement(element))
+  if (IsA<HTMLHeadElement>(element))
     AppendExtraForHeadElement(element);
 
   resource_delegate_.AddResourceForElement(*document_, element);
@@ -176,7 +178,7 @@ AtomicString SerializerMarkupAccumulator::AppendElement(
 
 void SerializerMarkupAccumulator::AppendExtraForHeadElement(
     const Element& element) {
-  DCHECK(IsHTMLHeadElement(element));
+  DCHECK(IsA<HTMLHeadElement>(element));
 
   // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an
   // element like this, without special cases for XHTML
@@ -214,7 +216,7 @@ void SerializerMarkupAccumulator::AppendStylesheets(Document* document,
     StyleSheet* sheet = sheets.item(i);
     if (!sheet->IsCSSStyleSheet() || sheet->disabled())
       continue;
-    if (style_element_only && !IsHTMLStyleElement(sheet->ownerNode()))
+    if (style_element_only && !IsA<HTMLStyleElement>(sheet->ownerNode()))
       continue;
 
     StringBuilder pseudo_sheet_url_builder;
@@ -382,26 +384,33 @@ void FrameSerializer::AddResourceForElement(Document& document,
   }
 
   if (const auto* image = ToHTMLImageElementOrNull(element)) {
-    // ImageSourceURL() works for both scenarios:
-    // * parent element is <picture>: best fit image URL from sibling source
-    //   element
-    // * single <img> element: image url contained in href attribute
-    KURL image_url = document.CompleteURL(image->ImageSourceURL());
+    AtomicString image_url_value;
+    const Element* parent = element.parentElement();
+    if (parent && IsA<HTMLPictureElement>(parent)) {
+      // If parent element is <picture>, use ImageSourceURL() to get best fit
+      // image URL from sibling source.
+      image_url_value = image->ImageSourceURL();
+    } else {
+      // Otherwise, it is single <img> element. We should get image url
+      // contained in href attribute. ImageSourceURL() may return a different
+      // URL from srcset attribute.
+      image_url_value = image->FastGetAttribute(html_names::kSrcAttr);
+    }
     ImageResourceContent* cached_image = image->CachedImage();
-    AddImageToResources(cached_image, image_url);
+    AddImageToResources(cached_image, document.CompleteURL(image_url_value));
   } else if (const auto* input = ToHTMLInputElementOrNull(element)) {
     if (input->type() == input_type_names::kImage && input->ImageLoader()) {
       KURL image_url = input->Src();
       ImageResourceContent* cached_image = input->ImageLoader()->GetContent();
       AddImageToResources(cached_image, image_url);
     }
-  } else if (const auto* link = ToHTMLLinkElementOrNull(element)) {
+  } else if (const auto* link = DynamicTo<HTMLLinkElement>(element)) {
     if (CSSStyleSheet* sheet = link->sheet()) {
       KURL sheet_url =
-          document.CompleteURL(link->getAttribute(html_names::kHrefAttr));
+          document.CompleteURL(link->FastGetAttribute(html_names::kHrefAttr));
       SerializeCSSStyleSheet(*sheet, sheet_url);
     }
-  } else if (const auto* style = ToHTMLStyleElementOrNull(element)) {
+  } else if (const auto* style = DynamicTo<HTMLStyleElement>(element)) {
     if (CSSStyleSheet* sheet = style->sheet())
       SerializeCSSStyleSheet(*sheet, NullURL());
   } else if (IsHTMLPlugInElement(element)) {
@@ -527,7 +536,6 @@ void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
     case CSSRule::kKeyframeRule:
     case CSSRule::kNamespaceRule:
     case CSSRule::kViewportRule:
-    case CSSRule::kFontFeatureValuesRule:
       break;
   }
 }
@@ -624,7 +632,19 @@ void FrameSerializer::RetrieveResourcesForCSSValue(const CSSValue& css_value,
     if (font_face_src_value->IsLocal())
       return;
 
-    AddFontToResources(font_face_src_value->Fetch(&document, nullptr));
+    if (base::FeatureList::IsEnabled(
+            features::kHtmlImportsRequestInitiatorLock)) {
+      if (Document* context_document = document.ContextDocument()) {
+        // For @imports from HTML imported Documents, we use the
+        // context document for getting origin and ResourceFetcher to use the
+        // main Document's origin, while using the element document for
+        // CompleteURL() to use imported Documents' base URLs.
+        AddFontToResources(
+            font_face_src_value->Fetch(context_document, nullptr));
+      }
+    } else {
+      AddFontToResources(font_face_src_value->Fetch(&document, nullptr));
+    }
   } else if (const auto* css_value_list = DynamicTo<CSSValueList>(css_value)) {
     for (unsigned i = 0; i < css_value_list->length(); i++)
       RetrieveResourcesForCSSValue(css_value_list->Item(i), document);

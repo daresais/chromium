@@ -41,10 +41,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/system_connector.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
-#include "services/data_decoder/public/cpp/testing_json_parser.h"
+#include "content/public/test/browser_task_environment.h"
+#include "services/data_decoder/public/cpp/data_decoder.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -80,14 +79,6 @@ std::unique_ptr<KeyedService> BuildProfileInvalidationProvider(
       syncer::TRANSIENT_INVALIDATION_ERROR);
   return std::make_unique<invalidation::ProfileInvalidationProvider>(
       std::move(invalidation_service), nullptr);
-}
-
-data_decoder::SafeJsonParser* CreateTestingJsonParser(
-    const std::string& unsafe_json,
-    data_decoder::SafeJsonParser::SuccessCallback success_callback,
-    data_decoder::SafeJsonParser::ErrorCallback error_callback) {
-  return new data_decoder::TestingJsonParser(
-      unsafe_json, std::move(success_callback), std::move(error_callback));
 }
 
 void SendInvalidatorStateChangeNotification(
@@ -186,7 +177,8 @@ class AffiliatedInvalidationServiceProviderImplTest
   invalidation::FakeInvalidationService* profile_invalidation_service_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
   base::test::ScopedFeatureList feature_list_;
   chromeos::FakeChromeUserManager* fake_user_manager_;
   user_manager::ScopedUserManager user_manager_enabler_;
@@ -253,23 +245,10 @@ AffiliatedInvalidationServiceProviderImplTest::
                                                                   "device_id");
   feature_list_.InitWithFeatureState(features::kPolicyFcmInvalidations,
                                      is_fcm_enabled());
-
-  if (is_fcm_enabled()) {
-    service_manager::mojom::ConnectorRequest conector_request;
-    content::SetSystemConnectorForTesting(
-        service_manager::Connector::Create(&conector_request));
-    data_decoder::SafeJsonParser::SetFactoryForTesting(
-        &CreateTestingJsonParser);
-  }
 }
 
 AffiliatedInvalidationServiceProviderImplTest::
-    ~AffiliatedInvalidationServiceProviderImplTest() {
-  if (is_fcm_enabled()) {
-    content::SetSystemConnectorForTesting(nullptr);
-    data_decoder::SafeJsonParser::SetFactoryForTesting(nullptr);
-  }
-}
+    ~AffiliatedInvalidationServiceProviderImplTest() = default;
 
 void AffiliatedInvalidationServiceProviderImplTest::SetUp() {
   chromeos::SystemSaltGetter::Initialize();
@@ -493,8 +472,16 @@ TEST_P(AffiliatedInvalidationServiceProviderImplTest,
   SendInvalidatorStateChangeNotification(
       is_fcm_enabled(), device_invalidation_service_,
       syncer::INVALIDATION_CREDENTIALS_REJECTED);
-  EXPECT_EQ(1, consumer_->GetAndClearInvalidationServiceSetCount());
-  EXPECT_EQ(nullptr, consumer_->GetInvalidationService());
+  if (is_fcm_enabled()) {
+    EXPECT_EQ(1, consumer_->GetAndClearInvalidationServiceSetCount());
+    EXPECT_EQ(nullptr, consumer_->GetInvalidationService());
+  } else {
+    // TiclInvalidationService replaces INVALIDATION_CREDENTIALS_REJECTED with
+    // TRANSIENT_INVALIDATION_ERROR. Which doesn't cause disconnection.
+    EXPECT_EQ(0, consumer_->GetAndClearInvalidationServiceSetCount());
+    EXPECT_EQ(provider_->GetDeviceInvalidationServiceForTest(),
+              consumer_->GetInvalidationService());
+  }
 
   // Verify that the device-global invalidation service still exists.
   EXPECT_TRUE(provider_->GetDeviceInvalidationServiceForTest());

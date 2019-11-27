@@ -12,12 +12,11 @@
 
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
+#include "base/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "components/invalidation/public/identity_provider.h"
@@ -37,6 +36,7 @@
 #include "components/sync/driver/sync_user_settings_impl.h"
 #include "components/sync/engine/configure_reason.h"
 #include "components/sync/engine/events/protocol_event_observer.h"
+#include "components/sync/engine/net/http_post_provider_factory.h"
 #include "components/sync/engine/net/network_time_update_callback.h"
 #include "components/sync/engine/shutdown_reason.h"
 #include "components/sync/engine/sync_engine.h"
@@ -55,7 +55,6 @@ class SharedURLLoaderFactory;
 namespace syncer {
 
 class BackendMigrator;
-class NetworkResources;
 class SyncAuthManager;
 class TypeDebugInfoObserver;
 struct CommitCounters;
@@ -70,7 +69,7 @@ class ProfileSyncService : public SyncService,
                            public SyncPrefObserver,
                            public DataTypeManagerObserver,
                            public UnrecoverableErrorHandler,
-                           public identity::IdentityManager::Observer {
+                           public signin::IdentityManager::Observer {
  public:
   // If AUTO_START, sync will set IsFirstSetupComplete() automatically and sync
   // will begin syncing without the user needing to confirm sync settings.
@@ -89,7 +88,7 @@ class ProfileSyncService : public SyncService,
     ~InitParams();
 
     std::unique_ptr<SyncClient> sync_client;
-    identity::IdentityManager* identity_manager = nullptr;
+    signin::IdentityManager* identity_manager = nullptr;
     std::vector<invalidation::IdentityProvider*>
         invalidations_identity_providers;
     StartBehavior start_behavior = MANUAL_START;
@@ -99,6 +98,7 @@ class ProfileSyncService : public SyncService,
     version_info::Channel channel = version_info::Channel::UNKNOWN;
     std::string debug_identifier;
     bool autofill_enable_account_wallet_storage = false;
+    bool enable_passwords_account_storage = false;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(InitParams);
@@ -126,6 +126,8 @@ class ProfileSyncService : public SyncService,
   bool RequiresClientUpgrade() const override;
   std::unique_ptr<SyncSetupInProgressHandle> GetSetupInProgressHandle()
       override;
+  std::unique_ptr<crypto::ECPrivateKey> GetExperimentalAuthenticationKey()
+      const override;
   bool IsSetupInProgress() const override;
   ModelTypeSet GetRegisteredDataTypes() const override;
   ModelTypeSet GetPreferredDataTypes() const override;
@@ -133,8 +135,10 @@ class ProfileSyncService : public SyncService,
   void StopAndClear() override;
   void OnDataTypeRequestsSyncStartup(ModelType type) override;
   void TriggerRefresh(const ModelTypeSet& types) override;
-  void ReadyForStartChanged(ModelType type) override;
+  void DataTypePreconditionChanged(ModelType type) override;
   void SetInvalidationsForSessionsEnabled(bool enabled) override;
+  UserDemographicsResult GetUserNoisedBirthYearAndGender(
+      base::Time now) override;
   void AddObserver(SyncServiceObserver* observer) override;
   void RemoveObserver(SyncServiceObserver* observer) override;
   bool HasObserver(const SyncServiceObserver* observer) const override;
@@ -164,8 +168,10 @@ class ProfileSyncService : public SyncService,
       const std::string& cache_guid,
       const std::string& birthday,
       const std::string& bag_of_chips,
+      const std::string& last_keystore_key,
       bool success) override;
-  void OnSyncCycleCompleted(const SyncCycleSnapshot& snapshot) override;
+  void OnSyncCycleCompleted(const SyncCycleSnapshot& snapshot,
+                            const std::string& last_keystore_key) override;
   void OnProtocolEvent(const ProtocolEvent& event) override;
   void OnDirectoryTypeCommitCounterUpdated(
       ModelType type,
@@ -185,7 +191,7 @@ class ProfileSyncService : public SyncService,
 
   // IdentityManager::Observer implementation.
   void OnAccountsInCookieUpdated(
-      const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+      const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
       const GoogleServiceAuthError& error) override;
 
   // Similar to above but with a callback that will be invoked on completion.
@@ -220,8 +226,6 @@ class ProfileSyncService : public SyncService,
   bool IsPassphrasePrompted() const;
   void SetPassphrasePrompted(bool prompted);
 
-  PassphraseRequiredReason GetPassphraseRequiredReasonForTest() const;
-
   // Returns whether or not the underlying sync engine has made any
   // local changes to items that have not yet been synced with the
   // server.
@@ -230,7 +234,7 @@ class ProfileSyncService : public SyncService,
   // Used by MigrationWatcher.  May return null.
   BackendMigrator* GetBackendMigratorForTest();
 
-  // Used by tests to inspect interaction with OAuth2TokenService.
+  // Used by tests to inspect interaction with the access token fetcher.
   bool IsRetryingAccessTokenFetchForTest() const;
 
   // Used by tests to inspect the OAuth2 access tokens used by PSS.
@@ -239,23 +243,26 @@ class ProfileSyncService : public SyncService,
   // Returns true if the syncer is waiting for new datatypes to be encrypted.
   bool IsEncryptionPendingForTest() const;
 
-  // Overrides the NetworkResources used for Sync connections.
+  // Overrides the callback used to create network connections.
   // TODO(crbug.com/949504): Inject this in the ctor instead. As it is, it's
-  // possible that the real NetworkResources were already used before the test
-  // had a chance to call this.
-  void OverrideNetworkResourcesForTest(
-      std::unique_ptr<NetworkResources> network_resources);
+  // possible that the real callback was already used before the test had a
+  // chance to call this.
+  void OverrideNetworkForTest(const CreateHttpPostProviderFactory&
+                                  create_http_post_provider_factory_cb);
 
   bool IsDataTypeControllerRunningForTest(ModelType type) const;
 
-  // Sometimes we need to wait for tasks on the sync thread in tests.
-  scoped_refptr<base::SingleThreadTaskRunner> GetSyncThreadTaskRunnerForTest()
-      const;
+  // Sometimes we need to wait for tasks on the |backend_task_runner_| in tests.
+  void FlushBackendTaskRunnerForTest() const;
 
   // Some tests rely on injecting calls to the encryption observer.
   SyncEncryptionHandler::Observer* GetEncryptionObserverForTest();
 
   SyncClient* GetSyncClientForTest();
+
+  // Combines GAIA ID, sync birthday and keystore key with '|' sepearator to
+  // generate a secret. Returns empty string if keystore key is not available.
+  std::string GetExperimentalAuthenticationSecretForTest() const;
 
  private:
   // Passed as an argument to StopImpl to control whether or not the sync
@@ -278,8 +285,6 @@ class ProfileSyncService : public SyncService,
 
   // Virtual for testing.
   virtual WeakHandle<JsEventHandler> GetJsEventHandler();
-
-  SyncEngine::HttpPostProviderFactoryGetter MakeHttpPostProviderFactoryGetter();
 
   WeakHandle<UnrecoverableErrorHandler> GetUnrecoverableErrorHandler();
 
@@ -331,6 +336,10 @@ class ProfileSyncService : public SyncService,
 
   void ClearUnrecoverableError();
 
+  // Initializes |backend_task_runner_| which is backed by |sync_thread_| or the
+  // ThreadPool depending on the ProfileSyncServiceUsesThreadPool experiment.
+  void InitializeBackendTaskRunnerIfNeeded();
+
   // Kicks off asynchronous initialization of the SyncEngine.
   void StartUpSlowEngineComponents();
 
@@ -342,13 +351,6 @@ class ProfileSyncService : public SyncService,
 
   // Tell the sync server that this client has disabled sync.
   void RemoveClientFromServer() const;
-
-  // Called when the system is under memory pressure.
-  void OnMemoryPressure(
-      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
-
-  // Check if previous shutdown is shutdown cleanly.
-  void ReportPreviousSessionMemoryWarningCount();
 
   // Estimates and records memory usage histograms per type.
   void RecordMemoryUsageHistograms();
@@ -362,6 +364,8 @@ class ProfileSyncService : public SyncService,
   // Called by SyncServiceCrypto when a passphrase is required or accepted.
   void ReconfigureDueToPassphrase(ConfigureReason reason);
 
+  std::string GetExperimentalAuthenticationSecret() const;
+
   // This profile's SyncClient, which abstracts away non-Sync dependencies and
   // the Sync API component factory.
   const std::unique_ptr<SyncClient> sync_client_;
@@ -371,7 +375,7 @@ class ProfileSyncService : public SyncService,
 
   // Encapsulates user signin - used to set/get the user's authenticated
   // email address and sign-out upon error.
-  identity::IdentityManager* const identity_manager_;
+  signin::IdentityManager* const identity_manager_;
 
   // The user-configurable knobs. Non-null between Initialize() and Shutdown().
   std::unique_ptr<SyncUserSettingsImpl> user_settings_;
@@ -386,6 +390,7 @@ class ProfileSyncService : public SyncService,
   const std::string debug_identifier_;
 
   const bool autofill_enable_account_wallet_storage_;
+  const bool enable_passwords_account_storage_;
 
   // This specifies where to find the sync server.
   const GURL sync_service_url_;
@@ -393,11 +398,13 @@ class ProfileSyncService : public SyncService,
   // A utility object containing logic and state relating to encryption.
   SyncServiceCrypto crypto_;
 
-  // The thread where all the sync operations happen. This thread is kept alive
-  // until browser shutdown and reused if sync is turned off and on again. It is
-  // joined during the shutdown process, but there is an abort mechanism in
-  // place to prevent slow HTTP requests from blocking browser shutdown.
-  std::unique_ptr<base::Thread> sync_thread_;
+  // Owns the sync thread and takes care of its destruction.
+  // TODO(https://crbug.com/1014464): Remove once we have switched to
+  // Threadpool.
+  base::OnceClosure sync_thread_stopper_;
+
+  // TODO(crbug.com/923287): Move out of this class. Possibly to SyncEngineImpl.
+  scoped_refptr<base::SequencedTaskRunner> backend_task_runner_;
 
   // Our asynchronous engine to communicate with sync components living on
   // other threads.
@@ -423,6 +430,11 @@ class ProfileSyncService : public SyncService,
   // This is set to true if last synced time is not set at the time of
   // OnEngineInitialized().
   bool is_first_time_sync_configure_;
+
+  // Last known keystore key, populated after engine initialization.
+  // TODO(crbug.com/1012226): Remove |last_keystore_key_| when VAPID migration
+  // is over.
+  std::string last_keystore_key_;
 
   // Number of UIs currently configuring the Sync service. When this number
   // is decremented back to zero, Sync setup is marked no longer in progress.
@@ -473,15 +485,12 @@ class ProfileSyncService : public SyncService,
   // List of available data type controllers.
   DataTypeController::TypeMap data_type_controllers_;
 
-  std::unique_ptr<NetworkResources> network_resources_;
+  CreateHttpPostProviderFactory create_http_post_provider_factory_cb_;
 
   const StartBehavior start_behavior_;
   std::unique_ptr<StartupController> startup_controller_;
 
   std::unique_ptr<SyncStoppedReporter> sync_stopped_reporter_;
-
-  // Listens for the system being under memory pressure.
-  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   // Whether the major version has changed since the last time Chrome ran,
   // and therefore a passphrase required state should result in prompting

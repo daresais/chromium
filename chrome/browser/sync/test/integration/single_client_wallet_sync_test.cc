@@ -4,16 +4,14 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/sync/test/integration/autofill_helper.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/secondary_account_helper.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
-#include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/wallet_helper.h"
@@ -33,12 +31,10 @@
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/driver/profile_sync_service.h"
-#include "components/sync/driver/sync_driver_switches.h"
+#include "components/sync/driver/sync_service.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "components/sync/test/fake_server/fake_server.h"
 #include "components/webdata/common/web_data_service_consumer.h"
-#include "content/public/browser/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using autofill::AutofillMetadata;
@@ -81,6 +77,8 @@ MATCHER(AddressHasConverted, "") {
 const char kLocalGuidA[] = "EDC609ED-7EEE-4F27-B00C-423242A9C44A";
 const char kDifferentBillingAddressId[] = "another address entity ID";
 const base::Time kArbitraryDefaultTime = base::Time::FromDoubleT(25);
+const syncer::SyncFirstSetupCompleteSource kSetSourceFromTest =
+    syncer::SyncFirstSetupCompleteSource::BASIC_FLOW;
 
 template <class T>
 class AutofillWebDataServiceConsumer : public WebDataServiceConsumer {
@@ -106,26 +104,18 @@ class AutofillWebDataServiceConsumer : public WebDataServiceConsumer {
   DISALLOW_COPY_AND_ASSIGN(AutofillWebDataServiceConsumer);
 };
 
-class PersonalDataLoadedObserverMock
-    : public autofill::PersonalDataManagerObserver {
+class WaitForWalletUpdateChecker : public StatusChangeChecker,
+                                   public syncer::SyncServiceObserver {
  public:
-  PersonalDataLoadedObserverMock() {}
-  ~PersonalDataLoadedObserverMock() override {}
-
-  MOCK_METHOD0(OnPersonalDataChanged, void());
-};
-
-class WaitForNextWalletUpdateChecker : public StatusChangeChecker,
-                                       public syncer::SyncServiceObserver {
- public:
-  explicit WaitForNextWalletUpdateChecker(syncer::ProfileSyncService* service)
-      : service_(service),
-        initial_marker_(GetInitialMarker(service)),
-        scoped_observer_(this) {
+  WaitForWalletUpdateChecker(base::Time min_required_progress_marker_timestamp,
+                             syncer::SyncService* service)
+      : min_required_progress_marker_timestamp_(
+            min_required_progress_marker_timestamp),
+        service_(service) {
     scoped_observer_.Add(service);
   }
 
-  bool IsExitConditionSatisfied() override {
+  bool IsExitConditionSatisfied(std::ostream* os) override {
     // GetLastCycleSnapshot() returns by value, so make sure to capture it for
     // iterator use.
     const syncer::SyncCycleSnapshot snap =
@@ -134,13 +124,25 @@ class WaitForNextWalletUpdateChecker : public StatusChangeChecker,
         snap.download_progress_markers();
     auto marker_it = progress_markers.find(syncer::AUTOFILL_WALLET_DATA);
     if (marker_it == progress_markers.end()) {
+      *os << "Waiting for an updated Wallet progress marker timestamp "
+          << min_required_progress_marker_timestamp_
+          << "; actual: no progress marker in last sync cycle";
       return false;
     }
-    return marker_it->second != initial_marker_;
-  }
 
-  std::string GetDebugMessage() const override {
-    return "Waiting for an updated Wallet progress marker.";
+    sync_pb::DataTypeProgressMarker progress_marker;
+    bool success = progress_marker.ParseFromString(marker_it->second);
+    DCHECK(success);
+
+    const base::Time actual_timestamp =
+        fake_server::FakeServer::GetWalletProgressMarkerTimestamp(
+            progress_marker);
+
+    *os << "Waiting for an updated Wallet progress marker timestamp "
+        << min_required_progress_marker_timestamp_ << "; actual "
+        << actual_timestamp;
+
+    return actual_timestamp >= min_required_progress_marker_timestamp_;
   }
 
   // syncer::SyncServiceObserver implementation.
@@ -149,25 +151,13 @@ class WaitForNextWalletUpdateChecker : public StatusChangeChecker,
   }
 
  private:
-  static std::string GetInitialMarker(
-      const syncer::ProfileSyncService* service) {
-    // GetLastCycleSnapshot() returns by value, so make sure to capture it for
-    // iterator use.
-    const syncer::SyncCycleSnapshot snap =
-        service->GetLastCycleSnapshotForDebugging();
-    const syncer::ProgressMarkerMap& progress_markers =
-        snap.download_progress_markers();
-    auto marker_it = progress_markers.find(syncer::AUTOFILL_WALLET_DATA);
-    if (marker_it == progress_markers.end()) {
-      return "N/A";
-    }
-    return marker_it->second;
-  }
+  const base::Time min_required_progress_marker_timestamp_;
+  const syncer::SyncService* const service_;
 
-  const syncer::ProfileSyncService* service_;
-  const std::string initial_marker_;
-  ScopedObserver<syncer::ProfileSyncService, WaitForNextWalletUpdateChecker>
-      scoped_observer_;
+  ScopedObserver<syncer::SyncService, syncer::SyncServiceObserver>
+      scoped_observer_{this};
+
+  DISALLOW_COPY_AND_ASSIGN(WaitForWalletUpdateChecker);
 };
 
 std::vector<std::unique_ptr<CreditCard>> GetServerCards(
@@ -240,7 +230,24 @@ class SingleClientWalletSyncTest : public SyncTest {
     test_clock_.Advance(base::TimeDelta::FromDays(1));
   }
 
-  PersonalDataLoadedObserverMock personal_data_observer_;
+  bool SetWalletDataInFakeServerAndWaitForUpdates(
+      const std::vector<sync_pb::SyncEntity>& wallet_entities) {
+    const base::Time write_timestamp =
+        GetFakeServer()->SetWalletData(wallet_entities);
+
+    return WaitForWalletUpdateChecker(write_timestamp, GetSyncService(0))
+        .Wait();
+  }
+
+  bool TriggerGetUpdatesAndWait() {
+    const base::Time now = base::Time::Now();
+    // Trigger a sync and wait for the new data to arrive.
+    TriggerSyncForModelTypes(
+        0, syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
+    return WaitForWalletUpdateChecker(now, GetSyncService(0)).Wait();
+  }
+
+  testing::NiceMock<PersonalDataLoadedObserverMock> personal_data_observer_;
   base::HistogramTester histogram_tester_;
   autofill::TestAutofillClock test_clock_;
 
@@ -249,17 +256,18 @@ class SingleClientWalletSyncTest : public SyncTest {
 };
 
 class SingleClientWalletSyncTestWithoutAccountStorage
-    : public UssWalletSwitchToggler,
-      public SingleClientWalletSyncTest {
+    : public SingleClientWalletSyncTest {
  public:
   SingleClientWalletSyncTestWithoutAccountStorage() {
-    InitWithFeatures(/*enabled_features=*/{},
-                     /*disabled_features=*/
-                     {autofill::features::kAutofillEnableAccountWalletStorage});
+    features_.InitAndDisableFeature(
+        autofill::features::kAutofillEnableAccountWalletStorage);
   }
+
+ private:
+  base::test::ScopedFeatureList features_;
 };
 
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithoutAccountStorage,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTestWithoutAccountStorage,
                        DownloadProfileStorage) {
   GetFakeServer()->SetWalletData({CreateDefaultSyncWalletAddress(),
                                   CreateDefaultSyncWalletCard(),
@@ -288,15 +296,15 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithoutAccountStorage,
 }
 
 class SingleClientWalletWithAccountStorageSyncTest
-    : public UssWalletSwitchToggler,
-      public SingleClientWalletSyncTest {
+    : public SingleClientWalletSyncTest {
  public:
   SingleClientWalletWithAccountStorageSyncTest() {
-    InitWithFeatures(
-        /*enabled_features=*/{autofill::features::
-                                  kAutofillEnableAccountWalletStorage},
-        /*disabled_features=*/{});
+    features_.InitAndEnableFeature(
+        autofill::features::kAutofillEnableAccountWalletStorage);
   }
+
+ private:
+  base::test::ScopedFeatureList features_;
 };
 
 // ChromeOS does not support late signin after profile creation, so the test
@@ -304,7 +312,7 @@ class SingleClientWalletWithAccountStorageSyncTest
 #if !defined(OS_CHROMEOS)
 // The account storage requires USS, so we only test the USS implementation
 // here.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletWithAccountStorageSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletWithAccountStorageSyncTest,
                        DownloadAccountStorage_Card) {
   ASSERT_TRUE(SetupClients());
   autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
@@ -359,15 +367,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletWithAccountStorageSyncTest,
 }
 #endif  // !defined(OS_CHROMEOS)
 
-class SingleClientWalletSyncTestWithDefaultFeatures
-    : public UssWalletSwitchToggler,
-      public SingleClientWalletSyncTest {
- public:
-  SingleClientWalletSyncTestWithDefaultFeatures() { InitWithDefaultFeatures(); }
-};
-
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       EnabledByDefault) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledByDefault) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
@@ -378,8 +378,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 }
 
 // Wallet data should get cleared from the database when sync is disabled.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       ClearOnDisableSync) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnDisableSync) {
   GetFakeServer()->SetWalletData({CreateDefaultSyncWalletAddress(),
                                   CreateDefaultSyncWalletCard(),
                                   CreateDefaultSyncPaymentsCustomerData()});
@@ -409,7 +408,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
   GetSyncService(0)->GetUserSettings()->SetSyncRequested(true);
   // StopAndClear() also clears the "first setup complete" flag, so set it
   // again.
-  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete();
+  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete(
+      kSetSourceFromTest);
   // Wait until Sync restores the card and it arrives at PDM.
   WaitForNumberOfCards(pdm, 1);
 
@@ -422,8 +422,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Wallet data should get cleared from the database when sync is (temporarily)
 // stopped, e.g. due to the Sync feature toggle in Android settings.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       ClearOnStopSync) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnStopSync) {
   GetFakeServer()->SetWalletData({CreateDefaultSyncWalletAddress(),
                                   CreateDefaultSyncWalletCard(),
                                   CreateDefaultSyncPaymentsCustomerData()});
@@ -464,8 +463,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 // ChromeOS does not sign out, so the test below does not apply.
 #if !defined(OS_CHROMEOS)
 // Wallet data should get cleared from the database when the user signs out.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       ClearOnSignOut) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnSignOut) {
   GetFakeServer()->SetWalletData({CreateDefaultSyncWalletAddress(),
                                   CreateDefaultSyncWalletCard(),
                                   CreateDefaultSyncPaymentsCustomerData()});
@@ -495,7 +493,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Wallet is not using incremental updates. Make sure existing data gets
 // replaced when synced down.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        NewSyncDataShouldReplaceExistingData) {
   GetFakeServer()->SetWalletData(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
@@ -517,19 +515,11 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
   EXPECT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
 
   // Put some completely new data in the sync server.
-  GetFakeServer()->SetWalletData(
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
       {CreateSyncWalletCard(/*name=*/"new-card", /*last_four=*/"0002",
                             kDefaultBillingAddressID),
        CreateSyncWalletAddress(/*name=*/"new-address", /*company=*/"Company-2"),
-       CreateSyncPaymentsCustomerData(/*customer_id=*/"newid")});
-
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+       CreateSyncPaymentsCustomerData(/*customer_id=*/"newid")}));
 
   // Make sure only the new data is present.
   cards = pdm->GetCreditCards();
@@ -545,8 +535,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 // Wallet is not using incremental updates. The server either sends a non-empty
 // update with deletion gc directives and with the (possibly empty) full data
 // set, or (more often) an empty update.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       EmptyUpdatesAreIgnored) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EmptyUpdatesAreIgnored) {
   GetFakeServer()->SetWalletData(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
                             kDefaultBillingAddressID),
@@ -566,16 +555,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
                              profiles[0]->GetRawInfo(autofill::COMPANY_NAME))));
   EXPECT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
 
-  // Do not change anything on the server so that the update forced below is an
-  // empty one.
-
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
   // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+  ASSERT_TRUE(TriggerGetUpdatesAndWait());
 
   // Refresh the pdm so that it gets cards from autofill table.
   RefreshAndWaitForOnPersonalDataChanged(pdm);
@@ -593,7 +574,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Check on top of EmptyUpdatesAreIgnored that the new progress marker is stored
 // for empty updates. This is a regression test for crbug.com/924447.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        EmptyUpdatesUpdateProgressMarker) {
   GetFakeServer()->SetWalletData(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
@@ -604,16 +585,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
   sync_pb::ModelTypeState state_before = GetWalletDataModelTypeState(0);
 
-  // Do not change anything on the server so that the update forced below is an
-  // empty one.
-
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
   // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+  ASSERT_TRUE(TriggerGetUpdatesAndWait());
 
   sync_pb::ModelTypeState state_after = GetWalletDataModelTypeState(0);
   EXPECT_NE(state_before.progress_marker().token(),
@@ -622,8 +595,14 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // If the server sends the same cards and addresses again, they should not
 // change on the client. We should also not overwrite existing metadata.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       SameUpdatesAreIgnored) {
+// Flaky on ASan/TSan only. http://crbug.com/997912
+#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER)
+#define MAYBE_SameUpdatesAreIgnored DISABLED_SameUpdatesAreIgnored
+#else
+#define MAYBE_SameUpdatesAreIgnored SameUpdatesAreIgnored
+#endif
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
+                       MAYBE_SameUpdatesAreIgnored) {
   GetFakeServer()->SetWalletData(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
                             kDefaultBillingAddressID),
@@ -646,19 +625,11 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
   // Keep the same data (only change the customer data to force the FakeServer
   // to send the full update).
-  GetFakeServer()->SetWalletData(
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
                             kDefaultBillingAddressID),
        CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateSyncPaymentsCustomerData("different")});
-
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+       CreateSyncPaymentsCustomerData("different")}));
 
   // Refresh the pdm so that it gets cards from autofill table.
   RefreshAndWaitForOnPersonalDataChanged(pdm);
@@ -688,8 +659,14 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // If the server sends the same cards and addresses with changed data, they
 // should change on the client.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       ChangedEntityGetsUpdated) {
+// Flaky on Mac/Linux/ChromeOS only. http://crbug.com/997825
+#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#define MAYBE_ChangedEntityGetsUpdated DISABLED_ChangedEntityGetsUpdated
+#else
+#define MAYBE_ChangedEntityGetsUpdated ChangedEntityGetsUpdated
+#endif
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
+                       MAYBE_ChangedEntityGetsUpdated) {
   GetFakeServer()->SetWalletData(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0002",
                             kDefaultBillingAddressID),
@@ -712,19 +689,11 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
   // Update the data (also change the customer data to force the full update as
   // FakeServer computes the hash for progress markers only based on ids).
-  GetFakeServer()->SetWalletData(
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
                             kDefaultBillingAddressID),
        CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateSyncPaymentsCustomerData("different")});
-
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+       CreateSyncPaymentsCustomerData("different")}));
 
   // Refresh the pdm so that it gets cards from autofill table.
   RefreshAndWaitForOnPersonalDataChanged(pdm);
@@ -755,7 +724,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // If the server sends the same cards again, they should not change on the
 // client even if the cards on the client are unmasked.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        SameUpdatesAreIgnoredWhenLocalCardsUnmasked) {
 // We need to allow storing full server cards for this test to work properly.
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -782,18 +751,10 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
   // Keep the same data (only change the customer data to force the FakeServer
   // to send the full update).
-  GetFakeServer()->SetWalletData(
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
       {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
                             kDefaultBillingAddressID),
-       CreateSyncPaymentsCustomerData("different")});
-
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+       CreateSyncPaymentsCustomerData("different")}));
 
   // Refresh the pdm so that it gets cards from autofill table.
   RefreshAndWaitForOnPersonalDataChanged(pdm);
@@ -806,143 +767,11 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
   EXPECT_EQ("different", pdm->GetPaymentsCustomerData()->customer_id);
 }
 
-// Tests that we do not report any diff metric on startup without getting a new
-// full update from the server. The test makes the initial sync in the first run
-// and then performs only an empty update after restart (see the test below).
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       PRE_NoMetricReportedOnStartup) {
-  GetFakeServer()->SetWalletData(
-      {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateDefaultSyncPaymentsCustomerData()});
-  ASSERT_TRUE(SetupSync());
-
-  // Make sure the data is present on the client.
-  autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
-  ASSERT_EQ(1uL, pdm->GetCreditCards().size());
-  ASSERT_EQ(1uL, pdm->GetServerProfiles().size());
-  ASSERT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
-}
-
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       NoMetricReportedOnStartup) {
-  // Set the same data on the server so that we get an empty update (this is
-  // based on a hash of the data).
-  GetFakeServer()->SetWalletData(
-      {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateDefaultSyncPaymentsCustomerData()});
-  ASSERT_TRUE(SetupSync());
-
-  // Make sure the data is still present on the client.
-  autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
-  ASSERT_EQ(1uL, pdm->GetCreditCards().size());
-  ASSERT_EQ(1uL, pdm->GetServerProfiles().size());
-  ASSERT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
-}
-
-// Tests that we _do_ report one diff metric on startup when we get an update
-// from the server. The test makes the initial sync in the first run and then
-// performs one full update after restart (see the test below). This in
-// particular tests that the Directory implementation handles well the case that
-// the update is received before MergeDataAndStartSyncing.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       PRE_OneMetricReportedOnStartup) {
-  GetFakeServer()->SetWalletData(
-      {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateDefaultSyncPaymentsCustomerData()});
-  ASSERT_TRUE(SetupSync());
-
-  // Make sure the data is present on the client.
-  autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
-  ASSERT_EQ(1uL, pdm->GetCreditCards().size());
-  ASSERT_EQ(1uL, pdm->GetServerProfiles().size());
-  ASSERT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
-}
-
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       OneMetricReportedOnStartup) {
-  // Set different data so that we get a full update.
-  GetFakeServer()->SetWalletData(
-      {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletCard(/*name=*/"card-2", /*last_four=*/"0002",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateDefaultSyncPaymentsCustomerData()});
-  ASSERT_TRUE(SetupSync());
-
-  // Make sure the data is still present on the client.
-  autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
-  ASSERT_EQ(2uL, pdm->GetCreditCards().size());
-  ASSERT_EQ(1uL, pdm->GetServerProfiles().size());
-  ASSERT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
-}
-
-// Tests that we do report age metric on startup.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       PRE_UseDateMetricReportedOnStartup) {
-  GetFakeServer()->SetWalletData(
-      {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateDefaultSyncPaymentsCustomerData()});
-  ASSERT_TRUE(SetupSync());
-
-  // Make sure the data is present on the client.
-  autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
-  ASSERT_EQ(1uL, pdm->GetCreditCards().size());
-  ASSERT_EQ(1uL, pdm->GetServerProfiles().size());
-  ASSERT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
-
-  // Here, we would ideally test that no metrics get recorded during initial
-  // sync. Due to design differences between USS&Directory, we cannot make it
-  // work (the metadata syncable service has no reliable way to tell it is
-  // initial sync).
-}
-
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       UseDateMetricReportedOnStartup) {
-  // Advance the clock to get a reasonable value.
-  AdvanceAutofillClockByOneDay();
-
-  // Set the same data on the server so that we get an empty update (this is
-  // based on a hash of the data).
-  GetFakeServer()->SetWalletData(
-      {CreateSyncWalletCard(/*name=*/"card-1", /*last_four=*/"0001",
-                            kDefaultBillingAddressID),
-       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
-       CreateDefaultSyncPaymentsCustomerData()});
-  ASSERT_TRUE(SetupSync());
-
-  // Make sure the data is still present on the client.
-  autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
-  ASSERT_EQ(1uL, pdm->GetCreditCards().size());
-  ASSERT_EQ(1uL, pdm->GetServerProfiles().size());
-  ASSERT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
-
-  // The metric gets recorded.
-  histogram_tester_.ExpectTotalCount("Autofill.WalletUseDateInMinutes.Card", 1);
-  histogram_tester_.ExpectBucketCount(
-      "Autofill.WalletUseDateInMinutes.Card",
-      /*sample=*/base::TimeDelta::FromDays(1).InMinutes(),
-      /*count=*/1);
-  histogram_tester_.ExpectTotalCount("Autofill.WalletUseDateInMinutes.Address",
-                                     1);
-  histogram_tester_.ExpectBucketCount(
-      "Autofill.WalletUseDateInMinutes.Address",
-      /*sample=*/base::TimeDelta::FromDays(1).InMinutes(),
-      /*count=*/1);
-}
-
 // Wallet data should get cleared from the database when the wallet sync type
 // flag is disabled.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       ClearOnDisableWalletSync) {
+// Test is flaky: https://crbug.com/997786
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
+                       DISABLED_ClearOnDisableWalletSync) {
   GetFakeServer()->SetWalletData({CreateDefaultSyncWalletAddress(),
                                   CreateDefaultSyncWalletCard(),
                                   CreateDefaultSyncPaymentsCustomerData()});
@@ -972,7 +801,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Wallet data should get cleared from the database when the wallet autofill
 // integration flag is disabled.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        ClearOnDisableWalletAutofill) {
   GetFakeServer()->SetWalletData({CreateDefaultSyncWalletAddress(),
                                   CreateDefaultSyncWalletCard(),
@@ -1004,8 +833,16 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Wallet data present on the client should be cleared in favor of the new data
 // synced down form the server.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       NewWalletCardRemovesExistingCardAndProfile) {
+// Flaky (mostly) on ASan/TSan. http://crbug.com/998130
+#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER)
+#define MAYBE_NewWalletCardRemovesExistingCardAndProfile \
+  DISABLED_NewWalletCardRemovesExistingCardAndProfile
+#else
+#define MAYBE_NewWalletCardRemovesExistingCardAndProfile \
+  NewWalletCardRemovesExistingCardAndProfile
+#endif
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
+                       MAYBE_NewWalletCardRemovesExistingCardAndProfile) {
   ASSERT_TRUE(SetupSync());
   autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
   ASSERT_NE(nullptr, pdm);
@@ -1043,15 +880,9 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
   EXPECT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
 
   // Add a new card from the server and sync it down.
-  GetFakeServer()->SetWalletData(
-      {CreateDefaultSyncWalletCard(), CreateDefaultSyncPaymentsCustomerData()});
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
+      {CreateDefaultSyncWalletCard(),
+       CreateDefaultSyncPaymentsCustomerData()}));
 
   // The only card present on the client should be the one from the server.
   cards = pdm->GetCreditCards();
@@ -1068,8 +899,15 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Wallet data present on the client should be cleared in favor of the new data
 // synced down form the server.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       NewWalletDataRemovesExistingData) {
+// Flaky (mostly) on ASan/TSan. http://crbug.com/998130
+#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER)
+#define MAYBE_NewWalletDataRemovesExistingData \
+  DISABLED_NewWalletDataRemovesExistingData
+#else
+#define MAYBE_NewWalletDataRemovesExistingData NewWalletDataRemovesExistingData
+#endif
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
+                       MAYBE_NewWalletDataRemovesExistingData) {
   ASSERT_TRUE(SetupSync());
   autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
   ASSERT_NE(nullptr, pdm);
@@ -1107,16 +945,9 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
   EXPECT_EQ(kDefaultCustomerID, pdm->GetPaymentsCustomerData()->customer_id);
 
   // Add a new profile and new customer data from the server and sync them down.
-  GetFakeServer()->SetWalletData(
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
       {CreateDefaultSyncWalletAddress(),
-       CreateSyncPaymentsCustomerData(/*customer_id=*/"newid")});
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+       CreateSyncPaymentsCustomerData(/*customer_id=*/"newid")}));
 
   // The only profile present on the client should be the one from the server.
   profiles = pdm->GetServerProfiles();
@@ -1134,7 +965,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Tests that a local billing address id set on a card on the client should not
 // be overwritten when that same card is synced again.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        SameWalletCard_PreservesLocalBillingAddressId) {
   ASSERT_TRUE(SetupSync());
   autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
@@ -1157,14 +988,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
   // Sync the same card from the server, except with a default billing address
   // id.
-  GetFakeServer()->SetWalletData({CreateDefaultSyncWalletCard()});
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
+      {CreateDefaultSyncWalletCard()}));
 
   // The billing address is should still refer to the local profile.
   cards = pdm->GetCreditCards();
@@ -1175,8 +1000,16 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
 // Tests that a server billing address id set on a card on the client is
 // overwritten when that same card is synced again.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       SameWalletCard_DiscardsOldServerBillingAddressId) {
+// Flaky (mostly) on ASan/TSan. http://crbug.com/998130
+#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER)
+#define MAYBE_SameWalletCard_DiscardsOldServerBillingAddressId \
+  DISABLED_SameWalletCard_DiscardsOldServerBillingAddressId
+#else
+#define MAYBE_SameWalletCard_DiscardsOldServerBillingAddressId \
+  SameWalletCard_DiscardsOldServerBillingAddressId
+#endif
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
+                       MAYBE_SameWalletCard_DiscardsOldServerBillingAddressId) {
   ASSERT_TRUE(SetupSync());
   autofill::PersonalDataManager* pdm = GetPersonalDataManager(0);
   ASSERT_NE(nullptr, pdm);
@@ -1198,14 +1031,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 
   // Sync the same card from the server, except with a default billing address
   // id.
-  GetFakeServer()->SetWalletData({CreateDefaultSyncWalletCard()});
-  // Constructing the checker captures the current progress marker. Make sure to
-  // do that before triggering the fetch.
-  WaitForNextWalletUpdateChecker checker(GetSyncService(0));
-  // Trigger a sync and wait for the new data to arrive.
-  TriggerSyncForModelTypes(0,
-                           syncer::ModelTypeSet(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(checker.Wait());
+  ASSERT_TRUE(SetWalletDataInFakeServerAndWaitForUpdates(
+      {CreateDefaultSyncWalletCard()}));
 
   // The billing address should be the one from the server card.
   cards = pdm->GetCreditCards();
@@ -1214,8 +1041,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
   EXPECT_EQ(kDefaultBillingAddressID, cards[0]->billing_address_id());
 }
 
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
-                       ConvertServerAddress) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ConvertServerAddress) {
   GetFakeServer()->SetWalletData(
       {CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1"),
        CreateDefaultSyncPaymentsCustomerData()});
@@ -1254,7 +1080,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
       /*count=*/1);
 }
 
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        DoNotConvertServerAddressAgain) {
   sync_pb::SyncEntity address_entity =
       CreateSyncWalletAddress(/*name=*/"address-1", /*company=*/"Company-1");
@@ -1297,15 +1123,11 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSyncTestWithDefaultFeatures,
 }
 
 class SingleClientWalletSecondaryAccountSyncTest
-    : public UssWalletSwitchToggler,
-      public SingleClientWalletSyncTest {
+    : public SingleClientWalletSyncTest {
  public:
   SingleClientWalletSecondaryAccountSyncTest() {
-    InitWithFeatures(
-        /*enabled_features=*/{switches::kSyncSupportSecondaryAccount,
-                              autofill::features::
-                                  kAutofillEnableAccountWalletStorage},
-        /*disabled_features=*/{});
+    features_.InitAndEnableFeature(
+        autofill::features::kAutofillEnableAccountWalletStorage);
   }
   ~SingleClientWalletSecondaryAccountSyncTest() override {}
 
@@ -1324,6 +1146,8 @@ class SingleClientWalletSecondaryAccountSyncTest
   Profile* profile() { return GetProfile(0); }
 
  private:
+  base::test::ScopedFeatureList features_;
+
   secondary_account_helper::ScopedSigninClientFactory
       test_signin_client_factory_;
 
@@ -1333,7 +1157,7 @@ class SingleClientWalletSecondaryAccountSyncTest
 // ChromeOS doesn't support changes to the primary account after startup, so
 // these secondary-account-related tests don't apply.
 #if !defined(OS_CHROMEOS)
-IN_PROC_BROWSER_TEST_P(SingleClientWalletSecondaryAccountSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSecondaryAccountSyncTest,
                        SwitchesFromAccountToProfileStorageOnSyncOptIn) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
 
@@ -1372,7 +1196,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSecondaryAccountSyncTest,
   // set first-time setup to complete.
   secondary_account_helper::MakeAccountPrimary(profile(), "user@email.com");
   GetSyncService(0)->GetUserSettings()->SetSyncRequested(true);
-  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete();
+  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete(
+      kSetSourceFromTest);
 
   // Wait for Sync to get reconfigured into feature mode.
   ASSERT_TRUE(GetClient(0)->AwaitSyncSetupCompletion());
@@ -1395,7 +1220,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletSecondaryAccountSyncTest,
   EXPECT_NE(nullptr, GetPaymentsCustomerData(profile_data).get());
 }
 
-IN_PROC_BROWSER_TEST_P(
+IN_PROC_BROWSER_TEST_F(
     SingleClientWalletSecondaryAccountSyncTest,
     SwitchesFromAccountToProfileStorageOnSyncOptInWithAdvancedSetup) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
@@ -1444,7 +1269,8 @@ IN_PROC_BROWSER_TEST_P(
   ASSERT_EQ(syncer::SyncService::TransportState::CONFIGURING,
             GetSyncService(0)->GetTransportState());
 
-  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete();
+  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete(
+      kSetSourceFromTest);
 
   // Wait for Sync to get reconfigured into feature mode.
   ASSERT_TRUE(GetClient(0)->AwaitSyncSetupCompletion());
@@ -1478,7 +1304,7 @@ IN_PROC_BROWSER_TEST_P(
 // 3. Enable Sync-the-feature again -> profile storage.
 // 4. StopAndClear() -> account storage.
 // 5. Enable Sync-the-feature again -> profile storage.
-IN_PROC_BROWSER_TEST_P(SingleClientWalletWithAccountStorageSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientWalletWithAccountStorageSyncTest,
                        SwitchesBetweenAccountAndProfileStorageOnTogglingSync) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
 
@@ -1577,7 +1403,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletWithAccountStorageSyncTest,
 
   // STEP 5. Turn Sync-the-feature on again.
   GetSyncService(0)->GetUserSettings()->SetSyncRequested(true);
-  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete();
+  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete(
+      kSetSourceFromTest);
 
   // Wait for Sync to get reconfigured into full feature mode again.
   ASSERT_TRUE(GetClient(0)->AwaitSyncSetupCompletion());
@@ -1597,19 +1424,3 @@ IN_PROC_BROWSER_TEST_P(SingleClientWalletWithAccountStorageSyncTest,
   EXPECT_EQ(0U, GetServerCards(account_data).size());
   EXPECT_EQ(1U, GetServerCards(profile_data).size());
 }
-
-INSTANTIATE_TEST_SUITE_P(USS,
-                         SingleClientWalletSyncTestWithoutAccountStorage,
-                         ::testing::Values(false, true));
-
-INSTANTIATE_TEST_SUITE_P(USS,
-                         SingleClientWalletWithAccountStorageSyncTest,
-                         ::testing::Values(false, true));
-
-INSTANTIATE_TEST_SUITE_P(USS,
-                         SingleClientWalletSyncTestWithDefaultFeatures,
-                         ::testing::Values(false, true));
-
-INSTANTIATE_TEST_SUITE_P(USS,
-                         SingleClientWalletSecondaryAccountSyncTest,
-                         ::testing::Values(false, true));

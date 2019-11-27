@@ -9,7 +9,6 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/signin/feature_flags.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
@@ -23,6 +22,7 @@
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/ui/util/named_guide_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #import "ui/gfx/ios/NSString+CrStringDrawing.h"
@@ -40,8 +40,8 @@ const CGFloat kBackgroundLandscapeInset = 169;
 // Fakebox highlight animation duration.
 const CGFloat kFakeboxHighlightDuration = 0.4;
 
-// Fakebox highlight background alpha increase.
-const CGFloat kFakeboxHighlightIncrease = 0.06;
+// Fakebox highlight background alpha.
+const CGFloat kFakeboxHighlightAlpha = 0.06;
 
 // Returns the height of the toolbar based on the preferred content size of the
 // application.
@@ -76,6 +76,8 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
 // Layout constraints for Identity Disc that need to be adjusted based on
 // device size class changes.
 @property(nonatomic, strong) NSLayoutConstraint* identityDiscTopConstraint;
+// View used to add on-touch highlight to the fake omnibox.
+@property(nonatomic, strong) UIView* fakeLocationBarHighlightView;
 
 @end
 
@@ -142,7 +144,7 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   // Omnibox, used for animations.
   // TODO(crbug.com/936811): See if it is possible to share some initialization
   // code with the real Omnibox.
-  UIColor* color = [UIColor colorWithWhite:0 alpha:kOmniboxPlaceholderAlpha];
+  UIColor* color = [UIColor colorNamed:kTextfieldPlaceholderColor];
   OmniboxContainerView* omnibox =
       [[OmniboxContainerView alloc] initWithFrame:CGRectZero
                                         textColor:color
@@ -249,8 +251,7 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   DCHECK(searchField.superview == self);
 
   self.separator = [[UIView alloc] init];
-  self.separator.backgroundColor =
-      [UIColor colorNamed:@"tab_toolbar_shadow_color"];
+  self.separator.backgroundColor = [UIColor colorNamed:kToolbarShadowColor];
   self.separator.alpha = 0;
   self.separator.translatesAutoresizingMaskIntoConstraints = NO;
   [searchField addSubview:self.separator];
@@ -303,8 +304,15 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
 
   CGFloat percent =
       [self searchFieldProgressForOffset:offset safeAreaInsets:safeAreaInsets];
+
   if (!IsSplitToolbarMode(self)) {
-    self.alpha = 1 - percent;
+    // When Voiceover is running, if the header's alpha is set to 0, voiceover
+    // can't scroll back to it, and it will never come back into view. To
+    // prevent that, set the alpha to non-zero when the header is fully
+    // offscreen. It will still not be seen, but it will be accessible to
+    // Voiceover.
+    self.alpha = std::max(1 - percent, 0.01);
+
     widthConstraint.constant = searchFieldNormalWidth;
     self.fakeLocationBarHeightConstraint.constant = ToolbarHeight();
     self.fakeLocationBar.layer.cornerRadius =
@@ -376,10 +384,8 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
                         delay:0
                       options:UIViewAnimationOptionCurveEaseOut
                    animations:^{
-                     CGFloat alpha = kAdaptiveLocationBarBackgroundAlpha;
-                     if (highlighted)
-                       alpha += kFakeboxHighlightIncrease;
-                     self.fakeLocationBar.backgroundColor =
+                     CGFloat alpha = highlighted ? kFakeboxHighlightAlpha : 0;
+                     self.fakeLocationBarHighlightView.backgroundColor =
                          [UIColor colorWithWhite:0 alpha:alpha];
                    }
                    completion:nil];
@@ -397,7 +403,6 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   // identityDiscView may not be set if feature is not enabled.
   if (!self.identityDiscView)
     return;
-  DCHECK(IsIdentityDiscFeatureEnabled());
   if ((self.traitCollection.verticalSizeClass !=
        previousTraitCollection.verticalSizeClass) ||
       (self.traitCollection.horizontalSizeClass !=
@@ -412,9 +417,18 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   if (!_fakeLocationBar) {
     _fakeLocationBar = [[UIView alloc] init];
     _fakeLocationBar.userInteractionEnabled = NO;
+    _fakeLocationBar.clipsToBounds = YES;
     _fakeLocationBar.backgroundColor =
-        [UIColor colorWithWhite:0 alpha:kAdaptiveLocationBarBackgroundAlpha];
+        [UIColor colorNamed:kTextfieldBackgroundColor];
     _fakeLocationBar.translatesAutoresizingMaskIntoConstraints = NO;
+
+    _fakeLocationBarHighlightView = [[UIView alloc] init];
+    _fakeLocationBarHighlightView.userInteractionEnabled = NO;
+    _fakeLocationBarHighlightView.backgroundColor = UIColor.clearColor;
+    _fakeLocationBarHighlightView.translatesAutoresizingMaskIntoConstraints =
+        NO;
+    [_fakeLocationBar addSubview:_fakeLocationBarHighlightView];
+    AddSameConstraints(_fakeLocationBar, _fakeLocationBarHighlightView);
   }
   return _fakeLocationBar;
 }

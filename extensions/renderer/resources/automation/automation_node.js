@@ -346,6 +346,13 @@ var GetNameFrom = natives.GetNameFrom;
 /**
  * @param {string} axTreeID The id of the accessibility tree.
  * @param {number} nodeID The id of a node.
+ * @return {automation.DescriptionFromType} The node description source.
+ */
+var GetDescriptionFrom = natives.GetDescriptionFrom;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
  * @return {?string} The image annotation status, which may
  *     include the annotation itself if completed successfully.
  */
@@ -448,6 +455,20 @@ var GetTableCellColumnIndex = natives.GetTableCellColumnIndex;
  * @return {number} Row index for this cell.
  */
 var GetTableCellRowIndex = natives.GetTableCellRowIndex;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {number} Column index for this cell.
+ */
+var GetTableCellAriaColumnIndex = natives.GetTableCellAriaColumnIndex;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {number} Row index for this cell.
+ */
+var GetTableCellAriaRowIndex = natives.GetTableCellAriaRowIndex;
 
 /**
  * @param {string} axTreeId The id of the accessibility tree.
@@ -648,6 +669,11 @@ AutomationNodeImpl.prototype = {
     return GetNameFrom(this.treeID, this.id);
   },
 
+
+  get descriptionFrom() {
+    return GetDescriptionFrom(this.treeID, this.id);
+  },
+
   get imageAnnotation() {
     return GetImageAnnotation(this.treeID, this.id);
   },
@@ -719,6 +745,15 @@ AutomationNodeImpl.prototype = {
 
   get tableCellRowIndex() {
     return GetTableCellRowIndex(this.treeID, this.id);
+  },
+
+
+  get tableCellAriaColumnIndex() {
+    return GetTableCellAriaColumnIndex(this.treeID, this.id);
+  },
+
+  get tableCellAriaRowIndex() {
+    return GetTableCellAriaRowIndex(this.treeID, this.id);
   },
 
   get nonInlineTextWordStarts() {
@@ -953,6 +988,8 @@ AutomationNodeImpl.prototype = {
       result += ' childTreeID=' + childTreeID;
     if (name)
       result += ' name=' + name;
+    if (this.className)
+      result += ' className=' + this.className;
     return result;
   },
 
@@ -1139,6 +1176,7 @@ var stringAttributes = [
     'placeholder',
     'roleDescription',
     'textInputType',
+    'tooltip',
     'url',
     'value'];
 
@@ -1160,9 +1198,7 @@ var intAttributes = [
     'scrollYMax',
     'scrollYMin',
     'setSize',
-    'ariaCellColumnIndex',
     'tableCellColumnSpan',
-    'ariaCellRowIndex',
     'tableCellRowSpan',
     'tableColumnCount',
     'ariaColumnCount',
@@ -1177,7 +1213,7 @@ var intAttributes = [
 var nodeRefAttributes = [
     ['activedescendantId', 'activeDescendant', 'activeDescendantFor'],
     ['detailsId', 'details', 'detailsFor'],
-    ['errorMessageId', 'errorMessage', 'errorMessageFor'],
+    ['errormessageId', 'errorMessage', 'errorMessageFor'],
     ['inPageLinkTargetId', 'inPageLinkTarget', null],
     ['nextFocusId', 'nextFocus', null],
     ['nextOnLineId', 'nextOnLine', null],
@@ -1725,6 +1761,7 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
         'root',
         'htmlAttributes',
         'nameFrom',
+        'descriptionFrom',
         'bold',
         'italic',
         'underline',
@@ -1737,6 +1774,8 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
         'tableCellRowHeaders',
         'tableCellColumnIndex',
         'tableCellRowIndex',
+        'tableCellAriaRowIndex',
+        'tableCellAriaColumnIndex',
         'nonInlineTextWordStarts',
         'nonInlineTextWordEnds',
       ]),

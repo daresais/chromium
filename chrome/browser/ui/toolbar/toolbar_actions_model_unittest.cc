@@ -1053,8 +1053,11 @@ TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarIncognitoEnableExtension) {
 }
 
 // Test that hiding actions on the toolbar results in sending them to the
-// overflow menu when the redesign switch is enabled.
-TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarActionsVisibilityWithSwitch) {
+// overflow menu.
+TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarActionsVisibility) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(features::kExtensionsToolbarMenu);
+
   Init();
 
   // We choose to use all types of extensions here, since the misnamed
@@ -1434,4 +1437,49 @@ TEST_F(ToolbarActionsModelUnitTest, PinnedExtensionsFilteredOnInitialization) {
   // extension a.
   EXPECT_THAT(model_created_after_prefs_set.pinned_action_ids(),
               testing::ElementsAre(browser_action_a()->id()));
+}
+
+TEST_F(ToolbarActionsModelUnitTest, ChangesToPinnedOrderSavedInExtensionPrefs) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kExtensionsToolbarMenu);
+
+  Init();
+  ASSERT_TRUE(AddBrowserActionExtensions());
+
+  extensions::ExtensionPrefs* const extension_prefs =
+      extensions::ExtensionPrefs::Get(profile());
+
+  // The preferences shouldn't have any extensions initially pinned.
+  EXPECT_THAT(extension_prefs->GetPinnedExtensions(), testing::IsEmpty());
+
+  // Verify that pinned extensions are reflected in preferences.
+  toolbar_model()->SetActionVisibility(browser_action_a()->id(), true);
+  toolbar_model()->SetActionVisibility(browser_action_b()->id(), true);
+  toolbar_model()->SetActionVisibility(browser_action_c()->id(), true);
+  EXPECT_THAT(
+      extension_prefs->GetPinnedExtensions(),
+      testing::ElementsAre(browser_action_a()->id(), browser_action_b()->id(),
+                           browser_action_c()->id()));
+
+  // Verify that moving an action left to right is reflected in preferences.
+  toolbar_model()->MovePinnedAction(browser_action_b()->id(), 2);
+  EXPECT_THAT(
+      extension_prefs->GetPinnedExtensions(),
+      testing::ElementsAre(browser_action_a()->id(), browser_action_c()->id(),
+                           browser_action_b()->id()));
+
+  // Verify that moving an action right to left is reflected in preferences.
+  toolbar_model()->MovePinnedAction(browser_action_b()->id(), 0);
+  EXPECT_THAT(
+      extension_prefs->GetPinnedExtensions(),
+      testing::ElementsAre(browser_action_b()->id(), browser_action_a()->id(),
+                           browser_action_c()->id()));
+
+  // Verify that moving an action to index greater than rightmost index is
+  // reflected in preferences as at the right end.
+  toolbar_model()->MovePinnedAction(browser_action_b()->id(), 4);
+  EXPECT_THAT(
+      extension_prefs->GetPinnedExtensions(),
+      testing::ElementsAre(browser_action_a()->id(), browser_action_c()->id(),
+                           browser_action_b()->id()));
 }

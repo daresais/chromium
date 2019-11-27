@@ -18,6 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/timer/timer.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -182,9 +183,9 @@ class LoginPasswordView::EasyUnlockIcon : public views::Button,
     on_tapped_ = on_tapped;
 
     hover_notifier_ = std::make_unique<HoverNotifier>(
-        this,
-        base::Bind(&LoginPasswordView::EasyUnlockIcon::OnHoverStateChanged,
-                   base::Unretained(this)));
+        this, base::BindRepeating(
+                  &LoginPasswordView::EasyUnlockIcon::OnHoverStateChanged,
+                  base::Unretained(this)));
   }
 
   void SetEasyUnlockIcon(EasyUnlockIconId icon_id,
@@ -458,10 +459,8 @@ void LoginPasswordView::SetEasyUnlockIcon(
   password_row_->Layout();
 }
 
-void LoginPasswordView::UpdateForUser(const LoginUserInfo& user) {
-  textfield_->SetAccessibleName(l10n_util::GetStringFUTF16(
-      IDS_ASH_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME,
-      base::UTF8ToUTF16(user.basic_user_info.display_email)));
+void LoginPasswordView::SetAccessibleName(const base::string16& name) {
+  textfield_->SetAccessibleName(name);
 }
 
 void LoginPasswordView::SetFocusEnabledForChildViews(bool enable) {
@@ -473,7 +472,7 @@ void LoginPasswordView::Clear() {
   textfield_->SetText(base::string16());
   // |ContentsChanged| won't be called by |Textfield| if the text is changed
   // by |Textfield::SetText()|.
-  ContentsChanged(textfield_, textfield_->text());
+  ContentsChanged(textfield_, textfield_->GetText());
 }
 
 void LoginPasswordView::InsertNumber(int value) {
@@ -494,7 +493,7 @@ void LoginPasswordView::Backspace() {
 
 void LoginPasswordView::SetPlaceholderText(
     const base::string16& placeholder_text) {
-  textfield_->set_placeholder_text(placeholder_text);
+  textfield_->SetPlaceholderText(placeholder_text);
   SchedulePaint();
 }
 
@@ -545,7 +544,7 @@ void LoginPasswordView::ContentsChanged(views::Textfield* sender,
 bool LoginPasswordView::HandleKeyEvent(views::Textfield* sender,
                                        const ui::KeyEvent& key_event) {
   // Treat the password field as normal if it has text
-  if (!textfield_->text().empty())
+  if (!textfield_->GetText().empty())
     return false;
 
   if (key_event.type() != ui::ET_KEY_PRESSED)
@@ -569,8 +568,9 @@ bool LoginPasswordView::HandleKeyEvent(views::Textfield* sender,
 }
 
 void LoginPasswordView::UpdateUiState() {
-  bool is_enabled = !textfield_->read_only() &&
-                    (enabled_on_empty_password_ || !textfield_->text().empty());
+  bool is_enabled =
+      !textfield_->GetReadOnly() &&
+      (enabled_on_empty_password_ || !textfield_->GetText().empty());
   submit_button_->SetEnabled(is_enabled);
   SkColor color = is_enabled
                       ? login_constants::kButtonEnabledColor
@@ -588,9 +588,9 @@ void LoginPasswordView::OnCapsLockChanged(bool enabled) {
 
 void LoginPasswordView::SubmitPassword() {
   DCHECK(submit_button_->GetEnabled());
-  if (textfield_->read_only())
+  if (textfield_->GetReadOnly())
     return;
-  on_submit_.Run(textfield_->text());
+  on_submit_.Run(textfield_->GetText());
 }
 
 }  // namespace ash

@@ -13,8 +13,10 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/version.h"
 #include "extensions/browser/updater/extension_downloader_delegate.h"
 #include "extensions/browser/updater/manifest_fetch_data.h"
@@ -29,11 +31,11 @@ namespace crx_file {
 enum class VerifierFormat;
 }
 
-namespace identity {
+namespace signin {
 class PrimaryAccountAccessTokenFetcher;
 class IdentityManager;
 struct AccessTokenInfo;
-}  // namespace identity
+}  // namespace signin
 
 namespace net {
 class URLRequestStatus;
@@ -47,10 +49,6 @@ class URLLoaderFactory;
 }
 struct ResourceRequest;
 }  // namespace network
-
-namespace service_manager {
-class Connector;
-}
 
 namespace extensions {
 
@@ -82,7 +80,6 @@ class ExtensionDownloader {
   ExtensionDownloader(
       ExtensionDownloaderDelegate* delegate,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      service_manager::Connector* connector,
       crx_file::VerifierFormat crx_format_requirement,
       const base::FilePath& profile_path = base::FilePath());
   ~ExtensionDownloader();
@@ -135,7 +132,7 @@ class ExtensionDownloader {
   // Sets the IdentityManager instance to be used for OAuth2 authentication on
   // protected Webstore downloads. The IdentityManager instance must be valid to
   // use for the lifetime of this object.
-  void SetIdentityManager(identity::IdentityManager* identity_manager);
+  void SetIdentityManager(signin::IdentityManager* identity_manager);
 
   void set_brand_code(const std::string& brand_code) {
     brand_code_ = brand_code;
@@ -286,6 +283,11 @@ class ExtensionDownloader {
                         std::set<std::string>* no_updates,
                         std::set<std::string>* errors);
 
+  // Checks whether extension is presented in cache. If yes, return path to its
+  // cached CRX, base::nullopt otherwise.
+  base::Optional<base::FilePath> GetCachedExtension(
+      const ExtensionFetch& fetch_data);
+
   // Begins (or queues up) download of an updated extension.
   void FetchUpdatedExtension(std::unique_ptr<ExtensionFetch> fetch_data);
 
@@ -340,7 +342,7 @@ class ExtensionDownloader {
                                            int response_code);
 
   void OnAccessTokenFetchComplete(GoogleServiceAuthError error,
-                                  identity::AccessTokenInfo token_info);
+                                  signin::AccessTokenInfo token_info);
 
   ManifestFetchData* CreateManifestFetchData(
       const GURL& update_url,
@@ -369,9 +371,6 @@ class ExtensionDownloader {
 
   // The profile path used to load file:// URLs. It can be invalid.
   base::FilePath profile_path_for_url_loader_factory_;
-
-  // The connector to the ServiceManager.
-  service_manager::Connector* connector_;
 
   // Collects UMA samples that are reported when ReportStats() is called.
   URLStats url_stats_;
@@ -402,14 +401,14 @@ class ExtensionDownloader {
 
   // May be used to fetch access tokens for protected download requests. May be
   // null. If non-null, guaranteed to outlive this object.
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
 
   // A Webstore download-scoped access token for the |identity_provider_|'s
   // active account, if any.
   std::string access_token_;
 
   // A pending access token fetcher.
-  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher>
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
       access_token_fetcher_;
 
   // Brand code to include with manifest fetch queries if sending ping data.

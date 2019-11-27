@@ -13,10 +13,10 @@
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
-#include "third_party/blink/public/web/modules/mediastream/mock_media_stream_video_sink.h"
-#include "third_party/blink/public/web/modules/mediastream/mock_media_stream_video_source.h"
-#include "third_party/blink/public/web/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/public/web/web_heap.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_sink.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_source.h"
+#include "third_party/blink/renderer/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -49,7 +49,7 @@ class MediaStreamVideoTrackTest : public ::testing::Test {
       scoped_refptr<media::VideoFrame> frame,
       MockMediaStreamVideoSink* sink) {
     base::RunLoop run_loop;
-    base::Closure quit_closure = run_loop.QuitClosure();
+    base::RepeatingClosure quit_closure = run_loop.QuitClosure();
     EXPECT_CALL(*sink, OnVideoFrame())
         .WillOnce(RunClosure(std::move(quit_closure)));
     mock_source()->DeliverVideoFrame(std::move(frame));
@@ -85,7 +85,7 @@ class MediaStreamVideoTrackTest : public ::testing::Test {
   WebMediaStreamTrack CreateTrack() {
     const bool enabled = true;
     WebMediaStreamTrack track = MediaStreamVideoTrack::CreateVideoTrack(
-        mock_source_, WebPlatformMediaStreamSource::ConstraintsCallback(),
+        mock_source_, WebPlatformMediaStreamSource::ConstraintsOnceCallback(),
         enabled);
     if (!source_started_) {
       mock_source_->StartMockedSource();
@@ -101,7 +101,7 @@ class MediaStreamVideoTrackTest : public ::testing::Test {
     const bool enabled = true;
     WebMediaStreamTrack track = MediaStreamVideoTrack::CreateVideoTrack(
         mock_source_, adapter_settings, base::Optional<bool>(), false, 0.0,
-        WebPlatformMediaStreamSource::ConstraintsCallback(), enabled);
+        WebPlatformMediaStreamSource::ConstraintsOnceCallback(), enabled);
     if (!source_started_) {
       mock_source_->StartMockedSource();
       source_started_ = true;
@@ -276,7 +276,7 @@ TEST_F(MediaStreamVideoTrackTest, CheckTrackRequestsFrame) {
   // Add sink and expect to get a frame.
   MockMediaStreamVideoSink sink;
   base::RunLoop run_loop;
-  base::Closure quit_closure = run_loop.QuitClosure();
+  base::RepeatingClosure quit_closure = run_loop.QuitClosure();
   EXPECT_CALL(sink, OnVideoFrame())
       .WillOnce(RunClosure(std::move(quit_closure)));
   sink.ConnectToTrack(track);

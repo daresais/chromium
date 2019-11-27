@@ -262,7 +262,7 @@ void GCMNetworkChannel::OnGetTokenComplete(
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = BuildUrl(registration_id_);
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   resource_request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
                                       "Bearer " + access_token_);
@@ -434,7 +434,7 @@ void GCMNetworkChannel::RequestDetailedStatus(
   callback.Run(*diagnostic_info_.CollectDebugData());
 }
 
-void GCMNetworkChannel::UpdateCredentials(const std::string& email,
+void GCMNetworkChannel::UpdateCredentials(const CoreAccountId& account_id,
                                           const std::string& token) {
   // Do nothing. We get access token by requesting it for every message.
 }

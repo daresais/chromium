@@ -329,9 +329,11 @@ void LayoutBoxModelObject::StyleDidChange(StyleDifference diff,
     }
   }
 
-  if (old_style &&
-      (could_contain_fixed != CanContainFixedPositionObjects() ||
-       could_contain_absolute != CanContainAbsolutePositionObjects())) {
+  bool can_contain_fixed = CanContainFixedPositionObjects();
+  bool can_contain_absolute = CanContainAbsolutePositionObjects();
+
+  if (old_style && (could_contain_fixed != can_contain_fixed ||
+                    could_contain_absolute != can_contain_absolute)) {
     // If out of flow element containment changed, then we need to force a
     // subtree paint property update, since the children elements may now be
     // referencing a different container.
@@ -345,6 +347,32 @@ void LayoutBoxModelObject::StyleDidChange(StyleDifference diff,
     SetNeedsPaintPropertyUpdate();
     if (Layer())
       Layer()->SetNeedsCompositingInputsUpdate();
+  }
+
+  if (old_style && Parent()) {
+    LayoutBlock* block = FindNonAnonymousContainingBlock(this);
+
+    if ((could_contain_fixed && !can_contain_fixed) ||
+        (could_contain_absolute && !can_contain_absolute)) {
+      // Clear our positioned objects list. Our absolute and fixed positioned
+      // descendants will be inserted into our containing block's positioned
+      // objects list during layout.
+      block->RemovePositionedObjects(nullptr, kNewContainingBlock);
+    }
+    if (!could_contain_absolute && can_contain_absolute) {
+      // Remove our absolute positioned descendants from their current
+      // containing block.
+      // They will be inserted into our positioned objects list during layout.
+      if (LayoutBlock* cb = block->ContainingBlockForAbsolutePosition())
+        cb->RemovePositionedObjects(this, kNewContainingBlock);
+    }
+    if (!could_contain_fixed && can_contain_fixed) {
+      // Remove our fixed positioned descendants from their current containing
+      // block.
+      // They will be inserted into our positioned objects list during layout.
+      if (LayoutBlock* cb = block->ContainingBlockForFixedPosition())
+        cb->RemovePositionedObjects(this, kNewContainingBlock);
+    }
   }
 
   if (Layer()) {
@@ -444,7 +472,7 @@ void LayoutBoxModelObject::StyleDidChange(StyleDifference diff,
     SetNeedsPaintPropertyUpdate();
   }
 
-  if (old_style && HasLayer() && !Layer()->NeedsRepaint() &&
+  if (old_style && HasLayer() && !Layer()->SelfNeedsRepaint() &&
       diff.TransformChanged() &&
       (RuntimeEnabledFeatures::CompositeAfterPaintEnabled() ||
        !Layer()->HasStyleDeterminedDirectCompositingReasons())) {
@@ -463,6 +491,15 @@ void LayoutBoxModelObject::StyleDidChange(StyleDifference diff,
         ComputedStyle::kIncludeIndependentTransformProperties);
     if (old_transform.IsInvertible() != new_transform.IsInvertible())
       Layer()->SetNeedsRepaint();
+  }
+
+  // We can't squash across a layout containment boundary. So, if the
+  // containment changes, we need to update the compositing inputs.
+  if (old_style &&
+      ShouldApplyLayoutContainment(*old_style) !=
+          ShouldApplyLayoutContainment() &&
+      Layer()) {
+    Layer()->SetNeedsCompositingInputsUpdate();
   }
 }
 
@@ -676,7 +713,7 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight(
        this_box->HasOverridePercentageResolutionBlockSize()))
     return false;
 
-  if (logical_height_length.IsAuto() &&
+  if (logical_height_length.IsIntrinsicOrAuto() &&
       !IsOutOfFlowPositionedWithImplicitHeight(this))
     return true;
 
@@ -1435,7 +1472,7 @@ bool LayoutBoxModelObject::BackgroundTransfersToView(
     return false;
 
   Element* document_element = GetDocument().documentElement();
-  if (!IsHTMLHtmlElement(document_element))
+  if (!IsA<HTMLHtmlElement>(document_element))
     return false;
 
   if (!document_element_style)

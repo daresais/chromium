@@ -20,6 +20,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "content/browser/appcache/appcache.h"
 #include "content/browser/appcache/appcache_database.h"
@@ -29,6 +30,7 @@
 #include "content/browser/appcache/appcache_quota_client.h"
 #include "content/browser/appcache/appcache_response.h"
 #include "content/browser/appcache/appcache_service_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_errors.h"
 #include "sql/database.h"
@@ -47,8 +49,6 @@ constexpr const int kMB = 1024 * 1024;
 
 // Hard coded default when not using quota management.
 constexpr const int kDefaultQuota = 5 * kMB;
-
-constexpr const int kMaxAppCacheMemDiskCacheSize = 10 * kMB;
 
 constexpr base::FilePath::CharType kDiskCacheDirectoryName[] =
     FILE_PATH_LITERAL("Cache");
@@ -305,8 +305,11 @@ void AppCacheStorageImpl::InitTask::RunCompleted() {
         kDelay);
   }
 
-  if (storage_->service()->quota_client())
-    storage_->service()->quota_client()->NotifyAppCacheReady();
+  if (storage_->service()->quota_manager_proxy()) {
+    base::PostTask(FROM_HERE, {BrowserThread::IO},
+                   base::BindOnce(&AppCacheQuotaClient::NotifyAppCacheReady,
+                                  storage_->service()->quota_client()));
+  }
 }
 
 // DisableDatabaseTask -------
@@ -1845,9 +1848,8 @@ AppCacheDiskCache* AppCacheStorageImpl::disk_cache() {
     disk_cache_ = std::make_unique<AppCacheDiskCache>();
     if (is_incognito_) {
       rv = disk_cache_->InitWithMemBackend(
-          kMaxAppCacheMemDiskCacheSize,
-          base::BindOnce(&AppCacheStorageImpl::OnDiskCacheInitialized,
-                         base::Unretained(this)));
+          0, base::BindOnce(&AppCacheStorageImpl::OnDiskCacheInitialized,
+                            base::Unretained(this)));
     } else {
       expecting_cleanup_complete_on_disable_ = true;
 

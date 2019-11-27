@@ -171,11 +171,16 @@
           category="{{ContentSettingsTypes.USB_DEVICES}}" icon="settings:usb"
           id="usbDevices" label="$i18n{siteSettingsUsbDevices}">
       </site-details-permission>
-      <template is="dom-if" if="[[enableExperimentalWebPlatformFeatures_]]">
+      <site-details-permission
+          category="{{ContentSettingsTypes.SERIAL_PORTS}}"
+          icon="settings:serial-port" id="serialPorts"
+          label="$i18n{siteSettingsSerialPorts}">
+      </site-details-permission>
+      <template is="dom-if" if="[[enableNativeFileSystemWriteContentSetting_]]">
         <site-details-permission
-            category="{{ContentSettingsTypes.SERIAL_PORTS}}"
-            icon="settings:serial-port" id="serialPorts"
-            label="$i18n{siteSettingsSerialPorts}">
+            category="{{ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE}}"
+            icon="settings:save-original" id="nativeFileSystemWrite"
+            label="$i18n{siteSettingsNativeFileSystemWrite}">
         </site-details-permission>
       </template>
       <site-details-permission
@@ -200,11 +205,18 @@
           icon="settings:payment-handler" id="paymentHandler"
           label="$i18n{siteSettingsPaymentHandler}">
       </site-details-permission>
-      <template is="dom-if" if="[[enableBluetoothScanningContentSetting_]]">
+      <template is="dom-if" if="[[enableExperimentalWebPlatformFeatures_]]">
         <site-details-permission
             category="{{ContentSettingsTypes.BLUETOOTH_SCANNING}}"
             icon="settings:bluetooth-scanning" id="bluetoothScanning"
             label="$i18n{siteSettingsBluetoothScanning}">
+        </site-details-permission>
+      </template>
+      <template is="dom-if" if="[[enableInsecureContentContentSetting_]]">
+        <site-details-permission
+            category="{{ContentSettingsTypes.MIXEDSCRIPT}}"
+            icon="settings:insecure-content" id="mixed-script"
+            label="$i18n{siteSettingsInsecureContent}">
         </site-details-permission>
       </template>
     </div>

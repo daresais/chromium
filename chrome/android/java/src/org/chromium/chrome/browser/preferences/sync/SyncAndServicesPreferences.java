@@ -6,23 +6,20 @@ package org.chromium.chrome.browser.preferences.sync;
 
 import android.accounts.Account;
 import android.app.Dialog;
-import android.app.DialogFragment;
-import android.app.FragmentManager;
-import android.app.FragmentTransaction;
 import android.content.Intent;
-import android.content.res.Resources;
 import android.net.Uri;
 import android.os.Bundle;
-import android.preference.Preference;
-import android.preference.PreferenceCategory;
-import android.preference.PreferenceFragment;
-import android.preference.PreferenceGroup;
 import android.provider.Settings;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
+import android.support.v4.app.DialogFragment;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.preference.Preference;
+import android.support.v7.preference.PreferenceCategory;
+import android.support.v7.preference.PreferenceFragmentCompat;
+import android.support.v7.preference.PreferenceGroup;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -30,26 +27,34 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.SyncFirstSetupCompleteSource;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
-import org.chromium.chrome.browser.invalidation.InvalidationController;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
+import org.chromium.chrome.browser.preferences.ChromeBasePreference;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
+import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.preferences.Preferences;
+import org.chromium.chrome.browser.preferences.password.PasswordUIView;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.safe_browsing.SafeBrowsingBridge;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
-import org.chromium.chrome.browser.signin.SignoutReason;
 import org.chromium.chrome.browser.signin.UnifiedConsentServiceBridge;
 import org.chromium.chrome.browser.sync.GoogleServiceAuthError;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
@@ -57,6 +62,7 @@ import org.chromium.chrome.browser.sync.ui.PassphraseDialogFragment;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChromeSigninController;
+import org.chromium.components.signin.metrics.SignoutReason;
 import org.chromium.components.sync.AndroidSyncSettings;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.ui.UiUtils;
@@ -68,7 +74,7 @@ import java.lang.annotation.RetentionPolicy;
 /**
  * Settings fragment to enable Sync and other services that communicate with Google.
  */
-public class SyncAndServicesPreferences extends PreferenceFragment
+public class SyncAndServicesPreferences extends PreferenceFragmentCompat
         implements PassphraseDialogFragment.Listener, Preference.OnPreferenceChangeListener,
                    ProfileSyncService.SyncStateChangedListener, Preferences.OnBackPressedListener {
     private static final String IS_FROM_SIGNIN_SCREEN =
@@ -82,14 +88,21 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     private static final String PREF_SIGNIN = "sign_in";
     private static final String PREF_MANAGE_YOUR_GOOGLE_ACCOUNT = "manage_your_google_account";
 
-    private static final String PREF_SYNC_CATEGORY = "sync_category";
-    private static final String PREF_SYNC_ERROR_CARD = "sync_error_card";
-    private static final String PREF_SYNC_REQUESTED = "sync_requested";
+    @VisibleForTesting
+    public static final String PREF_SYNC_CATEGORY = "sync_category";
+    @VisibleForTesting
+    public static final String PREF_SYNC_ERROR_CARD = "sync_error_card";
+    private static final String PREF_SYNC_DISABLED_BY_ADMINISTRATOR =
+            "sync_disabled_by_administrator";
+    @VisibleForTesting
+    public static final String PREF_SYNC_REQUESTED = "sync_requested";
+    private static final String PREF_MANAGE_SYNC = "manage_sync";
 
     private static final String PREF_SERVICES_CATEGORY = "services_category";
     private static final String PREF_SEARCH_SUGGESTIONS = "search_suggestions";
     private static final String PREF_NAVIGATION_ERROR = "navigation_error";
     private static final String PREF_SAFE_BROWSING = "safe_browsing";
+    private static final String PREF_PASSWORD_LEAK_DETECTION = "password_leak_detection";
     private static final String PREF_SAFE_BROWSING_SCOUT_REPORTING =
             "safe_browsing_scout_reporting";
     private static final String PREF_USAGE_AND_CRASH_REPORTING = "usage_and_crash_reports";
@@ -97,7 +110,8 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     private static final String PREF_CONTEXTUAL_SEARCH = "contextual_search";
 
     @IntDef({SyncError.NO_ERROR, SyncError.ANDROID_SYNC_DISABLED, SyncError.AUTH_ERROR,
-            SyncError.PASSPHRASE_REQUIRED, SyncError.CLIENT_OUT_OF_DATE, SyncError.OTHER_ERRORS})
+            SyncError.PASSPHRASE_REQUIRED, SyncError.CLIENT_OUT_OF_DATE,
+            SyncError.SYNC_SETUP_INCOMPLETE, SyncError.OTHER_ERRORS})
     @Retention(RetentionPolicy.SOURCE)
     private @interface SyncError {
         int NO_ERROR = -1;
@@ -105,6 +119,7 @@ public class SyncAndServicesPreferences extends PreferenceFragment
         int AUTH_ERROR = 1;
         int PASSPHRASE_REQUIRED = 2;
         int CLIENT_OUT_OF_DATE = 3;
+        int SYNC_SETUP_INCOMPLETE = 4;
         int OTHER_ERRORS = 128;
     }
 
@@ -122,11 +137,14 @@ public class SyncAndServicesPreferences extends PreferenceFragment
 
     private PreferenceCategory mSyncCategory;
     private Preference mSyncErrorCard;
+    private Preference mSyncDisabledByAdministrator;
+    private ChromeBasePreference mManageSync;
     private ChromeSwitchPreference mSyncRequested;
 
     private ChromeSwitchPreference mSearchSuggestions;
     private ChromeSwitchPreference mNavigationError;
     private ChromeSwitchPreference mSafeBrowsing;
+    private @Nullable ChromeSwitchPreference mPasswordLeakDetection;
     private ChromeSwitchPreference mSafeBrowsingReporting;
     private ChromeSwitchPreference mUsageAndCrashReporting;
     private ChromeSwitchPreference mUrlKeyedAnonymizedData;
@@ -147,9 +165,7 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     }
 
     @Override
-    public void onCreate(@Nullable Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
+    public void onCreatePreferences(@Nullable Bundle savedInstanceState, String rootKey) {
         mIsFromSigninScreen =
                 IntentUtils.safeGetBoolean(getArguments(), IS_FROM_SIGNIN_SCREEN, false);
 
@@ -162,13 +178,11 @@ public class SyncAndServicesPreferences extends PreferenceFragment
             assert actionBar != null;
             actionBar.setHomeActionContentDescription(
                     R.string.prefs_sync_and_services_content_description);
+            RecordUserAction.record("Signin_Signin_ShowAdvancedSyncSettings");
         }
 
         PreferenceUtils.addPreferencesFromResource(this, R.xml.sync_and_services_preferences);
 
-        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.IDENTITY_DISC)) {
-            getPreferenceScreen().removePreference(findPreference(PREF_USER_CATEGORY));
-        }
         mSigninPreference = (SignInPreference) findPreference(PREF_SIGNIN);
         mSigninPreference.setPersonalizedPromoEnabled(false);
         mManageYourGoogleAccount = findPreference(PREF_MANAGE_YOUR_GOOGLE_ACCOUNT);
@@ -181,8 +195,12 @@ public class SyncAndServicesPreferences extends PreferenceFragment
                 getActivity(), R.drawable.ic_sync_error_40dp, R.color.default_red));
         mSyncErrorCard.setOnPreferenceClickListener(
                 SyncPreferenceUtils.toOnClickListener(this, this::onSyncErrorCardClicked));
+        mSyncDisabledByAdministrator = findPreference(PREF_SYNC_DISABLED_BY_ADMINISTRATOR);
+        mSyncDisabledByAdministrator.setIcon(
+                ManagedPreferencesUtils.getManagedByEnterpriseIconId());
         mSyncRequested = (ChromeSwitchPreference) findPreference(PREF_SYNC_REQUESTED);
         mSyncRequested.setOnPreferenceChangeListener(this);
+        mManageSync = (ChromeBasePreference) findPreference(PREF_MANAGE_SYNC);
 
         mSearchSuggestions = (ChromeSwitchPreference) findPreference(PREF_SEARCH_SUGGESTIONS);
         mSearchSuggestions.setOnPreferenceChangeListener(this);
@@ -195,6 +213,18 @@ public class SyncAndServicesPreferences extends PreferenceFragment
         mSafeBrowsing = (ChromeSwitchPreference) findPreference(PREF_SAFE_BROWSING);
         mSafeBrowsing.setOnPreferenceChangeListener(this);
         mSafeBrowsing.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
+
+        PreferenceCategory servicesCategory =
+                (PreferenceCategory) findPreference(PREF_SERVICES_CATEGORY);
+        mPasswordLeakDetection =
+                (ChromeSwitchPreference) findPreference(PREF_PASSWORD_LEAK_DETECTION);
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.PASSWORD_LEAK_DETECTION)) {
+            mPasswordLeakDetection.setOnPreferenceChangeListener(this);
+            mPasswordLeakDetection.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
+        } else {
+            removePreference(servicesCategory, mPasswordLeakDetection);
+            mPasswordLeakDetection = null;
+        }
 
         mSafeBrowsingReporting =
                 (ChromeSwitchPreference) findPreference(PREF_SAFE_BROWSING_SCOUT_REPORTING);
@@ -211,8 +241,6 @@ public class SyncAndServicesPreferences extends PreferenceFragment
         mUrlKeyedAnonymizedData.setOnPreferenceChangeListener(this);
         mUrlKeyedAnonymizedData.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
 
-        PreferenceCategory servicesCategory =
-                (PreferenceCategory) findPreference(PREF_SERVICES_CATEGORY);
         mContextualSearch = findPreference(PREF_CONTEXTUAL_SEARCH);
         if (!ContextualSearchFieldTrial.isEnabled()) {
             removePreference(servicesCategory, mContextualSearch);
@@ -228,11 +256,17 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     @Override
     public void onDestroy() {
         super.onDestroy();
-        mSyncSetupInProgressHandle.close();
-
-        if (mProfileSyncService.isSyncRequested()) {
-            InvalidationController.get().ensureStartedAndUpdateRegisteredTypes();
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID)
+                && wasSigninFlowInterrupted()) {
+            // If the setup flow was previously interrupted, and now the user dismissed the page
+            // without turning sync on, then mark first setup as complete (so that we won't show the
+            // error again), but turn sync off.
+            assert !mSyncRequested.isChecked();
+            SyncPreferenceUtils.enableSync(false);
+            mProfileSyncService.setFirstSetupComplete(
+                    SyncFirstSetupCompleteSource.ADVANCED_FLOW_INTERRUPTED_LEAVE_SYNC_OFF);
         }
+        mSyncSetupInProgressHandle.close();
     }
 
     @Override
@@ -250,9 +284,9 @@ public class SyncAndServicesPreferences extends PreferenceFragment
             showCancelSyncDialog();
             return true;
         } else if (item.getItemId() == R.id.menu_id_targeted_help) {
-            HelpAndFeedback.getInstance(getActivity())
-                    .show(getActivity(), getString(R.string.help_context_sync_and_services),
-                            Profile.getLastUsedProfile(), null);
+            HelpAndFeedback.getInstance().show(getActivity(),
+                    getString(R.string.help_context_sync_and_services),
+                    Profile.getLastUsedProfile(), null);
             return true;
         }
         return false;
@@ -316,15 +350,29 @@ public class SyncAndServicesPreferences extends PreferenceFragment
         if (PREF_SYNC_REQUESTED.equals(key)) {
             assert canDisableSync();
             SyncPreferenceUtils.enableSync((boolean) newValue);
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID)
+                    && wasSigninFlowInterrupted()) {
+                // This flow should only be reached when user toggles sync on.
+                assert (boolean) newValue;
+                mProfileSyncService.setFirstSetupComplete(
+                        SyncFirstSetupCompleteSource.ADVANCED_FLOW_INTERRUPTED_TURN_SYNC_ON);
+            }
             PostTask.postTask(UiThreadTaskTraits.DEFAULT, this::updatePreferences);
         } else if (PREF_SEARCH_SUGGESTIONS.equals(key)) {
-            mPrefServiceBridge.setSearchSuggestEnabled((boolean) newValue);
+            mPrefServiceBridge.setBoolean(Pref.SEARCH_SUGGEST_ENABLED, (boolean) newValue);
         } else if (PREF_SAFE_BROWSING.equals(key)) {
-            mPrefServiceBridge.setSafeBrowsingEnabled((boolean) newValue);
+            mPrefServiceBridge.setBoolean(Pref.SAFE_BROWSING_ENABLED, (boolean) newValue);
+            // Toggling the safe browsing preference impacts the leak detection and the
+            // safe browsing reporting preferences as well.
+            PostTask.postTask(UiThreadTaskTraits.DEFAULT,
+                    this::updateLeakDetectionAndSafeBrowsingReportingPreferences);
+        } else if (PREF_PASSWORD_LEAK_DETECTION.equals(key)) {
+            mPrefServiceBridge.setBoolean(
+                    Pref.PASSWORD_MANAGER_LEAK_DETECTION_ENABLED, (boolean) newValue);
         } else if (PREF_SAFE_BROWSING_SCOUT_REPORTING.equals(key)) {
-            mPrefServiceBridge.setSafeBrowsingExtendedReportingEnabled((boolean) newValue);
+            SafeBrowsingBridge.setSafeBrowsingExtendedReportingEnabled((boolean) newValue);
         } else if (PREF_NAVIGATION_ERROR.equals(key)) {
-            mPrefServiceBridge.setResolveNavigationErrorEnabled((boolean) newValue);
+            mPrefServiceBridge.setBoolean(Pref.ALTERNATE_ERROR_PAGES_ENABLED, (boolean) newValue);
         } else if (PREF_USAGE_AND_CRASH_REPORTING.equals(key)) {
             UmaSessionStats.changeMetricsReportingConsent((boolean) newValue);
         } else if (PREF_URL_KEYED_ANONYMIZED_DATA.equals(key)) {
@@ -348,6 +396,11 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     /** Returns whether Sync can be disabled. */
     private boolean canDisableSync() {
         return !Profile.getLastUsedProfile().isChild();
+    }
+
+    /** Returns whether user did not complete the sign in flow. */
+    private boolean wasSigninFlowInterrupted() {
+        return !mIsFromSigninScreen && !mProfileSyncService.isFirstSetupComplete();
     }
 
     private void displayPassphraseDialog() {
@@ -380,7 +433,7 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     @Override
     public boolean onPassphraseEntered(String passphrase) {
         if (!mProfileSyncService.isEngineInitialized()
-                || !mProfileSyncService.isPassphraseRequiredForDecryption()) {
+                || !mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             // If the engine was shut down since the dialog was opened, or the passphrase isn't
             // required anymore, do nothing.
             return false;
@@ -417,11 +470,30 @@ public class SyncAndServicesPreferences extends PreferenceFragment
         }
 
         if (mProfileSyncService.isEngineInitialized()
-                && mProfileSyncService.isPassphraseRequiredForDecryption()) {
+                && mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             return SyncError.PASSPHRASE_REQUIRED;
         }
 
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID)
+                && wasSigninFlowInterrupted()) {
+            return SyncError.SYNC_SETUP_INCOMPLETE;
+        }
+
         return SyncError.NO_ERROR;
+    }
+
+    /**
+     * Gets title message for sync error.
+     * @param error The sync error.
+     */
+    private String getSyncErrorTitle(@SyncError int error) {
+        switch (error) {
+            case SyncError.SYNC_SETUP_INCOMPLETE:
+                assert ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID);
+                return getString(R.string.sync_settings_not_confirmed_title);
+            default:
+                return getString(R.string.sync_error_card_title);
+        }
     }
 
     /**
@@ -429,19 +501,21 @@ public class SyncAndServicesPreferences extends PreferenceFragment
      * @param error The sync error.
      */
     private String getSyncErrorHint(@SyncError int error) {
-        Resources res = getActivity().getResources();
         switch (error) {
             case SyncError.ANDROID_SYNC_DISABLED:
-                return res.getString(R.string.hint_android_sync_disabled);
+                return getString(R.string.hint_android_sync_disabled);
             case SyncError.AUTH_ERROR:
-                return res.getString(R.string.hint_sync_auth_error);
+                return getString(R.string.hint_sync_auth_error);
             case SyncError.CLIENT_OUT_OF_DATE:
-                return res.getString(
+                return getString(
                         R.string.hint_client_out_of_date, BuildInfo.getInstance().hostPackageLabel);
             case SyncError.OTHER_ERRORS:
-                return res.getString(R.string.hint_other_sync_errors);
+                return getString(R.string.hint_other_sync_errors);
             case SyncError.PASSPHRASE_REQUIRED:
-                return res.getString(R.string.hint_passphrase_required);
+                return getString(R.string.hint_passphrase_required);
+            case SyncError.SYNC_SETUP_INCOMPLETE:
+                assert ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID);
+                return getString(R.string.hint_sync_settings_not_confirmed_description);
             case SyncError.NO_ERROR:
             default:
                 return null;
@@ -478,7 +552,7 @@ public class SyncAndServicesPreferences extends PreferenceFragment
             // TODO(https://crbug.com/873116): Pass the correct reason for the signout.
             IdentityServicesProvider.getSigninManager().signOut(
                     SignoutReason.USER_CLICKED_SIGNOUT_SETTINGS,
-                    () -> IdentityServicesProvider.getSigninManager().signIn(account, null, null));
+                    () -> IdentityServicesProvider.getSigninManager().signIn(account, null), false);
             return;
         }
 
@@ -496,18 +570,21 @@ public class SyncAndServicesPreferences extends PreferenceFragment
     private void updatePreferences() {
         updateSyncPreferences();
 
-        mSearchSuggestions.setChecked(mPrefServiceBridge.isSearchSuggestEnabled());
-        mNavigationError.setChecked(mPrefServiceBridge.isResolveNavigationErrorEnabled());
-        mSafeBrowsing.setChecked(mPrefServiceBridge.isSafeBrowsingEnabled());
-        mSafeBrowsingReporting.setChecked(
-                mPrefServiceBridge.isSafeBrowsingExtendedReportingEnabled());
+        mSearchSuggestions.setChecked(mPrefServiceBridge.getBoolean(Pref.SEARCH_SUGGEST_ENABLED));
+        mNavigationError.setChecked(
+                mPrefServiceBridge.getBoolean(Pref.ALTERNATE_ERROR_PAGES_ENABLED));
+        mSafeBrowsing.setChecked(mPrefServiceBridge.getBoolean(Pref.SAFE_BROWSING_ENABLED));
+
+        updateLeakDetectionAndSafeBrowsingReportingPreferences();
+
         mUsageAndCrashReporting.setChecked(
                 mPrivacyPrefManager.isUsageAndCrashReportingPermittedByUser());
         mUrlKeyedAnonymizedData.setChecked(
                 UnifiedConsentServiceBridge.isUrlKeyedAnonymizedDataCollectionEnabled());
 
         if (mContextualSearch != null) {
-            boolean isContextualSearchEnabled = !mPrefServiceBridge.isContextualSearchDisabled();
+            boolean isContextualSearchEnabled =
+                    !ContextualSearchManager.isContextualSearchDisabled();
             mContextualSearch.setSummary(
                     isContextualSearchEnabled ? R.string.text_on : R.string.text_off);
         }
@@ -515,7 +592,7 @@ public class SyncAndServicesPreferences extends PreferenceFragment
 
     private void updateSyncPreferences() {
         if (!mProfileSyncService.isEngineInitialized()
-                || !mProfileSyncService.isPassphraseRequiredForDecryption()) {
+                || !mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             closeDialogIfOpen(FRAGMENT_ENTER_PASSPHRASE);
         }
 
@@ -524,39 +601,88 @@ public class SyncAndServicesPreferences extends PreferenceFragment
             getPreferenceScreen().removePreference(mSyncCategory);
             return;
         }
+
         getPreferenceScreen().addPreference(mManageYourGoogleAccount);
         getPreferenceScreen().addPreference(mSyncCategory);
+        if (ProfileSyncService.get().isSyncDisabledByEnterprisePolicy()) {
+            mSyncCategory.addPreference(mSyncDisabledByAdministrator);
+            mSyncCategory.removePreference(mSyncErrorCard);
+            mSyncCategory.removePreference(mSyncRequested);
+            mSyncCategory.removePreference(mManageSync);
+            return;
+        }
+        mSyncCategory.removePreference(mSyncDisabledByAdministrator);
+        mSyncCategory.addPreference(mSyncRequested);
+        mSyncCategory.addPreference(mManageSync);
 
         mCurrentSyncError = getSyncError();
         if (mCurrentSyncError == SyncError.NO_ERROR) {
             mSyncCategory.removePreference(mSyncErrorCard);
         } else {
-            String summary = getSyncErrorHint(mCurrentSyncError);
-            mSyncErrorCard.setSummary(summary);
+            mSyncErrorCard.setTitle(getSyncErrorTitle(mCurrentSyncError));
+            mSyncErrorCard.setSummary(getSyncErrorHint(mCurrentSyncError));
             mSyncCategory.addPreference(mSyncErrorCard);
         }
 
         mSyncRequested.setChecked(AndroidSyncSettings.get().isChromeSyncEnabled());
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID)
+                && wasSigninFlowInterrupted()) {
+            // If sync setup was not completed the sync request toggle should be off.
+            // In this situation, switching it on will trigger a call to setFirstSetupComplete.
+            mSyncRequested.setChecked(false);
+        }
         mSyncRequested.setEnabled(canDisableSync());
+    }
+
+    /**
+     * If password leak detection is off and cannot be toggled while safe browsing is disabled, so
+     * its appearance needs to be updated. The same goes for safe browsing reporting.
+     */
+    private void updateLeakDetectionAndSafeBrowsingReportingPreferences() {
+        boolean safe_browsing_enabled = mPrefServiceBridge.getBoolean(Pref.SAFE_BROWSING_ENABLED);
+        mSafeBrowsingReporting.setEnabled(safe_browsing_enabled);
+        mSafeBrowsingReporting.setChecked(safe_browsing_enabled
+                && SafeBrowsingBridge.isSafeBrowsingExtendedReportingEnabled());
+
+        if (mPasswordLeakDetection == null) return; // Early exit without leak detection to update.
+
+        boolean has_token_for_leak_check = PasswordUIView.hasAccountForLeakCheckRequest();
+        boolean leak_detection_enabled =
+                mPrefServiceBridge.getBoolean(Pref.PASSWORD_MANAGER_LEAK_DETECTION_ENABLED);
+        boolean toggle_enabled = safe_browsing_enabled && has_token_for_leak_check;
+
+        mPasswordLeakDetection.setEnabled(toggle_enabled);
+        mPasswordLeakDetection.setChecked(toggle_enabled && leak_detection_enabled);
+
+        if (!safe_browsing_enabled || !leak_detection_enabled || has_token_for_leak_check) {
+            mPasswordLeakDetection.setSummary(null);
+            return;
+        }
+        mPasswordLeakDetection.setSummary(
+                R.string.passwords_leak_detection_switch_signed_out_enable_description);
     }
 
     private ManagedPreferenceDelegate createManagedPreferenceDelegate() {
         return preference -> {
             String key = preference.getKey();
             if (PREF_NAVIGATION_ERROR.equals(key)) {
-                return mPrefServiceBridge.isResolveNavigationErrorManaged();
+                return mPrefServiceBridge.isManagedPreference(Pref.ALTERNATE_ERROR_PAGES_ENABLED);
             }
             if (PREF_SEARCH_SUGGESTIONS.equals(key)) {
-                return mPrefServiceBridge.isSearchSuggestManaged();
+                return mPrefServiceBridge.isManagedPreference(Pref.SEARCH_SUGGEST_ENABLED);
             }
             if (PREF_SAFE_BROWSING_SCOUT_REPORTING.equals(key)) {
-                return mPrefServiceBridge.isSafeBrowsingExtendedReportingManaged();
+                return SafeBrowsingBridge.isSafeBrowsingExtendedReportingManaged();
             }
             if (PREF_SAFE_BROWSING.equals(key)) {
-                return mPrefServiceBridge.isSafeBrowsingManaged();
+                return mPrefServiceBridge.isManagedPreference(Pref.SAFE_BROWSING_ENABLED);
+            }
+            if (PREF_PASSWORD_LEAK_DETECTION.equals(key)) {
+                return mPrefServiceBridge.isManagedPreference(
+                        Pref.PASSWORD_MANAGER_LEAK_DETECTION_ENABLED);
             }
             if (PREF_USAGE_AND_CRASH_REPORTING.equals(key)) {
-                return mPrefServiceBridge.isMetricsReportingManaged();
+                return PrivacyPreferencesManager.getInstance().isMetricsReportingManaged();
             }
             if (PREF_URL_KEYED_ANONYMIZED_DATA.equals(key)) {
                 return UnifiedConsentServiceBridge.isUrlKeyedAnonymizedDataCollectionManaged();
@@ -581,6 +707,10 @@ public class SyncAndServicesPreferences extends PreferenceFragment
 
     private void confirmSettings() {
         RecordUserAction.record("Signin_Signin_ConfirmAdvancedSyncSettings");
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID)) {
+            ProfileSyncService.get().setFirstSetupComplete(
+                    SyncFirstSetupCompleteSource.ADVANCED_FLOW_CONFIRM);
+        }
         UnifiedConsentServiceBridge.recordSyncSetupDataTypesHistogram();
         // Settings will be applied when mSyncSetupInProgressHandle is released in onDestroy.
         getActivity().finish();

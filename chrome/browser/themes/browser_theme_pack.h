@@ -18,6 +18,7 @@
 #include "extensions/common/extension.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/layout.h"
+#include "ui/color/color_buildflags.h"
 #include "ui/gfx/color_utils.h"
 
 namespace base {
@@ -32,6 +33,10 @@ class Image;
 
 namespace ui {
 class DataPack;
+
+#if BUILDFLAG(USE_COLOR_PIPELINE)
+class ColorProvider;
+#endif
 }
 
 // An optimized representation of a theme, backed by a mmapped DataPack.
@@ -73,9 +78,6 @@ class BrowserThemePack : public CustomThemeSupplier {
   // Builds the theme from given |color| into |pack|.
   static void BuildFromColor(SkColor color, BrowserThemePack* pack);
 
-  // Generates frame, background and active tab colors from |color|.
-  static void GenerateFrameAndTabColors(SkColor color, BrowserThemePack* pack);
-
   // Default. Everything is empty.
   explicit BrowserThemePack(ThemeType theme_type);
 
@@ -96,6 +98,12 @@ class BrowserThemePack : public CustomThemeSupplier {
   base::RefCountedMemory* GetRawData(int id, ui::ScaleFactor scale_factor)
       const override;
   bool HasCustomImage(int id) const override;
+
+#if BUILDFLAG(USE_COLOR_PIPELINE)
+  // Builds the color mixers that represent the state of the current browser
+  // theme instance.
+  void AddCustomThemeColorMixers(ui::ColorProvider* provider) const;
+#endif
 
  private:
   friend class BrowserThemePackTest;
@@ -202,7 +210,7 @@ class BrowserThemePack : public CustomThemeSupplier {
   void CropImages(ImageCache* images) const;
 
   // Set toolbar related elements' colors (e.g. status bubble, info bar,
-  // download shelf, detached bookmark bar) to toolbar color.
+  // download shelf) to toolbar color.
   void SetToolbarRelatedColors();
 
   // Creates a composited toolbar image. Source and destination is |images|.
@@ -227,17 +235,6 @@ class BrowserThemePack : public CustomThemeSupplier {
   // in |images|.  Also sets colors corresponding to these images if no explicit
   // color has been specified.  Must be called after GenerateFrameImages().
   void CreateTabBackgroundImagesAndColors(ImageCache* images);
-
-  // Generates any text colors which have not already been set.
-  void GenerateMissingTextColors();
-
-  // Generates text color for the specified id |text_color_id|, based on the
-  // background color of the tab |tab_color_id|, and using the color already
-  // defined for |source_color_id| as a starting point (if it exists).
-  void GenerateMissingTextColorForID(int text_color_id,
-                                     int tab_color_id,
-                                     int frame_color_id,
-                                     int source_color_id);
 
   // Generates missing NTP related colors.
   void GenerateMissingNtpColors();
@@ -283,6 +280,9 @@ class BrowserThemePack : public CustomThemeSupplier {
 
   // All structs written to disk need to be packed; no alignment tricks here,
   // please.
+  // NOTE: This structs can only contain primary data types to be reliably
+  // seralized and de-seralized. Not even nested structs will work across
+  // different machines, see crbug.com/988055.
 #pragma pack(push,1)
   // Header that is written to disk.
   struct BrowserThemePackHeader {
@@ -301,7 +301,9 @@ class BrowserThemePack : public CustomThemeSupplier {
   // will point directly to mmapped data.
   struct TintEntry {
     int32_t id;
-    color_utils::HSL hsl;
+    double h;
+    double s;
+    double l;
   }* tints_ = nullptr;
 
   struct ColorPair {

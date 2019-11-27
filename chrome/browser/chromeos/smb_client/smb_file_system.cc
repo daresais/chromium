@@ -370,12 +370,21 @@ AbortCallback SmbFileSystem::DeleteEntry(
     bool recursive,
     storage::AsyncFileUtil::StatusCallback callback) {
   OperationId operation_id = task_queue_.GetNextOperationId();
+  SmbTask task;
 
-  auto reply = base::BindOnce(&SmbFileSystem::HandleGetDeleteListCallback,
-                              AsWeakPtr(), std::move(callback), operation_id);
-  SmbTask task = base::BindOnce(&SmbProviderClient::GetDeleteList,
-                                GetWeakSmbProviderClient(), GetMountId(),
-                                entry_path, std::move(reply));
+  if (recursive) {
+    auto reply = base::BindOnce(&SmbFileSystem::HandleGetDeleteListCallback,
+                                AsWeakPtr(), std::move(callback), operation_id);
+    task = base::BindOnce(&SmbProviderClient::GetDeleteList,
+                          GetWeakSmbProviderClient(), GetMountId(), entry_path,
+                          std::move(reply));
+  } else {
+    auto reply = base::BindOnce(&SmbFileSystem::HandleStatusCallback,
+                                AsWeakPtr(), std::move(callback));
+    task = base::BindOnce(&SmbProviderClient::DeleteEntry,
+                          GetWeakSmbProviderClient(), GetMountId(), entry_path,
+                          false /* recursive */, std::move(reply));
+  }
 
   EnqueueTask(std::move(task), operation_id);
   return CreateAbortCallback(operation_id);
@@ -446,14 +455,14 @@ AbortCallback SmbFileSystem::WriteFile(
 void SmbFileSystem::CreateTempFileManagerAndExecuteTask(SmbTask task) {
   // CreateTempFileManager() has to be called on a separate thread since it
   // contains a call that requires a blockable thread.
-  base::TaskTraits task_traits = {base::MayBlock(),
+  base::TaskTraits task_traits = {base::ThreadPool(), base::MayBlock(),
                                   base::TaskPriority::USER_BLOCKING,
                                   base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
   auto init_task = base::BindOnce(&CreateTempFileManager);
   auto reply = base::BindOnce(&SmbFileSystem::InitTempFileManagerAndExecuteTask,
                               AsWeakPtr(), std::move(task));
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, task_traits, std::move(init_task), std::move(reply));
+  base::PostTaskAndReplyWithResult(FROM_HERE, task_traits, std::move(init_task),
+                                   std::move(reply));
 }
 
 void SmbFileSystem::InitTempFileManagerAndExecuteTask(

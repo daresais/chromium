@@ -64,10 +64,6 @@ TEST_P(PaintPropertyTreeUpdateTest,
 
 TEST_P(PaintPropertyTreeUpdateTest,
        BackgroundAttachmentFixedMainThreadScrollReasonsWithNestedScrollers) {
-  // This test needs the |FastMobileScrolling| feature to be disabled
-  // although it is stable on Android.
-  ScopedFastMobileScrollingForTest fast_mobile_scrolling(false);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       #overflowA {
@@ -151,10 +147,6 @@ TEST_P(PaintPropertyTreeUpdateTest,
 }
 
 TEST_P(PaintPropertyTreeUpdateTest, ParentFrameMainThreadScrollReasons) {
-  // This test needs the |FastMobileScrolling| feature to be disabled
-  // although it is stable on Android.
-  ScopedFastMobileScrollingForTest fast_mobile_scrolling(false);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       body { margin: 0; }
@@ -191,10 +183,6 @@ TEST_P(PaintPropertyTreeUpdateTest, ParentFrameMainThreadScrollReasons) {
 }
 
 TEST_P(PaintPropertyTreeUpdateTest, ChildFrameMainThreadScrollReasons) {
-  // This test needs the |FastMobileScrolling| feature to be disabled
-  // although it is stable on Android.
-  ScopedFastMobileScrollingForTest fast_mobile_scrolling(false);
-
   SetBodyInnerHTML(R"HTML(
     <style>body { margin: 0; }</style>
     <iframe></iframe>
@@ -234,10 +222,6 @@ TEST_P(PaintPropertyTreeUpdateTest, ChildFrameMainThreadScrollReasons) {
 
 TEST_P(PaintPropertyTreeUpdateTest,
        BackgroundAttachmentFixedMainThreadScrollReasonsWithFixedScroller) {
-  // This test needs the |FastMobileScrolling| feature to be disabled
-  // although it is stable on Android.
-  ScopedFastMobileScrollingForTest fast_mobile_scrolling(false);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       #overflowA {
@@ -413,7 +397,7 @@ TEST_P(PaintPropertyTreeUpdateTest, BuildingStopsAtThrottledFrames) {
   )HTML");
 
   // Move the child frame offscreen so it becomes available for throttling.
-  auto* iframe = ToHTMLIFrameElement(GetDocument().getElementById("iframe"));
+  auto* iframe = To<HTMLIFrameElement>(GetDocument().getElementById("iframe"));
   iframe->setAttribute(html_names::kStyleAttr, "transform: translateY(5555px)");
   UpdateAllLifecyclePhasesForTest();
   // Ensure intersection observer notifications get delivered.
@@ -836,6 +820,62 @@ TEST_P(PaintPropertyTreeUpdateTest,
   EXPECT_EQ(IntSize(800, 600), visual_viewport.GetScrollNode()->ContentsSize());
 }
 
+TEST_P(PaintPropertyTreeUpdateTest, ViewportAddRemoveDeviceEmulationNode) {
+  SetBodyInnerHTML(
+      "<style>body {height: 10000px; width: 10000px; margin: 0;}</style>");
+
+  auto& visual_viewport = GetDocument().GetPage()->GetVisualViewport();
+  EXPECT_FALSE(visual_viewport.GetDeviceEmulationTransformNode());
+  // The LayoutView (instead of VisualViewport) creates scrollbars because
+  // viewport is disabled.
+  ASSERT_FALSE(GetDocument().GetPage()->GetSettings().GetViewportEnabled());
+  EXPECT_FALSE(visual_viewport.LayerForHorizontalScrollbar());
+  EXPECT_FALSE(visual_viewport.LayerForVerticalScrollbar());
+  ASSERT_TRUE(GetLayoutView().GetScrollableArea());
+  auto* scrollbar_layer = GetLayoutView()
+                              .GetScrollableArea()
+                              ->GraphicsLayerForHorizontalScrollbar();
+  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    ASSERT_TRUE(scrollbar_layer);
+    EXPECT_EQ(&TransformPaintPropertyNode::Root(),
+              &scrollbar_layer->GetPropertyTreeState().Transform());
+  } else {
+    // TODO(wangxianzhu): Test for CompositeAfterPaint.
+    EXPECT_FALSE(scrollbar_layer);
+  }
+
+  // These emulate WebViewImpl::SetDeviceEmulationTransform().
+  GetChromeClient().SetDeviceEmulationTransform(
+      TransformationMatrix().Scale(2));
+  visual_viewport.SetNeedsPaintPropertyUpdate();
+
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(visual_viewport.GetDeviceEmulationTransformNode());
+  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    ASSERT_TRUE(scrollbar_layer);
+    EXPECT_EQ(visual_viewport.GetDeviceEmulationTransformNode(),
+              &scrollbar_layer->GetPropertyTreeState().Transform());
+  } else {
+    // TODO(wangxianzhu): Test for CompositeAfterPaint.
+    EXPECT_FALSE(scrollbar_layer);
+  }
+
+  // These emulate WebViewImpl::SetDeviceEmulationTransform().
+  GetChromeClient().SetDeviceEmulationTransform(TransformationMatrix());
+  visual_viewport.SetNeedsPaintPropertyUpdate();
+
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(visual_viewport.GetDeviceEmulationTransformNode());
+  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    ASSERT_TRUE(scrollbar_layer);
+    EXPECT_EQ(&TransformPaintPropertyNode::Root(),
+              &scrollbar_layer->GetPropertyTreeState().Transform());
+  } else {
+    // TODO(wangxianzhu): Test for CompositeAfterPaint.
+    EXPECT_FALSE(scrollbar_layer);
+  }
+}
+
 TEST_P(PaintPropertyTreeUpdateTest, ScrollbarWidthChange) {
   SetBodyInnerHTML(R"HTML(
     <style>::-webkit-scrollbar {width: 20px; height: 20px}</style>
@@ -890,7 +930,7 @@ TEST_P(PaintPropertyTreeUpdateTest, MenuListControlClipChange) {
   EXPECT_NE(nullptr, select->FirstFragment().PaintProperties()->OverflowClip());
 
   // Should not assert in FindPropertiesNeedingUpdate.
-  ToHTMLSelectElement(select->GetNode())->setSelectedIndex(1);
+  To<HTMLSelectElement>(select->GetNode())->setSelectedIndex(1);
   UpdateAllLifecyclePhasesForTest();
   EXPECT_NE(nullptr, select->FirstFragment().PaintProperties()->OverflowClip());
 }
@@ -1303,9 +1343,11 @@ TEST_P(PaintPropertyTreeUpdateTest, EnsureSnapContainerData) {
   SetBodyInnerHTML(R"HTML(
     <!DOCTYPE html>
     <style>
+    html {
+      scroll-snap-type: both proximity;
+    }
     body {
       overflow: scroll;
-      scroll-snap-type: both proximity;
       height: 300px;
       width: 300px;
       margin: 0px;
@@ -1325,7 +1367,6 @@ TEST_P(PaintPropertyTreeUpdateTest, EnsureSnapContainerData) {
       height: 200px;
       scroll-snap-align: start;
     }
-
     </style>
 
     <div id="container">
@@ -1618,11 +1659,23 @@ TEST_P(PaintPropertyTreeUpdateTest, SubpixelAccumulationAcrossIsolation) {
 }
 
 TEST_P(PaintPropertyTreeUpdateTest, ChangeDuringAnimation) {
-  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled() &&
-      !RuntimeEnabledFeatures::BlinkGenPropertyTreesEnabled())
-    return;
+  SetBodyInnerHTML(R"HTML(
+      <!DOCTYPE html>
+      <style>
+        @keyframes animation {
+          0% { opacity: 0.3; }
+          100% { opacity: 0.4; }
+        }
+        #target {
+          animation-name: animation;
+          animation-duration: 1s;
+          width: 100px;
+          height: 100px;
+        }
+      </style>
+      <div id='target'></div>
+  )HTML");
 
-  SetBodyInnerHTML("<div id='target' style='width: 100px; height: 100px'>");
   auto* target = GetLayoutObjectByElementId("target");
   auto style = ComputedStyle::Clone(target->StyleRef());
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
@@ -1642,7 +1695,7 @@ TEST_P(PaintPropertyTreeUpdateTest, ChangeDuringAnimation) {
   EXPECT_EQ(FloatPoint3D(50, 50, 0), transform_node->Origin());
   // Change of animation status should update PaintArtifactCompositor.
   auto* paint_artifact_compositor =
-      GetDocument().View()->GetPaintArtifactCompositorForTesting();
+      GetDocument().View()->GetPaintArtifactCompositor();
   EXPECT_TRUE(paint_artifact_compositor->NeedsUpdate());
   // PaintArtifactCompositor can't clear the NeedsUpdate flag by itself when
   // there is no cc::LayerTreeHost.

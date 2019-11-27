@@ -36,8 +36,9 @@ class ProfileManager : public ::ProfileManagerWithoutInit {
       : ::ProfileManagerWithoutInit(user_data_dir) {}
 
  protected:
-  Profile* CreateProfileHelper(const base::FilePath& file_path) override {
-    return new TestingProfile(file_path);
+  std::unique_ptr<Profile> CreateProfileHelper(
+      const base::FilePath& path) override {
+    return std::make_unique<TestingProfile>(path);
   }
 };
 
@@ -120,7 +121,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   DCHECK(success);
   entry->SetAvatarIconIndex(avatar_id);
   entry->SetSupervisedUserId(supervised_user_id);
-  entry->SetName(user_name);
+  entry->SetLocalProfileName(user_name);
 
   testing_profiles_.insert(std::make_pair(profile_name, profile_ptr));
 
@@ -230,10 +231,6 @@ void TestingProfileManager::DeleteSystemProfile() {
 
 void TestingProfileManager::DeleteProfileInfoCache() {
   profile_manager_->profile_info_cache_.reset(NULL);
-}
-
-void TestingProfileManager::SetLoggedIn(bool logged_in) {
-  profile_manager_->logged_in_ = logged_in;
 }
 
 void TestingProfileManager::UpdateLastUser(Profile* last_active) {

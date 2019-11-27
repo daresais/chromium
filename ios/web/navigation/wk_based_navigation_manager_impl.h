@@ -15,7 +15,7 @@
 #import "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/navigation/time_smoother.h"
-#include "ios/web/public/reload_type.h"
+#include "ios/web/public/navigation/reload_type.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -94,7 +94,7 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
   void InitializeSession() override;
   void OnNavigationItemsPruned(size_t pruned_item_count) override;
   void OnNavigationItemCommitted() override;
-  void OnRendererInitiatedNavigationStarted(const GURL& url) override;
+  void OnNavigationStarted(const GURL& url) override;
   void DetachFromWebView() override;
   CRWSessionController* GetSessionController() const override;
   void AddTransientItem(const GURL& url) override;
@@ -116,8 +116,10 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
                                    NSString* state_object,
                                    ui::PageTransition transition) override;
   bool IsRestoreSessionInProgress() const override;
+  bool ShouldBlockUrlDuringRestore(const GURL& url) override;
   void SetPendingItemIndex(int index) override;
   void ApplyWKWebViewForwardHistoryClobberWorkaround() override;
+  void SetWKWebViewNextPendingUrlNotSerializable(const GURL& url) override;
 
   // NavigationManager:
   BrowserState* GetBrowserState() const override;
@@ -248,6 +250,10 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
   bool CanTrustLastCommittedItem(
       const NavigationItem* last_committed_item) const;
 
+  // Update state to reflect session restore is complete, and call any post
+  // restore callbacks.
+  void FinalizeSessionRestore();
+
   // The pending main frame navigation item. This is nullptr if there is no
   // pending item or if the pending item is a back-forward navigation, in which
   // case the NavigationItemImpl is stored on the WKBackForwardListItem.
@@ -291,14 +297,18 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
   WKWebViewCache web_view_cache_;
 
   // Whether this navigation manager is in the process of restoring session
-  // history into WKWebView. It is set in Restore() and unset in the first
-  // OnNavigationItemCommitted() callback.
+  // history into WKWebView. It is set in Restore() and unset in
+  // FinalizeSessionRestore().
   bool is_restore_session_in_progress_ = false;
 
   // Set to true when delegate_->GoToBackForwardListItem is being called, which
   // is useful to know when comparing the VisibleWebViewURL with the last
   // committed item.
   bool going_to_back_forward_list_item_ = false;
+
+  // Set to an URL when the next created pending item should set
+  // ShouldSkipSerialization to true, provided it matches |url|.
+  GURL next_pending_url_should_skip_serialization_;
 
   // Non null during the session restoration. Created when session restoration
   // is started and reset when the restoration is finished. Used to log UMA
@@ -313,8 +323,8 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
   std::unique_ptr<NavigationItem> restored_visible_item_;
 
   // Non-empty only during the session restoration. The callbacks are
-  // registered in AddRestoreCompletionCallback() and are executed in the first
-  // OnNavigationItemCommitted() callback.
+  // registered in AddRestoreCompletionCallback() and are executed in
+  // FinalizeSessionRestore().
   std::vector<base::OnceClosure> restore_session_completion_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(WKBasedNavigationManagerImpl);

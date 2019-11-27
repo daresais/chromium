@@ -7,7 +7,7 @@
 #include "base/time/default_clock.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -16,14 +16,11 @@ namespace blink {
 // User gestures timeout in 1 second.
 const double kUserGestureTimeout = 1.0;
 
-UserGestureToken::UserGestureToken(Status status)
+UserGestureToken::UserGestureToken()
     : consumable_gestures_(0),
       clock_(base::DefaultClock::GetInstance()),
-      timestamp_(clock_->Now().ToDoubleT()),
-      timeout_policy_(kDefault),
-      was_forwarded_cross_process_(false) {
-  if (status == kNewGesture || !UserGestureIndicator::CurrentTokenThreadSafe())
-    consumable_gestures_++;
+      timestamp_(clock_->Now().ToDoubleT()) {
+  consumable_gestures_++;
 }
 
 bool UserGestureToken::HasGestures() const {
@@ -44,35 +41,13 @@ bool UserGestureToken::ConsumeGesture() {
   return true;
 }
 
-void UserGestureToken::SetTimeoutPolicy(TimeoutPolicy policy) {
-  if (HasGestures() && policy > timeout_policy_)
-    timeout_policy_ = policy;
-}
-
 void UserGestureToken::ResetTimestamp() {
   timestamp_ = clock_->Now().ToDoubleT();
 }
 
 bool UserGestureToken::HasTimedOut() const {
-  if (timeout_policy_ == kHasPaused)
-    return false;
   return clock_->Now().ToDoubleT() - timestamp_ > kUserGestureTimeout;
 }
-
-bool UserGestureToken::WasForwardedCrossProcess() const {
-  return was_forwarded_cross_process_;
-}
-
-void UserGestureToken::SetWasForwardedCrossProcess() {
-  was_forwarded_cross_process_ = true;
-}
-
-// This enum is used in a histogram, so its values shouldn't change.
-enum GestureMergeState {
-  kOldTokenHasGesture = 1 << 0,
-  kNewTokenHasGesture = 1 << 1,
-  kGestureMergeStateEnd = 1 << 2,
-};
 
 UserGestureToken* UserGestureIndicator::root_token_ = nullptr;
 
@@ -92,10 +67,10 @@ UserGestureIndicator::UserGestureIndicator(
   UpdateRootToken();
 }
 
-UserGestureIndicator::UserGestureIndicator(UserGestureToken::Status status) {
+UserGestureIndicator::UserGestureIndicator() {
   if (!IsMainThread())
     return;
-  token_ = base::AdoptRef(new UserGestureToken(status));
+  token_ = base::AdoptRef(new UserGestureToken());
   UpdateRootToken();
 }
 
@@ -105,60 +80,9 @@ UserGestureIndicator::~UserGestureIndicator() {
 }
 
 // static
-bool UserGestureIndicator::ProcessingUserGesture() {
-  if (auto* token = CurrentToken())
-    return token->HasGestures();
-  return false;
-}
-
-// static
-bool UserGestureIndicator::ProcessingUserGestureThreadSafe() {
-  return IsMainThread() && ProcessingUserGesture();
-}
-
-// static
-bool UserGestureIndicator::ConsumeUserGesture() {
-  if (auto* token = CurrentToken()) {
-    if (token->ConsumeGesture())
-      return true;
-  }
-  return false;
-}
-
-// static
-bool UserGestureIndicator::ConsumeUserGestureThreadSafe() {
-  return IsMainThread() && ConsumeUserGesture();
-}
-
-// static
-UserGestureToken* UserGestureIndicator::CurrentToken() {
+UserGestureToken* UserGestureIndicator::CurrentTokenForTest() {
   DCHECK(IsMainThread());
   return root_token_;
-}
-
-// static
-UserGestureToken* UserGestureIndicator::CurrentTokenThreadSafe() {
-  return IsMainThread() ? CurrentToken() : nullptr;
-}
-
-// static
-void UserGestureIndicator::SetTimeoutPolicy(
-    UserGestureToken::TimeoutPolicy policy) {
-  if (auto* token = CurrentTokenThreadSafe())
-    token->SetTimeoutPolicy(policy);
-}
-
-// static
-bool UserGestureIndicator::WasForwardedCrossProcess() {
-  if (auto* token = CurrentTokenThreadSafe())
-    return token->WasForwardedCrossProcess();
-  return false;
-}
-
-// static
-void UserGestureIndicator::SetWasForwardedCrossProcess() {
-  if (auto* token = CurrentTokenThreadSafe())
-    token->SetWasForwardedCrossProcess();
 }
 
 }  // namespace blink

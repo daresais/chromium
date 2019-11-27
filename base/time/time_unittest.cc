@@ -224,6 +224,13 @@ TEST_F(TimeTest, JsTime) {
   EXPECT_EQ(700.0003, t.ToDoubleT());
   t = Time::FromDoubleT(800.73);
   EXPECT_EQ(800730.0, t.ToJsTime());
+
+  // 1601-01-01 isn't round-trip with ToJsTime().
+  const double kWindowsEpoch = -11644473600000.0;
+  Time time = Time::FromJsTime(kWindowsEpoch);
+  EXPECT_TRUE(time.is_null());
+  EXPECT_NE(kWindowsEpoch, time.ToJsTime());
+  EXPECT_EQ(kWindowsEpoch, time.ToJsTimeIgnoringNull());
 }
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -1351,6 +1358,10 @@ TEST(TimeDelta, MaxConversions) {
       TimeDelta::FromSecondsD(max_d / Time::kMicrosecondsPerSecond + 1)
           .is_max(),
       "");
+
+  static_assert(
+      TimeDelta::FromMicrosecondsD(max_d).is_max(),
+      "Make sure that 2^63 correctly gets clamped to `max` (crbug.com/612601)");
 
   // Floating point arithmetic resulting in infinity isn't constexpr in C++14.
   EXPECT_TRUE(

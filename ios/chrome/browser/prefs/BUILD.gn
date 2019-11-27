@@ -52,7 +52,6 @@ source_set("browser_prefs") {
     "//components/rappor",
     "//components/search_engines",
     "//components/sessions",
-    "//components/signin/core/browser",
     "//components/signin/public/identity_manager",
     "//components/strings",
     "//components/sync",
@@ -76,7 +75,6 @@ source_set("browser_prefs") {
     "//ios/chrome/browser/ui/bookmarks",
     "//ios/chrome/browser/voice:prefs",
     "//ios/public/provider/chrome/browser",
-    "//ios/public/provider/chrome/browser/user",
     "//ui/base",
   ]
 }

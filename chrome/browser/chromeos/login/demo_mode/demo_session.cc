@@ -22,6 +22,8 @@
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/launch_service/launch_service.h"
 #include "chrome/browser/apps/platform_apps/app_load_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -33,20 +35,16 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/tpm/install_attributes.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
 #include "extensions/browser/app_window/app_window.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -171,7 +169,8 @@ void RestoreDefaultLocaleForNextSession() {
 // Returns the list of locales (and related info) supported by demo mode.
 std::vector<ash::LocaleInfo> GetSupportedLocales() {
   const base::flat_set<std::string> kSupportedLocales(
-      {"da", "en-GB", "en-US", "fi", "fr", "fr-CA", "nb", "nl", "sv"});
+      {"da", "de", "en-GB", "en-US", "fi", "fr", "fr-CA", "ja", "nb", "nl",
+       "sv"});
 
   const std::vector<std::string>& available_locales =
       l10n_util::GetAvailableLocales();
@@ -354,7 +353,7 @@ base::Value DemoSession::GetCountryList() {
     dict.SetString(
         "title", l10n_util::GetDisplayNameForCountry(country, current_locale));
     dict.SetBoolean("selected", current_country == country);
-    country_list.GetList().push_back(std::move(dict));
+    country_list.Append(std::move(dict));
   }
   return country_list;
 }
@@ -393,7 +392,8 @@ bool DemoSession::ShouldIgnorePinPolicy(const std::string& app_id_or_package) {
 void DemoSession::SetExtensionsExternalLoader(
     scoped_refptr<DemoExtensionsExternalLoader> extensions_external_loader) {
   extensions_external_loader_ = extensions_external_loader;
-  InstallAppFromUpdateUrl(GetScreensaverAppId());
+  if (!offline_enrolled_)
+    InstallAppFromUpdateUrl(GetScreensaverAppId());
 }
 
 void DemoSession::OverrideIgnorePinPolicyAppsForTesting(
@@ -410,19 +410,12 @@ base::OneShotTimer* DemoSession::GetTimerForTesting() {
   return remove_splash_screen_fallback_timer_.get();
 }
 
-void DemoSession::ActiveUserChanged(const user_manager::User* user) {
+void DemoSession::ActiveUserChanged(user_manager::User* active_user) {
   const base::RepeatingClosure hide_web_store_icon = base::BindRepeating([]() {
     ProfileManager::GetActiveUserProfile()->GetPrefs()->SetBoolean(
         prefs::kHideWebStoreIcon, true);
   });
-  user_manager::User* active_user =
-      user_manager::UserManager::Get()->GetActiveUser();
-  DCHECK_NE(active_user, user);
-  if (!active_user->is_profile_created()) {
-    active_user->AddProfileCreatedObserver(hide_web_store_icon);
-    return;
-  }
-  hide_web_store_icon.Run();
+  active_user->AddProfileCreatedObserver(hide_web_store_icon);
 }
 
 DemoSession::DemoSession()
@@ -451,8 +444,9 @@ void DemoSession::InstallDemoResources() {
   DCHECK(profile);
   const base::FilePath downloads =
       file_manager::util::GetDownloadsFolderForProfile(profile);
-  base::PostTaskWithTraits(
-      FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+  base::PostTask(
+      FROM_HERE,
+      {base::ThreadPool(), base::TaskPriority::USER_VISIBLE, base::MayBlock()},
       base::BindOnce(&InstallDemoMedia, demo_resources_->path(), downloads));
 }
 
@@ -569,11 +563,10 @@ void DemoSession::OnExtensionInstalled(content::BrowserContext* browser_context,
     return;
   Profile* profile = ProfileManager::GetActiveUserProfile();
   DCHECK(profile);
-  OpenApplication(
-      AppLaunchParams(profile, extension->id(),
-                      extensions::LaunchContainer::kLaunchContainerWindow,
-                      WindowOpenDisposition::NEW_WINDOW,
-                      extensions::AppLaunchSource::kSourceChromeInternal));
+  apps::LaunchService::Get(profile)->OpenApplication(apps::AppLaunchParams(
+      extension->id(), apps::mojom::LaunchContainer::kLaunchContainerWindow,
+      WindowOpenDisposition::NEW_WINDOW,
+      apps::mojom::AppLaunchSource::kSourceChromeInternal));
 }
 
 void DemoSession::OnAppWindowActivated(extensions::AppWindow* app_window) {

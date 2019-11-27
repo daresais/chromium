@@ -32,7 +32,7 @@
 #include "ui/views/background.h"
 #include "ui/views/layout/fill_layout.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -186,11 +186,11 @@ class SearchResultAnswerCardView::AnswerCardResultView
   // views::Button overrides:
   const char* GetClassName() const override { return "AnswerCardResultView"; }
 
-  void OnBlur() override { SetBackgroundHighlighted(false); }
+  void OnBlur() override { SetSelected(false, base::nullopt); }
 
   void OnFocus() override {
     ScrollRectToVisible(GetLocalBounds());
-    SetBackgroundHighlighted(true);
+    SetSelected(true, base::nullopt);
   }
 
   bool OnKeyPressed(const ui::KeyEvent& event) override {
@@ -198,8 +198,8 @@ class SearchResultAnswerCardView::AnswerCardResultView
       // Shouldn't eat Space; we want Space to go to the search box.
       return false;
     }
-
-    return Button::OnKeyPressed(event);
+    ActivateResult(event.flags(), false /* by_button_press */);
+    return true;
   }
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
@@ -210,24 +210,29 @@ class SearchResultAnswerCardView::AnswerCardResultView
   }
 
   void PaintButtonContents(gfx::Canvas* canvas) override {
-    if (background_highlighted())
+    if (selected())
       canvas->FillRect(GetContentsBounds(), kAnswerCardSelectedColor);
   }
 
   // views::ButtonListener overrides:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     DCHECK(sender == this);
+    ActivateResult(event.flags(), true /* by_button_press */);
+  }
+
+ private:
+  void ActivateResult(int event_flags, bool by_button_press) {
     if (result()) {
       RecordSearchResultOpenSource(result(), view_delegate_->GetModel(),
                                    view_delegate_->GetSearchModel());
       view_delegate_->OpenSearchResult(
-          result()->id(), event.flags(),
+          result()->id(), event_flags,
           ash::AppListLaunchedFrom::kLaunchedFromSearchBox,
-          ash::AppListLaunchType::kSearchResult, -1 /* suggestion_index */);
+          ash::AppListLaunchType::kSearchResult, -1 /* suggestion_index */,
+          !by_button_press && is_default_result() /* launch_as_default */);
     }
   }
 
- private:
   // content::NavigableContentsObserver overrides:
   void DidFinishNavigation(
       const GURL& url,
@@ -262,10 +267,6 @@ class SearchResultAnswerCardView::AnswerCardResultView
     OnVisibilityChanged(true /* is_visible */);
     views::View* content_view = contents_->GetView()->view();
     if (children().empty()) {
-      // Focusability is handled on SearchResultAnswerCardView so we explicitly
-      // disable it on the embedded view (for which it is enabled by default).
-      content_view->SetFocusBehavior(FocusBehavior::NEVER);
-
       AddChildView(content_view);
       ExcludeCardFromEventHandling(contents_->GetView()->native_view());
 
@@ -301,6 +302,9 @@ class SearchResultAnswerCardView::AnswerCardResultView
     // expectations.
     base::RecordAction(base::UserMetricsAction("SearchAnswer_OpenedUrl"));
   }
+
+  void FocusedNodeChanged(bool is_editable_node,
+                          const gfx::Rect& node_bounds_in_screen) override {}
 
   SearchResultContainerView* const container_;  // Not owned.
   AppListViewDelegate* const view_delegate_;    // Not owned.
@@ -395,4 +399,4 @@ SearchResultAnswerCardView::CreateAnswerCardResponseHeadersForTest(
   return headers;
 }
 
-}  // namespace app_list
+}  // namespace ash

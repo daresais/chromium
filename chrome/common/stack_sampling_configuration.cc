@@ -7,12 +7,17 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/rand_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/buildflags/buildflags.h"
+
+#if defined(OS_WIN)
+#include "base/win/static_constants.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -30,14 +35,14 @@ base::LazyInstance<StackSamplingConfiguration>::Leaky g_configuration =
 // The profiler is currently only implemented for Windows x64 and Mac x64.
 bool IsProfilerSupported() {
 #if (defined(OS_WIN) && defined(ARCH_CPU_X86_64)) || defined(OS_MACOSX)
-  #if defined(GOOGLE_CHROME_BUILD)
-    // Only run on canary and dev.
-    const version_info::Channel channel = chrome::GetChannel();
-    return channel == version_info::Channel::CANARY ||
-           channel == version_info::Channel::DEV;
-  #else
-    return true;
-  #endif
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Only run on canary and dev.
+  const version_info::Channel channel = chrome::GetChannel();
+  return channel == version_info::Channel::CANARY ||
+         channel == version_info::Channel::DEV;
+#else
+  return true;
+#endif
 #else
   return false;
 #endif
@@ -65,6 +70,21 @@ bool ShouldEnableProfilerForNextRendererProcess() {
   // Enable for every N-th renderer process, where N = 5.
   return base::RandInt(0, 4) == 0;
 }
+
+#if defined(OS_WIN)
+// Checks if Trend Micro DLLs are loaded in process, so we can disable the
+// profiler to avoid hitting their performance bug. See
+// https://crbug.com/1018291.
+bool IsTrendMicroInProcess() {
+#if defined(ARCH_CPU_X86_64)
+  return (::GetModuleHandle(L"tmmon64.dll") ||
+          ::GetModuleHandle(L"tmmonmgr64.dll"));
+#else   // defined(ARCH_CPU_X86_64)
+  return (::GetModuleHandle(L"tmmon.dll") ||
+          ::GetModuleHandle(L"tmmonmgr.dll"));
+#endif  // defined(ARCH_CPU_X86_64)
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace
 
@@ -115,6 +135,10 @@ bool StackSamplingConfiguration::GetSyntheticFieldTrial(
   switch (configuration_) {
     case PROFILE_DISABLED:
       *group_name = "Disabled";
+      break;
+
+    case PROFILE_DISABLED_TREND_MICRO:
+      *group_name = "DisabledTrendMicro";
       break;
 
     case PROFILE_CONTROL:
@@ -187,6 +211,20 @@ StackSamplingConfiguration::GenerateConfiguration() {
 
   if (!IsProfilerSupported())
     return PROFILE_DISABLED;
+
+#if defined(OS_WIN)
+  // Do not start the profiler when Application Verifier is in use; running them
+  // simultaneously can cause crashes and has no known use case.
+  if (GetModuleHandleA(base::win::kApplicationVerifierDllName))
+    return PROFILE_DISABLED;
+
+  // Do not start the profiler if Trend Micro DLLs are loaded in process to
+  // avoid hitting their performance bug.
+  // TODO(https://crbug.com/1018291): Remove once Trend Micro's fixes have
+  // propagated to customers.
+  if (IsTrendMicroInProcess())
+    return PROFILE_DISABLED_TREND_MICRO;
+#endif
 
   switch (chrome::GetChannel()) {
     // Enable the profiler unconditionally for development/waterfall builds.

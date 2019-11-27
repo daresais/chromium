@@ -105,7 +105,7 @@ class AshTestHelper {
     return test_views_delegate_.get();
   }
 
-  display::Display GetSecondaryDisplay();
+  display::Display GetSecondaryDisplay() const;
 
   TestSessionControllerClient* test_session_controller_client() {
     return session_controller_client_.get();
@@ -128,6 +128,10 @@ class AshTestHelper {
 
   TestKeyboardControllerObserver* test_keyboard_controller_observer() {
     return test_keyboard_controller_observer_.get();
+  }
+
+  TestAssistantService* test_assistant_service() {
+    return assistant_service_.get();
   }
 
   void reset_commandline() { command_line_.reset(); }

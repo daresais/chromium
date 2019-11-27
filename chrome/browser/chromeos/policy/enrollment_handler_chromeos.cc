@@ -29,7 +29,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/attestation/attestation_flow.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/dbus/auth_policy/auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/authpolicy_client.h"
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart/upstart_client.h"
@@ -188,8 +188,7 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
       client_id_(client_id),
       sub_organization_(sub_organization),
       completion_callback_(completion_callback),
-      enrollment_step_(STEP_PENDING),
-      weak_ptr_factory_(this) {
+      enrollment_step_(STEP_PENDING) {
   dm_auth_ = std::move(dm_auth);
   CHECK(!client_->is_registered());
   CHECK_EQ(DM_STATUS_SUCCESS, client_->status());
@@ -343,8 +342,8 @@ void EnrollmentHandlerChromeOS::OnPolicyFetched(CloudPolicyClient* client) {
                              CloudPolicyValidatorBase::DM_TOKEN_REQUIRED);
   DeviceCloudPolicyValidator::StartValidation(
       std::move(validator),
-      base::Bind(&EnrollmentHandlerChromeOS::HandlePolicyValidationResult,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&EnrollmentHandlerChromeOS::HandlePolicyValidationResult,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EnrollmentHandlerChromeOS::OnRegistrationStateChanged(
@@ -408,6 +407,19 @@ void EnrollmentHandlerChromeOS::OnStoreLoaded(CloudPolicyStore* store) {
 
 void EnrollmentHandlerChromeOS::OnStoreError(CloudPolicyStore* store) {
   DCHECK_EQ(store_, store);
+
+  if (enrollment_step_ < STEP_STORE_POLICY) {
+    // At those steps it is not expected to have any error notifications from
+    // |store_| since they are not initiated by enrollment handler and stored
+    // policies are not in a consistent state (e.g. a late response from
+    // |store_| loaded at boot). So the notification is ignored.
+    // Notifications are only expected starting STEP_STORE_POLICY
+    // when OnDeviceAccountTokenStored() is called.
+    LOG(WARNING) << "Unexpected store error with status: " << store->status()
+                 << " at step: " << enrollment_step_;
+    return;
+  }
+
   LOG(ERROR) << "Error in device policy store.";
   ReportResult(EnrollmentStatus::ForStoreError(store_->status(),
                                                store_->validation_status()));
@@ -457,7 +469,8 @@ void EnrollmentHandlerChromeOS::StartAttestationBasedEnrollmentFlow() {
           weak_ptr_factory_.GetWeakPtr());
   attestation_flow_->GetCertificate(
       chromeos::attestation::PROFILE_ENTERPRISE_ENROLLMENT_CERTIFICATE,
-      EmptyAccountId(), "" /* request_origin */, false /* force_new_key */,
+      EmptyAccountId(), std::string() /* request_origin */,
+      false /* force_new_key */, std::string(), /* key_name */
       callback);
 }
 
@@ -482,9 +495,10 @@ void EnrollmentHandlerChromeOS::StartOfflineDemoEnrollmentFlow() {
   skip_robot_auth_ = true;
   SetStep(STEP_POLICY_FETCH);
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      {base::ThreadPool(), base::MayBlock(),
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&ReadFileToOptionalString,
                      enrollment_config_.offline_policy_path),
       base::BindOnce(&EnrollmentHandlerChromeOS::OnOfflinePolicyBlobLoaded,
@@ -517,8 +531,8 @@ void EnrollmentHandlerChromeOS::OnOfflinePolicyBlobLoaded(
   validator->ValidateDomain(domain_);
   DeviceCloudPolicyValidator::StartValidation(
       std::move(validator),
-      base::Bind(&EnrollmentHandlerChromeOS::OnOfflinePolicyValidated,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&EnrollmentHandlerChromeOS::OnOfflinePolicyValidated,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EnrollmentHandlerChromeOS::OnOfflinePolicyValidated(

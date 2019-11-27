@@ -239,6 +239,16 @@ class BBJSONGenerator(object):
   def is_linux(self, tester_config):
     return tester_config.get('os_type') == 'linux'
 
+  def is_mac(self, tester_config):
+    return tester_config.get('os_type') == 'mac'
+
+  def is_win(self, tester_config):
+    return tester_config.get('os_type') == 'win'
+
+  def is_win64(self, tester_config):
+    return (tester_config.get('os_type') == 'win' and
+        tester_config.get('browser_config') == 'release_x64')
+
   def get_exception_for_test(self, test_name, test_config):
     # gtests may have both "test" and "name" fields, and usually, if the "name"
     # field is specified, it means that the same test is being repurposed
@@ -387,6 +397,9 @@ class BBJSONGenerator(object):
     add_conditional_args('linux_args', self.is_linux)
     add_conditional_args('android_args', self.is_android)
     add_conditional_args('chromeos_args', self.is_chromeos)
+    add_conditional_args('mac_args', self.is_mac)
+    add_conditional_args('win_args', self.is_win)
+    add_conditional_args('win64_args', self.is_win64)
 
     for key in additional_arg_keys or []:
       args.extend(generated_test.pop(key, []))
@@ -633,13 +646,17 @@ class BBJSONGenerator(object):
 
   def generate_junit_test(self, waterfall, tester_name, tester_config,
                           test_name, test_config):
-    del tester_config
     if not self.should_run_on_tester(waterfall, tester_name, test_name,
                                      test_config):
       return None
-    result = {
-      'test': test_name,
-    }
+    result = copy.deepcopy(test_config)
+    result.update({
+      'name': test_name,
+      'test': test_config.get('test', test_name),
+    })
+    self.initialize_args_for_test(result, tester_config)
+    result = self.update_and_cleanup_test(
+        result, test_name, tester_name, tester_config, waterfall)
     return result
 
   def generate_instrumentation_test(self, waterfall, tester_name, tester_config,
@@ -673,6 +690,8 @@ class BBJSONGenerator(object):
         gpu = ['10de', '1cb3']
       elif gpu.startswith('intel-hd-630'):
         gpu = ['8086', '5912']
+      elif gpu.startswith('intel-uhd-630'):
+        gpu = ['8086', '3e92']
       else:
         gpu = gpu.split('-')[0].split(':')
       substitutions['gpu_vendor_id'] = gpu[0]
@@ -757,13 +776,26 @@ class BBJSONGenerator(object):
 
   def check_composition_test_suites(self):
     # Pre-pass to catch errors reliably.
-    for name, value in self.test_suites.iteritems():
-      if isinstance(value, list):
-        for entry in value:
-          if isinstance(self.test_suites[entry], list):
+    for suite, suite_def in self.test_suites.iteritems():
+      if isinstance(suite_def, list):
+        seen_tests = {}
+        for sub_suite in suite_def:
+          if isinstance(self.test_suites[sub_suite], list):
             raise BBGenErr('Composition test suites may not refer to other '
                            'composition test suites (error found while '
-                           'processing %s)' % name)
+                           'processing %s)' % suite)
+          else:
+            # test name -> basic_suite that it came from
+            basic_tests = {k: sub_suite for k in self.test_suites[sub_suite]}
+            for test_name, test_suite in basic_tests.iteritems():
+              if (test_name in seen_tests and
+                  self.test_suites[test_suite][test_name] !=
+                  self.test_suites[seen_tests[test_name]][test_name]):
+                raise BBGenErr('Conflicting test definitions for %s from %s '
+                               'and %s in Composition test suite (error found '
+                               'while processing %s)' % (test_name,
+                               seen_tests[test_name], test_suite, suite))
+            seen_tests.update(basic_tests)
 
   def flatten_test_suites(self):
     new_test_suites = {}
@@ -974,8 +1006,8 @@ class BBJSONGenerator(object):
         os.path.join(os.path.dirname(__file__),
                      '..', '..', 'infra', 'config'))
     milo_configs = [
-        os.path.join(infra_config_dir, 'luci-milo.cfg'),
-        os.path.join(infra_config_dir, 'luci-milo-dev.cfg'),
+        os.path.join(infra_config_dir, 'generated', 'luci-milo.cfg'),
+        os.path.join(infra_config_dir, 'generated', 'luci-milo-dev.cfg'),
     ]
     for c in milo_configs:
       for l in self.read_file(c).splitlines():
@@ -990,34 +1022,28 @@ class BBJSONGenerator(object):
         bot_names.add(l[l.rindex('/') + 1:l.rindex('"')])
     return bot_names
 
-  def get_bots_that_do_not_actually_exist(self):
+  def get_builders_that_do_not_actually_exist(self):
     # Some of the bots on the chromium.gpu.fyi waterfall in particular
     # are defined only to be mirrored into trybots, and don't actually
     # exist on any of the waterfalls or consoles.
     return [
       'GPU FYI Fuchsia Builder',
+      'ANGLE GPU Android Release (Nexus 5X)',
       'ANGLE GPU Linux Release (Intel HD 630)',
       'ANGLE GPU Linux Release (NVIDIA)',
       'ANGLE GPU Mac Release (Intel)',
       'ANGLE GPU Mac Retina Release (AMD)',
       'ANGLE GPU Mac Retina Release (NVIDIA)',
-      'ANGLE GPU Win10 Release (Intel HD 630)',
-      'ANGLE GPU Win10 Release (NVIDIA)',
-      'Dawn GPU Linux Release (Intel HD 630)',
-      'Dawn GPU Linux Release (NVIDIA)',
-      'Dawn GPU Mac Release (Intel)',
-      'Dawn GPU Mac Retina Release (AMD)',
-      'Dawn GPU Mac Retina Release (NVIDIA)',
-      'Dawn GPU Win10 Release (Intel HD 630)',
-      'Dawn GPU Win10 Release (NVIDIA)',
+      'ANGLE GPU Win10 x64 Release (Intel HD 630)',
+      'ANGLE GPU Win10 x64 Release (NVIDIA)',
       'Optional Android Release (Nexus 5X)',
       'Optional Linux Release (Intel HD 630)',
       'Optional Linux Release (NVIDIA)',
       'Optional Mac Release (Intel)',
       'Optional Mac Retina Release (AMD)',
       'Optional Mac Retina Release (NVIDIA)',
-      'Optional Win10 Release (Intel HD 630)',
-      'Optional Win10 Release (NVIDIA)',
+      'Optional Win10 x64 Release (Intel HD 630)',
+      'Optional Win10 x64 Release (NVIDIA)',
       'Win7 ANGLE Tryserver (AMD)',
       # chromium.fyi
       'linux-blink-rel-dummy',
@@ -1030,24 +1056,18 @@ class BBJSONGenerator(object):
       'win10-blink-rel-dummy',
       'Dummy WebKit Mac10.13',
       'WebKit Linux composite_after_paint Dummy Builder',
-      'WebKit Linux layout_ng Dummy Builder',
-      'WebKit Linux root_layer_scrolls Dummy Builder',
+      'WebKit Linux layout_ng_disabled Builder',
       # chromium, due to https://crbug.com/878915
       'win-dbg',
       'win32-dbg',
       'win-archive-dbg',
       'win32-archive-dbg',
-      # chromium.mac, see https://crbug.com/943804
-      'mac-dummy-rel',
-      # Defined in internal configs.
-      'chromeos-amd64-generic-google-rel',
-      'chromeos-betty-google-rel',
-      # code coverage, see see https://crbug.com/930364
-      'Linux Builder Code Coverage',
-      'Linux Tests Code Coverage',
-      'GPU Linux Builder Code Coverage',
-      'Linux Release Code Coverage (NVIDIA)',
     ]
+
+  def get_internal_waterfalls(self):
+    # Similar to get_builders_that_do_not_actually_exist above, but for
+    # waterfalls defined in internal configs.
+    return ['chrome']
 
   def check_input_file_consistency(self, verbose=False):
     self.check_input_files_sorting(verbose)
@@ -1058,10 +1078,14 @@ class BBJSONGenerator(object):
 
     # All bots should exist.
     bot_names = self.get_valid_bot_names()
-    bots_that_dont_exist = self.get_bots_that_do_not_actually_exist()
+    internal_waterfalls = self.get_internal_waterfalls()
+    builders_that_dont_exist = self.get_builders_that_do_not_actually_exist()
     for waterfall in self.waterfalls:
+      # TODO(crbug.com/991417): Remove the need for this exception.
+      if waterfall['name'] in internal_waterfalls:
+        continue  # pragma: no cover
       for bot_name in waterfall['machines']:
-        if bot_name in bots_that_dont_exist:
+        if bot_name in builders_that_dont_exist:
           continue  # pragma: no cover
         if bot_name not in bot_names:
           if waterfall['name'] in ['client.v8.chromium', 'client.v8.fyi']:
@@ -1071,6 +1095,10 @@ class BBJSONGenerator(object):
                                    'webrtc.chromium.fyi.experimental']:
             # These waterfalls have their bot configs in a different repo.
             # so we don't know about their bot names.
+            continue  # pragma: no cover
+          if waterfall['name'] in [
+              'client.devtools-frontend.integration',
+              'tryserver.devtools-frontend']:
             continue  # pragma: no cover
           raise self.unknown_bot(bot_name, waterfall['name'])
 
@@ -1120,7 +1148,7 @@ class BBJSONGenerator(object):
         if removal not in all_bots:
           missing_bots.add(removal)
 
-    missing_bots = missing_bots - set(bots_that_dont_exist)
+    missing_bots = missing_bots - set(builders_that_dont_exist)
     if missing_bots:
       raise BBGenErr('The following nonexistent machines were referenced in '
                      'the test suite exceptions: ' + str(missing_bots))

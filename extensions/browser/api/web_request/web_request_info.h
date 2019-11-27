@@ -16,18 +16,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "base/values.h"
-#include "extensions/browser/api/declarative_net_request/ruleset_manager.h"
+#include "extensions/browser/api/declarative_net_request/request_action.h"
 #include "extensions/browser/api/web_request/web_request_resource_type.h"
 #include "extensions/browser/extension_api_frame_id_map.h"
 #include "ipc/ipc_message.h"
 #include "net/http/http_request_headers.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_response_head.mojom-forward.h"
 #include "url/gurl.h"
 #include "url/origin.h"
-
-namespace network {
-struct ResourceResponseHead;
-}
 
 namespace extensions {
 
@@ -49,7 +46,8 @@ struct WebRequestInfoInitParams {
       int32_t routing_id,
       const network::ResourceRequest& request,
       bool is_download,
-      bool is_async);
+      bool is_async,
+      bool is_service_worker_script);
 
   ~WebRequestInfoInitParams();
 
@@ -62,7 +60,7 @@ struct WebRequestInfoInitParams {
   std::string method;
   bool is_navigation_request = false;
   base::Optional<url::Origin> initiator;
-  base::Optional<content::ResourceType> type;
+  content::ResourceType type = content::ResourceType::kSubResource;
   WebRequestResourceType web_request_type = WebRequestResourceType::OTHER;
   bool is_async = false;
   net::HttpRequestHeaders extra_request_headers;
@@ -71,7 +69,8 @@ struct WebRequestInfoInitParams {
   int web_view_instance_id = -1;
   int web_view_rules_registry_id = -1;
   int web_view_embedder_process_id = -1;
-  base::Optional<ExtensionApiFrameIdMap::FrameData> frame_data;
+  ExtensionApiFrameIdMap::FrameData frame_data;
+  bool is_service_worker_script = false;
 
  private:
   void InitializeWebViewAndFrameData(
@@ -89,7 +88,7 @@ struct WebRequestInfo {
 
   // Fill in response data for this request.
   void AddResponseInfoFromResourceResponse(
-      const network::ResourceResponseHead& response);
+      const network::mojom::URLResponseHead& response);
 
   // A unique identifier for this request.
   const uint64_t id;
@@ -120,14 +119,11 @@ struct WebRequestInfo {
   const base::Optional<url::Origin> initiator;
 
   // Extension API frame data corresponding to details of the frame which
-  // initiate this request. May be null for renderer-initiated requests where
-  // some frame details are not known at WebRequestInfo construction time.
-  // Mutable since this is lazily computed.
-  mutable base::Optional<ExtensionApiFrameIdMap::FrameData> frame_data;
+  // initiate this request.
+  ExtensionApiFrameIdMap::FrameData frame_data;
 
-  // The type of the request (e.g. main frame, subresource, XHR, etc). May have
-  // no value if the request did not originate from a ResourceDispatcher.
-  const base::Optional<content::ResourceType> type;
+  // The type of the request (e.g. main frame, subresource, XHR, etc).
+  const content::ResourceType type;
 
   // A partially mirrored copy of |type| which is slightly less granular and
   // which also identifies WebSocket requests separately from other types.
@@ -167,10 +163,14 @@ struct WebRequestInfo {
   const int web_view_rules_registry_id;
   const int web_view_embedder_process_id;
 
-  // The Declarative Net Request action associated with this request. Mutable
+  // The Declarative Net Request actions associated with this request. Mutable
   // since this is lazily computed. Cached to avoid redundant computations.
-  mutable base::Optional<declarative_net_request::RulesetManager::Action>
-      dnr_action;
+  // Valid when not null. In case no actions are taken, populated with an empty
+  // vector.
+  mutable base::Optional<std::vector<declarative_net_request::RequestAction>>
+      dnr_actions;
+
+  const bool is_service_worker_script;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebRequestInfo);

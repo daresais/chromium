@@ -26,10 +26,10 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#include "ios/web/public/js_messaging/web_frame_util.h"
+#import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/test/http_server/http_server.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -94,7 +94,8 @@ class SaveCardInfobarEGTestHelper {
 
   static CreditCardSaveManager* credit_card_save_manager() {
     web::WebState* web_state = chrome_test_util::GetCurrentWebState();
-    web::WebFrame* main_frame = web::GetMainWebFrame(web_state);
+    web::WebFrame* main_frame =
+        web_state->GetWebFramesManager()->GetMainWebFrame();
     DCHECK(web_state);
     return AutofillDriverIOS::FromWebStateAndWebFrame(web_state, main_frame)
         ->autofill_manager()
@@ -105,7 +106,8 @@ class SaveCardInfobarEGTestHelper {
 
   static payments::PaymentsClient* payments_client() {
     web::WebState* web_state = chrome_test_util::GetCurrentWebState();
-    web::WebFrame* main_frame = web::GetMainWebFrame(web_state);
+    web::WebFrame* main_frame =
+        web_state->GetWebFramesManager()->GetMainWebFrame();
     DCHECK(web_state);
     return AutofillDriverIOS::FromWebStateAndWebFrame(web_state, main_frame)
         ->autofill_manager()
@@ -496,21 +498,15 @@ class SaveCardInfobarEGTestHelper {
              @"Save card infobar failed to show.");
 
   // Disable EarlGrey's synchronization since it's blocked by infobar animation.
-  [[GREYConfiguration sharedInstance]
-          setValue:@NO
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
-
-  [self resetEventWaiterForEvents:{InfobarEvent::SENT_UPLOAD_CARD_REQUEST}
-                          timeout:kWaitForDownloadTimeout];
-  // Tap the save button.
-  [[EarlGrey selectElementWithMatcher:saveButtonMatcher()]
-      performAction:grey_tap()];
-  [self waitForEvents];
-
-  // Reenable synchronization now that the infobar animation is over.
-  [[GREYConfiguration sharedInstance]
-          setValue:@YES
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+  {
+    ScopedSynchronizationDisabler disabler;
+    [self resetEventWaiterForEvents:{InfobarEvent::SENT_UPLOAD_CARD_REQUEST}
+                            timeout:kWaitForDownloadTimeout];
+    // Tap the save button.
+    [[EarlGrey selectElementWithMatcher:saveButtonMatcher()]
+        performAction:grey_tap()];
+    [self waitForEvents];
+  }
 
   // Wait until the save card infobar disappears.
   GREYAssert([self waitForUIElementToDisappearOrTimeout:

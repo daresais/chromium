@@ -4,6 +4,7 @@
 # found in the LICENSE file.
 
 # pylint: disable=too-many-lines
+# pylint: disable=line-too-long
 
 """Generates chromium.perf{,.fyi}.json from a set of condensed configs.
 
@@ -12,12 +13,15 @@ logic to inflate those into the full (unwieldy) configurations in
 //testing/buildbot that are consumed by the chromium recipe code.
 """
 
+from __future__ import print_function
+
 import argparse
 import collections
 import csv
 import filecmp
 import json
 import os
+import re
 import sys
 import tempfile
 import textwrap
@@ -150,6 +154,7 @@ FYI_BUILDERS = {
     'dimension': {
       'gpu': '10de',
       'id': 'build186-b7',
+      'os': 'Ubuntu-14.04',
       'pool': 'chrome.tests.perf-fyi',
     },
   },
@@ -264,7 +269,7 @@ BUILDERS = {
       },
     ],
     'dimension': {
-      'os': 'Ubuntu-14.04',
+      'os': 'Ubuntu-16.04',
       'pool': 'chrome.tests',
     },
     'perf_trigger': False,
@@ -311,7 +316,7 @@ BUILDERS = {
       },
     ],
     'dimension': {
-      'os': 'Ubuntu-14.04',
+      'os': 'Ubuntu-16.04',
       'pool': 'chrome.tests',
     },
     'perf_trigger': False,
@@ -343,7 +348,7 @@ BUILDERS = {
     ],
     'platform': 'android-chrome',
     'dimension': {
-      'device_os': 'O',
+      'device_os': 'OMB1.180119.001',
       'device_type': 'gobo',
       'device_os_flavor': 'google',
       'pool': 'chrome.tests.perf',
@@ -365,7 +370,7 @@ BUILDERS = {
       'pool': 'chrome.tests.perf-webview',
       'os': 'Android',
       'device_type': 'gobo',
-      'device_os': 'O',
+      'device_os': 'OMB1.180119.001',
       'device_os_flavor': 'google',
     },
   },
@@ -373,7 +378,7 @@ BUILDERS = {
     'tests': [
       {
         'isolate': 'performance_test_suite',
-        'num_shards': 16,
+        'num_shards': 10,
         'extra_args': [
             '--run-ref-build',
             '--test-shard-map-filename=android-nexus5x-perf_map.json',
@@ -506,7 +511,7 @@ BUILDERS = {
         'extra_args': [
           '--test-shard-map-filename=android-pixel2_webview-perf_map.json',
         ],
-        'num_shards': 28
+        'num_shards': 28,
       }
     ],
     'platform': 'android-webview-google',
@@ -514,7 +519,26 @@ BUILDERS = {
       'pool': 'chrome.tests.perf-webview',
       'os': 'Android',
       'device_type': 'walleye',
-      'device_os': 'O',
+      'device_os': 'OPM1.171019.021',
+      'device_os_flavor': 'google',
+    },
+  },
+  'android-pixel2_weblayer-perf': {
+    'tests': [
+      {
+        'isolate': 'performance_weblayer_test_suite',
+        'extra_args': [
+          '--test-shard-map-filename=android-pixel2_weblayer-perf_map.json',
+        ],
+        'num_shards': 4,
+      }
+    ],
+    'platform': 'android-weblayer',
+    'dimension': {
+      'pool': 'chrome.tests.perf-weblayer',
+      'os': 'Android',
+      'device_type': 'walleye',
+      'device_os': 'OPM1.171019.021',
       'device_os_flavor': 'google',
     },
   },
@@ -534,7 +558,7 @@ BUILDERS = {
       'pool': 'chrome.tests.perf',
       'os': 'Android',
       'device_type': 'walleye',
-      'device_os': 'O',
+      'device_os': 'OPM1.171019.021',
       'device_os_flavor': 'google',
     },
   },
@@ -576,17 +600,26 @@ BUILDERS = {
         'isolate': 'base_perftests',
         'num_shards': 1,
         'type': TEST_TYPES.GTEST,
-      }
+      },
+      {
+        'isolate': 'dawn_perf_tests',
+        'num_shards': 1,
+        'type': TEST_TYPES.GTEST,
+        'extra_args': [
+            '--shard-timeout=300'
+        ],
+      },
     ],
     'platform': 'win',
     'target_bits': 64,
     'dimension': {
       'pool': 'chrome.tests.perf',
-      # TODO(crbug.com/966238): Add more specific windows version.
-      'os': 'Windows-10',
-      # TODO(crbug.com/971204): Explicitly set the gpu to None to make
-      # chromium_swarming recipe_module ignore this dimension.
-      'gpu': None,
+      # Explicitly set GPU driver version and Windows OS version such
+      # that we can be informed if this
+      # version ever changes or becomes inconsistent. It is important
+      # that bots are homogeneous. See crbug.com/988045 for history.
+      'os': 'Windows-10-16299.309',
+      'gpu': '8086:5912-23.20.16.4877',
       'synthetic_product_name': 'OptiPlex 7050 (Dell Inc.)'
     },
   },
@@ -619,9 +652,10 @@ BUILDERS = {
     'platform': 'win',
     'target_bits': 32,
     'dimension': {
-      'pool': 'chrome.tests.perf',
-      'os': 'Windows-2008ServerR2-SP1',
-      'gpu': '102b:0532'
+        'gpu': '102b:0532-6.1.7600.16385',
+        'os': 'Windows-2008ServerR2-SP1',
+        'pool': 'chrome.tests.perf',
+        'synthetic_product_name': 'PowerEdge R210 II (Dell Inc.)',
     },
   },
   'Win 7 Nvidia GPU Perf': {
@@ -674,9 +708,10 @@ BUILDERS = {
     'platform': 'win',
     'target_bits': 64,
     'dimension': {
-      'pool': 'chrome.tests.perf',
-      'os': 'Windows-2008ServerR2-SP1',
-      'gpu': '10de:1cb3'
+        'gpu': '10de:1cb3-23.21.13.8792',
+        'os': 'Windows-2008ServerR2-SP1',
+        'pool': 'chrome.tests.perf',
+        'synthetic_product_name': 'PowerEdge R220 [01] (Dell Inc.)'
     },
   },
   'mac-10_12_laptop_low_end-perf': {
@@ -750,13 +785,14 @@ BUILDERS = {
         'isolate': 'base_perftests',
         'num_shards': 1,
         'type': TEST_TYPES.GTEST,
-      }
+      },
     ],
     'platform': 'linux',
     'dimension': {
-      'gpu': '10de:1cb3',
+      'gpu': '10de:1cb3-384.90',
       'os': 'Ubuntu-14.04',
       'pool': 'chrome.tests.perf',
+      'synthetic_product_name': 'PowerEdge R230 (Dell Inc.)'
     },
   },
   'mac-10_13_laptop_high_end-perf': {
@@ -794,17 +830,24 @@ BUILDERS = {
         'isolate': 'base_perftests',
         'num_shards': 1,
         'type': TEST_TYPES.GTEST,
-      }
+      },
+      {
+        'isolate': 'dawn_perf_tests',
+        'num_shards': 1,
+        'type': TEST_TYPES.GTEST,
+      },
     ],
     'platform': 'mac',
     'dimension': {
-      'pool': 'chrome.tests.perf',
-      'os': 'Mac-10.13',
-      'gpu': '1002:6821'
+        'gpu': '1002:6821-4.0.20-3.2.8',
+        'os': 'Mac-10.13.3',
+        'pool': 'chrome.tests.perf',
+        'synthetic_product_name': 'MacBookPro11,5_x86-64-i7-4870HQ_AMD Radeon R8 M370X 4.0.20 [3.2.8]_Intel Haswell Iris Pro Graphics 5200 4.0.20 [3.2.8]_16384_1_475936.0',
     },
   },
 }
 
+# pylint: enable=line-too-long
 
 def update_all_tests(builders_dict, file_path):
   tests = {}
@@ -820,10 +863,10 @@ def update_all_tests(builders_dict, file_path):
 
 
 def merge_dicts(*dict_args):
-    result = {}
-    for dictionary in dict_args:
-      result.update(dictionary)
-    return result
+  result = {}
+  for dictionary in dict_args:
+    result.update(dictionary)
+  return result
 
 
 class BenchmarkMetadata(object):
@@ -867,7 +910,11 @@ GTEST_BENCHMARKS = {
         'Internals>Media'),
     'views_perftests': BenchmarkMetadata(
         'tapted@chromium.org', 'Internals>Views'),
-    'components_perftests': BenchmarkMetadata('csharrison@chromium.org')
+    'components_perftests': BenchmarkMetadata('csharrison@chromium.org'),
+    'dawn_perf_tests': BenchmarkMetadata(
+        'enga@chromium.org, chrome-gpu-perf-owners@chromium.org',
+        'Internals>GPU>Dawn',
+        'https://dawn.googlesource.com/dawn/+/HEAD/src/tests/perf_tests/README.md'),
 }
 
 
@@ -890,17 +937,8 @@ OTHER_BENCHMARKS = {
 }
 
 
-# If you change this dictionary, run tools/perf/generate_perf_data
-NON_WATERFALL_BENCHMARKS = {
-    'sizes (mac)':
-        BenchmarkMetadata('tapted@chromium.org'),
-    'sizes (win)': BenchmarkMetadata('grt@chromium.org',
-                                     'Internals>PlatformIntegration'),
-    'sizes (linux)': BenchmarkMetadata(
-        'thestig@chromium.org', 'thomasanderson@chromium.org',
-        'Internals>PlatformIntegration'),
-    'supersize_archive': BenchmarkMetadata('agrieve@chromium.org'),
-}
+# Valid test suite (benchmark) names should match this regex.
+RE_VALID_TEST_SUITE_NAME = r'^[\w._-]+$'
 
 
 def _get_telemetry_perf_benchmarks_metadata():
@@ -941,7 +979,8 @@ def get_scheduled_non_telemetry_benchmarks(perf_waterfall_file):
     # on the benchmark bot map instead of on the generated tests
     # for new perf recipe.
     if not name in ('performance_test_suite',
-                    'performance_webview_test_suite'):
+                    'performance_webview_test_suite',
+                    'performance_weblayer_test_suite'):
       test_names.add(name)
 
   return test_names
@@ -980,7 +1019,7 @@ def is_perf_benchmarks_scheduling_valid(
         '//tools/perf/core/perf_data_generator.py.' % test_name)
 
   for message in error_messages:
-    print >> outstream, '*', textwrap.fill(message, 70), '\n'
+    print('*', textwrap.fill(message, 70), '\n', file=outstream)
 
   return not error_messages
 
@@ -1011,12 +1050,13 @@ def update_benchmark_csv(file_path):
 
   csv_data = []
   benchmark_metadatas = merge_dicts(
-      GTEST_BENCHMARKS, OTHER_BENCHMARKS, TELEMETRY_PERF_BENCHMARKS,
-      NON_WATERFALL_BENCHMARKS)
+      GTEST_BENCHMARKS, OTHER_BENCHMARKS, TELEMETRY_PERF_BENCHMARKS)
   _verify_benchmark_owners(benchmark_metadatas)
 
   undocumented_benchmarks = set()
   for benchmark_name in benchmark_metadatas:
+    if not re.match(RE_VALID_TEST_SUITE_NAME, benchmark_name):
+      raise ValueError('Invalid benchmark name: %s' % benchmark_name)
     if not benchmark_metadatas[benchmark_name].documentation_url:
       undocumented_benchmarks.add(benchmark_name)
     csv_data.append([
@@ -1071,7 +1111,7 @@ def update_labs_docs_md(filepath):
       f.write('## %s\n\n' % platform.title())
       testers.sort()
       for tester in testers:
-        f.write(' * [{0.name}]({0.buildbot_url}): {0.description}.\n'.format(
+        f.write(' * [{0.name}]({0.builder_url}): {0.description}.\n'.format(
             tester))
       f.write('\n')
 
@@ -1138,6 +1178,11 @@ def generate_telemetry_args(tester_config):
   if tester_config['platform'].startswith('android-webview'):
     test_args.append(
         '--webview-embedder-apk=../../out/Release/apks/SystemWebViewShell.apk')
+  if tester_config['platform'] == 'android-weblayer':
+    test_args.append(
+        '--webview-embedder-apk=../../out/Release/apks/WebLayerShell.apk')
+    test_args.append(
+        '--webview-embedder-apk=../../out/Release/apks/WebLayerSupport.apk')
 
   return test_args
 
@@ -1202,13 +1247,13 @@ def generate_performance_test(tester_config, test):
     # TODO(crbug.com/865538): once we have plenty of windows hardwares,
     # to shards perf benchmarks on Win builders, reduce this hard timeout limit
     # to ~2 hrs.
-    'hard_timeout': 10 * 60 * 60, # 10 hours timeout for full suite
+    'hard_timeout': 12 * 60 * 60, # 12 hours timeout for full suite
     'ignore_task_failure': False,
-    # 4 hour timeout. Note that this is effectively the timeout for a
+    # 6 hour timeout. Note that this is effectively the timeout for a
     # benchmarking subprocess to run since we intentionally do not stream
     # subprocess output to the task stdout.
     # TODO(crbug.com/865538): Reduce this once we can reduce hard_timeout.
-    'io_timeout': 4 * 60 * 60,
+    'io_timeout': 6 * 60 * 60,
     'dimension_sets': [
       tester_config['dimension']
     ],
@@ -1288,11 +1333,11 @@ def main(args):
         and validate_docs(labs_docs_file)
         and is_perf_benchmarks_scheduling_valid(
             perf_waterfall_file, outstream=sys.stderr)):
-      print 'All the perf config files are up-to-date. \\o/'
+      print('All the perf config files are up-to-date. \\o/')
       return 0
     else:
-      print ('Not all perf config files are up-to-date. Please run %s '
-             'to update them.') % sys.argv[0]
+      print('Not all perf config files are up-to-date. Please run %s '
+            'to update them.' % sys.argv[0])
       return 1
   else:
     update_all_tests(FYI_BUILDERS, fyi_waterfall_file)

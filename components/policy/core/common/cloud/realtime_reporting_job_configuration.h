@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,30 @@ class DMAuth;
 class POLICY_EXPORT RealtimeReportingJobConfiguration
     : public JobConfigurationBase {
  public:
+  // Keys used in report dictionary.
+  static const char kContextKey[];
+  static const char kEventListKey[];
+
+  // Keys used in request payload dictionary.  Public for testing.
+  static const char kBrowserIdKey[];
+  static const char kChromeVersionKey[];
+  static const char kClientIdKey[];
+  static const char kDmTokenKey[];
+  static const char kEventsKey[];
+  static const char kMachineUserKey[];
+  static const char kOsVersionKey[];
+
   typedef base::OnceCallback<void(DeviceManagementService::Job* job,
                                   DeviceManagementStatus code,
                                   int net_error,
                                   const base::Value&)>
       Callback;
+
+  // Combines the info given in |events| that corresponds to Event proto, and
+  // info given in |context| that corresponds to the Device, Browser and Profile
+  // proto, to a UploadEventsRequest proto defined in
+  // google3/google/internal/chrome/reporting/v1/chromereporting.proto.
+  static base::Value BuildReport(base::Value events, base::Value context);
 
   RealtimeReportingJobConfiguration(CloudPolicyClient* client,
                                     std::unique_ptr<DMAuth> auth_data,
@@ -34,16 +53,21 @@ class POLICY_EXPORT RealtimeReportingJobConfiguration
 
   ~RealtimeReportingJobConfiguration() override;
 
-  // Add a new event to the payload.  This methods takes ownership of the event
-  // value.  Events are dictionaries defined by the Event message described at
+  // Add a new report to the payload.  A report is a dictionary that
+  // contains two keys: "events" and "context".  The first key is a list of
+  // dictionaries, where dictionary is defined by the Event message described at
   // google/internal/chrome/reporting/v1/chromereporting.proto.
-  void AddEvent(base::Value event);
+  //
+  // The second is context information about this instance of chrome that
+  // is not specific to the event.
+  //
+  // Returns true if the report was added successfully.
+  bool AddReport(base::Value report);
 
  private:
-  // Keys used in request payload dictionary.
-  static const char kDmTokenKey[];
-  static const char kClientIdKey[];
-  static const char kEventsKey[];
+  // Does one time initialization of the payload when the configuration is
+  // created.
+  void InitializePayload(CloudPolicyClient* client);
 
   // DeviceManagementService::JobConfiguration.
   std::string GetPayload() override;

@@ -8,6 +8,7 @@
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/chromeos/crostini/crostini_package_service.h"
 #include "chrome/browser/chromeos/crostini/crostini_registry_service_factory.h"
+#include "chrome/browser/chromeos/crostini/crostini_util.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/ui/app_list/app_list_client_impl.h"
 #include "chrome/grit/generated_resources.h"
@@ -52,8 +53,7 @@ CrostiniPackageNotification::CrostiniPackageNotification(
           GetNotificationSettingsForTypeAndAppName(notification_type,
                                                    app_name)),
       visible_(true),
-      container_id_(container_id),
-      weak_ptr_factory_(this) {
+      container_id_(container_id) {
   if (status == PackageOperationStatus::RUNNING) {
     running_start_time_ = base::TimeTicks::Now();
     CrostiniRegistryServiceFactory::GetForProfile(profile_)->AddObserver(this);
@@ -107,6 +107,8 @@ CrostiniPackageNotification::GetNotificationSettingsForTypeAndAppName(
       DCHECK(app_name.empty());
       result.source = l10n_util::GetStringUTF16(
           IDS_CROSTINI_PACKAGE_INSTALL_NOTIFICATION_DISPLAY_SOURCE);
+      result.queued_title = l10n_util::GetStringUTF16(
+          IDS_CROSTINI_PACKAGE_INSTALL_NOTIFICATION_QUEUED_TITLE);
       result.progress_title = l10n_util::GetStringUTF16(
           IDS_CROSTINI_PACKAGE_INSTALL_NOTIFICATION_IN_PROGRESS_TITLE);
       result.progress_body.clear();
@@ -185,8 +187,8 @@ void CrostiniPackageNotification::UpdateProgress(PackageOperationStatus status,
           auto registration =
               crostini_registry_service->GetRegistration(app_id);
           if (registration.has_value() &&
-              registration->VmName() == container_id_.first &&
-              registration->ContainerName() == container_id_.second) {
+              registration->VmName() == container_id_.vm_name &&
+              registration->ContainerName() == container_id_.container_name) {
             app_id_ = app_id;
             app_count_++;
           }
@@ -230,10 +232,6 @@ void CrostiniPackageNotification::UpdateProgress(PackageOperationStatus status,
       break;
 
     case PackageOperationStatus::QUEUED:
-      // We don't have queued strings for some NotificationTypes; we shouldn't
-      // be asked to move to QUEUED status for those,
-      DCHECK(!notification_settings_.queued_title.empty());
-      DCHECK(!notification_settings_.queued_body.empty());
       title = notification_settings_.queued_title;
       body = notification_settings_.queued_body;
       break;
@@ -257,8 +255,8 @@ void CrostiniPackageNotification::ForceAllowAutoHide() {
 }
 
 void CrostiniPackageNotification::Close(bool by_user) {
-  if (current_status_ == PackageOperationStatus::RUNNING ||
-      current_status_ == PackageOperationStatus::QUEUED) {
+  if (current_status_ != PackageOperationStatus::SUCCEEDED &&
+      current_status_ != PackageOperationStatus::FAILED) {
     // We don't want to delete ourselves yet; we want to forcibly redisplay
     // when we hit success or failure. Just note that we are hidden.
     visible_ = false;
@@ -271,8 +269,11 @@ void CrostiniPackageNotification::Close(bool by_user) {
 void CrostiniPackageNotification::Click(
     const base::Optional<int>& button_index,
     const base::Optional<base::string16>& reply) {
+  if (current_status_ != PackageOperationStatus::SUCCEEDED)
+    return;
+
   if (app_count_ == 0) {
-    LaunchCrostiniApp(profile_, kCrostiniTerminalId,
+    LaunchCrostiniApp(profile_, GetTerminalId(),
                       display::Screen::GetScreen()->GetPrimaryDisplay().id());
   } else if (app_count_ == 1) {
     DCHECK(!app_id_.empty());

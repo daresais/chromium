@@ -4,8 +4,11 @@
 
 #include "third_party/blink/renderer/core/fetch/request.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/network/public/cpp/request_mode.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/public/common/loader/request_destination.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
@@ -25,6 +28,7 @@
 #include "third_party/blink/renderer/core/fetch/request_init.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/core/url/url_search_params.h"
@@ -52,17 +56,12 @@ FetchRequestData* CreateCopyOfFetchRequestDataForFetch(
   request->SetURL(original->Url());
   request->SetMethod(original->Method());
   request->SetHeaderList(original->HeaderList()->Clone());
+  request->SetOrigin(ExecutionContext::From(script_state)->GetSecurityOrigin());
   // FIXME: Set client.
   DOMWrapperWorld& world = script_state->World();
-  if (world.IsIsolatedWorld()) {
-    request->SetOrigin(world.IsolatedWorldSecurityOrigin());
-    request->SetShouldAlsoUseFactoryBoundOriginForCors(true);
-  } else {
-    request->SetOrigin(
-        ExecutionContext::From(script_state)->GetSecurityOrigin());
-  }
+  if (world.IsIsolatedWorld())
+    request->SetIsolatedWorldOrigin(world.IsolatedWorldSecurityOrigin());
   // FIXME: Set ForceOriginHeaderFlag.
-  request->SetSameOriginDataURLFlag(true);
   request->SetReferrerString(original->ReferrerString());
   request->SetReferrerPolicy(original->GetReferrerPolicy());
   request->SetMode(original->Mode());
@@ -75,8 +74,9 @@ FetchRequestData* CreateCopyOfFetchRequestDataForFetch(
   request->SetKeepalive(original->Keepalive());
   request->SetIsHistoryNavigation(original->IsHistoryNavigation());
   if (original->URLLoaderFactory()) {
-    network::mojom::blink::URLLoaderFactoryPtr factory_clone;
-    original->URLLoaderFactory()->Clone(MakeRequest(&factory_clone));
+    mojo::PendingRemote<network::mojom::blink::URLLoaderFactory> factory_clone;
+    original->URLLoaderFactory()->Clone(
+        factory_clone.InitWithNewPipeAndPassReceiver());
     request->SetURLLoaderFactory(std::move(factory_clone));
   }
   request->SetWindowId(original->WindowId());
@@ -264,11 +264,13 @@ Request* Request::CreateRequestWithRequestOrString(
     // Parsing URLs should also resolve blob URLs. This is important because
     // fetching of a blob URL should work even after the URL is revoked as long
     // as the request was created while the URL was still valid.
-    if (parsed_url.ProtocolIs("blob") && BlobUtils::MojoBlobURLsEnabled()) {
-      network::mojom::blink::URLLoaderFactoryPtr url_loader_factory;
+    if (parsed_url.ProtocolIs("blob")) {
+      mojo::PendingRemote<network::mojom::blink::URLLoaderFactory>
+          url_loader_factory;
       ExecutionContext::From(script_state)
           ->GetPublicURLManager()
-          .Resolve(parsed_url, MakeRequest(&url_loader_factory));
+          .Resolve(parsed_url,
+                   url_loader_factory.InitWithNewPipeAndPassReceiver());
       request->SetURLLoaderFactory(std::move(url_loader_factory));
     }
 
@@ -280,7 +282,7 @@ Request* Request::CreateRequestWithRequestOrString(
   // "If any of |init|'s members are present, then:"
   if (AreAnyMembersPresent(init)) {
     // "If |request|'s |mode| is "navigate", then set it to "same-origin".
-    if (request->Mode() == network::mojom::RequestMode::kNavigate)
+    if (network::IsNavigationRequestMode(request->Mode()))
       request->SetMode(network::mojom::RequestMode::kSameOrigin);
 
     // TODO(yhirano): Implement the following substep:
@@ -732,6 +734,8 @@ String Request::mode() const {
     case network::mojom::RequestMode::kCorsWithForcedPreflight:
       return "cors";
     case network::mojom::RequestMode::kNavigate:
+    case network::mojom::RequestMode::kNavigateNestedFrame:
+    case network::mojom::RequestMode::kNavigateNestedObject:
       return "navigate";
   }
   NOTREACHED();
@@ -895,6 +899,13 @@ String Request::ContentType() const {
   String result;
   request_->HeaderList()->Get(http_names::kContentType, result);
   return result;
+}
+
+mojom::RequestContextType Request::GetRequestContextType() const {
+  if (!request_) {
+    return mojom::RequestContextType::UNSPECIFIED;
+  }
+  return request_->Context();
 }
 
 void Request::Trace(blink::Visitor* visitor) {

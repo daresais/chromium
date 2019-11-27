@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/webauthn/sheet_view_factory.h"
 
 #include "base/logging.h"
+#include "chrome/browser/ui/autofill/payments/webauthn_dialog_model.h"
 #include "chrome/browser/ui/views/webauthn/authenticator_ble_pin_entry_sheet_view.h"
 #include "chrome/browser/ui/views/webauthn/authenticator_client_pin_entry_sheet_view.h"
 #include "chrome/browser/ui/views/webauthn/authenticator_qr_sheet_view.h"
@@ -43,10 +44,6 @@ std::unique_ptr<AuthenticatorRequestSheetView> CreateSheetViewForCurrentStepOf(
 
   std::unique_ptr<AuthenticatorRequestSheetView> sheet_view;
   switch (dialog_model->current_step()) {
-    case Step::kWelcomeScreen:
-      sheet_view = std::make_unique<AuthenticatorRequestSheetView>(
-          std::make_unique<AuthenticatorWelcomeSheetModel>(dialog_model));
-      break;
     case Step::kTransportSelection:
       sheet_view = std::make_unique<AuthenticatorTransportSelectorSheetView>(
           std::make_unique<AuthenticatorTransportSelectorSheetModel>(
@@ -195,4 +192,10 @@ std::unique_ptr<AuthenticatorRequestSheetView> CreateSheetViewForCurrentStepOf(
 
   CHECK(sheet_view);
   return sheet_view;
+}
+
+std::unique_ptr<AuthenticatorRequestSheetView>
+CreateSheetViewForAutofillWebAuthn(
+    std::unique_ptr<autofill::WebauthnDialogModel> model) {
+  return std::make_unique<AuthenticatorRequestSheetView>(std::move(model));
 }

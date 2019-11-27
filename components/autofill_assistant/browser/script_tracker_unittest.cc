@@ -10,11 +10,10 @@
 #include "base/test/mock_callback.h"
 #include "components/autofill_assistant/browser/fake_script_executor_delegate.h"
 #include "components/autofill_assistant/browser/mock_service.h"
-#include "components/autofill_assistant/browser/mock_ui_controller.h"
-#include "components/autofill_assistant/browser/mock_web_controller.h"
 #include "components/autofill_assistant/browser/protocol_utils.h"
 #include "components/autofill_assistant/browser/script_executor_delegate.h"
 #include "components/autofill_assistant/browser/service.h"
+#include "components/autofill_assistant/browser/web/mock_web_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace autofill_assistant {
@@ -37,10 +36,10 @@ class ScriptTrackerTest : public testing::Test, public ScriptTracker::Listener {
     delegate_.SetCurrentURL(GURL("http://www.example.com/"));
 
     ON_CALL(mock_web_controller_, OnElementCheck(Eq(Selector({"exists"})), _))
-        .WillByDefault(RunOnceCallback<1>(true));
+        .WillByDefault(RunOnceCallback<1>(OkClientStatus()));
     ON_CALL(mock_web_controller_,
             OnElementCheck(Eq(Selector({"does_not_exist"})), _))
-        .WillByDefault(RunOnceCallback<1>(false));
+        .WillByDefault(RunOnceCallback<1>(ClientStatus()));
 
     // Scripts run, but have no actions.
     ON_CALL(mock_service_, OnGetActions(_, _, _, _, _, _))
@@ -53,7 +52,6 @@ class ScriptTrackerTest : public testing::Test, public ScriptTracker::Listener {
         runnable_scripts_changed_(0),
         tracker_(&delegate_, /* listener=*/this) {
     delegate_.SetService(&mock_service_);
-    delegate_.SetUiController(&mock_ui_controller_);
     delegate_.SetWebController(&mock_web_controller_);
   }
 
@@ -123,7 +121,6 @@ class ScriptTrackerTest : public testing::Test, public ScriptTracker::Listener {
   GURL url_;
   NiceMock<MockService> mock_service_;
   NiceMock<MockWebController> mock_web_controller_;
-  NiceMock<MockUiController> mock_ui_controller_;
 
   // Number of times NoRunnableScriptsAnymore was called.
   int no_runnable_scripts_anymore_;
@@ -156,7 +153,6 @@ TEST_F(ScriptTrackerTest, SomeRunnableScripts) {
 }
 
 TEST_F(ScriptTrackerTest, DoNotCheckInterruptWithNoName) {
-
   // The interrupt's preconditions would all be met, but it won't be reported
   // since it doesn't have a name.
   auto* no_name = AddScript("", "path1", "exists");
@@ -267,7 +263,7 @@ TEST_F(ScriptTrackerTest, CheckScriptsAgainAfterScriptEnd) {
 TEST_F(ScriptTrackerTest, CheckScriptsAfterDOMChange) {
   EXPECT_CALL(mock_web_controller_,
               OnElementCheck(Eq(Selector({"maybe_exists"})), _))
-      .WillOnce(RunOnceCallback<1>(false));
+      .WillOnce(RunOnceCallback<1>(ClientStatus()));
 
   AddScript("script name", "script path", "maybe_exists");
   SetAndCheckScripts();
@@ -275,10 +271,10 @@ TEST_F(ScriptTrackerTest, CheckScriptsAfterDOMChange) {
   // No scripts are runnable.
   EXPECT_THAT(runnable_scripts(), IsEmpty());
 
-  // DOM has changed; OnElementExists now returns true.
+  // DOM has changed; OnElementExists now returns truthy.
   EXPECT_CALL(mock_web_controller_,
               OnElementCheck(Eq(Selector({"maybe_exists"})), _))
-      .WillOnce(RunOnceCallback<1>(true));
+      .WillOnce(RunOnceCallback<1>(OkClientStatus()));
   tracker_.CheckScripts();
 
   // The script can now run

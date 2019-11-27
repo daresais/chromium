@@ -28,7 +28,7 @@ namespace network {
 class TestURLLoaderFactory;
 }
 
-namespace identity {
+namespace signin {
 
 class IdentityManagerDependenciesOwner;
 class TestIdentityManagerObserver;
@@ -39,7 +39,7 @@ class TestIdentityManagerObserver;
 // not available; call MakePrimaryAccountAvailable() as needed.
 // NOTE: IdentityTestEnvironment requires that tests have a properly set up
 // task environment. If your test doesn't already have one, use a
-// base::test::ScopedTaskEnvironment instance variable to fulfill this
+// base::test::TaskEnvironment instance variable to fulfill this
 // requirement.
 class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
  public:
@@ -71,8 +71,8 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
   IdentityTestEnvironment(
       network::TestURLLoaderFactory* test_url_loader_factory = nullptr,
       sync_preferences::TestingPrefServiceSyncable* pref_service = nullptr,
-      signin::AccountConsistencyMethod account_consistency =
-          signin::AccountConsistencyMethod::kDisabled,
+      AccountConsistencyMethod account_consistency =
+          AccountConsistencyMethod::kDisabled,
       TestSigninClient* test_signin_client = nullptr);
 
   ~IdentityTestEnvironment() override;
@@ -114,6 +114,14 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
   // Returns the AccountInfo of the newly-available account.
   AccountInfo MakePrimaryAccountAvailable(const std::string& email);
 
+  // Combination of MakeAccountAvailable() and SetCookieAccounts() for a single
+  // account. It makes an account available for the given email address, and
+  // GAIA ID, setting the cookies and the refresh token that correspond uniquely
+  // to that email address. Blocks until the account is available. Returns the
+  // AccountInfo of the newly-available account.
+  AccountInfo MakeAccountAvailableWithCookies(const std::string& email,
+                                              const std::string& gaia_id);
+
   // Clears the primary account if present, with |policy| used to determine
   // whether to keep or remove all accounts. On non-ChromeOS, results in the
   // firing of the IdentityManager and PrimaryAccountManager callbacks for
@@ -154,7 +162,8 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
 
   // Puts the given accounts into the Gaia cookie, replacing any previous
   // accounts. Blocks until the accounts have been set.
-  void SetCookieAccounts(const std::vector<CookieParams>& cookie_accounts);
+  void SetCookieAccounts(
+      const std::vector<CookieParamsForTest>& cookie_accounts);
 
   // When this is set, access token requests will be automatically granted with
   // an access token value of "access_token".
@@ -286,7 +295,7 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
       kPending,
       kAvailable,
     } state;
-    base::Optional<std::string> account_id;
+    base::Optional<CoreAccountId> account_id;
     base::OnceClosure on_available;
   };
 
@@ -296,7 +305,7 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
   IdentityTestEnvironment(
       std::unique_ptr<IdentityManagerDependenciesOwner> dependencies_owner,
       network::TestURLLoaderFactory* test_url_loader_factory,
-      signin::AccountConsistencyMethod account_consistency);
+      AccountConsistencyMethod account_consistency);
 
   // Constructs an IdentityTestEnvironment that uses the supplied
   // |identity_manager|.
@@ -353,8 +362,8 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
       SigninClient* signin_client,
       PrefService* pref_service,
       base::FilePath user_data_dir,
-      signin::AccountConsistencyMethod account_consistency =
-          signin::AccountConsistencyMethod::kDisabled);
+      AccountConsistencyMethod account_consistency =
+          AccountConsistencyMethod::kDisabled);
 
   // Shared constructor initialization logic.
   void Initialize();
@@ -364,6 +373,6 @@ class IdentityTestEnvironment : public IdentityManager::DiagnosticsObserver {
   DISALLOW_COPY_AND_ASSIGN(IdentityTestEnvironment);
 };
 
-}  // namespace identity
+}  // namespace signin
 
 #endif  // COMPONENTS_SIGNIN_PUBLIC_IDENTITY_MANAGER_IDENTITY_TEST_ENVIRONMENT_H_

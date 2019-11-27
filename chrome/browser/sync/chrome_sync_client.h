@@ -51,7 +51,7 @@ class ChromeSyncClient : public browser_sync::BrowserSyncClient {
   base::Closure GetPasswordStateChangedCallback() override;
   syncer::DataTypeController::TypeVector CreateDataTypeControllers(
       syncer::SyncService* sync_service) override;
-  autofill::PersonalDataManager* GetPersonalDataManager() override;
+  syncer::TrustedVaultClient* GetTrustedVaultClient() override;
   invalidation::InvalidationService* GetInvalidationService() override;
   BookmarkUndoService* GetBookmarkUndoService() override;
   scoped_refptr<syncer::ExtensionsActivity> GetExtensionsActivity() override;
@@ -73,11 +73,14 @@ class ChromeSyncClient : public browser_sync::BrowserSyncClient {
   std::unique_ptr<browser_sync::ProfileSyncComponentsFactoryImpl>
       component_factory_;
 
+  std::unique_ptr<syncer::TrustedVaultClient> trusted_vault_client_;
+
   // Members that must be fetched on the UI thread but accessed on their
   // respective backend threads.
   scoped_refptr<autofill::AutofillWebDataService> profile_web_data_service_;
   scoped_refptr<autofill::AutofillWebDataService> account_web_data_service_;
-  scoped_refptr<password_manager::PasswordStore> password_store_;
+  scoped_refptr<password_manager::PasswordStore> profile_password_store_;
+  scoped_refptr<password_manager::PasswordStore> account_password_store_;
 
   // The task runner for the |web_data_service_|, if any.
   scoped_refptr<base::SequencedTaskRunner> web_data_service_thread_;

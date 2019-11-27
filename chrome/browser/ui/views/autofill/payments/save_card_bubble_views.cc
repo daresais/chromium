@@ -16,7 +16,6 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/payments/legal_message_line.h"
-#include "components/autofill/core/browser/ui/payments/save_card_bubble_controller.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -33,7 +32,6 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/style/typography.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace autofill {
 
@@ -52,18 +50,21 @@ void SaveCardBubbleViews::SyncPromoDelegate::OnEnableSync(
 }
 
 SaveCardBubbleViews::SaveCardBubbleViews(views::View* anchor_view,
-                                         const gfx::Point& anchor_point,
                                          content::WebContents* web_contents,
                                          SaveCardBubbleController* controller)
-    : LocationBarBubbleDelegateView(anchor_view, anchor_point, web_contents),
+    : LocationBarBubbleDelegateView(anchor_view, web_contents),
       controller_(controller) {
+  DialogDelegate::set_button_label(ui::DIALOG_BUTTON_OK,
+                                   controller->GetAcceptButtonText());
+  DialogDelegate::set_button_label(ui::DIALOG_BUTTON_CANCEL,
+                                   controller->GetDeclineButtonText());
   DCHECK(controller);
   chrome::RecordDialogCreation(chrome::DialogIdentifier::SAVE_CARD);
 }
 
 void SaveCardBubbleViews::Show(DisplayReason reason) {
   ShowForReason(reason);
-  AssignIdsToDialogClientView();
+  AssignIdsToDialogButtons();
 }
 
 void SaveCardBubbleViews::Hide() {
@@ -75,16 +76,6 @@ void SaveCardBubbleViews::Hide() {
     controller_->OnBubbleClosed();
   controller_ = nullptr;
   CloseBubble();
-}
-
-base::string16 SaveCardBubbleViews::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return button == ui::DIALOG_BUTTON_OK ? controller()->GetAcceptButtonText()
-                                        : controller()->GetDeclineButtonText();
-}
-
-std::unique_ptr<views::View> SaveCardBubbleViews::CreateFootnoteView() {
-  return nullptr;
 }
 
 bool SaveCardBubbleViews::Accept() {
@@ -166,7 +157,7 @@ std::unique_ptr<views::View> SaveCardBubbleViews::CreateMainContentView() {
   base::string16 explanation = controller_->GetExplanatoryMessage();
   if (!explanation.empty()) {
     auto* explanation_label = new views::Label(
-        explanation, CONTEXT_BODY_TEXT_LARGE, ChromeTextStyle::STYLE_SECONDARY);
+        explanation, CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
     explanation_label->SetMultiLine(true);
     explanation_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     view->AddChildView(explanation_label);
@@ -203,7 +194,7 @@ std::unique_ptr<views::View> SaveCardBubbleViews::CreateMainContentView() {
 
     auto* expiration_date_label = new views::Label(
         card.AbbreviatedExpirationDateForDisplay(false),
-        CONTEXT_BODY_TEXT_LARGE, ChromeTextStyle::STYLE_SECONDARY);
+        CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
     expiration_date_label->SetID(DialogViewId::EXPIRATION_DATE_LABEL);
     description_view->AddChildView(expiration_date_label);
   }
@@ -217,11 +208,11 @@ void SaveCardBubbleViews::InitFootnoteView(views::View* footnote_view) {
   footnote_view_->SetID(DialogViewId::FOOTNOTE_VIEW);
 }
 
-void SaveCardBubbleViews::AssignIdsToDialogClientView() {
-  auto* ok_button = GetDialogClientView()->ok_button();
+void SaveCardBubbleViews::AssignIdsToDialogButtons() {
+  auto* ok_button = GetOkButton();
   if (ok_button)
     ok_button->SetID(DialogViewId::OK_BUTTON);
-  auto* cancel_button = GetDialogClientView()->cancel_button();
+  auto* cancel_button = GetCancelButton();
   if (cancel_button)
     cancel_button->SetID(DialogViewId::CANCEL_BUTTON);
 }

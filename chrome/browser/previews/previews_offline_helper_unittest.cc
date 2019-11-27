@@ -17,6 +17,7 @@
 #include "chrome/browser/offline_pages/request_coordinator_factory.h"
 #include "chrome/browser/offline_pages/test_offline_page_model_builder.h"
 #include "chrome/browser/offline_pages/test_request_coordinator_builder.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/offline_pages/buildflags/buildflags.h"
@@ -52,12 +53,6 @@ class PreviewsOfflineHelperTest : public ChromeRenderViewHostTestHarness {
     return item;
   }
 
-  offline_pages::OfflinePageItem MakeDeletedPageItem(const std::string& url) {
-    offline_pages::OfflinePageItem item;
-    item.url = GURL(url);  // Only |url| is needed.
-    return item;
-  }
-
  private:
   std::unique_ptr<PreviewsOfflineHelper> helper_;
 };
@@ -68,7 +63,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
     bool enable_feature;
     std::vector<std::string> add_fresh_pages;
     std::vector<std::string> add_expired_pages;
-    std::vector<std::string> delete_pages;
     std::vector<std::string> want_pages;
     std::vector<std::string> not_want_pages;
     std::string original_url;
@@ -80,7 +74,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = false,
           .add_fresh_pages = {},
           .add_expired_pages = {},
-          .delete_pages = {},
           .want_pages = {"http://chromium.org"},
           .not_want_pages = {},
           .original_url = "",
@@ -91,7 +84,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = true,
           .add_fresh_pages = {},
           .add_expired_pages = {},
-          .delete_pages = {},
           .want_pages = {},
           .not_want_pages = {"http://chromium.org"},
           .original_url = "",
@@ -102,7 +94,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = true,
           .add_fresh_pages = {"http://chromium.org"},
           .add_expired_pages = {},
-          .delete_pages = {},
           .want_pages = {"http://chromium.org"},
           .not_want_pages = {},
           .original_url = "",
@@ -113,7 +104,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = true,
           .add_fresh_pages = {"http://chromium.org"},
           .add_expired_pages = {},
-          .delete_pages = {},
           .want_pages = {"http://google.com"},
           .not_want_pages = {},
           .original_url = "http://google.com",
@@ -124,18 +114,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = true,
           .add_fresh_pages = {},
           .add_expired_pages = {"http://chromium.org"},
-          .delete_pages = {},
-          .want_pages = {},
-          .not_want_pages = {"http://chromium.org"},
-          .original_url = "",
-          .want_pref_size = 0,
-      },
-      {
-          .msg = "Added then deleted page returns false",
-          .enable_feature = true,
-          .add_fresh_pages = {"http://chromium.org"},
-          .add_expired_pages = {},
-          .delete_pages = {"http://chromium.org"},
           .want_pages = {},
           .not_want_pages = {"http://chromium.org"},
           .original_url = "",
@@ -146,7 +124,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = true,
           .add_fresh_pages = {"http://chromium.org"},
           .add_expired_pages = {"http://chromium.org"},
-          .delete_pages = {},
           .want_pages = {"http://chromium.org"},
           .not_want_pages = {},
           .original_url = "",
@@ -157,7 +134,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
           .enable_feature = true,
           .add_fresh_pages = {"http://chromium.org"},
           .add_expired_pages = {},
-          .delete_pages = {},
           .want_pages = {"http://chromium.org",
                          "http://chromium.org/#previews"},
           .not_want_pages = {},
@@ -167,13 +143,10 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
       {
           .msg = "URLs with paths are different",
           .enable_feature = true,
-          .add_fresh_pages = {"http://chromium.org/fresh",
-                              "http://chromium.org/fresh_but_deleted"},
+          .add_fresh_pages = {"http://chromium.org/fresh"},
           .add_expired_pages = {"http://chromium.org/old"},
-          .delete_pages = {"http://chromium.org/fresh_but_deleted"},
           .want_pages = {"http://chromium.org/fresh"},
-          .not_want_pages = {"http://chromium.org/old",
-                             "http://chromium.org/fresh_but_deleted"},
+          .not_want_pages = {"http://chromium.org/old"},
           .original_url = "",
           .want_pref_size = 1,
       },
@@ -212,9 +185,6 @@ TEST_F(PreviewsOfflineHelperTest, TestAddRemovePages) {
       helper->OfflinePageAdded(
           nullptr,
           MakeAddedPageItem(fresh_page, test_case.original_url, fresh));
-    }
-    for (const std::string& deleted_page : test_case.delete_pages) {
-      helper->OfflinePageDeleted(MakeDeletedPageItem(deleted_page));
     }
 
     EXPECT_EQ(test_prefs.GetDictionary(kDictKey)->size(),

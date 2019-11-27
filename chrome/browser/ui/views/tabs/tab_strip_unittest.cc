@@ -8,16 +8,19 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/test/task_environment.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/tab_group_id.h"
+#include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
 #include "chrome/browser/ui/views/tabs/fake_base_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/new_tab_button.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
+#include "chrome/browser/ui/views/tabs/tab_animation.h"
 #include "chrome/browser/ui/views/tabs/tab_group_header.h"
+#include "chrome/browser/ui/views/tabs/tab_group_underline.h"
 #include "chrome/browser/ui/views/tabs/tab_icon.h"
-#include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_observer.h"
 #include "chrome/browser/ui/views/tabs/tab_style_views.h"
@@ -139,13 +142,13 @@ class TabStripTest : public ChromeViewsTestBase,
     auto* parent = new views::View;
     parent->AddChildView(tab_strip_);
 
-    widget_.reset(new views::Widget);
+    widget_ = std::make_unique<views::Widget>();
     views::Widget::InitParams init_params =
         CreateParams(views::Widget::InitParams::TYPE_POPUP);
     init_params.ownership =
         views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     init_params.bounds = gfx::Rect(0, 0, 200, 200);
-    widget_->Init(init_params);
+    widget_->Init(std::move(init_params));
     widget_->SetContentsView(parent);
   }
 
@@ -193,11 +196,11 @@ class TabStripTest : public ChromeViewsTestBase,
   int GetInactiveTabWidth() { return tab_strip_->GetInactiveTabWidth(); }
 
   // End any outstanding drag and animate tabs back to their ideal bounds.
-  void StopDraggingTab(Tab* tab) {
-    // Passing false for |is_first_tab| results in running the post-drag
+  void StopDragging(TabSlotView* view) {
+    // Passing false for |is_first_view| results in running the post-drag
     // animation unconditionally.
-    bool is_first_tab = false;
-    tab_strip_->StoppedDraggingTab(tab, &is_first_tab);
+    bool is_first_view = false;
+    tab_strip_->StoppedDraggingView(view, &is_first_view);
   }
 
   // Makes sure that all tabs have the correct AX indices.
@@ -218,6 +221,13 @@ class TabStripTest : public ChromeViewsTestBase,
     std::vector<TabGroupHeader*> result;
     for (auto const& header_pair : tab_strip_->group_headers_)
       result.push_back(header_pair.second.get());
+    return result;
+  }
+
+  std::vector<TabGroupUnderline*> ListGroupUnderlines() const {
+    std::vector<TabGroupUnderline*> result;
+    for (auto const& underline_pair : tab_strip_->group_underlines_)
+      result.push_back(underline_pair.second.get());
     return result;
   }
 
@@ -460,7 +470,7 @@ TEST_P(TabStripTest, TabForEventWhenStacked) {
     int previous_tab = -1;
     for (int x = 0; x < tab_strip_->width(); ++x) {
       p.set_x(x);
-      int tab = tab_strip_->GetModelIndexOfTab(FindTabForEvent(p));
+      int tab = tab_strip_->GetModelIndexOf(FindTabForEvent(p));
       if (tab == previous_tab)
         continue;
       if ((tab != -1) || (previous_tab != tab_strip_->tab_count() - 1))
@@ -831,6 +841,7 @@ TEST_P(TabStripTest, ActiveTabWidthWhenTabsAreTiny) {
               TabStyleViews::GetMinimumActiveWidth());
     tab_strip_->CloseTab(tab_strip_->tab_at(active_index),
                          CLOSE_TAB_FROM_MOUSE);
+    CompleteAnimationAndLayout();
   }
 }
 
@@ -887,7 +898,7 @@ TEST_P(TabStripTest, ResetBoundsForDraggedTabs) {
 
   // Ending the drag triggers the tabstrip to begin animating this tab back
   // to its ideal bounds.
-  StopDraggingTab(dragged_tab);
+  StopDragging(dragged_tab);
   EXPECT_TRUE(bounds_animator()->IsAnimating(dragged_tab));
 
   // Change the ideal bounds of the tabs mid-animation by selecting a
@@ -897,8 +908,7 @@ TEST_P(TabStripTest, ResetBoundsForDraggedTabs) {
   // Once the animation completes, the dragged tab should have animated to
   // the new ideal bounds (computed with this as an inactive tab) rather
   // than the original ones (where it's an active tab).
-  const auto duration = base::TimeDelta::FromMilliseconds(
-      bounds_animator()->GetAnimationDuration());
+  const base::TimeDelta duration = bounds_animator()->GetAnimationDuration();
   test_api.IncrementTime(duration);
 
   EXPECT_FALSE(dragged_tab->dragging());
@@ -973,55 +983,32 @@ TEST_P(TabStripTest, EventsOnClosingTab) {
   EXPECT_EQ(first_tab, tab_strip_->GetEventHandlerForPoint(tab_center));
 }
 
-// Switch selected tabs on horizontal scroll events.
-TEST_P(TabStripTest, HorizontalScroll) {
-  tab_strip_->SetBounds(0, 0, 200, 20);
+TEST_P(TabStripTest, AnimationOnTabAdd) {
+  tab_strip_->SetBounds(0, 0, 1000, 100);
+  // Show widget to enable animations.
+  widget_->Show();
 
-  for (int i = 0; i < 3; i++)
-    controller_->AddTab(i, true /* is_active */);
+  // First tab does not animate.
+  controller_->AddTab(0, true);
+  controller_->AddTab(1, false);
 
-  Tab* tab = tab_strip_->tab_at(0);
-  gfx::Point tab_center = tab->bounds().CenterPoint();
+  const int initial_width = tab_strip_->tab_at(1)->width();
+  EXPECT_LT(initial_width, tab_strip_->tab_at(0)->width());
 
-  for (int i = 0; i < tab_strip_->tab_count(); ++i) {
-    ui::MouseWheelEvent wheel_event(
-        gfx::Vector2d(ui::MouseWheelEvent::kWheelDelta, 0), tab_center,
-        tab_center, ui::EventTimeForNow(), 0, 0);
-    tab_strip_->OnMouseWheel(wheel_event);
-    EXPECT_EQ(i, controller_->GetActiveIndex());
-  }
+  task_environment_.FastForwardBy(TabAnimation::kAnimationDuration / 2);
 
-  controller_->SelectTab(0, dummy_event_);
-  for (int i = tab_strip_->tab_count() - 1; i >= 0; --i) {
-    ui::MouseWheelEvent wheel_event(
-        gfx::Vector2d(-ui::MouseWheelEvent::kWheelDelta, 0), tab_center,
-        tab_center, ui::EventTimeForNow(), 0, 0);
-    tab_strip_->OnMouseWheel(wheel_event);
-    EXPECT_EQ(i, controller_->GetActiveIndex());
-  }
+  EXPECT_GT(tab_strip_->tab_at(1)->width(), initial_width);
+  EXPECT_LT(tab_strip_->tab_at(1)->width(), tab_strip_->tab_at(0)->width());
 
-  // When offset is smaller than kWheelDelta, we don't scroll immediately.
-  // We wait offset until accumulated offset gets bigger than kWheelDelta.
-  const int small_offset = ui::MouseWheelEvent::kWheelDelta / 3;
-  int next_accumulated_offset = small_offset;
-  while (next_accumulated_offset < ui::MouseWheelEvent::kWheelDelta) {
-    ui::MouseWheelEvent wheel_event(gfx::Vector2d(small_offset, 0), tab_center,
-                                    tab_center, ui::EventTimeForNow(), 0, 0);
-    tab_strip_->OnMouseWheel(wheel_event);
+  // Fast-forward by more than enough to ensure the animation finishes.
+  task_environment_.FastForwardBy(TabAnimation::kAnimationDuration);
 
-    EXPECT_EQ(0, controller_->GetActiveIndex());
-    next_accumulated_offset += small_offset;
-  }
-
-  ui::MouseWheelEvent wheel_event(gfx::Vector2d(small_offset, 0), tab_center,
-                                  tab_center, ui::EventTimeForNow(), 0, 0);
-  tab_strip_->OnMouseWheel(wheel_event);
-  EXPECT_EQ(1, controller_->GetActiveIndex());
+  EXPECT_EQ(tab_strip_->tab_at(0)->width(), tab_strip_->tab_at(1)->width());
 }
 
 TEST_P(TabStripTest, GroupHeaderBasics) {
   tab_strip_->SetBounds(0, 0, 1000, 100);
-  bounds_animator()->SetAnimationDuration(0);
+  bounds_animator()->SetAnimationDuration(base::TimeDelta());
   tab_strip_->AddTabAt(0, TabRendererData(), false);
 
   Tab* tab = tab_strip_->tab_at(0);
@@ -1035,13 +1022,14 @@ TEST_P(TabStripTest, GroupHeaderBasics) {
   EXPECT_EQ(1u, headers.size());
   TabGroupHeader* header = headers[0];
   EXPECT_EQ(first_slot_x, header->x());
-  EXPECT_EQ(tab->width(), header->width());
+  EXPECT_GT(header->width(), 0);
+  EXPECT_EQ(header->bounds().right() - TabStyle::GetTabOverlap(), tab->x());
   EXPECT_EQ(tab->height(), header->height());
 }
 
 TEST_P(TabStripTest, GroupHeaderBetweenTabs) {
   tab_strip_->SetBounds(0, 0, 1000, 100);
-  bounds_animator()->SetAnimationDuration(0);
+  bounds_animator()->SetAnimationDuration(base::TimeDelta());
 
   tab_strip_->AddTabAt(0, TabRendererData(), false);
   tab_strip_->AddTabAt(1, TabRendererData(), false);
@@ -1063,15 +1051,13 @@ TEST_P(TabStripTest, GroupHeaderMovesRightWithTab) {
   controller_->MoveTabIntoGroup(1, group);
   CompleteAnimationAndLayout();
 
-  TabGroupHeader* header = ListGroupHeaders()[0];
-  const int initial_header_x = header->x();
-  const int initial_tab_1_x = tab_strip_->tab_at(1)->x();
-
   controller_->MoveTab(1, 2);
   CompleteAnimationAndLayout();
 
-  EXPECT_EQ(initial_header_x, tab_strip_->tab_at(1)->x());
-  EXPECT_EQ(initial_tab_1_x, header->x());
+  TabGroupHeader* header = ListGroupHeaders()[0];
+  // Header is now left of tab 2.
+  EXPECT_LT(tab_strip_->tab_at(1)->x(), header->x());
+  EXPECT_LT(header->x(), tab_strip_->tab_at(2)->x());
 }
 
 TEST_P(TabStripTest, GroupHeaderMovesLeftWithTab) {
@@ -1082,15 +1068,13 @@ TEST_P(TabStripTest, GroupHeaderMovesLeftWithTab) {
   controller_->MoveTabIntoGroup(2, group);
   CompleteAnimationAndLayout();
 
-  TabGroupHeader* header = ListGroupHeaders()[0];
-  const int initial_header_x = header->x();
-  const int initial_tab_1_x = tab_strip_->tab_at(1)->x();
-
   controller_->MoveTab(2, 1);
   CompleteAnimationAndLayout();
 
-  EXPECT_EQ(initial_header_x, tab_strip_->tab_at(1)->x());
-  EXPECT_EQ(initial_tab_1_x, header->x());
+  TabGroupHeader* header = ListGroupHeaders()[0];
+  // Header is now left of tab 1.
+  EXPECT_LT(tab_strip_->tab_at(0)->x(), header->x());
+  EXPECT_LT(header->x(), tab_strip_->tab_at(1)->x());
 }
 
 TEST_P(TabStripTest, GroupHeaderDoesntMoveReorderingTabsInGroup) {
@@ -1118,10 +1102,54 @@ TEST_P(TabStripTest, GroupHeaderDoesntMoveReorderingTabsInGroup) {
   EXPECT_EQ(initial_tab_2_x, tab1->x());
 }
 
+TEST_P(TabStripTest, GroupHeaderMovesOnRegrouping) {
+  tab_strip_->SetBounds(0, 0, 2000, 100);
+  for (int i = 0; i < 3; i++)
+    tab_strip_->AddTabAt(i, TabRendererData(), false);
+  TabGroupId group0 = TabGroupId::GenerateNew();
+  controller_->MoveTabIntoGroup(0, group0);
+  TabGroupId group1 = TabGroupId::GenerateNew();
+  controller_->MoveTabIntoGroup(1, group1);
+  controller_->MoveTabIntoGroup(2, group1);
+  CompleteAnimationAndLayout();
+
+  std::vector<TabGroupHeader*> headers = ListGroupHeaders();
+  auto header1_it = std::find_if(
+      headers.begin(), headers.end(),
+      [&group1](TabGroupHeader* header) { return header->group() == group1; });
+  ASSERT_TRUE(header1_it != headers.end());
+  TabGroupHeader* header1 = *header1_it;
+
+  // Change groups in a way so that the header should swap with the tab, without
+  // an explicit MoveTab call.
+  controller_->MoveTabIntoGroup(1, group0);
+
+  // Header is now right of tab 1.
+  EXPECT_LT(tab_strip_->tab_at(1)->x(), header1->x());
+  EXPECT_LT(header1->x(), tab_strip_->tab_at(2)->x());
+}
+
+TEST_P(TabStripTest, UngroupedTabMovesLeftOfHeader) {
+  tab_strip_->SetBounds(0, 0, 2000, 100);
+  for (int i = 0; i < 2; i++)
+    tab_strip_->AddTabAt(i, TabRendererData(), false);
+  TabGroupId group = TabGroupId::GenerateNew();
+  controller_->MoveTabIntoGroup(0, group);
+  CompleteAnimationAndLayout();
+
+  controller_->MoveTab(1, 0);
+  CompleteAnimationAndLayout();
+
+  // Header is right of tab 0.
+  TabGroupHeader* header = ListGroupHeaders()[0];
+  EXPECT_LT(tab_strip_->tab_at(0)->x(), header->x());
+  EXPECT_LT(header->x(), tab_strip_->tab_at(1)->x());
+}
+
 // This can happen when a tab in the middle of a group starts to close.
 TEST_P(TabStripTest, DiscontinuousGroup) {
   tab_strip_->SetBounds(0, 0, 1000, 100);
-  bounds_animator()->SetAnimationDuration(0);
+  bounds_animator()->SetAnimationDuration(base::TimeDelta());
 
   tab_strip_->AddTabAt(0, TabRendererData(), false);
   tab_strip_->AddTabAt(1, TabRendererData(), false);
@@ -1138,7 +1166,7 @@ TEST_P(TabStripTest, DiscontinuousGroup) {
   EXPECT_EQ(first_slot_x, headers[0]->x());
 }
 
-TEST_P(TabStripTest, DeleteTabGroupHeaderWhenEmpty) {
+TEST_P(TabStripTest, DeleteTabGroupHeaderAndUnderlineWhenEmpty) {
   tab_strip_->AddTabAt(0, TabRendererData(), false);
   tab_strip_->AddTabAt(1, TabRendererData(), false);
   base::Optional<TabGroupId> group = TabGroupId::GenerateNew();
@@ -1147,8 +1175,62 @@ TEST_P(TabStripTest, DeleteTabGroupHeaderWhenEmpty) {
   controller_->MoveTabIntoGroup(0, base::nullopt);
 
   EXPECT_EQ(1u, ListGroupHeaders().size());
+  EXPECT_EQ(1u, ListGroupUnderlines().size());
   controller_->MoveTabIntoGroup(1, base::nullopt);
   EXPECT_EQ(0u, ListGroupHeaders().size());
+  EXPECT_EQ(0u, ListGroupUnderlines().size());
 }
 
-INSTANTIATE_TEST_SUITE_P(, TabStripTest, ::testing::Values(false, true));
+TEST_P(TabStripTest, GroupUnderlineBasics) {
+  tab_strip_->SetBounds(0, 0, 1000, 100);
+  bounds_animator()->SetAnimationDuration(base::TimeDelta());
+  controller_->AddTab(0, false);
+
+  base::Optional<TabGroupId> group = TabGroupId::GenerateNew();
+  controller_->MoveTabIntoGroup(0, group);
+  CompleteAnimationAndLayout();
+
+  std::vector<TabGroupUnderline*> underlines = ListGroupUnderlines();
+  EXPECT_EQ(1u, underlines.size());
+  TabGroupUnderline* underline = underlines[0];
+  // Update underline manually in the absence of a real Paint cycle.
+  underline->UpdateBounds();
+
+  EXPECT_EQ(underline->x(), TabGroupUnderline::GetStrokeInset());
+  EXPECT_GT(underline->width(), 0);
+  EXPECT_EQ(underline->bounds().right(),
+            tab_strip_->tab_at(0)->bounds().right() -
+                TabGroupUnderline::GetStrokeInset());
+  EXPECT_EQ(underline->height(), TabGroupUnderline::kStrokeThickness);
+
+  // Endpoints are different if the last grouped tab is active.
+  controller_->AddTab(1, true);
+  controller_->MoveTabIntoGroup(1, group);
+  underline->UpdateBounds();
+
+  EXPECT_EQ(underline->x(), TabGroupUnderline::GetStrokeInset());
+  EXPECT_EQ(underline->bounds().right(),
+            tab_strip_->tab_at(1)->bounds().right() +
+                TabGroupUnderline::kStrokeThickness);
+}
+
+TEST_P(TabStripTest, ChangingLayoutTypeResizesTabs) {
+  tab_strip_->SetBounds(0, 0, 1000, 100);
+
+  tab_strip_->AddTabAt(0, TabRendererData(), false);
+  Tab* tab = tab_strip_->tab_at(0);
+  const int initial_height = tab->height();
+
+  ui::test::MaterialDesignControllerTestAPI other_layout(!GetParam());
+
+  CompleteAnimationAndLayout();
+  if (GetParam()) {
+    // Touch -> normal.
+    EXPECT_LT(tab->height(), initial_height);
+  } else {
+    // Normal -> touch.
+    EXPECT_GT(tab->height(), initial_height);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(All, TabStripTest, ::testing::Values(false, true));

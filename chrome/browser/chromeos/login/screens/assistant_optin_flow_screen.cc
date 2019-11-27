@@ -9,8 +9,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/assistant_optin_flow_screen_handler.h"
-#include "chromeos/assistant/buildflags.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/chromeos_features.h"
 
 namespace chromeos {
 namespace {
@@ -44,15 +43,13 @@ void AssistantOptInFlowScreen::Show() {
     return;
   }
 
-#if BUILDFLAG(ENABLE_CROS_ASSISTANT)
-  if (chromeos::switches::IsAssistantEnabled() &&
-      ::assistant::IsAssistantAllowedForProfile(
+  if (::assistant::IsAssistantAllowedForProfile(
           ProfileManager::GetActiveUserProfile()) ==
-          ash::mojom::AssistantAllowedState::ALLOWED) {
+          ash::mojom::AssistantAllowedState::ALLOWED &&
+      !skip_for_testing_) {
     view_->Show();
     return;
   }
-#endif
   exit_callback_.Run();
 }
 

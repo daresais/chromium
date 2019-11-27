@@ -38,12 +38,7 @@ public class TabDelegateFactoryImpl implements TabDelegateFactory {
     @Override
     public ContextMenuPopulator createContextMenuPopulator(Tab tab) {
         return new ChromeContextMenuPopulator(new TabContextMenuItemDelegate(tab),
-                ChromeContextMenuPopulator.ContextMenuMode.NORMAL);
-    }
-
-    @Override
-    public boolean canShowAppBanners() {
-        return true;
+                mActivity.getShareDelegate(), ChromeContextMenuPopulator.ContextMenuMode.NORMAL);
     }
 
     @Override

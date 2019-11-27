@@ -44,8 +44,6 @@
 #include "components/gcm_driver/instance_id/instance_id_profile_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/rappor/public/rappor_utils.h"
-#include "components/rappor/rappor_service_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_background_services_context.h"
 #include "content/public/browser/notification_service.h"
@@ -169,7 +167,8 @@ void PushMessagingServiceImpl::InitializeForProfile(Profile* profile) {
 
   PushMessagingServiceImpl* push_service =
       PushMessagingServiceFactory::GetForProfile(profile);
-  push_service->IncreasePushSubscriptionCount(count, false /* is_pending */);
+  if (push_service)
+    push_service->IncreasePushSubscriptionCount(count, false /* is_pending */);
 }
 
 PushMessagingServiceImpl::PushMessagingServiceImpl(Profile* profile)
@@ -293,10 +292,6 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
                            blink::mojom::PushDeliveryStatus::PERMISSION_DENIED);
     return;
   }
-
-  rappor::SampleDomainAndRegistryFromGURL(
-      g_browser_process->rappor_service(),
-      "PushMessaging.MessageReceived.Origin", app_identifier.origin());
 
   // The payload of a push message can be valid with content, valid with empty
   // content, or null.
@@ -546,8 +541,8 @@ void PushMessagingServiceImpl::SubscribeFromDocument(
 
   // Push does not allow permission requests from iframes.
   PermissionManager::Get(profile_)->RequestPermission(
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS, web_contents->GetMainFrame(),
-      requesting_origin, user_gesture,
+      ContentSettingsType::NOTIFICATIONS, render_frame_host, requesting_origin,
+      user_gesture,
       base::BindOnce(&PushMessagingServiceImpl::DoSubscribe,
                      weak_factory_.GetWeakPtr(), app_identifier,
                      std::move(options), std::move(callback)));
@@ -601,7 +596,7 @@ blink::mojom::PermissionStatus PushMessagingServiceImpl::GetPermissionStatus(
   // |origin| when checking whether permission to use the API has been granted.
   return ToPermissionStatus(
       PermissionManager::Get(profile_)
-          ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, origin,
+          ->GetPermissionStatus(ContentSettingsType::NOTIFICATIONS, origin,
                                 origin)
           .content_setting);
 }
@@ -631,7 +626,7 @@ void PushMessagingServiceImpl::DoSubscribe(
       ->GetInstanceID(app_identifier.app_id())
       ->GetToken(NormalizeSenderInfo(application_server_key_string), kGCMScope,
                  std::map<std::string, std::string>() /* options */,
-                 false /* is_lazy */,
+                 {} /* flags */,
                  base::BindOnce(&PushMessagingServiceImpl::DidSubscribe,
                                 weak_factory_.GetWeakPtr(), app_identifier,
                                 application_server_key_string,
@@ -1003,7 +998,7 @@ void PushMessagingServiceImpl::OnContentSettingChanged(
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
     const std::string& resource_identifier) {
-  if (content_type != CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+  if (content_type != ContentSettingsType::NOTIFICATIONS)
     return;
 
   std::vector<PushMessagingAppIdentifier> all_app_identifiers =

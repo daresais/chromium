@@ -430,6 +430,10 @@ bool Scheduler::ShouldYield(SequenceId sequence_id) {
   return running_sequence->ShouldYieldTo(next_sequence);
 }
 
+base::WeakPtr<Scheduler> Scheduler::AsWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
 void Scheduler::SyncTokenFenceReleased(const SyncToken& sync_token,
                                        uint32_t order_num,
                                        SequenceId release_sequence_id,
@@ -521,7 +525,26 @@ void Scheduler::RunNextTask() {
   {
     base::AutoUnlock auto_unlock(lock_);
     order_data->BeginProcessingOrderNumber(order_num);
+
+    bool supports_thread_time = base::ThreadTicks::IsSupported();
+
+    // We can't call base::ThreadTicks::Now() if it's not supported
+    base::ThreadTicks thread_time_start =
+        supports_thread_time ? base::ThreadTicks::Now() : base::ThreadTicks();
+    base::TimeTicks wall_time_start = base::TimeTicks::Now();
+
     std::move(closure).Run();
+
+    if (supports_thread_time) {
+      base::TimeDelta thread_time_elapsed =
+          base::ThreadTicks::Now() - thread_time_start;
+      base::TimeDelta wall_time_elapsed =
+          base::TimeTicks::Now() - wall_time_start;
+      base::TimeDelta blocked_time = wall_time_elapsed - thread_time_elapsed;
+
+      total_blocked_time_ += blocked_time;
+    }
+
     if (order_data->IsProcessingOrderNumber())
       order_data->FinishProcessingOrderNumber(order_num);
   }
@@ -540,6 +563,14 @@ void Scheduler::RunNextTask() {
 
   task_runner_->PostTask(FROM_HERE,
                          base::BindOnce(&Scheduler::RunNextTask, weak_ptr_));
+}
+
+base::TimeDelta Scheduler::TakeTotalBlockingTime() {
+  if (!base::ThreadTicks::IsSupported())
+    return base::TimeDelta::Min();
+  base::TimeDelta result;
+  std::swap(result, total_blocked_time_);
+  return result;
 }
 
 }  // namespace gpu

@@ -27,10 +27,11 @@
 // <include src="throbber_notice.js">
 // <include src="navigation_bar.js">
 // <include src="oobe_a11y_option.js">
+// <include src="oobe_adb_sideloading_screen.js">
 // <include src="oobe_buttons.js">
-// <include src="oobe_change_picture.js">
 // <include src="oobe_dialog.js">
 // <include src="oobe_eula.js">
+// <include src="oobe_terms_of_service.js">
 // <include src="oobe_hid_detection.js">
 // <include src="oobe_reset.js">
 // <include src="oobe_reset_confirmation_overlay.js">
@@ -56,3 +57,5 @@
 // <include src="../assistant_optin/assistant_optin_flow.js">
 // <include src="multidevice_setup_first_run.js">
 // <include src="security_token_pin.js">
+// <include src="update_required_card.js">
+// <include src="packaged_license_screen.js">

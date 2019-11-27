@@ -11,10 +11,12 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/wm/desks/desk_mini_view.h"
 #include "ash/wm/desks/desk_mini_view_animations.h"
 #include "ash/wm/desks/new_desk_button.h"
 #include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/overview/overview_grid.h"
 #include "ash/wm/overview/overview_highlight_controller.h"
 #include "ash/wm/overview/overview_session.h"
 #include "base/stl_util.h"
@@ -22,6 +24,7 @@
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event_observer.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/event_monitor.h"
 #include "ui/views/widget/widget.h"
@@ -32,6 +35,16 @@ namespace ash {
 namespace {
 
 constexpr int kBarHeight = 104;
+constexpr int kBarHeightInCompactLayout = 64;
+constexpr int kUseCompactLayoutWidthThreshold = 600;
+
+// New desk button layout constants.
+constexpr int kButtonRightMargin = 36;
+constexpr int kIconAndTextHorizontalPadding = 16;
+constexpr int kIconAndTextVerticalPadding = 8;
+
+// Spacing between mini views.
+constexpr int kMiniViewsSpacing = 12;
 
 base::string16 GetMiniViewTitle(int mini_view_index) {
   DCHECK_GE(mini_view_index, 0);
@@ -44,9 +57,15 @@ base::string16 GetMiniViewTitle(int mini_view_index) {
   return l10n_util::GetStringUTF16(kStringIds[mini_view_index]);
 }
 
-gfx::Point GetGestureEventScreenPoint(const ui::Event& event) {
+gfx::Rect GetGestureEventScreenRect(const ui::Event& event) {
   DCHECK(event.IsGestureEvent());
-  return event.AsGestureEvent()->details().bounding_box().CenterPoint();
+  return event.AsGestureEvent()->details().bounding_box();
+}
+
+OverviewHighlightController* GetHighlightController() {
+  auto* overview_controller = Shell::Get()->overview_controller();
+  DCHECK(overview_controller->InOverviewSession());
+  return overview_controller->overview_session()->highlight_controller();
 }
 
 }  // namespace
@@ -82,13 +101,13 @@ class DeskBarHoverObserver : public ui::EventObserver {
 
       case ui::ET_GESTURE_LONG_PRESS:
       case ui::ET_GESTURE_LONG_TAP:
-        owner_->OnGestureTap(GetGestureEventScreenPoint(event),
+        owner_->OnGestureTap(GetGestureEventScreenRect(event),
                              /*is_long_gesture=*/true);
         break;
 
       case ui::ET_GESTURE_TAP:
       case ui::ET_GESTURE_TAP_DOWN:
-        owner_->OnGestureTap(GetGestureEventScreenPoint(event),
+        owner_->OnGestureTap(GetGestureEventScreenRect(event),
                              /*is_long_gesture=*/false);
         break;
 
@@ -109,19 +128,23 @@ class DeskBarHoverObserver : public ui::EventObserver {
 // -----------------------------------------------------------------------------
 // DesksBarView:
 
-DesksBarView::DesksBarView()
+DesksBarView::DesksBarView(OverviewGrid* overview_grid)
     : background_view_(new views::View),
-      new_desk_button_(new NewDeskButton(this)) {
+      new_desk_button_(new NewDeskButton(this)),
+      overview_grid_(overview_grid) {
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 
   background_view_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
   background_view_->layer()->SetFillsBoundsOpaquely(false);
-  background_view_->layer()->SetColor(SkColorSetARGB(60, 0, 0, 0));
+  background_view_->layer()->SetColor(
+      AshColorProvider::Get()->GetBaseLayerColor(
+          AshColorProvider::BaseLayerType::kTransparent74,
+          AshColorProvider::AshColorMode::kDark));
 
   AddChildView(background_view_);
   AddChildView(new_desk_button_);
-  UpdateNewDeskButtonState();
+
   DesksController::Get()->AddObserver(this);
 }
 
@@ -130,7 +153,13 @@ DesksBarView::~DesksBarView() {
 }
 
 // static
-int DesksBarView::GetBarHeight() {
+int DesksBarView::GetBarHeightForWidth(const DesksBarView* desks_bar_view,
+                                       int width) {
+  if (width <= kUseCompactLayoutWidthThreshold ||
+      (desks_bar_view && width <= desks_bar_view->min_width_to_fit_contents_)) {
+    return kBarHeightInCompactLayout;
+  }
+
   return kBarHeight;
 }
 
@@ -147,13 +176,13 @@ std::unique_ptr<views::Widget> DesksBarView::CreateDesksWidget(
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.accept_events = true;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   // Use the wallpaper container similar to all background widgets created in
   // overview mode.
   params.parent = root->GetChildById(kShellWindowId_WallpaperContainer);
   params.bounds = bounds;
   params.name = "VirtualDesksWidget";
-  widget->Init(params);
+  widget->Init(std::move(params));
   ::wm::SetWindowVisibilityAnimationTransition(widget->GetNativeWindow(),
                                                ::wm::ANIMATE_NONE);
 
@@ -171,10 +200,10 @@ void DesksBarView::OnHoverStateMayHaveChanged() {
     mini_view->OnHoverStateMayHaveChanged();
 }
 
-void DesksBarView::OnGestureTap(const gfx::Point& screen_location,
+void DesksBarView::OnGestureTap(const gfx::Rect& screen_rect,
                                 bool is_long_gesture) {
   for (auto& mini_view : mini_views_)
-    mini_view->OnWidgetGestureTap(screen_location, is_long_gesture);
+    mini_view->OnWidgetGestureTap(screen_rect, is_long_gesture);
 }
 
 void DesksBarView::SetDragDetails(const gfx::Point& screen_location,
@@ -197,13 +226,16 @@ const char* DesksBarView::GetClassName() const {
 void DesksBarView::Layout() {
   background_view_->SetBoundsRect(bounds());
 
-  constexpr int kButtonRightMargin = 36;
-  constexpr int kIconAndTextHorizontalPadding = 16;
-  constexpr int kIconAndTextVerticalPadding = 8;
-
+  const bool compact = UsesCompactLayout();
+  new_desk_button_->SetLabelVisible(!compact);
   gfx::Size new_desk_button_size = new_desk_button_->GetPreferredSize();
-  new_desk_button_size.Enlarge(2 * kIconAndTextHorizontalPadding,
-                               2 * kIconAndTextVerticalPadding);
+  if (compact) {
+    new_desk_button_size.Enlarge(2 * kIconAndTextVerticalPadding,
+                                 2 * kIconAndTextVerticalPadding);
+  } else {
+    new_desk_button_size.Enlarge(2 * kIconAndTextHorizontalPadding,
+                                 2 * kIconAndTextVerticalPadding);
+  }
 
   const gfx::Rect button_bounds{
       bounds().right() - new_desk_button_size.width() - kButtonRightMargin,
@@ -214,7 +246,6 @@ void DesksBarView::Layout() {
   if (mini_views_.empty())
     return;
 
-  constexpr int kMiniViewsSpacing = 8;
   const gfx::Size mini_view_size = mini_views_[0]->GetPreferredSize();
   const int total_width =
       mini_views_.size() * (mini_view_size.width() + kMiniViewsSpacing) -
@@ -231,20 +262,23 @@ void DesksBarView::Layout() {
   }
 }
 
+bool DesksBarView::UsesCompactLayout() const {
+  return width() <= kUseCompactLayoutWidthThreshold ||
+         width() <= min_width_to_fit_contents_;
+}
+
 void DesksBarView::ButtonPressed(views::Button* sender,
                                  const ui::Event& event) {
   auto* controller = DesksController::Get();
   if (sender == new_desk_button_) {
-    if (controller->CanCreateDesks()) {
-      controller->NewDesk();
-      UpdateNewDeskButtonState();
-    }
+    new_desk_button_->OnButtonPressed();
     return;
   }
 
   for (auto& mini_view : mini_views_) {
     if (mini_view.get() == sender) {
-      controller->ActivateDesk(mini_view->desk());
+      controller->ActivateDesk(mini_view->desk(),
+                               DesksSwitchSource::kMiniViewButton);
       return;
     }
   }
@@ -263,19 +297,20 @@ void DesksBarView::OnDeskRemoved(const Desk* desk) {
 
   DCHECK(iter != mini_views_.end());
 
+  // Let the highlight controller know the view is destroying before it is
+  // removed from the collection because it needs to know the index of the mini
+  // view relative to other traversable views.
+  GetHighlightController()->OnViewDestroyingOrDisabling(iter->get());
+
   const int begin_x = GetFirstMiniViewXOffset();
   std::unique_ptr<DeskMiniView> removed_mini_view = std::move(*iter);
   auto partition_iter = mini_views_.erase(iter);
 
-  Layout();
+  UpdateMinimumWidthToFitContents();
+  overview_grid_->OnDesksChanged();
+
   UpdateMiniViewsLabels();
-  UpdateNewDeskButtonState();
-  DCHECK(Shell::Get()->overview_controller()->InOverviewSession());
-  auto* highlight_controller = Shell::Get()
-                                   ->overview_controller()
-                                   ->overview_session()
-                                   ->highlight_controller();
-  highlight_controller->OnViewDestroying(removed_mini_view.get());
+  new_desk_button_->UpdateButtonState();
 
   std::vector<DeskMiniView*> mini_views_before;
   std::vector<DeskMiniView*> mini_views_after;
@@ -289,15 +324,9 @@ void DesksBarView::OnDeskRemoved(const Desk* desk) {
   std::transform(partition_iter, mini_views_.end(),
                  std::back_inserter(mini_views_after), transform_lambda);
 
-  aura::Window* root_window = removed_mini_view->root_window();
   PerformRemoveDeskMiniViewAnimation(std::move(removed_mini_view),
                                      mini_views_before, mini_views_after,
                                      begin_x - GetFirstMiniViewXOffset());
-
-  // Once the remaining mini views have their bounds updated, notify the
-  // overview highlight controller so that it can update the focus highlight, if
-  // needed.
-  highlight_controller->OnWindowsRepositioned(root_window);
 }
 
 void DesksBarView::OnDeskActivationChanged(const Desk* activated,
@@ -309,11 +338,9 @@ void DesksBarView::OnDeskActivationChanged(const Desk* activated,
   }
 }
 
-void DesksBarView::OnDeskSwitchAnimationFinished() {}
+void DesksBarView::OnDeskSwitchAnimationLaunching() {}
 
-void DesksBarView::UpdateNewDeskButtonState() {
-  new_desk_button_->SetEnabled(DesksController::Get()->CanCreateDesks());
-}
+void DesksBarView::OnDeskSwitchAnimationFinished() {}
 
 void DesksBarView::UpdateNewMiniViews(bool animate) {
   const auto& desks = DesksController::Get()->desks();
@@ -323,7 +350,7 @@ void DesksBarView::UpdateNewMiniViews(bool animate) {
 
     // The bar background is initially translated off the screen.
     gfx::Transform translate;
-    translate.Translate(0, -kBarHeight);
+    translate.Translate(0, -height());
     background_view_->layer()->SetTransform(translate);
     background_view_->layer()->SetOpacity(0);
 
@@ -350,7 +377,8 @@ void DesksBarView::UpdateNewMiniViews(bool animate) {
     }
   }
 
-  Layout();
+  UpdateMinimumWidthToFitContents();
+  overview_grid_->OnDesksChanged();
 
   if (!animate)
     return;
@@ -379,6 +407,24 @@ void DesksBarView::UpdateMiniViewsLabels() {
 int DesksBarView::GetFirstMiniViewXOffset() const {
   return mini_views_.empty() ? bounds().CenterPoint().x()
                              : mini_views_[0]->bounds().x();
+}
+
+void DesksBarView::UpdateMinimumWidthToFitContents() {
+  int button_width = new_desk_button_->GetMinSize(/*compact=*/false).width();
+  button_width += 2 * kIconAndTextHorizontalPadding;
+  button_width += kButtonRightMargin;
+
+  if (mini_views_.empty()) {
+    min_width_to_fit_contents_ = button_width;
+    return;
+  }
+
+  const int mini_view_width = mini_views_[0]->GetMinWidthForDefaultLayout();
+  const int total_mini_views_width =
+      mini_views_.size() * (mini_view_width + kMiniViewsSpacing) -
+      kMiniViewsSpacing;
+
+  min_width_to_fit_contents_ = total_mini_views_width + button_width * 2;
 }
 
 }  // namespace ash

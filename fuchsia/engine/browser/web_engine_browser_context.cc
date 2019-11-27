@@ -19,9 +19,6 @@
 #include "content/public/browser/resource_context.h"
 #include "fuchsia/engine/browser/web_engine_net_log.h"
 #include "fuchsia/engine/browser/web_engine_permission_manager.h"
-#include "fuchsia/engine/browser/web_engine_url_request_context_getter.h"
-#include "fuchsia/engine/common.h"
-#include "net/url_request/url_request_context.h"
 #include "services/network/public/cpp/network_switches.h"
 
 class WebEngineBrowserContext::ResourceContext
@@ -68,8 +65,8 @@ WebEngineBrowserContext::~WebEngineBrowserContext() {
   NotifyWillBeDestroyed(this);
 
   if (resource_context_) {
-    content::BrowserThread::DeleteSoon(content::BrowserThread::IO, FROM_HERE,
-                                       std::move(resource_context_));
+    base::DeleteSoon(FROM_HERE, {content::BrowserThread::IO},
+                     std::move(resource_context_));
   }
 
   ShutdownStoragePartitions();
@@ -113,6 +110,11 @@ WebEngineBrowserContext::GetPushMessagingService() {
   return nullptr;
 }
 
+content::StorageNotificationService*
+WebEngineBrowserContext::GetStorageNotificationService() {
+  return nullptr;
+}
+
 content::SSLHostStateDelegate*
 WebEngineBrowserContext::GetSSLHostStateDelegate() {
   return nullptr;
@@ -143,22 +145,4 @@ WebEngineBrowserContext::GetBackgroundSyncController() {
 content::BrowsingDataRemoverDelegate*
 WebEngineBrowserContext::GetBrowsingDataRemoverDelegate() {
   return nullptr;
-}
-
-net::URLRequestContextGetter* WebEngineBrowserContext::CreateRequestContext(
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  DCHECK(!url_request_getter_);
-  url_request_getter_ = new WebEngineURLRequestContextGetter(
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::IO}),
-      net_log_.get(), std::move(*protocol_handlers),
-      std::move(request_interceptors), data_dir_path_);
-  return url_request_getter_.get();
-}
-
-net::URLRequestContextGetter*
-WebEngineBrowserContext::CreateMediaRequestContext() {
-  DCHECK(url_request_getter_.get());
-  return url_request_getter_.get();
 }

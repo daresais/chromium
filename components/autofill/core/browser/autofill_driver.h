@@ -10,14 +10,12 @@
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "components/autofill/core/common/form_data.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "net/base/network_isolation_key.h"
 
 #if !defined(OS_IOS)
 #include "third_party/blink/public/mojom/webauthn/internal_authenticator.mojom.h"
 #endif
-
-namespace net {
-class URLRequestContextGetter;
-}
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -59,9 +57,6 @@ class AutofillDriver {
   // Returns the ax tree id associated with this driver.
   virtual ui::AXTreeID GetAxTreeId() const = 0;
 
-  // Returns the URL request context information associated with this driver.
-  virtual net::URLRequestContextGetter* GetURLRequestContext() = 0;
-
   // Returns the URL loader factory associated with this driver.
   virtual scoped_refptr<network::SharedURLLoaderFactory>
   GetURLLoaderFactory() = 0;
@@ -72,7 +67,7 @@ class AutofillDriver {
 #if !defined(OS_IOS)
   // Binds the mojom request in order to facilitate WebAuthn flows.
   virtual void ConnectToAuthenticator(
-      blink::mojom::InternalAuthenticatorRequest request) = 0;
+      mojo::PendingReceiver<blink::mojom::InternalAuthenticator> receiver) = 0;
 #endif
 
   // Forwards |data| to the renderer. |query_id| is the id of the renderer's
@@ -113,9 +108,9 @@ class AutofillDriver {
       const base::string16& value) = 0;
 
   // Tells the renderer to set the currently focused node's corresponding
-  // accessibility node to |autofill_suggestions_available|.
+  // accessibility node's autofill state to |state|.
   virtual void RendererShouldSetSuggestionAvailability(
-      bool autofill_suggestions_available) = 0;
+      const mojom::AutofillState state) = 0;
 
   // Informs the renderer that the popup has been hidden.
   virtual void PopupHidden() = 0;
@@ -125,6 +120,8 @@ class AutofillDriver {
   // renderers cannot do this transformation themselves.
   virtual gfx::RectF TransformBoundingBoxToViewportCoordinates(
       const gfx::RectF& bounding_box) = 0;
+
+  virtual net::NetworkIsolationKey NetworkIsolationKey() = 0;
 };
 
 }  // namespace autofill

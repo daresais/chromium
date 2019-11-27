@@ -6,7 +6,7 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/hid/hid_chooser_context.h"
 #include "chrome/browser/hid/hid_chooser_context_factory.h"
 #include "chrome/browser/ui/hid/hid_chooser_controller.h"
@@ -67,10 +67,10 @@ class HidChooserControllerTest : public ChromeRenderViewHostTestHarness {
     web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
 
     // Set fake HID manager for HidChooserContext.
-    device::mojom::HidManagerPtr hid_manager_ptr;
-    hid_manager_.Bind(mojo::MakeRequest(&hid_manager_ptr));
+    mojo::PendingRemote<device::mojom::HidManager> hid_manager;
+    hid_manager_.Bind(hid_manager.InitWithNewPipeAndPassReceiver());
     HidChooserContextFactory::GetForProfile(profile())->SetHidManagerForTesting(
-        std::move(hid_manager_ptr));
+        std::move(hid_manager));
   }
 
   std::unique_ptr<HidChooserController> CreateHidChooserController(

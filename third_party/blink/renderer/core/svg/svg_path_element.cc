@@ -64,7 +64,7 @@ Path SVGPathElement::AsPath() const {
   return GetStylePath()->GetPath();
 }
 
-float SVGPathElement::getTotalLength() {
+float SVGPathElement::getTotalLength(ExceptionState& exception_state) {
   GetDocument().UpdateStyleAndLayoutForNode(this);
   return SVGPathQuery(PathByteStream()).GetTotalLength();
 }
@@ -117,7 +117,7 @@ void SVGPathElement::InvalidateMPathDependencies() {
   // dependencies manually.
   if (SVGElementSet* dependencies = SetOfIncomingReferences()) {
     for (SVGElement* element : *dependencies) {
-      if (auto* mpath = ToSVGMPathElementOrNull(*element))
+      if (auto* mpath = DynamicTo<SVGMPathElement>(*element))
         mpath->TargetPathChanged();
     }
   }

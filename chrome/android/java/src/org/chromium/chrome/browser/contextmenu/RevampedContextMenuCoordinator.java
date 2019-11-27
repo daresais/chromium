@@ -7,24 +7,27 @@ package org.chromium.chrome.browser.contextmenu;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.IntDef;
 import android.support.v7.app.AlertDialog;
 import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.View;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Callback;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.share.ShareParams;
-import org.chromium.chrome.browser.widget.ContextMenuDialog;
+import org.chromium.chrome.browser.ui.widget.ContextMenuDialog;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
+import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.ModelListAdapter;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -64,10 +67,11 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
     }
 
     @Override
-    public void displayMenu(final Activity activity, ContextMenuParams params,
+    public void displayMenu(final WindowAndroid window, ContextMenuParams params,
             List<Pair<Integer, List<ContextMenuItem>>> items, Callback<Integer> onItemClicked,
             final Runnable onMenuShown, final Callback<Boolean> onMenuClosed) {
         mOnMenuClosed = onMenuClosed;
+        Activity activity = window.getActivity().get();
         final float density = activity.getResources().getDisplayMetrics().density;
         final float touchPointXPx = params.getTriggeringTouchXDp() * density;
         final float touchPointYPx = params.getTriggeringTouchYDp() * density;
@@ -80,7 +84,10 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
 
         mHeaderCoordinator = new RevampedContextMenuHeaderCoordinator(activity, params);
 
-        ModelListAdapter adapter = new ModelListAdapter() {
+        // The Integer here specifies the {@link ListItemType}.
+        ModelList listItems = getItemList(window, items, params);
+
+        ModelListAdapter adapter = new ModelListAdapter(listItems) {
             @Override
             public boolean areAllItemsEnabled() {
                 return false;
@@ -96,8 +103,8 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
             public long getItemId(int position) {
                 if (getItemViewType(position) == ListItemType.CONTEXT_MENU_ITEM
                         || getItemViewType(position) == ListItemType.CONTEXT_MENU_SHARE_ITEM) {
-                    return ((Pair<Integer, PropertyModel>) getItem(position))
-                            .second.get(RevampedContextMenuItemProperties.MENU_ID);
+                    return ((ListItem) getItem(position))
+                            .model.get(RevampedContextMenuItemProperties.MENU_ID);
                 }
                 return INVALID_ITEM_ID;
             }
@@ -115,7 +122,7 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
         adapter.registerType(
                 ListItemType.DIVIDER,
                 () -> LayoutInflater.from(mListView.getContext())
-                        .inflate(R.layout.context_menu_divider, null),
+                        .inflate(R.layout.app_menu_divider, null),
                 (m, v, p) -> {});
         adapter.registerType(
                 ListItemType.CONTEXT_MENU_ITEM,
@@ -129,10 +136,6 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
                 RevampedContextMenuShareItemViewBinder::bind);
         // clang-format on
 
-        // The Integer here specifies the {@link ListItemType}.
-        List<Pair<Integer, PropertyModel>> itemList = getItemList(activity, items, params);
-
-        adapter.updateModels(itemList);
         mListView.setOnItemClickListener((p, v, pos, id) -> {
             assert id != INVALID_ITEM_ID;
 
@@ -158,25 +161,26 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
         View frame = view.findViewById(R.id.context_menu_frame);
         // TODO(sinansahin): Refactor ContextMenuDialog as well.
         final ContextMenuDialog dialog =
-                new ContextMenuDialog(activity, R.style.Theme_Chromium_DialogWhenLarge,
-                        touchPointXPx, touchPointYPx, mTopContentOffsetPx, frame);
+                new ContextMenuDialog(activity, R.style.Theme_Chromium_AlertDialog, touchPointXPx,
+                        touchPointYPx, mTopContentOffsetPx, frame);
         dialog.setContentView(view);
 
         return dialog;
     }
 
     @VisibleForTesting
-    List<Pair<Integer, PropertyModel>> getItemList(Activity activity,
-            List<Pair<Integer, List<ContextMenuItem>>> items, ContextMenuParams params) {
-        List<Pair<Integer, PropertyModel>> itemList = new ArrayList<>();
+    ModelList getItemList(WindowAndroid window, List<Pair<Integer, List<ContextMenuItem>>> items,
+            ContextMenuParams params) {
+        Activity activity = window.getActivity().get();
+        ModelList itemList = new ModelList();
 
         // TODO(sinansahin): We should be able to remove this conversion once we can get the items
         // in the desired format.
-        itemList.add(new Pair<>(ListItemType.HEADER, mHeaderCoordinator.getModel()));
+        itemList.add(new ListItem(ListItemType.HEADER, mHeaderCoordinator.getModel()));
 
         for (Pair<Integer, List<ContextMenuItem>> group : items) {
             // Add a divider
-            itemList.add(new Pair<>(ListItemType.DIVIDER, new PropertyModel()));
+            itemList.add(new ListItem(ListItemType.DIVIDER, new PropertyModel()));
 
             for (ContextMenuItem item : group.second) {
                 PropertyModel itemModel;
@@ -195,9 +199,9 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
                                     .with(RevampedContextMenuShareItemProperties.CONTENT_DESC,
                                             shareInfo.second)
                                     .with(RevampedContextMenuShareItemProperties.CLICK_LISTENER,
-                                            getShareItemClickListener(activity, shareItem, params))
+                                            getShareItemClickListener(window, shareItem, params))
                                     .build();
-                    itemList.add(new Pair<>(ListItemType.CONTEXT_MENU_SHARE_ITEM, itemModel));
+                    itemList.add(new ListItem(ListItemType.CONTEXT_MENU_SHARE_ITEM, itemModel));
                 } else {
                     itemModel =
                             new PropertyModel.Builder(RevampedContextMenuItemProperties.ALL_KEYS)
@@ -206,7 +210,7 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
                                     .with(RevampedContextMenuItemProperties.TEXT,
                                             item.getTitle(activity))
                                     .build();
-                    itemList.add(new Pair<>(ListItemType.CONTEXT_MENU_ITEM, itemModel));
+                    itemList.add(new ListItem(ListItemType.CONTEXT_MENU_ITEM, itemModel));
                 }
             }
         }
@@ -215,7 +219,7 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
     }
 
     private View.OnClickListener getShareItemClickListener(
-            Activity activity, ShareContextMenuItem item, ContextMenuParams params) {
+            WindowAndroid window, ShareContextMenuItem item, ContextMenuParams params) {
         return (v) -> {
             ChromeContextMenuPopulator.ContextMenuUma.record(params,
                     item.isShareLink()
@@ -225,11 +229,11 @@ public class RevampedContextMenuCoordinator implements ContextMenuUi {
             mDialog.dismiss();
             if (item.isShareLink()) {
                 final ShareParams shareParams =
-                        new ShareParams.Builder(activity, params.getUrl(), params.getUrl())
+                        new ShareParams.Builder(window, params.getUrl(), params.getUrl())
                                 .setShareDirectly(true)
                                 .setSaveLastUsed(false)
                                 .build();
-                ShareHelper.share(shareParams);
+                ShareHelper.shareDirectly(shareParams);
             } else {
                 mOnShareImageDirectly.run();
             }

@@ -90,7 +90,8 @@ NGOutOfFlowLayoutPart::NGOutOfFlowLayoutPart(
       container_builder_(container_builder),
       writing_mode_(container_style.GetWritingMode()),
       is_absolute_container_(is_absolute_container),
-      is_fixed_container_(is_fixed_container) {
+      is_fixed_container_(is_fixed_container),
+      allow_first_tier_oof_cache_(border_scrollbar.IsEmpty()) {
   if (!container_builder->HasOutOfFlowPositionedCandidates() &&
       !To<LayoutBlock>(container_builder_->GetLayoutObject())
            ->HasPositionedObjects())
@@ -111,6 +112,11 @@ NGOutOfFlowLayoutPart::NGOutOfFlowLayoutPart(
 void NGOutOfFlowLayoutPart::Run(const LayoutBox* only_layout) {
   Vector<NGLogicalOutOfFlowPositionedNode> candidates;
   const LayoutObject* current_container = container_builder_->GetLayoutObject();
+  // If the container is display-locked, then we skip the layout of descendants,
+  // so we can early out immediately.
+  if (current_container->LayoutBlockedByDisplayLock(
+          DisplayLockLifecycleTarget::kChildren))
+    return;
 
   container_builder_->SwapOutOfFlowPositionedCandidates(&candidates,
                                                         current_container);
@@ -455,10 +461,13 @@ scoped_refptr<const NGLayoutResult> NGOutOfFlowLayoutPart::LayoutCandidate(
   // Determine if we need to actually run the full OOF-positioned sizing, and
   // positioning algorithm.
   //
-  // When this candidate has an inline container, the container may move without
-  // setting |NeedsLayout()| to the candidate and that there are cases where the
-  // cache validity cannot be determined.
-  if (!candidate.inline_container) {
+  // The first-tier cache compares the given available-size. However we can't
+  // reuse the result if the |ContainingBlockInfo::container_offset| may change.
+  // This can occur when:
+  //  - The default containing-block has borders and/or scrollbars.
+  //  - The candidate has an inline container (instead of the default
+  //    containing-block).
+  if (allow_first_tier_oof_cache_ && !candidate.inline_container) {
     LogicalSize container_content_size_in_candidate_writing_mode =
         container_physical_content_size.ConvertToLogical(
             candidate_writing_mode);
@@ -482,13 +491,12 @@ scoped_refptr<const NGLayoutResult> NGOutOfFlowLayoutPart::LayoutCandidate(
                             container_physical_content_size);
 
   // Need a constraint space to resolve offsets.
-  NGConstraintSpace candidate_constraint_space =
-      NGConstraintSpaceBuilder(writing_mode_, candidate_writing_mode,
-                               /* is_new_fc */ true)
-          .SetTextDirection(candidate_direction)
-          .SetAvailableSize(container_content_size)
-          .SetPercentageResolutionSize(container_content_size)
-          .ToConstraintSpace();
+  NGConstraintSpaceBuilder builder(writing_mode_, candidate_writing_mode,
+                                   /* is_new_fc */ true);
+  builder.SetTextDirection(candidate_direction);
+  builder.SetAvailableSize(container_content_size);
+  builder.SetPercentageResolutionSize(container_content_size);
+  NGConstraintSpace candidate_constraint_space = builder.ToConstraintSpace();
 
   base::Optional<PaintLayerScrollableArea::FreezeScrollbarsScope>
       freeze_scrollbars;
@@ -566,9 +574,21 @@ scoped_refptr<const NGLayoutResult> NGOutOfFlowLayoutPart::Layout(
   }
 
   base::Optional<LogicalSize> replaced_size;
+  base::Optional<LogicalSize> replaced_aspect_ratio;
+  bool is_replaced_with_only_aspect_ratio = false;
   if (is_replaced) {
-    replaced_size =
-        ComputeReplacedSize(node, candidate_constraint_space, min_max_size);
+    ComputeReplacedSize(node, candidate_constraint_space, min_max_size,
+                        &replaced_size, &replaced_aspect_ratio);
+    is_replaced_with_only_aspect_ratio = !replaced_size &&
+                                         replaced_aspect_ratio &&
+                                         !replaced_aspect_ratio->IsEmpty();
+    // If we only have aspect ratio, and no replaced size, intrinsic size
+    // defaults to 300x150. min_max_size gets computed from the intrinsic size.
+    // We reset the min_max_size because spec says that OOF-positioned size
+    // should not be constrained by intrinsic size in this case.
+    // https://www.w3.org/TR/CSS22/visudet.html#inline-replaced-width
+    if (is_replaced_with_only_aspect_ratio)
+      min_max_size = MinMaxSize{LayoutUnit(), LayoutUnit::NearlyMax()};
   } else if (should_be_considered_as_replaced) {
     replaced_size =
         LogicalSize{min_max_size->ShrinkToFit(
@@ -586,6 +606,17 @@ scoped_refptr<const NGLayoutResult> NGOutOfFlowLayoutPart::Layout(
   if (!is_replaced && should_be_considered_as_replaced)
     replaced_size.reset();
 
+  // Replaced elements with only aspect ratio compute their block size from
+  // inline size and aspect ratio.
+  // https://www.w3.org/TR/css-sizing-3/#intrinsic-sizes
+  if (is_replaced_with_only_aspect_ratio) {
+    replaced_size = LogicalSize(
+        node_position.size.inline_size,
+        (replaced_aspect_ratio->block_size *
+         ((node_position.size.inline_size - border_padding.InlineSum()) /
+          replaced_aspect_ratio->inline_size)) +
+            border_padding.BlockSum());
+  }
   if (AbsoluteNeedsChildBlockSize(candidate_style)) {
     layout_result =
         GenerateFragment(node, container_content_size_in_candidate_writing_mode,
@@ -705,7 +736,8 @@ scoped_refptr<const NGLayoutResult> NGOutOfFlowLayoutPart::Layout(
       offset.inline_offset = *y;
   }
 
-  layout_result->GetMutableForOutOfFlow().SetOutOfFlowPositionedOffset(offset);
+  layout_result->GetMutableForOutOfFlow().SetOutOfFlowPositionedOffset(
+      offset, allow_first_tier_oof_cache_);
   return layout_result;
 }
 
@@ -713,8 +745,8 @@ bool NGOutOfFlowLayoutPart::IsContainingBlockForCandidate(
     const NGLogicalOutOfFlowPositionedNode& candidate) {
   EPosition position = candidate.node.Style().GetPosition();
 
-  // Candidates whose containing block is inline are always positioned
-  // inside closest parent block flow.
+  // Candidates whose containing block is inline are always positioned inside
+  // closest parent block flow.
   if (candidate.inline_container) {
     DCHECK(
         candidate.node.Style().GetPosition() == EPosition::kAbsolute &&
@@ -738,28 +770,26 @@ scoped_refptr<const NGLayoutResult> NGOutOfFlowLayoutPart::GenerateFragment(
     const LogicalSize& container_content_size_in_candidate_writing_mode,
     const base::Optional<LayoutUnit>& block_estimate,
     const NGLogicalOutOfFlowPosition& node_position) {
-  // As the |block_estimate| is always in the node's writing mode, we
-  // build the constraint space in the node's writing mode.
+  // As the |block_estimate| is always in the node's writing mode, we build the
+  // constraint space in the node's writing mode.
   WritingMode writing_mode = node.Style().GetWritingMode();
 
   LayoutUnit inline_size = node_position.size.inline_size;
-  LayoutUnit block_size =
-      block_estimate
-          ? *block_estimate
-          : container_content_size_in_candidate_writing_mode.block_size;
+  LayoutUnit block_size = block_estimate.value_or(
+      container_content_size_in_candidate_writing_mode.block_size);
 
   LogicalSize available_size(inline_size, block_size);
 
   // TODO(atotic) will need to be adjusted for scrollbars.
   NGConstraintSpaceBuilder builder(writing_mode, writing_mode,
                                    /* is_new_fc */ true);
-  builder.SetAvailableSize(available_size)
-      .SetTextDirection(node.Style().Direction())
-      .SetPercentageResolutionSize(
-          container_content_size_in_candidate_writing_mode)
-      .SetIsFixedSizeInline(true);
+  builder.SetAvailableSize(available_size);
+  builder.SetTextDirection(node.Style().Direction());
+  builder.SetPercentageResolutionSize(
+      container_content_size_in_candidate_writing_mode);
+  builder.SetIsFixedInlineSize(true);
   if (block_estimate)
-    builder.SetIsFixedSizeBlock(true);
+    builder.SetIsFixedBlockSize(true);
   NGConstraintSpace space = builder.ToConstraintSpace();
 
   return node.Layout(space);

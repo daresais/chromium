@@ -46,8 +46,6 @@
 
 namespace blink {
 
-using namespace html_names;
-
 HitTestResult::HitTestResult()
     : hit_test_request_(HitTestRequest::kReadOnly | HitTestRequest::kActive),
       cacheable_(true),
@@ -190,7 +188,7 @@ HTMLAreaElement* HitTestResult::ImageAreaForImage() const {
     return nullptr;
 
   HTMLMapElement* map = image_element->GetTreeScope().GetImageMap(
-      image_element->FastGetAttribute(kUsemapAttr));
+      image_element->FastGetAttribute(html_names::kUsemapAttr));
   if (!map)
     return nullptr;
 
@@ -293,7 +291,7 @@ const AtomicString& HitTestResult::AltDisplayString() const {
     return g_null_atom;
 
   if (auto* image = ToHTMLImageElementOrNull(*inner_node_or_image_map_image))
-    return image->getAttribute(kAltAttr);
+    return image->FastGetAttribute(html_names::kAltAttr);
 
   if (auto* input = ToHTMLInputElementOrNull(*inner_node_or_image_map_image))
     return input->Alt();
@@ -530,9 +528,9 @@ Node* HitTestResult::InnerNodeOrImageMapImage() const {
     return nullptr;
 
   HTMLImageElement* image_map_image_element = nullptr;
-  if (auto* area = ToHTMLAreaElementOrNull(inner_node_.Get()))
+  if (auto* area = DynamicTo<HTMLAreaElement>(inner_node_.Get()))
     image_map_image_element = area->ImageElement();
-  else if (auto* map = ToHTMLMapElementOrNull(inner_node_.Get()))
+  else if (auto* map = DynamicTo<HTMLMapElement>(inner_node_.Get()))
     image_map_image_element = map->ImageElement();
 
   if (!image_map_image_element)

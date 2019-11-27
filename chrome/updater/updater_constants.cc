@@ -6,20 +6,31 @@
 
 namespace updater {
 
+// App ids.
+const char kUpdaterAppId[] = "{44FC7FE2-65CE-487C-93F4-EDEE46EEAAAB}";
+const char kChromeAppId[] = "{8A69D345-D564-463C-AFF1-A69D9E530F96}";
+
+// Command line arguments.
+const char kComServerSwitch[] = "com-server";
 const char kCrashMeSwitch[] = "crash-me";
 const char kCrashHandlerSwitch[] = "crash-handler";
-const char kInstall[] = "install";
-const char kUninstall[] = "uninstall";
+const char kInstallSwitch[] = "install";
+const char kUninstallSwitch[] = "uninstall";
+const char kUpdateAppsSwitch[] = "ua";
 const char kTestSwitch[] = "test";
+const char kInitDoneNotifierSwitch[] = "init-done-notifier";
+const char kNoRateLimitSwitch[] = "no-rate-limit";
+const char kEnableLoggingSwitch[] = "enable-logging";
+const char kLoggingModuleSwitch[] = "vmodule";
 
-const char kNoRateLimit[] = "--no-rate-limit";
-
+// URLs.
 const char kUpdaterJSONDefaultUrl[] =
     "https://update.googleapis.com/service/update2/json";
 const char kCrashUploadURL[] = "https://clients2.google.com/cr/report";
 const char kCrashStagingUploadURL[] =
     "https://clients2.google.com/cr/staging_report";
 
+// Path names.
 extern const char kAppsDir[] = "apps";
 extern const char kUninstallScript[] = "uninstall.cmd";
 

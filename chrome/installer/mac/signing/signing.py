@@ -93,7 +93,7 @@ def get_parts(config):
             CodeSignedProduct(
                 '{0.framework_dir}/Helpers/{0.product} Helper (GPU).app'
                 .format(config),
-                '{}.helper.gpu'.format(uncustomized_bundle_id),
+                '{}.helper'.format(uncustomized_bundle_id),
                 # Do not use |full_hardened_runtime_options| because library
                 # validation is incompatible with more permissive code signing
                 # entitlements.
@@ -190,8 +190,6 @@ def sign_part(paths, config, part):
     reqs = part.requirements_string(config)
     if reqs:
         command.extend(['--requirements', '=' + reqs])
-    if config.keychain:
-        command.extend(['--keychain', config.keychain])
     if part.options:
         command.extend(['--options', ','.join(part.options)])
     if part.entitlements:

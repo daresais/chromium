@@ -10,7 +10,7 @@
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/chromeos/authpolicy/data_pipe_utils.h"
-#include "chromeos/dbus/auth_policy/auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/authpolicy_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart/upstart_client.h"
 #include "chromeos/tpm/install_attributes.h"
@@ -121,7 +121,7 @@ std::string DoDecrypt(const std::string& encrypted_data,
 
 }  // namespace
 
-AuthPolicyHelper::AuthPolicyHelper() : weak_factory_(this) {
+AuthPolicyHelper::AuthPolicyHelper() {
   AuthPolicyClient::Get()->WaitForServiceToBeAvailable(base::BindOnce(
       &AuthPolicyHelper::OnServiceAvailable, weak_factory_.GetWeakPtr()));
 }
@@ -147,8 +147,9 @@ void AuthPolicyHelper::Restart() {
 void AuthPolicyHelper::DecryptConfiguration(const std::string& blob,
                                             const std::string& password,
                                             OnDecryptedCallback callback) {
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::ThreadPool(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&DoDecrypt, blob, password), std::move(callback));
 }
 

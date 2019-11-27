@@ -50,6 +50,11 @@ class UI_BASE_EXPORT ResourceBundle {
   static const int kMediumFontDelta = 3;
   static const int kLargeFontDelta = 8;
 
+  // The constant added during the compression to the front of Brotli-compressed
+  // resources in Chromium. Compression occurs at tools/grit/grit/node/base.py.
+  static constexpr uint8_t kBrotliConst[] = {0x1e, 0x9b};
+  static const size_t kBrotliHeaderSize = 8;
+
   // Legacy font style mappings. TODO(tapted): Phase these out in favour of
   // client code providing their own constant with the desired font size delta.
   enum FontStyle {
@@ -221,11 +226,15 @@ class UI_BASE_EXPORT ResourceBundle {
   // if the resource is not found.
   bool IsGzipped(int resource_id) const;
 
+  // Whether the |resource_id| is brotli compressed in this bundle. False is
+  // also returned if the resource is not found.
+  bool IsBrotli(int resource_id) const;
+
   // Loads the raw bytes of a data resource nearest the scale factor
-  // |scale_factor| into |bytes|, without doing any processing or
-  // interpretation of the resource. Use ResourceHandle::SCALE_FACTOR_NONE
-  // for scale independent image resources (such as wallpaper).
-  // Returns NULL if we fail to read the resource.
+  // |scale_factor| into |bytes|. If the resource is compressed, decompress
+  // before returning. Use ResourceHandle::SCALE_FACTOR_NONE for scale
+  // independent image resources (such as wallpaper). Returns nullptr if we fail
+  // to read the resource.
   base::RefCountedMemory* LoadDataResourceBytesForScale(
       int resource_id,
       ScaleFactor scale_factor) const;
@@ -241,24 +250,28 @@ class UI_BASE_EXPORT ResourceBundle {
   base::StringPiece GetRawDataResourceForScale(int resource_id,
                                                ScaleFactor scale_factor) const;
 
-  // Return the contents of a scale independent resource, decompressed into a
-  // newly allocated string given the resource id.
-  // Todo: Look into introducing an Async version of this function in the future
+  // Return the contents of a scale independent resource, decompressed
+  // into a newly allocated string given the resource id. Todo: Look into
+  // introducing an Async version of this function in the future.
   // Bug: https://bugs.chromium.org/p/chromium/issues/detail?id=973417
-  std::string DecompressDataResource(int resource_id);
+  std::string LoadDataResourceString(int resource_id) const;
 
-  // Return the contents of a scale dependent resource, decompressed into a
+  // Return the contents of a scale dependent resource, decompressed into
+  // a newly allocated string given the resource id.
+  std::string LoadDataResourceStringForScale(int resource_id,
+                                             ScaleFactor scaling_factor) const;
+
+  // Return the contents of a localized resource, decompressed into a
   // newly allocated string given the resource id.
-  std::string DecompressDataResourceScaled(int resource_id,
-                                           ScaleFactor scaling_factor);
-
-  // Return the contents of a localized resource, decompressed into a newly
-  // allocated string given the resource id.
-  std::string DecompressLocalizedDataResource(int resource_id);
+  std::string LoadLocalizedResourceString(int resource_id) const;
 
   // Get a localized string given a message id.  Returns an empty string if the
   // resource_id is not found.
   base::string16 GetLocalizedString(int resource_id);
+
+  // Get a localized resource (for example, localized image logo) given a
+  // resource id.
+  base::RefCountedMemory* LoadLocalizedResourceBytes(int resource_id);
 
   // Returns a font list derived from the platform-specific "Base" font list.
   // The result is always cached and exists for the lifetime of the process.
@@ -304,12 +317,12 @@ class UI_BASE_EXPORT ResourceBundle {
   void OverrideLocaleStringResource(int resource_id,
                                     const base::string16& string);
 
-  // Returns the full pathname of the locale file to load.  May return an empty
-  // string if no locale data files are found and |test_file_exists| is true.
+  // Returns the full pathname of the locale file to load, which may be a
+  // compressed locale file ending in .gz. Returns an empty string if no locale
+  // data files are found.
   // Used on Android to load the local file in the browser process and pass it
   // to the sandboxed renderer process.
-  static base::FilePath GetLocaleFilePath(const std::string& app_locale,
-                                          bool test_file_exists);
+  static base::FilePath GetLocaleFilePath(const std::string& app_locale);
 
   // Returns the maximum scale factor currently loaded.
   // Returns SCALE_FACTOR_100P if no resource is loaded.

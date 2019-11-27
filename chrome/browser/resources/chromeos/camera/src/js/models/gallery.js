@@ -17,6 +17,7 @@ cca.models = cca.models || {};
 /**
  * Creates the gallery model controller.
  * @constructor
+ * @implements {cca.models.ResultSaver}
  */
 cca.models.Gallery = function() {
   /**
@@ -87,11 +88,15 @@ cca.models.Gallery.Picture.parseTimestamp_ = function(pictureEntry) {
   var name = cca.models.FileSystem.regulatePictureName(pictureEntry);
   // Match numeric parts from filenames, e.g. IMG_'yyyyMMdd_HHmmss (n)'.jpg.
   // Assume no more than one picture taken within one millisecond.
+  // Use String.raw instead of /...regex.../ here to avoid breaking syntax
+  // highlight on gerrit.
   var match = name.match(
-      /_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})(?: \((\d+)\))?/);
-  return match ? new Date(num(match[1]), num(match[2]) - 1, num(match[3]),
-      num(match[4]), num(match[5]), num(match[6]),
-      match[7] ? num(match[7]) : 0) : new Date(0);
+      String.raw`_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})(?: \((\d+)\))?/`);
+  return match ?
+      new Date(
+          num(match[1]), num(match[2]) - 1, num(match[3]), num(match[4]),
+          num(match[5]), num(match[6]), match[7] ? num(match[7]) : 0) :
+      new Date(0);
 };
 
 cca.models.Gallery.Picture.prototype = {
@@ -285,12 +290,9 @@ cca.models.Gallery.prototype.wrapPicture_ = function(
 };
 
 /**
- * Saves photo capture result into persistent storage and adds it into gallery.
- * @param {!Blob} blob Data of the photo to be added.
- * @param {string} filename Filename of photo to be added.
- * @return {!Promise} Promise for the operation.
+ * @override
  */
-cca.models.Gallery.prototype.savePhoto = function(blob, filename) {
+cca.models.Gallery.prototype.savePhoto = function(blob, name) {
   // TODO(yuli): models.Gallery listens to models.FileSystem's file-added event
   // and then add a new picture into the model.
   var saved = new Promise((resolve) => {
@@ -301,7 +303,7 @@ cca.models.Gallery.prototype.savePhoto = function(blob, filename) {
                 cca.util.orientPhoto(blob, resolve, () => resolve(blob));
               })
                   .then((blob) => {
-                    return cca.models.FileSystem.savePhoto(blob, filename);
+                    return cca.models.FileSystem.saveBlob(blob, name);
                   })
                   .then((pictureEntry) => {
                     return this.wrapPicture_(pictureEntry);
@@ -311,12 +313,19 @@ cca.models.Gallery.prototype.savePhoto = function(blob, filename) {
 };
 
 /**
- * Saves video capture result into persistent storage and adds it into gallery.
- * @param {FileEntry} tempfile File saving temporary video recording result.
- * @param {string} filename Filename of picture to be added.
+ * @override
  */
-cca.models.Gallery.prototype.saveVideo = async function(tempfile, filename) {
-  const savedFile = await cca.models.FileSystem.saveVideo(tempfile, filename);
+cca.models.Gallery.prototype.startSaveVideo = async function() {
+  const tempFile = await cca.models.FileSystem.createTempVideoFile();
+  return cca.models.FileVideoSaver.create(tempFile);
+};
+
+/**
+ * @override
+ */
+cca.models.Gallery.prototype.finishSaveVideo = async function(video, name) {
+  const tempFile = await video.endWrite();
+  const savedFile = await cca.models.FileSystem.saveVideo(tempFile, name);
   const picture = await this.wrapPicture_(savedFile);
   await this.addPicture_(picture);
 };

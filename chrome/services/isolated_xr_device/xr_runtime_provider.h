@@ -9,7 +9,8 @@
 
 #include "device/vr/buildflags/buildflags.h"
 #include "device/vr/public/mojom/isolated_xr_service.mojom.h"
-#include "services/service_manager/public/cpp/service_keepalive.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace device {
 class OculusDevice;
@@ -17,24 +18,22 @@ class OpenVRDevice;
 class MixedRealityDevice;
 class MixedRealityDeviceStatics;
 class OpenXrDevice;
+class OpenXrStatics;
 }  // namespace device
 
 class IsolatedXRRuntimeProvider
     : public device::mojom::IsolatedXRRuntimeProvider {
  public:
-  IsolatedXRRuntimeProvider(
-      std::unique_ptr<service_manager::ServiceKeepaliveRef> service_ref);
+  IsolatedXRRuntimeProvider();
   ~IsolatedXRRuntimeProvider() final;
 
   void RequestDevices(
-      device::mojom::IsolatedXRRuntimeProviderClientPtr client) override;
+      mojo::PendingRemote<device::mojom::IsolatedXRRuntimeProviderClient>
+          client) override;
 
   enum class RuntimeStatus;
 
  private:
-  const std::unique_ptr<service_manager::ServiceKeepaliveRef> service_ref_;
-
-  IsolatedXRRuntimeProvider();
   void PollForDeviceChanges();
   void SetupPollingForDeviceChanges();
 
@@ -65,9 +64,10 @@ class IsolatedXRRuntimeProvider
   void SetOpenXrRuntimeStatus(RuntimeStatus status);
   bool should_check_openxr_ = false;
   std::unique_ptr<device::OpenXrDevice> openxr_device_;
+  std::unique_ptr<device::OpenXrStatics> openxr_statics_;
 #endif
 
-  device::mojom::IsolatedXRRuntimeProviderClientPtr client_;
+  mojo::Remote<device::mojom::IsolatedXRRuntimeProviderClient> client_;
   base::WeakPtrFactory<IsolatedXRRuntimeProvider> weak_ptr_factory_{this};
 };
 

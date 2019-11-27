@@ -28,6 +28,7 @@
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/frame_host/render_widget_host_view_guest.h"
 #include "content/browser/gpu/compositor_util.h"
+#include "content/browser/renderer_host/frame_token_message_queue.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/text_input_manager.h"
 #include "content/common/input_messages.h"
@@ -49,6 +50,7 @@
 #include "content/test/test_render_view_host.h"
 #include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/image_transport_surface.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -340,9 +342,10 @@ class MockRenderWidgetHostImpl : public RenderWidgetHostImpl {
   static MockRenderWidgetHostImpl* Create(RenderWidgetHostDelegate* delegate,
                                           RenderProcessHost* process,
                                           int32_t routing_id) {
-    mojom::WidgetPtr widget;
+    mojo::PendingRemote<mojom::Widget> widget;
     std::unique_ptr<MockWidgetImpl> widget_impl =
-        std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
+        std::make_unique<MockWidgetImpl>(
+            widget.InitWithNewPipeAndPassReceiver());
 
     return new MockRenderWidgetHostImpl(delegate, process, routing_id,
                                         std::move(widget_impl),
@@ -361,12 +364,13 @@ class MockRenderWidgetHostImpl : public RenderWidgetHostImpl {
                            RenderProcessHost* process,
                            int32_t routing_id,
                            std::unique_ptr<MockWidgetImpl> widget_impl,
-                           mojom::WidgetPtr widget)
+                           mojo::PendingRemote<mojom::Widget> widget)
       : RenderWidgetHostImpl(delegate,
                              process,
                              routing_id,
                              std::move(widget),
-                             false),
+                             /*hidden=*/false,
+                             std::make_unique<FrameTokenMessageQueue>()),
         widget_impl_(std::move(widget_impl)) {
     set_renderer_initialized(true);
     lastWheelEventLatencyInfo = ui::LatencyInfo();
@@ -475,11 +479,11 @@ class MockRenderWidgetHostOwnerDelegate
 class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
  public:
   RenderWidgetHostViewMacTest() : rwhv_mac_(nullptr) {
-    mock_clock_.Advance(base::TimeDelta::FromMilliseconds(100));
-    ui::SetEventTickClockForTesting(&mock_clock_);
   }
 
   void SetUp() override {
+    mock_clock_.Advance(base::TimeDelta::FromMilliseconds(100));
+    ui::SetEventTickClockForTesting(&mock_clock_);
     RenderViewHostImplTestHarness::SetUp();
     base::test::ScopedFeatureList feature_list;
     feature_list.InitAndEnableFeature(features::kDirectManipulationStylus);
@@ -504,6 +508,7 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
   }
 
   void TearDown() override {
+    ui::SetEventTickClockForTesting(nullptr);
     rwhv_cocoa_.reset();
     // RenderWidgetHostImpls with an owner delegate are not expected to be self-
     // deleting.
@@ -1233,8 +1238,8 @@ TEST_F(RenderWidgetHostViewMacTest, GuestViewDoesNotLeak) {
 
   // Let |guest_rwhv_weak| have a chance to delete itself.
   base::RunLoop run_loop;
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           run_loop.QuitClosure());
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 run_loop.QuitClosure());
   run_loop.Run();
 
   ASSERT_FALSE(guest_rwhv_weak.get());
@@ -1359,6 +1364,11 @@ TEST_F(RenderWidgetHostViewMacTest,
   ASSERT_EQ(0U, events.size());
   DCHECK(view->HasPendingWheelEndEventForTesting());
 
+  // Get the max time here before |view| is destroyed in the
+  // ShutdownAndDestroyWidget call below.
+  const base::TimeDelta max_time_between_phase_ended_and_momentum_phase_began =
+      view->max_time_between_phase_ended_and_momentum_phase_began_for_test();
+
   host->ShutdownAndDestroyWidget(true);
 
   // Wait for the mouse_wheel_end_dispatch_timer_ to expire after host is
@@ -1369,7 +1379,7 @@ TEST_F(RenderWidgetHostViewMacTest,
   base::RunLoop run_loop;
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(),
-      kMaximumTimeBetweenPhaseEndedAndMomentumPhaseBegan);
+      max_time_between_phase_ended_and_momentum_phase_began);
   run_loop.Run();
 }
 
@@ -2062,7 +2072,7 @@ TEST_F(InputMethodMacTest, TouchBarTextSuggestionsPresence) {
   if (@available(macOS 10.12.2, *)) {
     EXPECT_NSEQ(nil, candidate_list_item());
     SetTextInputType(tab_view(), ui::TEXT_INPUT_TYPE_PASSWORD);
-    EXPECT_NSEQ(nil, candidate_list_item());
+    EXPECT_NSNE(nil, candidate_list_item());
     SetTextInputType(tab_view(), ui::TEXT_INPUT_TYPE_TEXT);
     EXPECT_NSNE(nil, candidate_list_item());
   }
@@ -2125,6 +2135,27 @@ TEST_F(InputMethodMacTest, TouchBarTextSuggestionsReplacement) {
     base::RunLoop().RunUntilIdle();
     events = host_->GetAndResetDispatchedMessages();
     ASSERT_EQ("CommitText", GetMessageNames(events));
+  }
+}
+
+TEST_F(InputMethodMacTest, TouchBarTextSuggestionsNotRequestedForPasswords) {
+  base::test::ScopedFeatureList feature_list;
+  if (@available(macOS 10.12.2, *)) {
+    base::scoped_nsobject<FakeSpellChecker> spellChecker(
+        [[FakeSpellChecker alloc] init]);
+    tab_GetInProcessNSView().spellCheckerForTesting =
+        static_cast<NSSpellChecker*>(spellChecker.get());
+
+    SetTextInputType(tab_view(), ui::TEXT_INPUT_TYPE_PASSWORD);
+    EXPECT_NSNE(nil, candidate_list_item());
+    candidate_list_item().allowsCollapsing = NO;
+
+    const base::string16 kOriginalString = base::UTF8ToUTF16("abcxxxghi");
+
+    // Change the selection once; completions should *not* be requested.
+    tab_view()->SelectionChanged(kOriginalString, 3, gfx::Range(3, 3));
+
+    EXPECT_EQ(0U, [spellChecker sequenceNumber]);
   }
 }
 

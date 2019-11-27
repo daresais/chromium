@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -135,9 +136,9 @@ class AppInfoDialogViewsTest : public BrowserWithTestWindowTest,
 
   void ShowAppInfoForProfile(const std::string& app_id, Profile* profile) {
     const extensions::Extension* extension =
-        extensions::ExtensionSystem::Get(profile)
-            ->extension_service()
-            ->GetExtensionById(app_id, true);
+        extensions::ExtensionRegistry::Get(profile)
+            ->enabled_extensions()
+            .GetByID(app_id);
     DCHECK(extension);
 
     DCHECK(!widget_);

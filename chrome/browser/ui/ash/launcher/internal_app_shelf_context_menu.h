@@ -21,8 +21,6 @@ class InternalAppShelfContextMenu : public LauncherContextMenu {
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
-  void BuildMenu(ui::SimpleMenuModel* menu_model);
-
   DISALLOW_COPY_AND_ASSIGN(InternalAppShelfContextMenu);
 };
 

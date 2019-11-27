@@ -8,7 +8,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.support.test.filters.LargeTest;
-import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.View;
 
@@ -28,11 +27,12 @@ import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.ui.DummyUiActivityTestCase;
 import org.chromium.chrome.test.util.RenderTestRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
+import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.ModelListAdapter;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -49,6 +49,7 @@ public class RevampedContextMenuRenderTest extends DummyUiActivityTestCase {
     public RenderTestRule mRenderTestRule = new RenderTestRule();
 
     private ModelListAdapter mAdapter;
+    private ModelList mListItems;
     private View mView;
     private View mFrame;
 
@@ -60,7 +61,8 @@ public class RevampedContextMenuRenderTest extends DummyUiActivityTestCase {
     @Override
     public void setUpTest() throws Exception {
         super.setUpTest();
-        mAdapter = new ModelListAdapter();
+        mListItems = new ModelList();
+        mAdapter = new ModelListAdapter(mListItems);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getActivity().setContentView(R.layout.revamped_context_menu);
             mView = getActivity().findViewById(android.R.id.content);
@@ -77,7 +79,7 @@ public class RevampedContextMenuRenderTest extends DummyUiActivityTestCase {
             mAdapter.registerType(
                     ListItemType.DIVIDER,
                     () -> LayoutInflater.from(listView.getContext())
-                            .inflate(R.layout.context_menu_divider, null),
+                            .inflate(R.layout.app_menu_divider, null),
                     (m, v, p) -> {
                     });
             mAdapter.registerType(
@@ -97,6 +99,7 @@ public class RevampedContextMenuRenderTest extends DummyUiActivityTestCase {
     @Override
     public void tearDownTest() throws Exception {
         NightModeTestUtils.tearDownNightModeForDummyUiActivity();
+        TestThreadUtils.runOnUiThreadBlocking(() -> mListItems.clear());
         super.tearDownTest();
     }
 
@@ -105,20 +108,17 @@ public class RevampedContextMenuRenderTest extends DummyUiActivityTestCase {
     @Feature({"RenderTest"})
     public void testRevampedContextMenuViewWithLink() throws IOException {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            List<Pair<Integer, PropertyModel>> itemList = new ArrayList<>();
-            itemList.add(
-                    new Pair<>(ListItemType.HEADER, getHeaderModel("", "www.google.com", false)));
-            itemList.add(new Pair<>(ListItemType.DIVIDER, new PropertyModel()));
-            itemList.add(
-                    (new Pair<>(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open in new tab"))));
-            itemList.add((new Pair<>(
+            mListItems.add(
+                    new ListItem(ListItemType.HEADER, getHeaderModel("", "www.google.com", false)));
+            mListItems.add(new ListItem(ListItemType.DIVIDER, new PropertyModel()));
+            mListItems.add((
+                    new ListItem(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open in new tab"))));
+            mListItems.add((new ListItem(
                     ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open in incognito tab"))));
-            itemList.add((
-                    new Pair<>(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Copy link address"))));
-            itemList.add((new Pair<>(
+            mListItems.add((new ListItem(
+                    ListItemType.CONTEXT_MENU_ITEM, getItemModel("Copy link address"))));
+            mListItems.add((new ListItem(
                     ListItemType.CONTEXT_MENU_SHARE_ITEM, getShareItemModel("Share link"))));
-
-            mAdapter.updateModels(itemList);
         });
         mRenderTestRule.render(mFrame, "revamped_context_menu_with_link");
     }
@@ -128,27 +128,25 @@ public class RevampedContextMenuRenderTest extends DummyUiActivityTestCase {
     @Feature({"RenderTest"})
     public void testRevampedContextMenuViewWithImageLink() throws IOException {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            List<Pair<Integer, PropertyModel>> itemList = new ArrayList<>();
-            itemList.add(new Pair<>(
+            mListItems.add(new ListItem(
                     ListItemType.HEADER, getHeaderModel("Capybara", "www.google.com", true)));
-            itemList.add(new Pair<>(ListItemType.DIVIDER, new PropertyModel()));
-            itemList.add(
-                    (new Pair<>(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open in new tab"))));
-            itemList.add((new Pair<>(
+            mListItems.add(new ListItem(ListItemType.DIVIDER, new PropertyModel()));
+            mListItems.add((
+                    new ListItem(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open in new tab"))));
+            mListItems.add((new ListItem(
                     ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open in incognito tab"))));
-            itemList.add((
-                    new Pair<>(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Copy link address"))));
-            itemList.add((new Pair<>(
+            mListItems.add((new ListItem(
+                    ListItemType.CONTEXT_MENU_ITEM, getItemModel("Copy link address"))));
+            mListItems.add((new ListItem(
                     ListItemType.CONTEXT_MENU_SHARE_ITEM, getShareItemModel("Share link"))));
-            itemList.add(new Pair<>(ListItemType.DIVIDER, new PropertyModel()));
-            itemList.add((new Pair<>(
+            mListItems.add(new ListItem(ListItemType.DIVIDER, new PropertyModel()));
+            mListItems.add((new ListItem(
                     ListItemType.CONTEXT_MENU_ITEM, getItemModel("Open image in new tab"))));
-            itemList.add(
-                    (new Pair<>(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Download image"))));
-            itemList.add((new Pair<>(
+            mListItems.add(
+                    (new ListItem(ListItemType.CONTEXT_MENU_ITEM, getItemModel("Download image"))));
+            mListItems.add((new ListItem(
                     ListItemType.CONTEXT_MENU_SHARE_ITEM, getShareItemModel("Share image"))));
 
-            mAdapter.updateModels(itemList);
         });
         mRenderTestRule.render(mFrame, "revamped_context_menu_with_image_link");
     }

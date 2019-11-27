@@ -38,7 +38,7 @@ const CryptAuthDevice& GetLocalDeviceForTest() {
     return CryptAuthDevice(
         cryptauthv2::GetClientAppMetadataForTest().instance_id(),
         kLocalDeviceDeviceName, kLocalDeviceDeviceSyncBetterTogetherPublicKey,
-        base::Time(), bt_metadata,
+        base::Time::FromJsTime(100), bt_metadata,
         {
             {multidevice::SoftwareFeature::kBetterTogetherHost,
              multidevice::SoftwareFeatureState::kNotSupported},
@@ -85,7 +85,7 @@ const CryptAuthDevice& GetRemoteDeviceNeedsGroupPrivateKeyForTest() {
         kRemoteDeviceNeedsGroupPrivateKeyId,
         kRemoteDeviceNeedsGroupPrivateKeyDeviceName,
         kRemoteDeviceNeedsGroupPrivateKeyDeviceSyncBetterTogetherPublicKey,
-        base::Time(), bt_metadata,
+        base::Time::FromJsTime(200), bt_metadata,
         {
             {multidevice::SoftwareFeature::kBetterTogetherHost,
              multidevice::SoftwareFeatureState::kEnabled},
@@ -132,7 +132,7 @@ const CryptAuthDevice& GetRemoteDeviceHasGroupPrivateKeyForTest() {
         kRemoteDeviceHasGroupPrivateKeyId,
         kRemoteDeviceHasGroupPrivateKeyDeviceName,
         kRemoteDeviceHasGroupPrivateKeyDeviceSyncBetterTogetherPublicKey,
-        base::Time(), bt_metadata,
+        base::Time::FromJsTime(300), bt_metadata,
         {
             {multidevice::SoftwareFeature::kBetterTogetherHost,
              multidevice::SoftwareFeatureState::kNotSupported},
@@ -175,13 +175,17 @@ const std::vector<CryptAuthDevice>& GetAllTestDevices() {
   return *all_devices;
 }
 
-const std::vector<CryptAuthDevice>& GetAllTestDevicesWithoutMetadata() {
+const std::vector<CryptAuthDevice>& GetAllTestDevicesWithoutRemoteMetadata() {
   static const base::NoDestructor<std::vector<CryptAuthDevice>>
       all_devices_without_metadata([] {
         std::vector<CryptAuthDevice> devices_without_metadata =
             GetAllTestDevices();
         for (CryptAuthDevice& device : devices_without_metadata) {
-          device.better_together_device_metadata = base::nullopt;
+          // The local device always has its BetterTogetherDeviceMetadata.
+          if (device.instance_id() == GetLocalDeviceForTest().instance_id())
+            continue;
+
+          device.better_together_device_metadata.reset();
         }
 
         return devices_without_metadata;
@@ -202,12 +206,16 @@ const base::flat_set<std::string>& GetAllTestDeviceIds() {
 
 const base::flat_set<std::string>&
 GetAllTestDeviceIdsThatNeedGroupPrivateKey() {
-  static const base::NoDestructor<base::flat_set<std::string>> all_device_ids(
-      [] {
-        return base::flat_set<std::string>{
-            GetRemoteDeviceNeedsGroupPrivateKeyForTest().instance_id()};
-      }());
-  return *all_device_ids;
+  static const base::NoDestructor<base::flat_set<std::string>> device_ids([] {
+    base::flat_set<std::string> device_ids;
+    for (const cryptauthv2::DeviceMetadataPacket& metadata :
+         GetAllTestDeviceMetadataPackets()) {
+      if (metadata.need_group_private_key())
+        device_ids.insert(metadata.device_id());
+    }
+    return device_ids;
+  }());
+  return *device_ids;
 }
 
 cryptauthv2::DeviceMetadataPacket ConvertTestDeviceToMetadataPacket(

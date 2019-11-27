@@ -28,7 +28,8 @@ public class ExpandablePreferenceGroup extends PreferenceGroup {
     private Drawable mDrawable;
 
     public ExpandablePreferenceGroup(Context context, AttributeSet attrs) {
-        super(context, attrs, android.R.attr.preferenceStyle);
+        super(context, attrs, R.attr.preferenceStyle);
+
         setWidgetLayoutResource(R.layout.checkable_image_view_widget);
     }
 

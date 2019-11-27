@@ -19,7 +19,7 @@
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
-#include "chrome/browser/previews/previews_lite_page_decider.h"
+#include "chrome/browser/previews/previews_lite_page_redirect_decider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 #include "chrome/browser/signin/signin_promo.h"
@@ -51,6 +51,8 @@
 #if defined(OS_CHROMEOS)
 #include "ash/public/cpp/multi_user_window_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "components/account_id/account_id.h"
 #endif
 
@@ -164,17 +166,12 @@ std::pair<Browser*, int> GetBrowserAndTabForDisposition(
   switch (params.disposition) {
     case WindowOpenDisposition::SWITCH_TO_TAB:
 #if !defined(OS_ANDROID)
-      for (auto browser_it = BrowserList::GetInstance()->begin_last_active();
-           browser_it != BrowserList::GetInstance()->end_last_active();
-           ++browser_it) {
-        Browser* browser = *browser_it;
-        // When tab switching, only look at same profile and anonymity level.
-        if (browser->profile()->IsSameProfileAndType(profile)) {
-          int index = GetIndexOfExistingTab(browser, params);
-          if (index >= 0)
-            return {browser, index};
-        }
-      }
+    {
+      std::pair<Browser*, int> index =
+          GetIndexAndBrowserOfExistingTab(profile, params);
+      if (index.first)
+        return index;
+    }
 #endif
       FALLTHROUGH;
     case WindowOpenDisposition::CURRENT_TAB:
@@ -187,6 +184,15 @@ std::pair<Browser*, int> GetBrowserAndTabForDisposition(
       int index = GetIndexOfExistingTab(params.browser, params);
       if (index >= 0)
         return {params.browser, index};
+      // If this window can't open tabs, then it would load in a random
+      // window, potentially opening a second copy. Instead, make an extra
+      // effort to see if there's an already open copy.
+      if (params.browser && !WindowCanOpenTabs(params.browser)) {
+        std::pair<Browser*, int> index =
+            GetIndexAndBrowserOfExistingTab(profile, params);
+        if (index.first)
+          return index;
+      }
     }
       FALLTHROUGH;
     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
@@ -340,11 +346,11 @@ void LoadURLInContents(WebContents* target_contents,
     load_url_params.navigation_ui_data =
         ChromeNavigationUIData::CreateForMainFrameNavigation(
             target_contents, params->disposition,
-            PreviewsLitePageDecider::GeneratePageIdForProfile(
+            PreviewsLitePageRedirectDecider::GeneratePageIdForProfile(
                 GetSourceProfile(params)));
   }
 
-  if (params->uses_post) {
+  if (params->post_data) {
     load_url_params.load_type = NavigationController::LOAD_TYPE_HTTP_POST;
     load_url_params.post_data = params->post_data;
   }
@@ -408,8 +414,6 @@ std::unique_ptr<content::WebContents> CreateTargetContents(
         params.opener->GetProcess()->GetID();
   }
   if (params.source_contents) {
-    create_params.initial_size =
-        params.source_contents->GetContainerBounds().size();
     create_params.created_with_opener = params.created_with_opener;
   }
   if (params.disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB)
@@ -482,7 +486,7 @@ void Navigate(NavigateParams* params) {
   // focusing a regular browser window an opening a tab in the background
   // of that window. Change the disposition to NEW_FOREGROUND_TAB so that
   // the new tab is focused.
-  if (source_browser && source_browser->is_app() &&
+  if (source_browser && source_browser->deprecated_is_app() &&
       params->disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
     params->disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   }
@@ -521,24 +525,41 @@ void Navigate(NavigateParams* params) {
     return;
   }
 #if defined(OS_CHROMEOS)
-  if (source_browser && source_browser != params->browser) {
-    // When the newly created browser was spawned by a browser which visits
-    // another user's desktop, it should be shown on the same desktop as the
-    // originating one. (This is part of the desktop separation per profile).
-    auto* window_manager = MultiUserWindowManagerHelper::GetWindowManager();
-    // Some unit tests have no client instantiated.
-    if (window_manager) {
-      aura::Window* src_window = source_browser->window()->GetNativeWindow();
-      aura::Window* new_window = params->browser->window()->GetNativeWindow();
-      const AccountId& src_account_id =
-          window_manager->GetUserPresentingWindow(src_window);
-      if (src_account_id !=
-          window_manager->GetUserPresentingWindow(new_window)) {
-        // Once the window gets presented, it should be shown on the same
-        // desktop as the desktop of the creating browser. Note that this
-        // command will not show the window if it wasn't shown yet by the
-        // browser creation.
-        window_manager->ShowWindowForUser(new_window, src_account_id);
+  if (source_browser) {
+    // If OS Settings is accessed in any means other than explicitly typing the
+    // URL into the URL bar, open OS Settings in its own standalone surface.
+    if (chromeos::features::IsSplitSettingsEnabled() &&
+        params->url.host() == chrome::kChromeUIOSSettingsHost &&
+        !PageTransitionCoreTypeIs(params->transition,
+                                  ui::PageTransition::PAGE_TRANSITION_TYPED)) {
+      chrome::SettingsWindowManager* settings_window_manager =
+          chrome::SettingsWindowManager::GetInstance();
+      if (!settings_window_manager->IsSettingsBrowser(source_browser)) {
+        settings_window_manager->ShowChromePageForProfile(
+            GetSourceProfile(params), params->url);
+        return;
+      }
+    }
+
+    if (source_browser != params->browser) {
+      // When the newly created browser was spawned by a browser which visits
+      // another user's desktop, it should be shown on the same desktop as the
+      // originating one. (This is part of the desktop separation per profile).
+      auto* window_manager = MultiUserWindowManagerHelper::GetWindowManager();
+      // Some unit tests have no client instantiated.
+      if (window_manager) {
+        aura::Window* src_window = source_browser->window()->GetNativeWindow();
+        aura::Window* new_window = params->browser->window()->GetNativeWindow();
+        const AccountId& src_account_id =
+            window_manager->GetUserPresentingWindow(src_window);
+        if (src_account_id !=
+            window_manager->GetUserPresentingWindow(new_window)) {
+          // Once the window gets presented, it should be shown on the same
+          // desktop as the desktop of the creating browser. Note that this
+          // command will not show the window if it wasn't shown yet by the
+          // browser creation.
+          window_manager->ShowWindowForUser(new_window, src_account_id);
+        }
       }
     }
   }
@@ -623,9 +644,6 @@ void Navigate(NavigateParams* params) {
       if (swapped_in_prerender)
         contents_to_navigate_or_insert = prerender_params.replaced_contents;
     }
-
-    if (user_initiated)
-      contents_to_navigate_or_insert->NavigatedByUser();
 
     if (!swapped_in_prerender) {
       // Try to handle non-navigational URLs that popup dialogs and such, these
@@ -717,13 +735,6 @@ void Navigate(NavigateParams* params) {
     }
   }
 
-  if (params->disposition != WindowOpenDisposition::CURRENT_TAB) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_TAB_ADDED,
-        content::Source<content::WebContentsDelegate>(params->browser),
-        content::Details<WebContents>(contents_to_navigate_or_insert));
-  }
-
   params->navigated_or_inserted_contents = contents_to_navigate_or_insert;
 }
 
@@ -757,13 +768,14 @@ bool IsHostAllowedInIncognito(const GURL& url) {
   // chrome://extensions is on the list because it redirects to
   // chrome://settings.
   return host != chrome::kChromeUIAppLauncherPageHost &&
-         host != chrome::kChromeUIAppManagementHost &&
          host != chrome::kChromeUISettingsHost &&
+#if defined(OS_CHROMEOS)
+         host != chrome::kChromeUIOSSettingsHost &&
+#endif
          host != chrome::kChromeUIHelpHost &&
          host != chrome::kChromeUIHistoryHost &&
          host != chrome::kChromeUIExtensionsHost &&
          host != chrome::kChromeUIBookmarksHost &&
-         host != chrome::kChromeUIUberHost &&
          host != chrome::kChromeUIThumbnailHost &&
          host != chrome::kChromeUIThumbnailHost2 &&
          host != chrome::kChromeUIThumbnailListHost &&
@@ -785,15 +797,5 @@ bool IsURLAllowedInIncognito(const GURL& url,
            IsURLAllowedInIncognito(stripped_url, browser_context);
   }
 
-  if (!IsHostAllowedInIncognito(url))
-    return false;
-
-  GURL rewritten_url = url;
-  bool reverse_on_redirect = false;
-  content::BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
-      &rewritten_url, browser_context, &reverse_on_redirect);
-
-  // Some URLs are mapped to uber subpages. Do not allow them in incognito.
-  return !(rewritten_url.scheme_piece() == content::kChromeUIScheme &&
-           rewritten_url.host_piece() == chrome::kChromeUIUberHost);
+  return IsHostAllowedInIncognito(url);
 }

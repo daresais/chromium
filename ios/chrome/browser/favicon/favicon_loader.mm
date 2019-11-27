@@ -10,10 +10,10 @@
 #import "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/favicon/core/fallback_url_util.h"
-#include "components/favicon/core/favicon_server_fetcher_params.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon_base/fallback_icon_style.h"
 #include "components/favicon_base/favicon_callback.h"
+#include "components/favicon_base/favicon_types.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/favicon/favicon_attributes.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -74,7 +74,6 @@ void FaviconLoader::FaviconForPageUrl(
   }
 
   const CGFloat scale = UIScreen.mainScreen.scale;
-  const CGFloat favicon_size_in_pixels = scale * size_in_points;
   GURL block_page_url(page_url);
   auto favicon_block = ^(const favicon_base::LargeIconResult& result) {
     // GetLargeIconOrFallbackStyle() either returns a valid favicon (which can
@@ -112,8 +111,7 @@ void FaviconLoader::FaviconForPageUrl(
 
       large_icon_service_
           ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-              favicon::FaviconServerFetcherParams::CreateForMobile(
-                  block_page_url, favicon_size_in_pixels),
+              block_page_url,
               /*may_page_url_be_private=*/true,
               /*should_trim_page_url_path=*/false, kTrafficAnnotation,
               base::BindRepeating(favicon_loaded_from_server_block));
@@ -141,7 +139,7 @@ void FaviconLoader::FaviconForPageUrl(
   // Now fetch the image synchronously.
   DCHECK(large_icon_service_);
   large_icon_service_->GetLargeIconRawBitmapOrFallbackStyleForPageUrl(
-      page_url, scale * min_size_in_points, favicon_size_in_pixels,
+      page_url, scale * min_size_in_points, scale * size_in_points,
       base::BindRepeating(favicon_block), &cancelable_task_tracker_);
 }
 

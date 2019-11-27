@@ -30,7 +30,7 @@ class AXPlatformNodeTextProviderTest : public ui::AXPlatformNodeWinTest {
  public:
   ui::AXPlatformNodeWin* GetOwner(
       const AXPlatformNodeTextProviderWin* text_provider) {
-    return text_provider->owner_;
+    return text_provider->owner_.Get();
   }
   const AXNodePosition::AXPositionInstance& GetStart(
       const AXPlatformNodeTextRangeProviderWin* text_range) {
@@ -117,7 +117,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderRangeFromChild) {
   Init(update);
 
   AXNode* root_node = GetRootNode();
-  AXNodePosition::SetTreeForTesting(tree_.get());
+  AXNodePosition::SetTree(tree_.get());
   AXNode* text_node = root_node->children()[0];
   AXNode* empty_text_node = root_node->children()[1];
 
@@ -194,7 +194,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestNearestTextIndexToPoint) {
   Init(root_data, text_data);
 
   AXNode* root_node = GetRootNode();
-  AXNodePosition::SetTreeForTesting(tree_.get());
+  AXNodePosition::SetTree(tree_.get());
   AXNode* text_node = root_node->children()[0];
 
   struct NearestTextIndexTestData {
@@ -346,7 +346,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetSelection) {
   update.nodes.push_back(textbox_data);
   Init(update);
 
-  AXNodePosition::SetTreeForTesting(tree_.get());
+  AXNodePosition::SetTree(tree_.get());
 
   ComPtr<IRawElementProviderSimple> root_node =
       GetRootIRawElementProviderSimple();
@@ -381,9 +381,9 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetSelection) {
   EXPECT_EQ(0, lbound);
 
   LONG index = 0;
-  CComPtr<ITextRangeProvider> text_range_provider;
-  EXPECT_HRESULT_SUCCEEDED(
-      SafeArrayGetElement(selections.Get(), &index, &text_range_provider));
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(SafeArrayGetElement(
+      selections.Get(), &index, static_cast<void**>(&text_range_provider)));
 
   base::win::ScopedBstr text_content;
   EXPECT_HRESULT_SUCCEEDED(
@@ -391,7 +391,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetSelection) {
   EXPECT_EQ(0, wcscmp(text_content, L"some"));
   text_content.Reset();
   selections.Reset();
-  text_range_provider.Release();
+  text_range_provider.Reset();
 
   // Verify that start and end are appropriately swapped when sel_anchor_offset
   // is greater than sel_focus_offset
@@ -408,15 +408,15 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetSelection) {
   EXPECT_HRESULT_SUCCEEDED(SafeArrayGetLBound(selections.Get(), 1, &lbound));
   EXPECT_EQ(0, lbound);
 
-  EXPECT_HRESULT_SUCCEEDED(
-      SafeArrayGetElement(selections.Get(), &index, &text_range_provider));
+  EXPECT_HRESULT_SUCCEEDED(SafeArrayGetElement(
+      selections.Get(), &index, static_cast<void**>(&text_range_provider)));
 
   EXPECT_HRESULT_SUCCEEDED(
       text_range_provider->GetText(-1, text_content.Receive()));
   EXPECT_EQ(0, wcscmp(text_content, L"some"));
   text_content.Reset();
   selections.Reset();
-  text_range_provider.Release();
+  text_range_provider.Reset();
 
   // Verify that text ranges at an insertion point returns a degenerate (empty)
   // text range via textbox with sel_anchor_offset equal to sel_focus_offset
@@ -444,16 +444,27 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetSelection) {
   EXPECT_HRESULT_SUCCEEDED(SafeArrayGetLBound(selections.Get(), 1, &lbound));
   EXPECT_EQ(0, lbound);
 
-  CComPtr<ITextRangeProvider> text_edit_range_provider;
+  ComPtr<ITextRangeProvider> text_edit_range_provider;
   EXPECT_HRESULT_SUCCEEDED(
-      SafeArrayGetElement(selections.Get(), &index, &text_edit_range_provider));
+      SafeArrayGetElement(selections.Get(), &index,
+                          static_cast<void**>(&text_edit_range_provider)));
 
   EXPECT_HRESULT_SUCCEEDED(
       text_edit_range_provider->GetText(-1, text_content.Receive()));
   EXPECT_EQ(0U, SysStringLen(text_content));
   text_content.Reset();
   selections.Reset();
-  text_edit_range_provider.Release();
+  text_edit_range_provider.Reset();
+
+  // Verify that we don't fill the SAFEARRAY when there is no selection and the
+  // node is not editable.
+  selected_tree_data.sel_focus_object_id = 2;
+  selected_tree_data.sel_anchor_object_id = 2;
+  selected_tree_data.sel_anchor_offset = 1;
+  selected_tree_data.sel_focus_offset = 1;
+
+  root_text_provider->GetSelection(selections.Receive());
+  ASSERT_EQ(nullptr, selections.Get());
 
   // Now delete the tree (which will delete the associated elements) and verify
   // that UIA_E_ELEMENTNOTAVAILABLE is returned when calling GetSelection on
@@ -463,7 +474,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetSelection) {
   EXPECT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE),
             text_edit_provider->GetSelection(selections.Receive()));
 
-  AXNodePosition::SetTreeForTesting(nullptr);
+  AXNodePosition::SetTree(nullptr);
 }
 
 TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetActiveComposition) {
@@ -488,7 +499,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetActiveComposition) {
   update.nodes.push_back(text_data);
   Init(update);
 
-  AXNodePosition::SetTreeForTesting(tree_.get());
+  AXNodePosition::SetTree(tree_.get());
 
   ComPtr<IRawElementProviderSimple> root_node =
       GetRootIRawElementProviderSimple();
@@ -501,7 +512,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetActiveComposition) {
   EXPECT_HRESULT_SUCCEEDED(root_node->GetPatternProvider(
       UIA_TextEditPatternId, &root_text_edit_provider));
 
-  CComPtr<ITextRangeProvider> text_range_provider;
+  ComPtr<ITextRangeProvider> text_range_provider;
   root_text_edit_provider->GetActiveComposition(&text_range_provider);
   ASSERT_EQ(nullptr, text_range_provider);
 
@@ -550,7 +561,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetConversionTarget) {
   update.nodes.push_back(text_data);
   Init(update);
 
-  AXNodePosition::SetTreeForTesting(tree_.get());
+  AXNodePosition::SetTree(tree_.get());
 
   ComPtr<IRawElementProviderSimple> root_node =
       GetRootIRawElementProviderSimple();
@@ -563,7 +574,7 @@ TEST_F(AXPlatformNodeTextProviderTest, TestITextProviderGetConversionTarget) {
   EXPECT_HRESULT_SUCCEEDED(root_node->GetPatternProvider(
       UIA_TextEditPatternId, &root_text_edit_provider));
 
-  CComPtr<ITextRangeProvider> text_range_provider;
+  ComPtr<ITextRangeProvider> text_range_provider;
   root_text_edit_provider->GetConversionTarget(&text_range_provider);
   ASSERT_EQ(nullptr, text_range_provider);
 

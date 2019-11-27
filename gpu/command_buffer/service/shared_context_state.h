@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/skia_utils.h"
 #include "gpu/command_buffer/service/gl_context_virtual_delegate.h"
+#include "gpu/config/gpu_preferences.h"
 #include "gpu/gpu_gles2_export.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "ui/gl/progress_reporter.h"
@@ -27,6 +28,7 @@ class GLSurface;
 }  // namespace gl
 
 namespace viz {
+class DawnContextProvider;
 class MetalContextProvider;
 class VulkanContextProvider;
 }  // namespace viz
@@ -35,7 +37,6 @@ namespace gpu {
 class GpuDriverBugWorkarounds;
 class GpuProcessActivityFlags;
 class ServiceTransferCache;
-struct GpuPreferences;
 
 namespace gles2 {
 class FeatureInfo;
@@ -45,7 +46,8 @@ struct ContextState;
 class GPU_GLES2_EXPORT SharedContextState
     : public base::trace_event::MemoryDumpProvider,
       public gpu::GLContextVirtualDelegate,
-      public base::RefCounted<SharedContextState> {
+      public base::RefCounted<SharedContextState>,
+      public GrContextOptions::ShaderErrorHandler {
  public:
   // TODO: Refactor code to have seperate constructor for GL and Vulkan and not
   // initialize/use GL related info for vulkan and vice-versa.
@@ -55,18 +57,27 @@ class GPU_GLES2_EXPORT SharedContextState
       scoped_refptr<gl::GLContext> context,
       bool use_virtualized_gl_contexts,
       base::OnceClosure context_lost_callback,
+      GrContextType gr_context_type = GrContextType::kGL,
       viz::VulkanContextProvider* vulkan_context_provider = nullptr,
-      viz::MetalContextProvider* metal_context_provider = nullptr);
+      viz::MetalContextProvider* metal_context_provider = nullptr,
+      viz::DawnContextProvider* dawn_context_provider = nullptr);
 
   void InitializeGrContext(const GpuDriverBugWorkarounds& workarounds,
                            GrContextOptions::PersistentCache* cache,
                            GpuProcessActivityFlags* activity_flags = nullptr,
                            gl::ProgressReporter* progress_reporter = nullptr);
   bool GrContextIsGL() const {
-    return !vk_context_provider_ && !metal_context_provider_;
+    return gr_context_type_ == GrContextType::kGL;
   }
-  bool GrContextIsVulkan() const { return vk_context_provider_; }
-  bool GrContextIsMetal() const { return metal_context_provider_; }
+  bool GrContextIsVulkan() const {
+    return vk_context_provider_ && gr_context_type_ == GrContextType::kVulkan;
+  }
+  bool GrContextIsMetal() const {
+    return metal_context_provider_ && gr_context_type_ == GrContextType::kMetal;
+  }
+  bool GrContextIsDawn() const {
+    return dawn_context_provider_ && gr_context_type_ == GrContextType::kDawn;
+  }
 
   bool InitializeGL(const GpuPreferences& gpu_preferences,
                     scoped_refptr<gles2::FeatureInfo> feature_info);
@@ -91,8 +102,13 @@ class GPU_GLES2_EXPORT SharedContextState
   viz::MetalContextProvider* metal_context_provider() {
     return metal_context_provider_;
   }
+  viz::DawnContextProvider* dawn_context_provider() {
+    return dawn_context_provider_;
+  }
   gl::ProgressReporter* progress_reporter() const { return progress_reporter_; }
   GrContext* gr_context() { return gr_context_; }
+  // Handles Skia-reported shader compilation errors.
+  void compileError(const char* shader, const char* errors) override;
   gles2::FeatureInfo* feature_info() { return feature_info_.get(); }
   gles2::ContextState* context_state() const { return context_state_.get(); }
   bool context_lost() const { return context_lost_; }
@@ -158,8 +174,10 @@ class GPU_GLES2_EXPORT SharedContextState
   bool use_virtualized_gl_contexts_ = false;
   bool support_vulkan_external_object_ = false;
   base::OnceClosure context_lost_callback_;
+  GrContextType gr_context_type_ = GrContextType::kGL;
   viz::VulkanContextProvider* const vk_context_provider_;
   viz::MetalContextProvider* const metal_context_provider_;
+  viz::DawnContextProvider* const dawn_context_provider_;
   GrContext* gr_context_ = nullptr;
 
   scoped_refptr<gl::GLShareGroup> share_group_;

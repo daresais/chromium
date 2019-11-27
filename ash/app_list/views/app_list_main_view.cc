@@ -29,7 +29,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/string_util.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "ui/aura/window.h"
 #include "ui/chromeos/search_box/search_box_view_base.h"
 #include "ui/gfx/geometry/insets.h"
@@ -38,9 +38,8 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
-#include "ui/wm/public/activation_client.h"
 
-namespace app_list {
+namespace ash {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppListMainView:
@@ -85,19 +84,6 @@ void AppListMainView::AddContentsViews() {
   AddChildView(contents_view_);
 
   search_box_view_->set_contents_view(contents_view_);
-}
-
-void AppListMainView::ShowAppListWhenReady() {
-  // After switching to tablet mode, other app windows may be active. Show the
-  // app list without activating it to avoid breaking other windows' state.
-  const aura::Window* active_window =
-      wm::GetActivationClient(
-          app_list_view_->GetWidget()->GetNativeView()->GetRootWindow())
-          ->GetActiveWindow();
-  if (app_list_view_->is_tablet_mode() && active_window)
-    GetWidget()->ShowInactive();
-  else
-    GetWidget()->Show();
 }
 
 void AppListMainView::ModelChanged() {
@@ -149,7 +135,13 @@ void AppListMainView::ActivateApp(AppListItem* item, int event_flags) {
                               kFullscreenAppListFolders, kMaxFolderOpened);
   } else {
     base::RecordAction(base::UserMetricsAction("AppList_ClickOnApp"));
-    delegate_->ActivateItem(item->id(), event_flags,
+
+    // Avoid using |item->id()| as the parameter. In some rare situations,
+    // activating the item may destruct it. Using the reference to an object
+    // which may be destroyed during the procedure as the function parameter
+    // may bring the crash like https://crbug.com/990282.
+    const std::string id = item->id();
+    delegate_->ActivateItem(id, event_flags,
                             ash::AppListLaunchedFrom::kLaunchedFromGrid);
   }
 }
@@ -165,6 +157,16 @@ void AppListMainView::OnResultInstalled(SearchResult* result) {
   // Clears the search to show the apps grid. The last installed app
   // should be highlighted and made visible already.
   search_box_view_->ClearSearch();
+}
+
+// AppListModelObserver overrides:
+void AppListMainView::OnAppListStateChanged(AppListState new_state,
+                                            AppListState old_state) {
+  if (new_state == AppListState::kStateEmbeddedAssistant) {
+    search_box_view_->SetVisible(false);
+  } else {
+    search_box_view_->SetVisible(true);
+  }
 }
 
 void AppListMainView::QueryChanged(search_box::SearchBoxViewBase* sender) {
@@ -211,14 +213,12 @@ void AppListMainView::SearchBoxFocusChanged(
 
   SearchResultBaseView* first_result_view =
       contents_view_->search_results_page_view()->first_result_view();
-  if (!first_result_view || !first_result_view->background_highlighted())
+  if (!first_result_view || !first_result_view->selected())
     return;
-
-  first_result_view->SetBackgroundHighlighted(false);
+  first_result_view->SetSelected(false, base::nullopt);
 }
 
 void AppListMainView::AssistantButtonPressed() {
-  DCHECK(chromeos::switches::IsAssistantEnabled());
   delegate_->StartAssistant();
 }
 
@@ -227,4 +227,4 @@ void AppListMainView::BackButtonPressed() {
     app_list_view_->Dismiss();
 }
 
-}  // namespace app_list
+}  // namespace ash

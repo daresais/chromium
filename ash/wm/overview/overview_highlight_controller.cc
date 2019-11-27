@@ -4,6 +4,8 @@
 
 #include "ash/wm/overview/overview_highlight_controller.h"
 
+#include "ash/magnifier/docked_magnifier_controller_impl.h"
+#include "ash/magnifier/magnification_controller.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/shell.h"
@@ -12,15 +14,20 @@
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/desks/new_desk_button.h"
 #include "ash/wm/overview/cleanup_animation_observer.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_delegate.h"
 #include "ash/wm/overview/overview_grid.h"
 #include "ash/wm/overview/overview_item.h"
+#include "ash/wm/overview/overview_item_view.h"
 #include "ash/wm/overview/overview_session.h"
 #include "ash/wm/overview/overview_utils.h"
 #include "ash/wm/overview/scoped_overview_animation_settings.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/compositor_extra/shadow.h"
+#include "ui/gfx/transform_util.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/window_animations.h"
 #include "ui/wm/core/window_properties.h"
 
@@ -82,28 +89,34 @@ bool ShouldCreateHighlight(
 // avoid animating two separate layers.
 class OverviewHighlightController::HighlightWidget : public views::Widget {
  public:
-  HighlightWidget(aura::Window* root_window, const gfx::Rect& bounds) {
+  HighlightWidget(aura::Window* root_window,
+                  const gfx::Rect& bounds_in_screen,
+                  const gfx::RoundedCornersF& rounded_corners)
+      : root_window_(root_window) {
     DCHECK(root_window->IsRootWindow());
 
     views::Widget::InitParams params;
     params.type = views::Widget::InitParams::TYPE_POPUP;
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
     params.layer_type = ui::LAYER_NOT_DRAWN;
     params.accept_events = false;
     params.parent =
         root_window->GetChildById(kShellWindowId_WallpaperContainer);
+    params.init_properties_container.SetProperty(kHideInDeskMiniViewKey, true);
     set_focus_on_creation(false);
-    Init(params);
+    Init(std::move(params));
 
     aura::Window* widget_window = GetNativeWindow();
-    widget_window->SetProperty(kHideInDeskMiniViewKey, true);
     // Disable the "bounce in" animation when showing the window.
     ::wm::SetWindowVisibilityAnimationTransition(widget_window,
                                                  ::wm::ANIMATE_NONE);
     // Set the opacity to 0 initial so we can fade it in.
     SetOpacity(0.f);
     Show();
+
+    gfx::Rect bounds = bounds_in_screen;
+    wm::ConvertRectFromScreen(root_window_, &bounds);
 
     widget_window->SetBounds(bounds);
     widget_window->SetName("OverviewModeHighlight");
@@ -119,7 +132,7 @@ class OverviewHighlightController::HighlightWidget : public views::Widget {
     // Add rounded corner solid color layer.
     color_layer_ = new ui::Layer(ui::LAYER_SOLID_COLOR);
     color_layer_->SetColor(kHighlightColor);
-    color_layer_->SetRoundedCornerRadius(kHighlightCornerRadii);
+    color_layer_->SetRoundedCornerRadius(rounded_corners);
     color_layer_->SetVisible(true);
     color_layer_->SetBounds(gfx::Rect(bounds.size()));
     widget_window->layer()->Add(color_layer_);
@@ -129,19 +142,76 @@ class OverviewHighlightController::HighlightWidget : public views::Widget {
 
   // Set the bounds of |this|, and also manually sets the bounds of the
   // children, because there is no masks to bounds.
-  void SetWidgetBounds(const gfx::Rect& bounds) {
-    SetBounds(bounds);
-    const gfx::Rect child_bounds(bounds.size());
+  void SetWidgetBoundsInScreen(const gfx::Rect& bounds) {
+    gfx::Rect bounds_in_root = bounds;
+    wm::ConvertRectFromScreen(root_window_, &bounds_in_root);
+    SetBounds(bounds_in_root);
+    const gfx::Rect child_bounds(bounds_in_root.size());
     shadow_layer_->SetContentBounds(child_bounds);
     color_layer_->SetBounds(child_bounds);
   }
 
  private:
+  aura::Window* root_window_;
+
   ui::Shadow* shadow_layer_ = nullptr;
   ui::Layer* color_layer_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(HighlightWidget);
 };
+
+gfx::RoundedCornersF
+OverviewHighlightController::OverviewHighlightableView::GetRoundedCornersRadii()
+    const {
+  return kHighlightCornerRadii;
+}
+
+bool OverviewHighlightController::OverviewHighlightableView::
+    OnViewHighlighted() {
+  return false;
+}
+
+void OverviewHighlightController::OverviewHighlightableView::
+    OnViewUnhighlighted() {}
+
+bool OverviewHighlightController::OverviewHighlightableView::
+    IsViewHighlighted() {
+  auto* overview_session =
+      Shell::Get()->overview_controller()->overview_session();
+  DCHECK(overview_session);
+  return overview_session->highlight_controller()->highlighted_view_ == this;
+}
+
+gfx::Point OverviewHighlightController::OverviewHighlightableView::
+    GetMagnifierFocusPointInScreen() {
+  return GetHighlightBoundsInScreen().CenterPoint();
+}
+
+// -----------------------------------------------------------------------------
+// OverviewHighlightController::TestApi
+
+OverviewHighlightController::TestApi::TestApi(
+    OverviewHighlightController* highlight_controller)
+    : highlight_controller_(highlight_controller) {}
+
+OverviewHighlightController::TestApi::~TestApi() = default;
+
+gfx::Rect OverviewHighlightController::TestApi::GetHighlightBoundsInScreen()
+    const {
+  if (!GetHighlightWidget())
+    return gfx::Rect();
+  return GetHighlightWidget()->GetNativeWindow()->GetBoundsInScreen();
+}
+
+OverviewHighlightController::OverviewHighlightableView*
+OverviewHighlightController::TestApi::GetHighlightView() const {
+  return highlight_controller_->highlighted_view_;
+}
+
+OverviewHighlightController::HighlightWidget*
+OverviewHighlightController::TestApi::GetHighlightWidget() const {
+  return highlight_controller_->highlight_widget_.get();
+}
 
 // -----------------------------------------------------------------------------
 // OverviewHighlightController
@@ -183,7 +253,7 @@ void OverviewHighlightController::MoveHighlight(bool reverse) {
   UpdateFocusWidget(traversable_views[index], reverse);
 }
 
-void OverviewHighlightController::OnViewDestroying(
+void OverviewHighlightController::OnViewDestroyingOrDisabling(
     OverviewHighlightableView* view) {
   DCHECK(view);
   if (view != highlighted_view_)
@@ -198,6 +268,7 @@ void OverviewHighlightController::OnViewDestroying(
   DCHECK_GE(current_index, 0);
   deleted_index_ = base::make_optional(current_index);
   highlight_widget_.reset();
+  highlighted_view_->OnViewUnhighlighted();
   highlighted_view_ = nullptr;
 }
 
@@ -215,13 +286,29 @@ bool OverviewHighlightController::IsFocusHighlightVisible() const {
   return highlight_widget_ && highlight_widget_->IsVisible();
 }
 
+bool OverviewHighlightController::MaybeActivateHighlightedView() {
+  if (!highlighted_view_)
+    return false;
+
+  highlighted_view_->MaybeActivateHighlightedView();
+  return true;
+}
+
+bool OverviewHighlightController::MaybeCloseHighlightedView() {
+  if (!highlighted_view_)
+    return false;
+
+  highlighted_view_->MaybeCloseHighlightedView();
+  return true;
+}
+
 OverviewItem* OverviewHighlightController::GetHighlightedItem() const {
   if (!highlighted_view_)
     return nullptr;
 
   for (auto& grid : overview_session_->grid_list()) {
     for (auto& item : grid->window_list()) {
-      if (highlighted_view_->GetView() == item->caption_container_view())
+      if (highlighted_view_->GetView() == item->overview_item_view())
         return item.get();
     }
   }
@@ -235,14 +322,15 @@ void OverviewHighlightController::ClearTabDragHighlight() {
 
 void OverviewHighlightController::UpdateTabDragHighlight(
     aura::Window* root_window,
-    const gfx::Rect& bounds) {
+    const gfx::Rect& bounds_in_screen) {
   DCHECK(root_window);
-  DCHECK(!bounds.IsEmpty());
+  DCHECK(!bounds_in_screen.IsEmpty());
   if (tab_drag_widget_) {
-    tab_drag_widget_->SetWidgetBounds(bounds);
+    tab_drag_widget_->SetWidgetBoundsInScreen(bounds_in_screen);
     return;
   }
-  tab_drag_widget_ = std::make_unique<HighlightWidget>(root_window, bounds);
+  tab_drag_widget_ = std::make_unique<HighlightWidget>(
+      root_window, bounds_in_screen, kHighlightCornerRadii);
   tab_drag_widget_->SetOpacity(1.f);
 }
 
@@ -260,7 +348,8 @@ void OverviewHighlightController::OnWindowsRepositioned(
     return;
 
   DCHECK(highlighted_view_);
-  highlight_widget_->SetWidgetBounds(highlighted_view_->GetHighlightBounds());
+  highlight_widget_->SetWidgetBoundsInScreen(
+      highlighted_view_->GetHighlightBoundsInScreen());
 }
 
 std::vector<OverviewHighlightController::OverviewHighlightableView*>
@@ -276,11 +365,13 @@ OverviewHighlightController::GetTraversableViews() const {
       // languages.
       for (const auto& mini_view : bar_view->mini_views())
         traversable_views.push_back(mini_view.get());
-      traversable_views.push_back(bar_view->new_desk_button());
+
+      if (bar_view->new_desk_button()->GetEnabled())
+        traversable_views.push_back(bar_view->new_desk_button());
     }
 
     for (auto& item : grid->window_list())
-      traversable_views.push_back(item->caption_container_view());
+      traversable_views.push_back(item->overview_item_view());
   }
   return traversable_views;
 }
@@ -293,8 +384,26 @@ void OverviewHighlightController::UpdateFocusWidget(
 
   OverviewHighlightableView* previous_view = highlighted_view_;
   highlighted_view_ = view_to_be_highlighted;
+
+  // Perform accessibility related tasks.
   highlighted_view_->GetView()->NotifyAccessibilityEvent(
       ax::mojom::Event::kSelection, true);
+  // Note that both magnifiers are mutually exclusive. The overview "focus"
+  // works differently from regular focusing so we need to update the magnifier
+  // manually here.
+  DockedMagnifierControllerImpl* docked_magnifier =
+      Shell::Get()->docked_magnifier_controller();
+  MagnificationController* fullscreen_magnifier =
+      Shell::Get()->magnification_controller();
+  const gfx::Point point_of_interest =
+      highlighted_view_->GetMagnifierFocusPointInScreen();
+  if (docked_magnifier->GetEnabled())
+    docked_magnifier->CenterOnPoint(point_of_interest);
+  else if (fullscreen_magnifier->IsEnabled())
+    fullscreen_magnifier->CenterOnPoint(point_of_interest);
+
+  if (previous_view)
+    previous_view->OnViewUnhighlighted();
 
   const bool create_highlight =
       ShouldCreateHighlight(previous_view, highlighted_view_, reverse);
@@ -321,28 +430,28 @@ void OverviewHighlightController::UpdateFocusWidget(
     old_highlight_window->SetTransform(transform);
   }
 
-  gfx::Rect target_bounds = highlighted_view_->GetHighlightBounds();
+  if (highlighted_view_->OnViewHighlighted())
+    return;
+
+  gfx::Rect target_screen_bounds =
+      highlighted_view_->GetHighlightBoundsInScreen();
   if (!highlight_widget_) {
     // Offset the bounds slightly to create a slide in animation.
-    gfx::Rect initial_bounds = target_bounds;
-    initial_bounds.Offset(target_bounds.width() * (reverse ? 1 : -1), 0);
+    gfx::Rect initial_bounds = target_screen_bounds;
+    initial_bounds.Offset(target_screen_bounds.width() * (reverse ? 1 : -1), 0);
     highlight_widget_ = std::make_unique<HighlightWidget>(
         GetWindowForView(highlighted_view_->GetView())->GetRootWindow(),
-        initial_bounds);
+        initial_bounds, highlighted_view_->GetRoundedCornersRadii());
   }
 
   // Move the highlight to the target.
   aura::Window* highlight_window = highlight_widget_->GetNativeWindow();
   gfx::RectF previous_bounds =
-      gfx::RectF(highlight_window->GetBoundsInRootWindow());
-  highlight_widget_->SetWidgetBounds(target_bounds);
-  gfx::RectF current_bounds = gfx::RectF(target_bounds);
-  gfx::Transform transform(previous_bounds.width() / current_bounds.width(),
-                           0.f, 0.f,
-                           previous_bounds.height() / current_bounds.height(),
-                           previous_bounds.x() - current_bounds.x(),
-                           previous_bounds.y() - current_bounds.y());
-  highlight_window->SetTransform(transform);
+      gfx::RectF(highlight_window->GetBoundsInScreen());
+  highlight_widget_->SetWidgetBoundsInScreen(target_screen_bounds);
+  const gfx::RectF current_bounds = gfx::RectF(target_screen_bounds);
+  highlight_window->SetTransform(
+      gfx::TransformBetweenRects(current_bounds, previous_bounds));
   ScopedOverviewAnimationSettings settings(OVERVIEW_ANIMATION_SELECTION_WINDOW,
                                            highlight_window);
   highlight_window->SetTransform(gfx::Transform());

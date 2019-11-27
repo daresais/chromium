@@ -58,8 +58,6 @@
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/about_signin_internals.h"
-#include "components/signin/core/browser/signin_header_helper.h"
-#include "components/signin/core/browser/signin_investigator.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
@@ -251,7 +249,7 @@ void OnSyncSetupComplete(Profile* profile,
                          const std::string& username,
                          const std::string& password) {
   DCHECK(signin_util::IsForceSigninEnabled());
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   bool has_primary_account = identity_manager->HasPrimaryAccount();
   if (has_primary_account && !password.empty()) {
@@ -260,7 +258,7 @@ void OnSyncSetupComplete(Profile* profile,
                                             ServiceAccessType::EXPLICIT_ACCESS);
     password_store->SaveGaiaPasswordHash(
         username, base::UTF8ToUTF16(password),
-        password_manager::metrics_util::SyncPasswordHashChange::
+        password_manager::metrics_util::GaiaPasswordHashChange::
             SAVED_ON_CHROME_SIGNIN);
 
     if (profiles::IsLockAvailable(profile))
@@ -358,7 +356,7 @@ void InlineSigninHelper::OnClientOAuthSuccessAndBrowserOpened(
       AboutSigninInternalsFactory::GetForProfile(profile_);
   about_signin_internals->OnRefreshTokenReceived("Successful");
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile_);
 
   std::string primary_email = identity_manager->GetPrimaryAccountInfo().email;
@@ -376,7 +374,7 @@ void InlineSigninHelper::OnClientOAuthSuccessAndBrowserOpened(
     if (password_store && !primary_email.empty()) {
       password_store->SaveGaiaPasswordHash(
           primary_email, base::UTF8ToUTF16(password_),
-          password_manager::metrics_util::SyncPasswordHashChange::
+          password_manager::metrics_util::GaiaPasswordHashChange::
               SAVED_ON_CHROME_SIGNIN);
     }
   }
@@ -442,7 +440,7 @@ void InlineSigninHelper::UntrustedSigninConfirmed(
 
 void InlineSigninHelper::CreateSyncStarter(const std::string& refresh_token) {
   DCHECK(signin_util::IsForceSigninEnabled());
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile_);
   if (identity_manager->HasPrimaryAccount()) {
     // Already signed in, nothing to do.
@@ -450,7 +448,7 @@ void InlineSigninHelper::CreateSyncStarter(const std::string& refresh_token) {
   }
 
   Browser* browser = chrome::FindLastActiveWithProfile(profile_);
-  std::string account_id =
+  CoreAccountId account_id =
       identity_manager->GetAccountsMutator()->AddOrUpdateAccount(
           gaia_id_, email_, refresh_token,
           /*is_under_advanced_protection=*/false,

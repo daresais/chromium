@@ -13,14 +13,15 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.permissions.AndroidPermissionRequester;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.download.DownloadCollectionBridge;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.WebContents;
@@ -65,17 +66,9 @@ public class DownloadController {
     }
 
     private static DownloadNotificationService sDownloadNotificationService;
-    private static Boolean sEnableNewDownloadBackendForTesting;
-
-    /** For testing only. */
-    public static void enableNewDownloadBackendForTesting(boolean enabled) {
-        sEnableNewDownloadBackendForTesting = enabled;
-    }
 
     public static void setDownloadNotificationService(DownloadNotificationService service) {
-        if ((sEnableNewDownloadBackendForTesting != null && sEnableNewDownloadBackendForTesting)
-                || ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.DOWNLOAD_OFFLINE_CONTENT_PROVIDER)) {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOAD_OFFLINE_CONTENT_PROVIDER)) {
             return;
         }
 
@@ -150,7 +143,8 @@ public class DownloadController {
     @CalledByNative
     private static void requestFileAccess(final long callbackId) {
         requestFileAccessPermissionHelper(result -> {
-            nativeOnAcquirePermissionResult(callbackId, result.first, result.second);
+            DownloadControllerJni.get().onAcquirePermissionResult(
+                    callbackId, result.first, result.second);
         });
     }
 
@@ -289,7 +283,8 @@ public class DownloadController {
         return false;
     }
 
-    // native methods
-    private static native void nativeOnAcquirePermissionResult(
-            long callbackId, boolean granted, String permissionToUpdate);
+    @NativeMethods
+    interface Natives {
+        void onAcquirePermissionResult(long callbackId, boolean granted, String permissionToUpdate);
+    }
 }

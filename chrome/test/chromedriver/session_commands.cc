@@ -31,13 +31,14 @@
 #include "chrome/test/chromedriver/chrome/geoposition.h"
 #include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/chrome/version.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
 #include "chrome/test/chromedriver/chrome_launcher.h"
 #include "chrome/test/chromedriver/command_listener.h"
+#include "chrome/test/chromedriver/constants/version.h"
 #include "chrome/test/chromedriver/logging.h"
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/util.h"
-#include "chrome/test/chromedriver/version.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace {
@@ -87,26 +88,27 @@ InitSessionParams::~InitSessionParams() {}
 bool GetW3CSetting(const base::DictionaryValue& params) {
   bool w3c;
   const base::ListValue* list;
-  const base::DictionaryValue* dict;
+  const base::DictionaryValue* caps_dict;
+  const base::DictionaryValue* options_dict;
 
-  if (params.GetDictionary("capabilities.alwaysMatch", &dict)) {
-    if (dict->GetBoolean("goog:chromeOptions.w3c", &w3c) ||
-        dict->GetBoolean("chromeOptions.w3c", &w3c)) {
+  if (params.GetDictionary("capabilities.alwaysMatch", &caps_dict)) {
+    if (GetChromeOptionsDictionary(*caps_dict, &options_dict) &&
+        options_dict->GetBoolean("w3c", &w3c)) {
       return w3c;
     }
   }
 
   if (params.GetList("capabilities.firstMatch", &list) &&
-      list->GetDictionary(0, &dict)) {
-    if (dict->GetBoolean("goog:chromeOptions.w3c", &w3c) ||
-        dict->GetBoolean("chromeOptions.w3c", &w3c)) {
+      list->GetDictionary(0, &caps_dict)) {
+    if (GetChromeOptionsDictionary(*caps_dict, &options_dict) &&
+        options_dict->GetBoolean("w3c", &w3c)) {
       return w3c;
     }
   }
 
-  if (params.GetDictionary("desiredCapabilities", &dict)) {
-    if (dict->GetBoolean("goog:chromeOptions.w3c", &w3c) ||
-        dict->GetBoolean("chromeOptions.w3c", &w3c)) {
+  if (params.GetDictionary("desiredCapabilities", &caps_dict)) {
+    if (GetChromeOptionsDictionary(*caps_dict, &options_dict) &&
+        options_dict->GetBoolean("w3c", &w3c)) {
       return w3c;
     }
   }
@@ -131,15 +133,17 @@ std::unique_ptr<base::DictionaryValue> CreateCapabilities(
 
   // Capabilities defined by W3C. Some of these capabilities have different
   // names in legacy mode.
-  caps->SetString("browserName", "chrome");
+  caps->SetString("browserName", base::ToLowerASCII(kBrowserShortName));
   caps->SetString(session->w3c_compliant ? "browserVersion" : "version",
                   session->chrome->GetBrowserInfo()->browser_version);
-  if (session->w3c_compliant)
-    caps->SetString(
-        "platformName",
-        base::ToLowerASCII(session->chrome->GetOperatingSystemName()));
-  else
-    caps->SetString("platform", session->chrome->GetOperatingSystemName());
+  std::string operatingSystemName = session->chrome->GetOperatingSystemName();
+  if (operatingSystemName.find("Windows") != std::string::npos)
+    operatingSystemName = "Windows";
+  if (session->w3c_compliant) {
+    caps->SetString("platformName", base::ToLowerASCII(operatingSystemName));
+  } else {
+    caps->SetString("platform", operatingSystemName);
+  }
   caps->SetString("pageLoadStrategy", session->chrome->page_load_strategy());
   caps->SetBoolean("acceptInsecureCerts", capabilities.accept_insecure_certs);
   const base::Value* proxy = desired_caps.FindKey("proxy");
@@ -169,14 +173,21 @@ std::unique_ptr<base::DictionaryValue> CreateCapabilities(
                   session->unhandled_prompt_behavior);
 
   // Chrome-specific extensions.
-  caps->SetString("chrome.chromedriverVersion", kChromeDriverVersion);
-  caps->SetString(
-      "goog:chromeOptions.debuggerAddress",
-      session->chrome->GetBrowserInfo()->debugger_address.ToString());
+  const std::string chromedriverVersionKey = base::StringPrintf(
+      "%s.%sVersion", base::ToLowerASCII(kBrowserShortName).c_str(),
+      base::ToLowerASCII(kChromeDriverProductShortName).c_str());
+  caps->SetString(chromedriverVersionKey, kChromeDriverVersion);
+  const std::string debuggerAddressKey =
+      base::StringPrintf("%s.debuggerAddress", kChromeDriverOptionsKeyPrefixed);
+  caps->SetString(debuggerAddressKey, session->chrome->GetBrowserInfo()
+                                          ->debugger_endpoint.Address()
+                                          .ToString());
   ChromeDesktopImpl* desktop = NULL;
   Status status = session->chrome->GetAsDesktop(&desktop);
   if (status.IsOk()) {
-    caps->SetString("chrome.userDataDir",
+    const std::string userDataDirKey = base::StringPrintf(
+        "%s.userDataDir", base::ToLowerASCII(kBrowserShortName).c_str());
+    caps->SetString(userDataDirKey,
                     desktop->command().GetSwitchValueNative("user-data-dir"));
     caps->SetBoolean("networkConnectionEnabled",
                      desktop->IsNetworkConnectionEnabled());
@@ -235,46 +246,14 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
                          Session* session,
                          const base::DictionaryValue& params,
                          std::unique_ptr<base::Value>* value) {
-  session->driver_log.reset(
-      new WebDriverLog(WebDriverLog::kDriverType, Log::kAll));
   const base::DictionaryValue* desired_caps;
   base::DictionaryValue merged_caps;
 
-  session->w3c_compliant = GetW3CSetting(params);
-  if (session->w3c_compliant) {
-    Status status = ProcessCapabilities(params, &merged_caps);
-    if (status.IsError())
-      return status;
-    desired_caps = &merged_caps;
-  } else if (!params.GetDictionary("desiredCapabilities", &desired_caps)) {
-    return Status(kSessionNotCreated,
-                  "Missing or invalid capabilities");
-  }
-
   Capabilities capabilities;
-  Status status = capabilities.Parse(*desired_caps, session->w3c_compliant);
+  Status status = internal::ConfigureSession(session, params, &desired_caps,
+                                             &merged_caps, &capabilities);
   if (status.IsError())
     return status;
-
-  if (capabilities.unhandled_prompt_behavior.length() > 0) {
-    session->unhandled_prompt_behavior = capabilities.unhandled_prompt_behavior;
-  } else {
-    // W3C spec (https://www.w3.org/TR/webdriver/#dfn-handle-any-user-prompts)
-    // shows the default behavior to be dismiss and notify. For backward
-    // compatibility, in legacy mode default behavior is not handling prompt.
-    session->unhandled_prompt_behavior =
-        session->w3c_compliant ? kDismissAndNotify : kIgnore;
-  }
-
-  session->implicit_wait = capabilities.implicit_wait_timeout;
-  session->page_load_timeout = capabilities.page_load_timeout;
-  session->script_timeout = capabilities.script_timeout;
-  session->strict_file_interactability =
-        capabilities.strict_file_interactability;
-  Log::Level driver_level = Log::kWarning;
-  if (capabilities.logging_prefs.count(WebDriverLog::kDriverType))
-    driver_level = capabilities.logging_prefs[WebDriverLog::kDriverType];
-  session->driver_log->set_min_level(driver_level);
 
   // Create Log's and DevToolsEventListener's for ones that are DevTools-based.
   // Session will own the Log's, Chrome will own the listeners.
@@ -314,18 +293,7 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   session->capabilities =
       CreateCapabilities(session, capabilities, *desired_caps);
 
-  std::string download_directory;
-  if (capabilities.prefs &&
-      capabilities.prefs->GetString("download.default_directory",
-                                    &download_directory))
-    session->headless_download_directory =
-        std::make_unique<std::string>(download_directory);
-  else
-    session->headless_download_directory = std::make_unique<std::string>(".");
-  WebView* first_view;
-  session->chrome->GetWebViewById(session->window, &first_view);
-  status = first_view->OverrideDownloadDirectoryIfNeeded(
-      *session->headless_download_directory);
+  status = internal::ConfigureHeadlessSession(session, capabilities);
   if (status.IsError())
     return status;
 
@@ -344,6 +312,79 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
 }
 
 }  // namespace
+
+namespace internal {
+
+Status ConfigureSession(Session* session,
+                        const base::DictionaryValue& params,
+                        const base::DictionaryValue** desired_caps,
+                        base::DictionaryValue* merged_caps,
+                        Capabilities* capabilities) {
+  session->driver_log.reset(
+      new WebDriverLog(WebDriverLog::kDriverType, Log::kAll));
+
+  session->w3c_compliant = GetW3CSetting(params);
+  if (session->w3c_compliant) {
+    Status status = ProcessCapabilities(params, merged_caps);
+    if (status.IsError())
+      return status;
+    *desired_caps = merged_caps;
+  } else if (!params.GetDictionary("desiredCapabilities", desired_caps)) {
+    return Status(kSessionNotCreated, "Missing or invalid capabilities");
+  }
+
+  Status status = capabilities->Parse(**desired_caps, session->w3c_compliant);
+  if (status.IsError())
+    return status;
+
+  if (capabilities->unhandled_prompt_behavior.length() > 0) {
+    session->unhandled_prompt_behavior =
+        capabilities->unhandled_prompt_behavior;
+  } else {
+    // W3C spec (https://www.w3.org/TR/webdriver/#dfn-handle-any-user-prompts)
+    // shows the default behavior to be dismiss and notify. For backward
+    // compatibility, in legacy mode default behavior is not handling prompt.
+    session->unhandled_prompt_behavior =
+        session->w3c_compliant ? kDismissAndNotify : kIgnore;
+  }
+
+  session->implicit_wait = capabilities->implicit_wait_timeout;
+  session->page_load_timeout = capabilities->page_load_timeout;
+  session->script_timeout = capabilities->script_timeout;
+  session->strict_file_interactability =
+      capabilities->strict_file_interactability;
+  Log::Level driver_level = Log::kWarning;
+  if (capabilities->logging_prefs.count(WebDriverLog::kDriverType))
+    driver_level = capabilities->logging_prefs[WebDriverLog::kDriverType];
+  session->driver_log->set_min_level(driver_level);
+
+  return Status(kOk);
+}
+
+Status ConfigureHeadlessSession(Session* session,
+                                const Capabilities& capabilities) {
+  if (session->chrome->GetBrowserInfo()->is_headless) {
+    std::string download_directory;
+    if (capabilities.prefs &&
+        (capabilities.prefs->GetString("download.default_directory",
+                                       &download_directory) ||
+         capabilities.prefs->GetStringWithoutPathExpansion(
+             "download.default_directory", &download_directory)))
+      session->headless_download_directory =
+          std::make_unique<std::string>(download_directory);
+    else
+      session->headless_download_directory = std::make_unique<std::string>(".");
+    WebView* first_view;
+    session->chrome->GetWebViewById(session->window, &first_view);
+    Status status = first_view->OverrideDownloadDirectoryIfNeeded(
+        *session->headless_download_directory);
+    return status;
+  }
+  // session is not headless
+  return Status(kOk);
+}
+
+}  // namespace internal
 
 bool MergeCapabilities(const base::DictionaryValue* always_match,
                        const base::DictionaryValue* first_match,
@@ -375,7 +416,7 @@ bool MergeCapabilities(const base::DictionaryValue* always_match,
 bool MatchCapabilities(const base::DictionaryValue* capabilities) {
   const base::Value* name;
   if (capabilities->Get("browserName", &name) && !name->is_none()) {
-    if (!(name->is_string() && name->GetString() == "chrome"))
+    if (!(name->is_string() && name->GetString() == kBrowserCapabilityName))
       return false;
   }
 
@@ -384,23 +425,34 @@ bool MatchCapabilities(const base::DictionaryValue* capabilities) {
       !platform_name_value->is_none()) {
     if (platform_name_value->is_string()) {
       std::string requested_platform_name = platform_name_value->GetString();
+      std::string requested_first_token =
+        requested_platform_name.substr(0, requested_platform_name.find(' '));
+
       std::string actual_platform_name =
-          base::ToLowerASCII(base::SysInfo::OperatingSystemName());
-      bool is_android =
-          capabilities->HasKey("goog:chromeOptions.androidPackage");
-      bool is_remote =
-          capabilities->HasKey("goog:chromeOptions.debuggerAddress");
-      if (requested_platform_name == "any" || is_remote) {
-        // "any" can be used as a wild card for platformName
-        // and if |is_remote| there is no easy way to know
-        // target platform, so will skip check
+        base::ToLowerASCII(base::SysInfo::OperatingSystemName());
+      std::string actual_first_token =
+        actual_platform_name.substr(0, actual_platform_name.find(' '));
+
+      const base::DictionaryValue* chrome_options;
+      const bool has_chrome_options =
+          GetChromeOptionsDictionary(*capabilities, &chrome_options);
+
+      bool is_android = has_chrome_options && chrome_options->FindStringKey(
+                                                  "androidPackage") != nullptr;
+      bool is_remote = has_chrome_options && chrome_options->FindStringKey(
+                                                 "debuggerAddress") != nullptr;
+      if (requested_platform_name == "any" || is_remote ||
+          (is_android && requested_platform_name == "android")) {
+        // "any" can be used as a wild card for platformName.
+        // if |is_remote| there is no easy way to know
+        // target platform. Android check also occurs here.
+        // If any of the above cases pass, we return true.
       } else if (is_android && requested_platform_name != "android") {
         return false;
-      } else if (requested_platform_name == "mac" ||
-                 requested_platform_name == "windows" ||
-                 requested_platform_name == "linux") {
-        if (!base::StartsWith(actual_platform_name, requested_platform_name,
-                              base::CompareCase::SENSITIVE))
+      } else if (requested_first_token == "mac" ||
+                 requested_first_token == "windows" ||
+                 requested_first_token == "linux") {
+        if (actual_first_token != requested_first_token)
           return false;
       } else if (requested_platform_name != actual_platform_name) {
         return false;
@@ -722,7 +774,11 @@ Status ExecuteSwitchToWindow(Session* session,
   if (!found)
     return Status(kNoSuchWindow);
 
-  if (session->overridden_geoposition) {
+  if (session->overridden_geoposition ||
+      session->overridden_network_conditions ||
+      session->headless_download_directory ||
+      session->chrome->IsMobileEmulationEnabled()) {
+    // Connect to new window to apply session configuration
     WebView* web_view;
     Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
     if (status.IsError())
@@ -730,36 +786,25 @@ Status ExecuteSwitchToWindow(Session* session,
     status = web_view->ConnectIfNecessary();
     if (status.IsError())
       return status;
-    status = web_view->OverrideGeolocation(*session->overridden_geoposition);
-    if (status.IsError())
-      return status;
-  }
 
-  if (session->overridden_network_conditions) {
-    WebView* web_view;
-    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
-    if (status.IsError())
-      return status;
-    status = web_view->ConnectIfNecessary();
-    if (status.IsError())
-      return status;
-    status = web_view->OverrideNetworkConditions(
-        *session->overridden_network_conditions);
-    if (status.IsError())
-      return status;
-  }
-  if (session->headless_download_directory) {
-    WebView* web_view;
-    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
-    if (status.IsError())
-      return status;
-    status = web_view->ConnectIfNecessary();
-    if (status.IsError())
-      return status;
-    status = web_view->OverrideDownloadDirectoryIfNeeded(
-        *session->headless_download_directory);
-    if (status.IsError())
-      return status;
+    // apply type specific configurations:
+    if (session->overridden_geoposition) {
+      status = web_view->OverrideGeolocation(*session->overridden_geoposition);
+      if (status.IsError())
+        return status;
+    }
+    if (session->overridden_network_conditions) {
+      status = web_view->OverrideNetworkConditions(
+          *session->overridden_network_conditions);
+      if (status.IsError())
+        return status;
+    }
+    if (session->headless_download_directory) {
+      status = web_view->OverrideDownloadDirectoryIfNeeded(
+          *session->headless_download_directory);
+      if (status.IsError())
+        return status;
+    }
   }
 
   status = session->chrome->ActivateWebView(web_view_id);

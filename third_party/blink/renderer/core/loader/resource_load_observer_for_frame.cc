@@ -145,19 +145,23 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
                                                response.RemoteIPAddress());
 
   std::unique_ptr<AlternateSignedExchangeResourceInfo> alternate_resource_info;
-  if (RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
-          &frame_or_imported_document_->GetDocument()) &&
-      response.IsSignedExchangeInnerResponse() &&
-      resource->GetType() == ResourceType::kLinkPrefetch &&
-      resource->LastResourceResponse()) {
-    // If this is a prefetch for a SXG, see if the outer response (which must be
-    // the last response in the redirect chain) had provided alternate links for
-    // the prefetch.
-    alternate_resource_info =
-        AlternateSignedExchangeResourceInfo::CreateIfValid(
-            resource->LastResourceResponse()->HttpHeaderField(
-                http_names::kLink),
-            response.HttpHeaderField(http_names::kLink));
+
+  // See if this is a prefetch for a SXG.
+  if (response.IsSignedExchangeInnerResponse() &&
+      resource->GetType() == ResourceType::kLinkPrefetch) {
+    CountUsage(WebFeature::kLinkRelPrefetchForSignedExchanges);
+
+    if (RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
+            &frame_or_imported_document_->GetDocument()) &&
+        resource->LastResourceResponse()) {
+      // See if the outer response (which must be the last response in
+      // the redirect chain) had provided alternate links for the prefetch.
+      alternate_resource_info =
+          AlternateSignedExchangeResourceInfo::CreateIfValid(
+              resource->LastResourceResponse()->HttpHeaderField(
+                  http_names::kLink),
+              response.HttpHeaderField(http_names::kLink));
+    }
   }
 
   PreloadHelper::CanLoadResources resource_loading_policy =
@@ -169,7 +173,7 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
       frame, &frame_or_imported_document_->GetDocument(),
       resource_loading_policy, PreloadHelper::kLoadAll,
       base::nullopt /* viewport_description */,
-      std::move(alternate_resource_info));
+      std::move(alternate_resource_info), response.RecursivePrefetchToken());
 
   if (response.HasMajorCertificateErrors()) {
     MixedContentChecker::HandleCertificateError(&frame, response,
@@ -177,8 +181,9 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
   }
 
   if (response.IsLegacyTLSVersion()) {
-    CountUsage(WebFeature::kLegacyTLSVersionInSubresource);
-    frame_client->ReportLegacyTLSVersion(response.CurrentRequestUrl());
+    frame.Loader().ReportLegacyTLSVersion(
+        response.CurrentRequestUrl(), true /* is_subresource */,
+        resource->GetResourceRequest().IsAdResource());
   }
 
   frame.Loader().Progress().IncrementProgress(identifier, response);
@@ -245,11 +250,12 @@ void ResourceLoadObserverForFrame::DidFinishLoading(
   document.CheckCompleted();
 }
 
-void ResourceLoadObserverForFrame::DidFailLoading(const KURL&,
-                                                  uint64_t identifier,
-                                                  const ResourceError& error,
-                                                  int64_t,
-                                                  bool is_internal_request) {
+void ResourceLoadObserverForFrame::DidFailLoading(
+    const KURL&,
+    uint64_t identifier,
+    const ResourceError& error,
+    int64_t,
+    IsInternalRequest is_internal_request) {
   LocalFrame& frame = frame_or_imported_document_->GetFrame();
   DocumentLoader& document_loader =
       frame_or_imported_document_->GetMasterDocumentLoader();

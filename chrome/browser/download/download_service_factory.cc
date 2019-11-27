@@ -23,6 +23,7 @@
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/transition_manager/full_browser_transition_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "components/download/content/factory/download_service_factory_helper.h"
@@ -34,7 +35,7 @@
 #include "components/download/public/common/simple_download_manager_coordinator.h"
 #include "components/download/public/task/task_scheduler.h"
 #include "components/keyed_service/core/simple_dependency_manager.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
+#include "components/leveldb_proto/public/proto_database_provider.h"
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -44,7 +45,7 @@
 #include "content/public/browser/storage_partition.h"
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/download/service/download_task_scheduler.h"
+#include "chrome/browser/download/android/service/download_task_scheduler.h"
 #endif
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
@@ -114,7 +115,6 @@ DownloadServiceFactory::DownloadServiceFactory()
                                 SimpleDependencyManager::GetInstance()) {
   DependsOn(SimpleDownloadManagerCoordinatorFactory::GetInstance());
   DependsOn(download::NavigationMonitorFactory::GetInstance());
-  DependsOn(leveldb_proto::ProtoDatabaseProviderFactory::GetInstance());
 }
 
 DownloadServiceFactory::~DownloadServiceFactory() = default;
@@ -122,6 +122,7 @@ DownloadServiceFactory::~DownloadServiceFactory() = default;
 std::unique_ptr<KeyedService> DownloadServiceFactory::BuildServiceInstanceFor(
     SimpleFactoryKey* key) const {
   auto clients = std::make_unique<download::DownloadClientMap>();
+  ProfileKey* profile_key = ProfileKey::FromSimpleFactoryKey(key);
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   // Offline prefetch doesn't support incognito.
@@ -154,8 +155,7 @@ std::unique_ptr<KeyedService> DownloadServiceFactory::BuildServiceInstanceFor(
     auto blob_context_getter_factory =
         std::make_unique<DownloadBlobContextGetterFactory>(key);
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner =
-        base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::IO});
+        base::CreateSingleThreadTaskRunner({content::BrowserThread::IO});
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory =
         SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
 
@@ -171,8 +171,8 @@ std::unique_ptr<KeyedService> DownloadServiceFactory::BuildServiceInstanceFor(
           key->GetPath().Append(chrome::kDownloadServiceStorageDirname);
     }
     scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-        base::CreateSequencedTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
+        base::CreateSequencedTaskRunner({base::ThreadPool(), base::MayBlock(),
+                                         base::TaskPriority::BEST_EFFORT});
 
     std::unique_ptr<download::TaskScheduler> task_scheduler;
 #if defined(OS_ANDROID)
@@ -185,11 +185,13 @@ std::unique_ptr<KeyedService> DownloadServiceFactory::BuildServiceInstanceFor(
     // and cause the download service to fail. Call
     // InitializeSimpleDownloadManager() to initialize the DownloadManager
     // whenever profile becomes available.
-    DownloadManagerUtils::InitializeSimpleDownloadManager(key);
+    DownloadManagerUtils::InitializeSimpleDownloadManager(profile_key);
+    leveldb_proto::ProtoDatabaseProvider* proto_db_provider =
+        profile_key->GetProtoDatabaseProvider();
     return download::BuildDownloadService(
         key, std::move(clients), content::GetNetworkConnectionTracker(),
         storage_dir, SimpleDownloadManagerCoordinatorFactory::GetForKey(key),
-        background_task_runner, std::move(task_scheduler));
+        proto_db_provider, background_task_runner, std::move(task_scheduler));
   }
 }
 

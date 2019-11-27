@@ -1,16 +1,16 @@
 // Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
 package org.chromium.chrome.browser.contextualsearch;
 
 import android.net.Uri;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
-import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.chrome.browser.util.UrlUtilitiesJni;
 
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -234,7 +234,7 @@ class ContextualSearchRequest {
      */
     @VisibleForTesting
     boolean isGoogleUrl(@Nullable String someUrl) {
-        return !TextUtils.isEmpty(someUrl) && UrlUtilities.nativeIsGoogleSubDomainUrl(someUrl);
+        return !TextUtils.isEmpty(someUrl) && UrlUtilitiesJni.get().isGoogleSubDomainUrl(someUrl);
     }
 
     /**

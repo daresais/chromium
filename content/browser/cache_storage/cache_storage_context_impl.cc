@@ -32,9 +32,9 @@ const base::Feature kCacheStorageSequenceFeature{
 
 scoped_refptr<base::SequencedTaskRunner> CreateSchedulerTaskRunner() {
   if (!base::FeatureList::IsEnabled(kCacheStorageSequenceFeature))
-    return base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
-  return base::CreateSequencedTaskRunnerWithTraits(
-      {base::TaskPriority::USER_VISIBLE});
+    return base::CreateSingleThreadTaskRunner({BrowserThread::IO});
+  return base::CreateSequencedTaskRunner(
+      {base::ThreadPool(), base::TaskPriority::USER_VISIBLE});
 }
 
 }  // namespace
@@ -61,8 +61,9 @@ void CacheStorageContextImpl::Init(
   special_storage_policy_ = std::move(special_storage_policy);
 
   scoped_refptr<base::SequencedTaskRunner> cache_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+      base::CreateSequencedTaskRunner(
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
   task_runner_->PostTask(
@@ -77,7 +78,7 @@ void CacheStorageContextImpl::Init(
   // running with a different target sequence then the quota client code will
   // get a cross-sequence wrapper that is guaranteed to initialize its internal
   // SequenceBound<> object after the real manager is created.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&CacheStorageContextImpl::CreateQuotaClientsOnIOThread,
                      base::WrapRefCounted(this),
@@ -92,8 +93,8 @@ void CacheStorageContextImpl::Shutdown() {
       base::BindOnce(&CacheStorageContextImpl::ShutdownOnTaskRunner, this));
 }
 
-void CacheStorageContextImpl::AddBinding(
-    blink::mojom::CacheStorageRequest request,
+void CacheStorageContextImpl::AddReceiver(
+    mojo::PendingReceiver<blink::mojom::CacheStorage> receiver,
     const url::Origin& origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!dispatcher_host_) {
@@ -102,8 +103,8 @@ void CacheStorageContextImpl::AddBinding(
     dispatcher_host_.Post(FROM_HERE, &CacheStorageDispatcherHost::Init,
                           base::RetainedRef(this));
   }
-  dispatcher_host_.Post(FROM_HERE, &CacheStorageDispatcherHost::AddBinding,
-                        std::move(request), origin);
+  dispatcher_host_.Post(FROM_HERE, &CacheStorageDispatcherHost::AddReceiver,
+                        std::move(receiver), origin);
 }
 
 scoped_refptr<CacheStorageManager> CacheStorageContextImpl::CacheManager() {
@@ -127,13 +128,25 @@ void CacheStorageContextImpl::SetBlobParametersForCache(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!blob_storage_context)
     return;
-  // We can only get a WeakPtr to the BlobStorageContext on the IO thread.
-  // Bounce there first before setting the context on the manager.
-  base::PostTaskWithTraits(
+
+  // TODO(enne): this remote will need to be sent to the storage service when
+  // cache storage is moved.
+  mojo::PendingRemote<storage::mojom::BlobStorageContext> remote;
+  auto receiver = remote.InitWithNewPipeAndPassReceiver();
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &CacheStorageContextImpl::SetBlobParametersForCacheOnTaskRunner, this,
+          std::move(remote)));
+
+  // We can only bind a mojo interface for BlobStorageContext on the IO thread.
+  // TODO(enne): clean this up in the future to not require this bounce and
+  // to have this mojo context live on the cache storage sequence.
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(
-          &CacheStorageContextImpl::GetBlobStorageContextWeakPtrOnIOThread,
-          this, base::RetainedRef(blob_storage_context)));
+          &CacheStorageContextImpl::BindBlobStorageMojoContextOnIOThread, this,
+          base::RetainedRef(blob_storage_context), std::move(receiver)));
 }
 
 void CacheStorageContextImpl::GetAllOriginsInfo(
@@ -247,22 +260,23 @@ void CacheStorageContextImpl::ShutdownOnTaskRunner() {
   cache_manager_ = nullptr;
 }
 
-void CacheStorageContextImpl::GetBlobStorageContextWeakPtrOnIOThread(
-    ChromeBlobStorageContext* blob_storage_context) {
+void CacheStorageContextImpl::BindBlobStorageMojoContextOnIOThread(
+    ChromeBlobStorageContext* blob_storage_context,
+    mojo::PendingReceiver<storage::mojom::BlobStorageContext> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(blob_storage_context);
-  task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          &CacheStorageContextImpl::SetBlobParametersForCacheOnTaskRunner, this,
-          blob_storage_context->context()->AsWeakPtr()));
+  DCHECK(receiver.is_valid());
+
+  blob_storage_context->BindMojoContext(std::move(receiver));
 }
 
 void CacheStorageContextImpl::SetBlobParametersForCacheOnTaskRunner(
-    base::WeakPtr<storage::BlobStorageContext> blob_storage_context) {
+    mojo::PendingRemote<storage::mojom::BlobStorageContext> remote) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
-  if (cache_manager_)
-    cache_manager_->SetBlobParametersForCache(blob_storage_context);
+  if (!cache_manager_)
+    return;
+  cache_manager_->SetBlobParametersForCache(
+      base::MakeRefCounted<BlobStorageContextWrapper>(std::move(remote)));
 }
 
 void CacheStorageContextImpl::CreateQuotaClientsOnIOThread(

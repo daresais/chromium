@@ -10,7 +10,6 @@
 
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/signin/core/browser/signin_header_helper.h"
 
 class Profile;
 class ProfileManager;
@@ -23,6 +22,12 @@ namespace profile_metrics {
 enum class BrowserProfileType;
 struct Counts;
 }
+
+#if defined(OS_ANDROID)
+namespace signin {
+enum GAIAServiceType : int;
+}
+#endif  // defined(OS_ANDROID)
 
 class ProfileMetrics {
  public:
@@ -193,8 +198,7 @@ class ProfileMetrics {
   static void LogProfileSwitchGaia(ProfileGaia metric);
   static void LogProfileSyncInfo(ProfileSync metric);
   static void LogProfileAuthResult(ProfileAuth metric);
-  static void LogProfileDesktopMenu(ProfileDesktopMenu metric,
-                                    signin::GAIAServiceType gaia_service);
+  static void LogProfileDesktopMenu(ProfileDesktopMenu metric);
   static void LogProfileDelete(bool profile_was_signed_in);
   static void LogTimeToOpenUserManager(const base::TimeDelta& time_to_open);
 

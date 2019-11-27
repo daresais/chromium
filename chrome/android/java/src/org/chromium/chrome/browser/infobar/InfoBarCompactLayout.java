@@ -7,8 +7,6 @@ package org.chromium.chrome.browser.infobar;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
-import android.support.annotation.ColorRes;
-import android.support.annotation.StringRes;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -19,6 +17,9 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import androidx.annotation.ColorRes;
+import androidx.annotation.StringRes;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
@@ -139,18 +140,27 @@ public class InfoBarCompactLayout extends LinearLayout implements View.OnClickLi
             return this;
         }
 
-        /** The link will be appended after the main message. */
-        public MessageBuilder withLink(@StringRes int textResId, Callback<View> onTapCallback) {
+        /** Appends a link after the main message, its displayed text being the specified string. */
+        public MessageBuilder withLink(CharSequence label, Callback<View> onTapCallback) {
             assert mLink == null;
 
             final Resources resources = mLayout.getResources();
-            String label = resources.getString(textResId);
             SpannableString link = new SpannableString(label);
             link.setSpan(new NoUnderlineClickableSpan(resources, onTapCallback), 0, label.length(),
                     Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
             mLink = link;
 
             return this;
+        }
+
+        /**
+         * Appends a link after the main message, its displayed text being constructed from the
+         * given resource ID.
+         */
+        public MessageBuilder withLink(@StringRes int textResId, Callback<View> onTapCallback) {
+            final Resources resources = mLayout.getResources();
+            String label = resources.getString(textResId);
+            return withLink(label, onTapCallback);
         }
 
         /** Finalizes the message view as set up in the builder and inserts it into the layout. */

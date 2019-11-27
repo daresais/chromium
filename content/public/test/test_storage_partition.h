@@ -10,8 +10,8 @@
 #include "build/build_config.h"
 #include "content/public/browser/storage_partition.h"
 
-namespace net {
-class URLRequestContextGetter;
+namespace leveldb_proto {
+class ProtoDatabaseProvider;
 }
 
 namespace content {
@@ -44,16 +44,6 @@ class TestStoragePartition : public StoragePartition {
   void set_path(base::FilePath file_path) { file_path_ = file_path; }
   base::FilePath GetPath() override;
 
-  void set_url_request_context(net::URLRequestContextGetter* getter) {
-    url_request_context_getter_ = getter;
-  }
-  net::URLRequestContextGetter* GetURLRequestContext() override;
-
-  void set_media_url_request_context(net::URLRequestContextGetter* getter) {
-    media_url_request_context_getter_ = getter;
-  }
-  net::URLRequestContextGetter* GetMediaURLRequestContext() override;
-
   void set_network_context(network::mojom::NetworkContext* context) {
     network_context_ = context;
   }
@@ -73,6 +63,16 @@ class TestStoragePartition : public StoragePartition {
     cookie_manager_for_browser_process_ = cookie_manager_for_browser_process;
   }
   network::mojom::CookieManager* GetCookieManagerForBrowserProcess() override;
+  void CreateRestrictedCookieManager(
+      network::mojom::RestrictedCookieManagerRole role,
+      const url::Origin& origin,
+      const GURL& site_for_cookies,
+      const url::Origin& top_frame_origin,
+      bool is_service_worker,
+      int process_id,
+      int routing_id,
+      mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver)
+      override;
 
   void set_quota_manager(storage::QuotaManager* manager) {
     quota_manager_ = manager;
@@ -142,6 +142,11 @@ class TestStoragePartition : public StoragePartition {
   DevToolsBackgroundServicesContext* GetDevToolsBackgroundServicesContext()
       override;
 
+  leveldb_proto::ProtoDatabaseProvider* GetProtoDatabaseProvider() override;
+  void SetProtoDatabaseProvider(
+      std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> proto_db_provider)
+      override;
+
   void set_content_index_context(ContentIndexContext* context) {
     content_index_context_ = context;
   }
@@ -182,12 +187,6 @@ class TestStoragePartition : public StoragePartition {
                  const base::Time end,
                  base::OnceClosure callback) override;
 
-  void ClearHttpAndMediaCaches(
-      const base::Time begin,
-      const base::Time end,
-      const base::Callback<bool(const GURL&)>& url_matcher,
-      base::OnceClosure callback) override;
-
   void ClearCodeCaches(
       const base::Time begin,
       const base::Time end,
@@ -201,11 +200,10 @@ class TestStoragePartition : public StoragePartition {
   void ClearBluetoothAllowedDevicesMapForTesting() override;
   void FlushNetworkInterfaceForTesting() override;
   void WaitForDeletionTasksForTesting() override;
+  void WaitForCodeCacheShutdownForTesting() override;
 
  private:
   base::FilePath file_path_;
-  net::URLRequestContextGetter* url_request_context_getter_ = nullptr;
-  net::URLRequestContextGetter* media_url_request_context_getter_ = nullptr;
   network::mojom::NetworkContext* network_context_ = nullptr;
   network::mojom::CookieManager* cookie_manager_for_browser_process_ = nullptr;
   storage::QuotaManager* quota_manager_ = nullptr;

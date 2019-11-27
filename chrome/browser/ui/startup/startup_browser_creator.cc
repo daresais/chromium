@@ -23,16 +23,17 @@
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/task/post_task.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/trace_event/trace_event.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/apps/platform_apps/app_load_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -41,10 +42,13 @@
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/common/buildflags.h"
@@ -62,10 +66,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/common/switches.h"
 #include "printing/buildflags/buildflags.h"
@@ -108,43 +108,31 @@ using content::ChildProcessSecurityPolicy;
 namespace {
 
 // Keeps track on which profiles have been launched.
-class ProfileLaunchObserver : public content::NotificationObserver {
+class ProfileLaunchObserver : public ProfileObserver,
+                              public BrowserListObserver {
  public:
-  ProfileLaunchObserver()
-      : profile_to_activate_(NULL),
-        activated_profile_(false) {
-    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                   content::NotificationService::AllSources());
-    registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                   content::NotificationService::AllSources());
+  ProfileLaunchObserver() {
+    BrowserList::AddObserver(this);
   }
-  ~ProfileLaunchObserver() override {}
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    switch (type) {
-      case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-        Profile* profile = content::Source<Profile>(source).ptr();
-        launched_profiles_.erase(profile);
-        opened_profiles_.erase(profile);
-        if (profile == profile_to_activate_)
-          profile_to_activate_ = NULL;
-        // If this profile was the last launched one without an opened window,
-        // then we may be ready to activate |profile_to_activate_|.
-        MaybeActivateProfile();
-        break;
-      }
-      case chrome::NOTIFICATION_BROWSER_OPENED: {
-        Browser* browser = content::Source<Browser>(source).ptr();
-        DCHECK(browser);
-        opened_profiles_.insert(browser->profile());
-        MaybeActivateProfile();
-        break;
-      }
-      default:
-        NOTREACHED();
-    }
+  ~ProfileLaunchObserver() override { BrowserList::RemoveObserver(this); }
+
+  // BrowserListObserver:
+  void OnBrowserAdded(Browser* browser) override {
+    opened_profiles_.insert(browser->profile());
+    MaybeActivateProfile();
+  }
+
+  // ProfileObserver:
+  void OnProfileWillBeDestroyed(Profile* profile) override {
+    observed_profiles_.Remove(profile);
+    launched_profiles_.erase(profile);
+    opened_profiles_.erase(profile);
+    if (profile == profile_to_activate_)
+      profile_to_activate_ = nullptr;
+    // If this profile was the last launched one without an opened window,
+    // then we may be ready to activate |profile_to_activate_|.
+    MaybeActivateProfile();
   }
 
   bool HasBeenLaunched(const Profile* profile) const {
@@ -152,10 +140,12 @@ class ProfileLaunchObserver : public content::NotificationObserver {
   }
 
   void AddLaunched(Profile* profile) {
+    if (!observed_profiles_.IsObserving(profile))
+      observed_profiles_.Add(profile);
     launched_profiles_.insert(profile);
     if (chrome::FindBrowserWithProfile(profile)) {
       // A browser may get opened before we get initialized (e.g., in tests),
-      // so we never see the NOTIFICATION_BROWSER_OPENED for it.
+      // so we never see the OnBrowserAdded() for it.
       opened_profiles_.insert(profile);
     }
   }
@@ -168,6 +158,8 @@ class ProfileLaunchObserver : public content::NotificationObserver {
   bool activated_profile() { return activated_profile_; }
 
   void set_profile_to_activate(Profile* profile) {
+    if (!observed_profiles_.IsObserving(profile))
+      observed_profiles_.Add(profile);
     profile_to_activate_ = profile;
     MaybeActivateProfile();
   }
@@ -186,15 +178,12 @@ class ProfileLaunchObserver : public content::NotificationObserver {
     }
     // Asynchronous post to give a chance to the last window to completely
     // open and activate before trying to activate |profile_to_activate_|.
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&ProfileLaunchObserver::ActivateProfile,
-                       base::Unretained(this)));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(&ProfileLaunchObserver::ActivateProfile,
+                                  base::Unretained(this)));
     // Avoid posting more than once before ActivateProfile gets called.
-    registrar_.Remove(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                      content::NotificationService::AllSources());
-    registrar_.Remove(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                      content::NotificationService::AllSources());
+    observed_profiles_.RemoveAll();
+    BrowserList::RemoveObserver(this);
   }
 
   void ActivateProfile() {
@@ -207,7 +196,7 @@ class ProfileLaunchObserver : public content::NotificationObserver {
       if (browser)
         browser->window()->Activate();
       // No need try to activate this profile again.
-      profile_to_activate_ = NULL;
+      profile_to_activate_ = nullptr;
     }
     // Assign true here, even if no browser was actually activated, so that
     // the test can stop waiting, and fail gracefully when needed.
@@ -222,13 +211,13 @@ class ProfileLaunchObserver : public content::NotificationObserver {
   // |profile_to_activate_|, otherwise, new browser windows being opened will
   // be activated on top of it.
   std::set<const Profile*> opened_profiles_;
-  content::NotificationRegistrar registrar_;
-  // This is NULL until the profile to activate has been chosen. This value,
+  // This is null until the profile to activate has been chosen. This value
   // should only be set once all profiles have been launched, otherwise,
   // activation may not happen after the launch of newer profiles.
-  Profile* profile_to_activate_;
+  Profile* profile_to_activate_ = nullptr;
   // Set once we attempted to activate a profile. We only get one shot at this.
-  bool activated_profile_;
+  bool activated_profile_ = false;
+  ScopedObserver<Profile, ProfileObserver> observed_profiles_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ProfileLaunchObserver);
 };
@@ -323,11 +312,9 @@ bool IsGuestModeEnforced(const base::CommandLine& command_line,
 
 }  // namespace
 
-StartupBrowserCreator::StartupBrowserCreator()
-    : is_default_browser_dialog_suppressed_(false),
-      show_main_browser_window_(true) {}
+StartupBrowserCreator::StartupBrowserCreator() = default;
 
-StartupBrowserCreator::~StartupBrowserCreator() {}
+StartupBrowserCreator::~StartupBrowserCreator() = default;
 
 // static
 bool StartupBrowserCreator::was_restarted_read_ = false;
@@ -477,8 +464,7 @@ SessionStartupPref StartupBrowserCreator::GetSessionStartupPref(
       pref.type = SessionStartupPref::LAST;
   }
 
-  if (pref.type == SessionStartupPref::LAST &&
-      IncognitoModePrefs::ShouldLaunchIncognito(command_line, prefs)) {
+  if (pref.type == SessionStartupPref::LAST && profile->IsOffTheRecord()) {
     // We don't store session information when incognito. If the user has
     // chosen to restore last session and launched incognito, fallback to
     // default launch behavior.
@@ -511,11 +497,11 @@ void StartupBrowserCreator::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   // ProfileManager handles setting this to false for new profiles upon
   // creation.
   registry->RegisterBooleanPref(prefs::kHasSeenWelcomePage, true);
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // This will be set for newly created profiles, and is used to indicate which
   // users went through onboarding with the current experiment group.
   registry->RegisterStringPref(prefs::kNaviOnboardGroup, "");
-#endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#endif  // defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 // static
@@ -692,11 +678,11 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     base::FilePath output_file(
         command_line.GetSwitchValuePath(switches::kDumpBrowserHistograms));
     if (!output_file.empty()) {
-      base::PostTaskWithTraits(
-          FROM_HERE,
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
-          base::BindOnce(&DumpBrowserHistograms, output_file));
+      base::PostTask(FROM_HERE,
+                     {base::ThreadPool(), base::MayBlock(),
+                      base::TaskPriority::BEST_EFFORT,
+                      base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+                     base::BindOnce(&DumpBrowserHistograms, output_file));
     }
     silent_launch = true;
   }
@@ -711,6 +697,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
         command_line.GetSwitchValueASCII(
             switches::kNativeMessagingConnectExtension),
         command_line.GetSwitchValueASCII(switches::kNativeMessagingConnectHost),
+        command_line.GetSwitchValueASCII(switches::kNativeMessagingConnectId),
         last_used_profile);
   }
 #endif

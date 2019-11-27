@@ -8,6 +8,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/origin_trials/trial_token.h"
 #include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
+#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/feature_policy/feature_policy_parser.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -71,12 +72,10 @@ class MockTokenValidator : public TrialTokenValidator {
 
 }  // namespace
 
-class OriginTrialContextTest : public testing::Test,
-                               private ScopedOriginTrialsForTest {
+class OriginTrialContextTest : public testing::Test{
  protected:
   OriginTrialContextTest()
-      : ScopedOriginTrialsForTest(true),
-        token_validator_(new MockTokenValidator),
+      : token_validator_(new MockTokenValidator),
         execution_context_(MakeGarbageCollected<NullExecutionContext>(
             MakeGarbageCollected<OriginTrialContext>(
                 std::unique_ptr<MockTokenValidator>(token_validator_)))),

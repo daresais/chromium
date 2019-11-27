@@ -108,7 +108,7 @@ $ out/Default/bin/run_webview_instrumentation_test_apk \ # Any test runner
 ```sh
 $ out/Default/bin/run_webview_instrumentation_test_apk \ # Any test runner
     # Desired Features; see commandline-flags.md for more information
-    --enable-features="NetworkService,NetworkServiceInProcess" \
+    --enable-features="MyFeature,MyOtherFeature" \
     -f=AwContentsTest#testClearCacheInQuickSuccession
 ```
 
@@ -143,6 +143,9 @@ $ android_webview/tools/run_cts.py \
     --verbose \ # Optional
     -f=android.webkit.cts.WebViewTest#* # Supports similar test filters
 ```
+
+To disable failing CTS tests, please see the cts_config
+[README](../tools/cts_config/README.md) file.
 
 If you'd like to edit these tests, see internal documentation at
 http://go/clank-webview for working with Android checkouts.

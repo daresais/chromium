@@ -43,6 +43,7 @@
 #include "extensions/renderer/guest_view/mime_handler_view/mime_handler_view_container_manager.h"
 #include "extensions/renderer/renderer_extension_registry.h"
 #include "extensions/renderer/script_context.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -53,11 +54,6 @@ using extensions::Extension;
 
 namespace {
 
-bool IsStandaloneExtensionProcess() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      extensions::switches::kExtensionProcess);
-}
-
 void IsGuestViewApiAvailableToScriptContext(
     bool* api_is_available,
     extensions::ScriptContext* context) {
@@ -66,52 +62,14 @@ void IsGuestViewApiAvailableToScriptContext(
   }
 }
 
-// Returns true if the frame is navigating to an URL either into or out of an
-// extension app's extent.
-bool CrossesExtensionExtents(blink::WebLocalFrame* frame,
-                             const GURL& new_url,
-                             bool is_extension_url,
-                             bool is_initial_navigation) {
-  DCHECK(!frame->Parent());
-  GURL old_url(frame->GetDocument().Url());
-
-  extensions::RendererExtensionRegistry* extension_registry =
-      extensions::RendererExtensionRegistry::Get();
-
-  // If old_url is still empty and this is an initial navigation, then this is
-  // a window.open operation.  We should look at the opener URL.  Note that the
-  // opener is a local frame in this case.
-  if (is_initial_navigation && old_url.is_empty() && frame->Opener()) {
-    blink::WebLocalFrame* opener_frame = frame->Opener()->ToWebLocalFrame();
-
-    // We want to compare against the URL that determines the type of
-    // process.  Use the URL of the opener's local frame root, which will
-    // correctly handle any site isolation modes (e.g. --site-per-process).
-    blink::WebLocalFrame* local_root = opener_frame->LocalRoot();
-    old_url = local_root->GetDocument().Url();
-
-    // If we're about to open a normal web page from a same-origin opener stuck
-    // in an extension process (other than the Chrome Web Store), we want to
-    // keep it in process to allow the opener to script it.
-    blink::WebDocument opener_document = opener_frame->GetDocument();
-    blink::WebSecurityOrigin opener_origin =
-        opener_document.GetSecurityOrigin();
-    bool opener_is_extension_url =
-        !opener_origin.IsUnique() && extension_registry->GetExtensionOrAppByURL(
-                                         opener_document.Url()) != nullptr;
-    const Extension* opener_top_extension =
-        extension_registry->GetExtensionOrAppByURL(old_url);
-    bool opener_is_web_store =
-        opener_top_extension &&
-        opener_top_extension->id() == extensions::kWebStoreAppId;
-    if (!is_extension_url && !opener_is_extension_url && !opener_is_web_store &&
-        IsStandaloneExtensionProcess() &&
-        opener_origin.CanRequest(blink::WebURL(new_url)))
-      return false;
-  }
-
-  return extensions::CrossesExtensionProcessBoundary(
-      *extension_registry->GetMainThreadExtensionSet(), old_url, new_url);
+bool ExtensionHasAccessToUrl(const Extension* extension,
+                             int tab_id,
+                             const GURL& url) {
+  return extension->permissions_data()->GetPageAccess(url, tab_id, nullptr) ==
+             extensions::PermissionsData::PageAccess::kAllowed ||
+         extension->permissions_data()->GetContentScriptAccess(url, tab_id,
+                                                               nullptr) ==
+             extensions::PermissionsData::PageAccess::kAllowed;
 }
 
 }  // namespace
@@ -232,10 +190,10 @@ bool ChromeExtensionsRendererClient::AllowPopup() {
     case extensions::Feature::WEB_PAGE_CONTEXT:
     case extensions::Feature::UNBLESSED_EXTENSION_CONTEXT:
     case extensions::Feature::WEBUI_CONTEXT:
-    case extensions::Feature::SERVICE_WORKER_CONTEXT:
     case extensions::Feature::LOCK_SCREEN_EXTENSION_CONTEXT:
       return false;
     case extensions::Feature::BLESSED_EXTENSION_CONTEXT:
+      return !current_context->IsForServiceWorker();
     case extensions::Feature::CONTENT_SCRIPT_CONTEXT:
       return true;
     case extensions::Feature::BLESSED_WEB_PAGE_CONTEXT:
@@ -250,28 +208,60 @@ void ChromeExtensionsRendererClient::WillSendRequest(
     blink::WebLocalFrame* frame,
     ui::PageTransition transition_type,
     const blink::WebURL& url,
+    const blink::WebURL& site_for_cookies,
     const url::Origin* initiator_origin,
     GURL* new_url,
     bool* attach_same_site_cookies) {
+  std::string extension_id;
   if (initiator_origin &&
       initiator_origin->scheme() == extensions::kExtensionScheme) {
+    extension_id = initiator_origin->host();
+  } else {
+    url::Origin site_for_cookies_origin =
+        url::Origin::Create(GURL(site_for_cookies));
+    if (site_for_cookies_origin.scheme() == extensions::kExtensionScheme) {
+      extension_id = site_for_cookies_origin.host();
+    }
+  }
+
+  if (!extension_id.empty()) {
     const extensions::RendererExtensionRegistry* extension_registry =
         extensions::RendererExtensionRegistry::Get();
-    const Extension* extension =
-        extension_registry->GetByID(initiator_origin->host());
+    const Extension* extension = extension_registry->GetByID(extension_id);
     if (extension) {
       int tab_id = extensions::ExtensionFrameHelper::Get(
                        content::RenderFrame::FromWebFrame(frame))
                        ->tab_id();
       GURL request_url(url);
-      if (extension->permissions_data()->GetPageAccess(request_url, tab_id,
-                                                       nullptr) ==
-              extensions::PermissionsData::PageAccess::kAllowed ||
-          extension->permissions_data()->GetContentScriptAccess(
-              request_url, tab_id, nullptr) ==
-              extensions::PermissionsData::PageAccess::kAllowed) {
-        *attach_same_site_cookies = true;
+      bool extension_has_access_to_request_url =
+          ExtensionHasAccessToUrl(extension, tab_id, request_url);
+
+      bool initiator_ok = true;
+      // In the case where the site_for_cookies is an extension URL, we also
+      // want to check that the initiator and the requested URL are same-site,
+      // and that the extension has permission for both the requested URL and
+      // the initiator origin.
+      // Ideally we would walk up the frame tree and check that each ancestor is
+      // first-party to the main frame (treating the extension as "first-party"
+      // to any URLs it has permission for). But for now we make do with just
+      // checking the direct initiator of the request.
+      // We also want to check same-siteness between the initiator and the
+      // requested URL, because setting |attach_same_site_cookies| to true
+      // causes Strict cookies to be attached, and having the initiator be
+      // same-site to the request URL is a requirement for Strict cookies
+      // (see net::cookie_util::ComputeSameSiteContext).
+      if (initiator_origin &&
+          initiator_origin->scheme() != extensions::kExtensionScheme) {
+        initiator_ok =
+            ExtensionHasAccessToUrl(extension, tab_id,
+                                    initiator_origin->GetURL()) &&
+            net::registry_controlled_domains::SameDomainOrHost(
+                request_url, *initiator_origin,
+                net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
       }
+
+      *attach_same_site_cookies =
+          extension_has_access_to_request_url && initiator_ok;
     } else {
       // If there is no extension installed for the origin, it may be from a
       // recently uninstalled extension.  The tabs of such extensions are
@@ -299,39 +289,6 @@ void ChromeExtensionsRendererClient::SetExtensionDispatcherForTest(
 extensions::Dispatcher*
 ChromeExtensionsRendererClient::GetExtensionDispatcherForTest() {
   return extension_dispatcher();
-}
-
-// static
-bool ChromeExtensionsRendererClient::ShouldFork(blink::WebLocalFrame* frame,
-                                                const GURL& url,
-                                                bool is_initial_navigation,
-                                                bool is_server_redirect) {
-  const extensions::RendererExtensionRegistry* extension_registry =
-      extensions::RendererExtensionRegistry::Get();
-
-  // Determine if the new URL is an extension (excluding bookmark apps).
-  const Extension* new_url_extension = extensions::GetNonBookmarkAppExtension(
-      *extension_registry->GetMainThreadExtensionSet(), url);
-  bool is_extension_url = !!new_url_extension;
-
-  // If the navigation would cross an app extent boundary, we also need
-  // to defer to the browser to ensure process isolation.  This is not necessary
-  // for server redirects, which will be transferred to a new process by the
-  // browser process when they are ready to commit.  It is necessary for client
-  // redirects, which won't be transferred in the same way.
-  if (!is_server_redirect &&
-      CrossesExtensionExtents(frame, url, is_extension_url,
-                              is_initial_navigation)) {
-    const Extension* extension =
-        extension_registry->GetExtensionOrAppByURL(url);
-    if (extension && extension->is_app()) {
-      extensions::RecordAppLaunchType(
-          extension_misc::APP_LAUNCH_CONTENT_NAVIGATION, extension->GetType());
-    }
-    return true;
-  }
-
-  return false;
 }
 
 // static

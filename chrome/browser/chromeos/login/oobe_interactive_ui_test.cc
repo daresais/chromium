@@ -1,16 +1,24 @@
+
 // Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "ash/public/cpp/ash_switches.h"
+#include "ash/public/cpp/test/shell_test_api.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/arc/arc_service_launcher.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "build/branding_buildflags.h"
+#include "build/buildflag.h"
+#include "chrome/browser/chrome_browser_main.h"
+#include "chrome/browser/chrome_browser_main_extra_parts.h"
+#include "chrome/browser/chromeos/arc/session/arc_service_launcher.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/extensions/quick_unlock_private/quick_unlock_private_api.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/browser/chromeos/login/screens/recommend_apps/recommend_apps_fetcher.h"
@@ -31,13 +39,14 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/app_downloading_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/assistant_optin_flow_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/recommend_apps_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/terms_of_service_screen_handler.h"
+#include "chromeos/assistant/buildflags.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "chromeos/system/fake_statistics_provider.h"
@@ -50,6 +59,9 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_observer.h"
+#include "ui/display/display_switches.h"
 
 using net::test_server::BasicHttpResponse;
 using net::test_server::HttpRequest;
@@ -74,7 +86,7 @@ std::string ArcStateToString(ArcState arc_state) {
 }
 
 void RunWelcomeScreenChecks() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   constexpr int kNumberOfVideosPlaying = 1;
 #else
   constexpr int kNumberOfVideosPlaying = 0;
@@ -97,8 +109,7 @@ void RunNetworkSelectionScreenChecks() {
       ").disabled");
 }
 
-
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 void RunEulaScreenChecks() {
   // Wait for actual EULA to appear.
   test::OobeJS()
@@ -174,9 +185,7 @@ void HandleArcTermsOfServiceScreen(bool accept_terms) {
   test::OobeJS()
       .CreateEnabledWaiter(true, {"arc-tos-root", "arc-tos-next-button"})
       ->Wait();
-  test::OobeJS().Evaluate(
-      test::GetOobeElementPath({"arc-tos-root", "arc-tos-next-button"}) +
-      ".click()");
+  test::OobeJS().TapOnPath({"arc-tos-root", "arc-tos-next-button"});
   test::OobeJS()
       .CreateVisibilityWaiter(true, {"arc-tos-root", "arc-location-service"})
       ->Wait();
@@ -186,8 +195,7 @@ void HandleArcTermsOfServiceScreen(bool accept_terms) {
 
   const std::string button_to_click =
       accept_terms ? "arc-tos-accept-button" : "arc-tos-skip-button";
-  test::OobeJS().Evaluate(
-      test::GetOobeElementPath({"arc-tos-root", button_to_click}) + ".click()");
+  test::OobeJS().TapOnPath({"arc-tos-root", button_to_click});
 
   OobeScreenExitWaiter(ArcTermsOfServiceScreenView::kScreenId).Wait();
   LOG(INFO) << "OobeInteractiveUITest: 'arc-tos' screen done.";
@@ -276,6 +284,10 @@ void HandleAppDownloadingScreen() {
 // screen is shown, and how the setup progresses after the screen. The actual
 // assistant opt-in flow is tested separately.
 void HandleAssistantOptInScreen() {
+#if !BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+  return;
+#endif
+
   OobeScreenWaiter(AssistantOptInFlowScreenView::kScreenId).Wait();
   LOG(INFO) << "OobeInteractiveUITest: Switched to 'assistant-optin' screen.";
 
@@ -303,7 +315,7 @@ class FakeRecommendAppsFetcher : public RecommendAppsFetcher {
     base::Value app(base::Value::Type::DICTIONARY);
     app.SetKey("package_name", base::Value("test.package"));
     base::Value app_list(base::Value::Type::LIST);
-    app_list.GetList().emplace_back(std::move(app));
+    app_list.Append(std::move(app));
     delegate_->OnLoadSuccess(std::move(app_list));
   }
   void Retry() override { NOTREACHED(); }
@@ -345,6 +357,58 @@ class ScopedQuickUnlockPrivateGetAuthTokenFunctionObserver
       ScopedQuickUnlockPrivateGetAuthTokenFunctionObserver);
 };
 
+// Observes an |aura::Window| to see if the window was visible at some point in
+// time.
+class NativeWindowVisibilityObserver : public aura::WindowObserver {
+ public:
+  NativeWindowVisibilityObserver() = default;
+  // aura::Window will remove observers on destruction.
+  ~NativeWindowVisibilityObserver() override = default;
+
+  void Observe(aura::Window* window) {
+    window_ = window;
+    window_->AddObserver(this);
+  }
+
+  void OnWindowVisibilityChanged(aura::Window* window, bool visible) override {
+    if (visible)
+      was_visible_ = visible;
+  }
+
+  bool was_visible() { return was_visible_; }
+
+ private:
+  // The window was visible at some point in time.
+  bool was_visible_ = false;
+
+  aura::Window* window_;
+
+  DISALLOW_COPY_AND_ASSIGN(NativeWindowVisibilityObserver);
+};
+
+// Sets the |NativeWindowVisibilityObserver| to observe the
+// |LoginDisplayHost|'s |NativeWindow|. This needs to be done in
+// |PostProfileInit()| as the |default_host| will not be initialized before
+// this.
+class NativeWindowVisibilityBrowserMainExtraParts
+    : public ChromeBrowserMainExtraParts {
+ public:
+  NativeWindowVisibilityBrowserMainExtraParts(
+      NativeWindowVisibilityObserver* observer)
+      : observer_(observer) {}
+  ~NativeWindowVisibilityBrowserMainExtraParts() override = default;
+
+  // ChromeBrowserMainExtraParts:
+  void PostProfileInit() override {
+    observer_->Observe(LoginDisplayHost::default_host()->GetNativeWindow());
+  }
+
+ private:
+  NativeWindowVisibilityObserver* observer_;
+
+  DISALLOW_COPY_AND_ASSIGN(NativeWindowVisibilityBrowserMainExtraParts);
+};
+
 class OobeEndToEndTestSetupMixin : public InProcessBrowserTestMixin {
  public:
   struct Parameters {
@@ -374,14 +438,16 @@ class OobeEndToEndTestSetupMixin : public InProcessBrowserTestMixin {
   void SetUp() override {
     LOG(INFO) << "OOBE end-to-end test  started with params "
               << params_.ToString();
-
-    if (params_.arc_state != ArcState::kNotAvailable)
-      feature_list_.InitAndEnableFeature(switches::kAssistantFeature);
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    if (params_.is_tablet)
+    if (params_.is_tablet) {
+      // Makes the device capable to entering tablet mode.
       command_line->AppendSwitch(ash::switches::kAshEnableTabletMode);
+      // Having an active internal display so that tablet mode does not end
+      // on display config change.
+      command_line->AppendSwitch(::switches::kUseFirstDisplayAsInternal);
+    }
 
     if (params_.arc_state != ArcState::kNotAvailable) {
       arc::SetArcAvailableCommandLineForTesting(command_line);
@@ -409,7 +475,7 @@ class OobeEndToEndTestSetupMixin : public InProcessBrowserTestMixin {
 
   void SetUpOnMainThread() override {
     if (params_.is_tablet)
-      TabletModeClient::Get()->OnTabletModeToggled(true);
+      ash::ShellTestApi().SetTabletModeEnabledForTest(true);
 
     if (params_.arc_state != ArcState::kNotAvailable) {
       // Init ArcSessionManager for testing.
@@ -522,7 +588,7 @@ void OobeInteractiveUITest::PerformStepsBeforeEnrollmentCheck() {
   RunNetworkSelectionScreenChecks();
   test::TapNetworkSelectionNext();
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   test::WaitForEulaScreen();
   RunEulaScreenChecks();
   test::TapEulaAccept();
@@ -538,7 +604,7 @@ void OobeInteractiveUITest::PerformSessionSignInSteps(
   WaitForGaiaSignInScreen(test_setup()->arc_state() != ArcState::kNotAvailable);
   LogInAsRegularUser();
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   test::WaitForSyncConsentScreen();
   test::ExitScreenSyncConsent();
 #endif
@@ -581,7 +647,13 @@ void OobeInteractiveUITest::SimpleEndToEnd() {
   WaitForLoginDisplayHostShutdown();
 }
 
-IN_PROC_BROWSER_TEST_P(OobeInteractiveUITest, SimpleEndToEnd) {
+// Timing out on debug bots. crbug.com/1004327
+#if defined(NDEBUG)
+#define MAYBE_SimpleEndToEnd SimpleEndToEnd
+#else
+#define MAYBE_SimpleEndToEnd DISABLED_SimpleEndToEnd
+#endif
+IN_PROC_BROWSER_TEST_P(OobeInteractiveUITest, MAYBE_SimpleEndToEnd) {
   SimpleEndToEnd();
 }
 
@@ -639,7 +711,14 @@ void OobeZeroTouchInteractiveUITest::ZeroTouchEndToEnd() {
   WaitForLoginDisplayHostShutdown();
 }
 
-IN_PROC_BROWSER_TEST_P(OobeZeroTouchInteractiveUITest, EndToEnd) {
+// crbug.com/997987. Disabled in debug since they time out.crbug.com/1004327
+#if defined(MEMORY_SANITIZER) || !defined(NDEBUG)
+#define MAYBE_EndToEnd DISABLED_EndToEnd
+#else
+#define MAYBE_EndToEnd EndToEnd
+#endif
+
+IN_PROC_BROWSER_TEST_P(OobeZeroTouchInteractiveUITest, MAYBE_EndToEnd) {
   ZeroTouchEndToEnd();
 }
 
@@ -660,7 +739,8 @@ class PublicSessionOobeTest
       : PublicSessionOobeTest(false /*requires_terms_of_service*/) {}
 
   explicit PublicSessionOobeTest(bool requires_terms_of_service)
-      : requires_terms_of_service_(requires_terms_of_service) {
+      : requires_terms_of_service_(requires_terms_of_service),
+        observer_(std::make_unique<NativeWindowVisibilityObserver>()) {
     // Prevents Chrome from starting to quit right after login display is
     // finalized.
     login_manager_.set_should_launch_browser(true);
@@ -704,10 +784,25 @@ class PublicSessionOobeTest
     MixinBasedInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
   }
 
+  void CreatedBrowserMainParts(content::BrowserMainParts* parts) override {
+    MixinBasedInProcessBrowserTest::CreatedBrowserMainParts(parts);
+    static_cast<ChromeBrowserMainParts*>(parts)->AddParts(
+        new NativeWindowVisibilityBrowserMainExtraParts(observer_.get()));
+  }
+
+  void TearDownOnMainThread() override {
+    observer_.reset();
+    MixinBasedInProcessBrowserTest::TearDownOnMainThread();
+  }
+
+  bool DialogWasVisible() { return observer_->was_visible(); }
+
   LoginManagerMixin login_manager_{&mixin_host_, {}};
 
  private:
   const bool requires_terms_of_service_;
+
+  std::unique_ptr<NativeWindowVisibilityObserver> observer_;
 
   OobeEndToEndTestSetupMixin setup_{&mixin_host_, nullptr, GetParam()};
   DeviceStateMixin device_state_{
@@ -716,6 +811,8 @@ class PublicSessionOobeTest
 
 IN_PROC_BROWSER_TEST_P(PublicSessionOobeTest, NoTermsOfService) {
   login_manager_.WaitForActiveSession();
+  // Check that the dialog was never shown.
+  EXPECT_FALSE(DialogWasVisible());
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -742,9 +839,10 @@ IN_PROC_BROWSER_TEST_P(PublicSessionWithTermsOfServiceOobeTest,
   OobeScreenWaiter(TermsOfServiceScreenView::kScreenId).Wait();
 
   test::OobeJS()
-      .CreateWaiter(test::GetOobeElementPath({"tos-accept-button"}))
+      .CreateWaiter(
+          test::GetOobeElementPath({"terms-of-service", "acceptButton"}))
       ->Wait();
-  test::OobeJS().ClickOnPath({"tos-accept-button"});
+  test::OobeJS().ClickOnPath({"terms-of-service", "acceptButton"});
 
   OobeScreenExitWaiter(TermsOfServiceScreenView::kScreenId).Wait();
 
@@ -809,13 +907,14 @@ class EphemeralUserOobeTest
       &mixin_host_, DeviceStateMixin::State::OOBE_COMPLETED_CLOUD_ENROLLED};
 };
 
-IN_PROC_BROWSER_TEST_P(EphemeralUserOobeTest, RegularEphemeralUser) {
+// TODO(crbug.com/1004561) Disabled due to flake.
+IN_PROC_BROWSER_TEST_P(EphemeralUserOobeTest, DISABLED_RegularEphemeralUser) {
   ScopedQuickUnlockPrivateGetAuthTokenFunctionObserver get_auth_token_observer;
 
   WaitForGaiaSignInScreen(test_setup()->arc_state() != ArcState::kNotAvailable);
   LogInAsRegularUser();
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   test::WaitForSyncConsentScreen();
   test::ExitScreenSyncConsent();
 #endif

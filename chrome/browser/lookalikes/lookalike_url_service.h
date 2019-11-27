@@ -24,8 +24,6 @@ namespace base {
 class Clock;
 }
 
-namespace lookalikes {
-
 // Returns eTLD+1 of |hostname|. This excludes private registries, and returns
 // "blogspot.com" for "test.blogspot.com" (blogspot.com is listed as a private
 // registry). We do this to be consistent with url_formatter's top domain list
@@ -36,9 +34,10 @@ struct DomainInfo {
   // eTLD+1, used for skeleton and edit distance comparison. Must be ASCII.
   // Empty for non-unique domains, localhost or sites whose eTLD+1 is empty.
   const std::string domain_and_registry;
-  // eTLD+1 without the registry part. For "www.google.com", this will be
-  // "google". Used for edit distance comparisons.
-  // Empty for non-unique domains, localhost or sites whose eTLD+1 is empty.
+  // eTLD+1 without the registry part, and with a trailing period. For
+  // "www.google.com", this will be "google.". Used for edit distance
+  // comparisons. Empty for non-unique domains, localhost or sites whose eTLD+1
+  // is empty.
   const std::string domain_without_registry;
 
   // Result of IDN conversion of domain_and_registry field.
@@ -73,12 +72,12 @@ class LookalikeUrlService : public KeyedService {
 
   static LookalikeUrlService* Get(Profile* profile);
 
-  // Checks whether the engaged site list is recently updated, and triggers
-  // an update to the list if not. This method will not update the contents of
-  // engaged_sites nor call |callback| if an update is not required.  The method
-  // returns whether or not an update was triggered (and thus whether the
-  // callback will be called).
-  bool UpdateEngagedSites(EngagedSitesCallback callback);
+  // Returns whether the engaged site list is recently updated.
+  bool EngagedSitesNeedUpdating();
+
+  // Triggers an update to the engaged sites list and calls |callback| with the
+  // new list once available.
+  void ForceUpdateEngagedSites(EngagedSitesCallback callback);
 
   // Returns the _current_ list of engaged sites, without updating them if
   // they're out of date.
@@ -98,7 +97,5 @@ class LookalikeUrlService : public KeyedService {
 
   DISALLOW_COPY_AND_ASSIGN(LookalikeUrlService);
 };
-
-}  // namespace lookalikes
 
 #endif  // CHROME_BROWSER_LOOKALIKES_LOOKALIKE_URL_SERVICE_H_

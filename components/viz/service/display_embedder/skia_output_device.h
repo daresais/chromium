@@ -5,9 +5,14 @@
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_DEVICE_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_DEVICE_H_
 
+#include <memory>
+#include <vector>
+
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/optional.h"
+#include "build/build_config.h"
 #include "components/viz/service/display/output_surface.h"
 #include "gpu/command_buffer/common/swap_buffers_complete_params.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -19,12 +24,22 @@ class SkSurface;
 
 namespace gfx {
 class ColorSpace;
+class GpuFence;
 class Rect;
 class Size;
 struct PresentationFeedback;
 }  // namespace gfx
 
+// TODO(crbug.com/996004): Remove this once we use BufferQueue SharedImage
+// implementation.
+namespace gl {
+class GLImage;
+}
+
 namespace viz {
+#if defined(OS_WIN)
+class DCLayerOverlay;
+#endif
 
 class SkiaOutputDevice {
  public:
@@ -62,7 +77,7 @@ class SkiaOutputDevice {
   virtual ~SkiaOutputDevice();
 
   // Changes the size of draw surface and invalidates it's contents.
-  virtual void Reshape(const gfx::Size& size,
+  virtual bool Reshape(const gfx::Size& size,
                        float device_scale_factor,
                        const gfx::ColorSpace& color_space,
                        bool has_alpha,
@@ -75,8 +90,19 @@ class SkiaOutputDevice {
                              BufferPresentedCallback feedback,
                              std::vector<ui::LatencyInfo> latency_info);
 
+  // TODO(crbug.com/996004): Should use BufferQueue SharedImage
+  // implementation instead of GLImage.
+  virtual gl::GLImage* GetOverlayImage();
+  virtual std::unique_ptr<gfx::GpuFence> SubmitOverlayGpuFence();
+
   // Set the rectangle that will be drawn into on the surface.
   virtual void SetDrawRectangle(const gfx::Rect& draw_rectangle);
+
+  virtual void SetGpuVSyncEnabled(bool enabled);
+#if defined(OS_WIN)
+  virtual void SetEnableDCLayers(bool enabled);
+  virtual void ScheduleDCLayers(std::vector<DCLayerOverlay> dc_layers);
+#endif
 
   const OutputSurface::Capabilities& capabilities() const {
     return capabilities_;
@@ -115,8 +141,21 @@ class SkiaOutputDevice {
   DidSwapBufferCompleteCallback did_swap_buffer_complete_callback_;
 
   // Only valid between StartSwapBuffers and FinishSwapBuffers.
-  base::Optional<BufferPresentedCallback> feedback_;
-  base::Optional<gpu::SwapBuffersCompleteParams> params_;
+  class SwapInfo {
+   public:
+    SwapInfo(uint64_t swap_id,
+             base::Optional<BufferPresentedCallback> feedback);
+    SwapInfo(SwapInfo&& other);
+    ~SwapInfo();
+    const gpu::SwapBuffersCompleteParams& Complete(gfx::SwapResult result);
+    void CallFeedback();
+
+   private:
+    base::Optional<BufferPresentedCallback> feedback_;
+    gpu::SwapBuffersCompleteParams params_;
+  };
+
+  base::queue<SwapInfo> pending_swaps_;
 
   ui::LatencyTracker latency_tracker_;
 

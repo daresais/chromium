@@ -4,16 +4,22 @@
 
 package org.chromium.chrome.browser.night_mode;
 
+import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.UI_THEME_SETTING_KEY;
+
 import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.os.Build;
-import android.support.annotation.Nullable;
-import android.support.annotation.StyleRes;
 import android.view.ContextThemeWrapper;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.Nullable;
+import androidx.annotation.StyleRes;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.preferences.themes.ThemePreferences;
 
 /**
  * Helper methods for supporting night mode.
@@ -29,6 +35,22 @@ public class NightModeUtils {
     public static boolean isNightModeSupported() {
         if (sNightModeSupportedForTest != null) return sNightModeSupportedForTest;
         return Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT;
+    }
+
+    /**
+     * If the {@link Context} is a ChromeBaseAppCompatActivity, this method will get the
+     * {@link NightModeStateProvider} from the activity. Otherwise, the
+     * {@link GlobalNightModeStateProviderHolder} will be used.
+     * @param context The {@link Context} to get the NightModeStateProvider.
+     * @return Whether or not the night mode is enabled.
+     */
+    public static boolean isInNightMode(Context context) {
+        if (context instanceof ChromeBaseAppCompatActivity) {
+            return ((ChromeBaseAppCompatActivity) context)
+                    .getNightModeStateProvider()
+                    .isInNightMode();
+        }
+        return GlobalNightModeStateProviderHolder.getInstance().isInNightMode();
     }
 
     /**
@@ -106,6 +128,22 @@ public class NightModeUtils {
         config.uiMode = nightModeFlag | (config.uiMode & ~Configuration.UI_MODE_NIGHT_MASK);
         wrapper.applyOverrideConfiguration(config);
         return wrapper;
+    }
+
+    /**
+     * The current theme setting, reflecting either the user setting or the default if the user has
+     * not explicitly set a preference.
+     * @return The current theme setting. See {@link ThemePreferences.ThemeSetting}.
+     */
+    public static @ThemePreferences.ThemeSetting int getThemeSetting() {
+        int userSetting = SharedPreferencesManager.getInstance().readInt(UI_THEME_SETTING_KEY, -1);
+        if (userSetting == -1) {
+            return FeatureUtilities.isNightModeDefaultToLight()
+                    ? ThemePreferences.ThemeSetting.LIGHT
+                    : ThemePreferences.ThemeSetting.SYSTEM_DEFAULT;
+        } else {
+            return userSetting;
+        }
     }
 
     @VisibleForTesting

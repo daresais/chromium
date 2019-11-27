@@ -29,7 +29,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
+#include "ash/public/cpp/tablet_mode.h"
 #endif
 
 using content::BrowserContext;
@@ -39,6 +39,9 @@ ExtensionDialog::ExtensionDialog(
     std::unique_ptr<extensions::ExtensionViewHost> host,
     ExtensionDialogObserver* observer)
     : host_(std::move(host)), observer_(observer) {
+  DialogDelegate::set_buttons(ui::DIALOG_BUTTON_NONE);
+  DialogDelegate::set_use_custom_frame(false);
+
   AddRef();  // Balanced in DeleteDelegate();
 
   registrar_.Add(this,
@@ -167,16 +170,10 @@ void ExtensionDialog::MaybeFocusRenderView() {
 /////////////////////////////////////////////////////////////////////////////
 // views::DialogDelegate overrides.
 
-int ExtensionDialog::GetDialogButtons() const {
-  // The only user, SelectFileDialogExtension, provides its own buttons.
-  return ui::DIALOG_BUTTON_NONE;
-}
-
 bool ExtensionDialog::CanResize() const {
 #if defined(OS_CHROMEOS)
   // Prevent dialog resize mouse cursor in tablet mode, crbug.com/453634.
-  const auto* client = TabletModeClient::Get();
-  if (client && client->tablet_mode_enabled())
+  if (ash::TabletMode::Get() && ash::TabletMode::Get()->InTabletMode())
     return false;
 #endif
   // Can resize only if minimum contents size set.
@@ -219,10 +216,6 @@ const views::Widget* ExtensionDialog::GetWidget() const {
 
 views::View* ExtensionDialog::GetContentsView() {
   return GetExtensionView();
-}
-
-bool ExtensionDialog::ShouldUseCustomFrame() const {
-  return false;
 }
 
 /////////////////////////////////////////////////////////////////////////////

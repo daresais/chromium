@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -98,7 +99,7 @@ bool ParseHostsFromJSON(Extension* extension,
   }
 
   // Add all permissions parsed from the manifest to |hosts|.
-  const base::Value::ListStorage& list_storage = permissions->GetList();
+  base::span<const base::Value> list_storage = permissions->GetList();
   for (size_t i = 0; i < list_storage.size(); ++i) {
     if (list_storage[i].is_string()) {
       hosts->push_back(list_storage[i].GetString());

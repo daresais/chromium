@@ -28,8 +28,10 @@ AccessibilityFeatureDisableDialog::AccessibilityFeatureDisableDialog(
     base::OnceClosure on_cancel_callback)
     : window_title_(l10n_util::GetStringUTF16(window_title_text_id)),
       on_accept_callback_(std::move(on_accept_callback)),
-      on_cancel_callback_(std::move(on_cancel_callback)),
-      weak_ptr_factory_(this) {
+      on_cancel_callback_(std::move(on_cancel_callback)) {
+  DialogDelegate::set_button_label(
+      ui::DIALOG_BUTTON_OK, l10n_util::GetStringUTF16(IDS_ASH_YES_BUTTON));
+
   SetLayoutManager(std::make_unique<views::FillLayout>());
   SetBorder(views::CreateEmptyBorder(
       views::LayoutProvider::Get()->GetDialogInsetsForContentType(
@@ -75,13 +77,6 @@ ui::ModalType AccessibilityFeatureDisableDialog::GetModalType() const {
 
 base::string16 AccessibilityFeatureDisableDialog::GetWindowTitle() const {
   return window_title_;
-}
-
-base::string16 AccessibilityFeatureDisableDialog::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_OK)
-    return l10n_util::GetStringUTF16(IDS_ASH_YES_BUTTON);
-  return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
 
 base::WeakPtr<AccessibilityFeatureDisableDialog>

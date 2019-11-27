@@ -34,14 +34,16 @@
 #include "third_party/blink/renderer/core/frame/user_activation.h"
 #include "third_party/blink/renderer/core/html/portal/html_portal_element.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 
 namespace blink {
 
+// extern
+const V8PrivateProperty::SymbolKey kPrivatePropertyMessageEventCachedData;
+
 static inline bool IsValidSource(EventTarget* source) {
-  return !source || source->ToLocalDOMWindow() || source->ToMessagePort() ||
+  return !source || source->ToDOMWindow() || source->ToMessagePort() ||
          source->ToServiceWorker() || source->ToPortalHost() ||
-         ToHTMLPortalElementOrNull(source->ToNode());
+         IsA<HTMLPortalElement>(source->ToNode());
 }
 
 MessageEvent::V8GCAwareString::V8GCAwareString(const String& value)
@@ -126,7 +128,8 @@ MessageEvent::MessageEvent(scoped_refptr<SerializedScriptValue> data,
                            EventTarget* source,
                            Vector<MessagePortChannel> channels,
                            UserActivation* user_activation,
-                           bool transfer_user_activation)
+                           bool transfer_user_activation,
+                           bool allow_autoplay)
     : Event(event_type_names::kMessage, Bubbles::kNo, Cancelable::kNo),
       data_type_(kDataTypeSerializedScriptValue),
       data_as_serialized_script_value_(
@@ -136,7 +139,8 @@ MessageEvent::MessageEvent(scoped_refptr<SerializedScriptValue> data,
       source_(source),
       channels_(std::move(channels)),
       user_activation_(user_activation),
-      transfer_user_activation_(transfer_user_activation) {
+      transfer_user_activation_(transfer_user_activation),
+      allow_autoplay_(allow_autoplay) {
   DCHECK(IsValidSource(source_.Get()));
 }
 
@@ -216,7 +220,8 @@ void MessageEvent::initMessageEvent(const AtomicString& type,
                                     EventTarget* source,
                                     MessagePortArray* ports,
                                     UserActivation* user_activation,
-                                    bool transfer_user_activation) {
+                                    bool transfer_user_activation,
+                                    bool allow_autoplay) {
   if (IsBeingDispatched())
     return;
 
@@ -233,6 +238,7 @@ void MessageEvent::initMessageEvent(const AtomicString& type,
   is_ports_dirty_ = true;
   user_activation_ = user_activation;
   transfer_user_activation_ = transfer_user_activation;
+  allow_autoplay_ = allow_autoplay;
 }
 
 void MessageEvent::initMessageEvent(const AtomicString& type,
@@ -299,7 +305,7 @@ ScriptValue MessageEvent::data(ScriptState* script_state) {
       break;
   }
 
-  return ScriptValue(script_state, value);
+  return ScriptValue(isolate, value);
 }
 
 const AtomicString& MessageEvent::InterfaceName() const {
@@ -313,6 +319,20 @@ MessagePortArray MessageEvent::ports() {
   // modify the content.
   is_ports_dirty_ = false;
   return ports_ ? *ports_ : MessagePortArray();
+}
+
+bool MessageEvent::IsOriginCheckRequiredToAccessData() const {
+  if (data_type_ != kDataTypeSerializedScriptValue) {
+    return false;
+  }
+  return data_as_serialized_script_value_->Value()->IsOriginCheckRequired();
+}
+
+bool MessageEvent::IsLockedToAgentCluster() const {
+  if (data_type_ != kDataTypeSerializedScriptValue) {
+    return false;
+  }
+  return data_as_serialized_script_value_->Value()->IsLockedToAgentCluster();
 }
 
 void MessageEvent::EntangleMessagePorts(ExecutionContext* context) {
@@ -347,14 +367,16 @@ v8::Local<v8::Object> MessageEvent::AssociateWithWrapper(
     case kDataTypeSerializedScriptValue:
       break;
     case kDataTypeString:
-      V8PrivateProperty::GetMessageEventCachedData(isolate).Set(
-          wrapper, V8String(isolate, data_as_string_.data()));
+      V8PrivateProperty::GetSymbol(isolate,
+                                   kPrivatePropertyMessageEventCachedData)
+          .Set(wrapper, V8String(isolate, data_as_string_.data()));
       break;
     case kDataTypeBlob:
       break;
     case kDataTypeArrayBuffer:
-      V8PrivateProperty::GetMessageEventCachedData(isolate).Set(
-          wrapper, ToV8(data_as_array_buffer_, wrapper, isolate));
+      V8PrivateProperty::GetSymbol(isolate,
+                                   kPrivatePropertyMessageEventCachedData)
+          .Set(wrapper, ToV8(data_as_array_buffer_, wrapper, isolate));
       break;
   }
 

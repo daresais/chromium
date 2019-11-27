@@ -5,6 +5,7 @@
 #include "chrome/common/service_process_util_posix.h"
 
 #include <fcntl.h>
+
 #include <string>
 #include <utility>
 
@@ -14,6 +15,7 @@
 #include "base/message_loop/message_loop_current.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/waitable_event.h"
+#include "build/branding_buildflags.h"
 #include "chrome/common/multi_process_lock.h"
 
 #if defined(OS_ANDROID)
@@ -35,7 +37,7 @@ bool FilePathForMemoryName(const std::string& mem_name, base::FilePath* path) {
   if (!GetShmemTempDir(false, &temp_dir))
     return false;
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   static const char kShmem[] = "com.google.Chrome.shmem.";
 #else
   static const char kShmem[] = "org.chromium.Chromium.shmem.";
@@ -192,9 +194,8 @@ MultiProcessLock* TakeNamedLock(const std::string& name, bool waiting) {
 }
 
 ServiceProcessTerminateMonitor::ServiceProcessTerminateMonitor(
-    const base::Closure& terminate_task)
-    : terminate_task_(terminate_task) {
-}
+    base::OnceClosure terminate_task)
+    : terminate_task_(std::move(terminate_task)) {}
 
 ServiceProcessTerminateMonitor::~ServiceProcessTerminateMonitor() {
 }
@@ -204,8 +205,7 @@ void ServiceProcessTerminateMonitor::OnFileCanReadWithoutBlocking(int fd) {
     int buffer;
     int length = read(fd, &buffer, sizeof(buffer));
     if ((length == sizeof(buffer)) && (buffer == kTerminateMessage)) {
-      terminate_task_.Run();
-      terminate_task_.Reset();
+      std::move(terminate_task_).Run();
     } else if (length > 0) {
       DLOG(ERROR) << "Unexpected read: " << buffer;
     } else if (length == 0) {
@@ -319,7 +319,7 @@ void ServiceProcessState::CreateState() {
 
 bool ServiceProcessState::SignalReady(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const base::Closure& terminate_task) {
+    base::OnceClosure terminate_task) {
   DCHECK(task_runner);
   DCHECK(state_);
 
@@ -329,8 +329,8 @@ bool ServiceProcessState::SignalReady(
     return false;
   }
 #endif
-  state_->terminate_monitor.reset(
-      new ServiceProcessTerminateMonitor(terminate_task));
+  state_->terminate_monitor = std::make_unique<ServiceProcessTerminateMonitor>(
+      std::move(terminate_task));
   if (pipe(state_->sockets) < 0) {
     DPLOG(ERROR) << "pipe";
     return false;

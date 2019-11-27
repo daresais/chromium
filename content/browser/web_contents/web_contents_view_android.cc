@@ -25,6 +25,8 @@
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/drop_data.h"
 #include "ui/android/overscroll_refresh_handler.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -51,8 +53,7 @@ namespace {
 // compositor event queue.
 bool ShouldRequestUnbufferedDispatch() {
   static bool should_request_unbuffered_dispatch =
-      base::FeatureList::IsEnabled(
-          content::android::kRequestUnbufferedDispatch) &&
+      base::FeatureList::IsEnabled(features::kRequestUnbufferedDispatch) &&
       base::android::BuildInfo::GetInstance()->sdk_int() >=
           base::android::SDK_VERSION_LOLLIPOP &&
       !content::GetContentClient()->UsingSynchronousCompositing();
@@ -229,9 +230,7 @@ gfx::Rect WebContentsViewAndroid::GetViewBounds() const {
   return gfx::Rect(view_.GetSize());
 }
 
-void WebContentsViewAndroid::CreateView(
-    const gfx::Size& initial_size, gfx::NativeView context) {
-}
+void WebContentsViewAndroid::CreateView(gfx::NativeView context) {}
 
 RenderWidgetHostViewBase* WebContentsViewAndroid::CreateViewForWidget(
     RenderWidgetHost* render_widget_host, bool is_guest_view_hack) {

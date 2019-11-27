@@ -63,9 +63,9 @@ class CC_PAINT_EXPORT DisplayItemList
   void Raster(SkCanvas* canvas, ImageProvider* image_provider = nullptr) const;
 
   // Captures the DrawTextBlobOp within |rect| and returns the associated
-  // NodeHolder in |content|.
+  // NodeId in |content|.
   void CaptureContent(const gfx::Rect& rect,
-                      std::vector<NodeHolder>* content) const;
+                      std::vector<NodeId>* content) const;
 
   void StartPaint() {
 #if DCHECK_IS_ON()
@@ -89,6 +89,8 @@ class CC_PAINT_EXPORT DisplayItemList
     paint_op_buffer_.push<T>(std::forward<Args>(args)...);
     return offset;
   }
+
+  UsageHint GetUsageHint() const { return usage_hint_; }
 
   // Called by blink::PaintChunksToCcLayer when an effect ends, to update the
   // bounds of a SaveLayer[Alpha]Op which was emitted when the effect started.

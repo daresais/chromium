@@ -39,12 +39,12 @@ namespace blink {
 class CSSStyleDeclaration;
 class ImmutableCSSPropertyValueSet;
 class MutableCSSPropertyValueSet;
-class PropertyRegistry;
 class StyleSheetContents;
+enum class CSSValueID;
 enum class SecureContextMode;
 
 class CORE_EXPORT CSSPropertyValueSet
-    : public GarbageCollectedFinalized<CSSPropertyValueSet> {
+    : public GarbageCollected<CSSPropertyValueSet> {
   friend class PropertyReference;
 
  public:
@@ -166,8 +166,7 @@ class CORE_EXPORT CSSPropertyValueSet
 };
 
 // Used for lazily parsing properties.
-class CSSLazyPropertyParser
-    : public GarbageCollectedFinalized<CSSLazyPropertyParser> {
+class CSSLazyPropertyParser : public GarbageCollected<CSSLazyPropertyParser> {
  public:
   CSSLazyPropertyParser() = default;
   virtual ~CSSLazyPropertyParser() = default;
@@ -176,8 +175,8 @@ class CSSLazyPropertyParser
   DISALLOW_COPY_AND_ASSIGN(CSSLazyPropertyParser);
 };
 
-class CORE_EXPORT alignas(Member<const CSSValue>) alignas(
-    CSSPropertyValueMetadata) ImmutableCSSPropertyValueSet
+class CORE_EXPORT ALIGNAS(alignof(Member<const CSSValue>))
+    ALIGNAS(alignof(CSSPropertyValueMetadata)) ImmutableCSSPropertyValueSet
     : public CSSPropertyValueSet {
  public:
   ImmutableCSSPropertyValueSet(const CSSPropertyValue*,
@@ -252,7 +251,6 @@ class CORE_EXPORT MutableCSSPropertyValueSet : public CSSPropertyValueSet {
                         SecureContextMode,
                         StyleSheetContents* context_style_sheet = nullptr);
   SetResult SetProperty(const AtomicString& custom_property_name,
-                        const PropertyRegistry*,
                         const String& value,
                         bool important,
                         SecureContextMode,

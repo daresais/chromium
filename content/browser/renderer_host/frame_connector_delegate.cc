@@ -45,9 +45,10 @@ void FrameConnectorDelegate::SynchronizeVisualProperties(
   render_widget_host->SetAutoResize(visual_properties.auto_resize_enabled,
                                     visual_properties.min_size_for_auto_resize,
                                     visual_properties.max_size_for_auto_resize);
-  render_widget_host->SetPageScaleState(
+  render_widget_host->SetVisualPropertiesFromParentFrame(
       visual_properties.page_scale_factor,
-      visual_properties.is_pinch_gesture_active);
+      visual_properties.is_pinch_gesture_active,
+      visual_properties.compositor_viewport);
 
   render_widget_host->SynchronizeVisualProperties();
 }
@@ -75,7 +76,7 @@ bool FrameConnectorDelegate::HasFocus() {
   return false;
 }
 
-bool FrameConnectorDelegate::LockMouse() {
+bool FrameConnectorDelegate::LockMouse(bool request_unadjusted_movement) {
   return false;
 }
 

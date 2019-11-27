@@ -10,6 +10,10 @@ if (is_mac) {
   import("//build/config/mac/mac_sdk.gni")
 }
 
+declare_args() {
+  subpixel_font_rendering_disabled = false
+}
+
 jumbo_component("service") {
   output_name = "gpu_ipc_service"
   sources = [
@@ -17,6 +21,7 @@ jumbo_component("service") {
     "command_buffer_stub.h",
     "context_url.cc",
     "context_url.h",
+    "display_context.h",
     "gles2_command_buffer_stub.cc",
     "gles2_command_buffer_stub.h",
     "gpu_channel.cc",
@@ -51,9 +56,13 @@ jumbo_component("service") {
   if (is_chromecast) {
     defines += [ "IS_CHROMECAST" ]
   }
+  if (subpixel_font_rendering_disabled) {
+    defines += [ "SUBPIXEL_FONT_RENDERING_DISABLED" ]
+  }
   public_deps = [
     "//base",
     "//components/viz/common",
+    "//gpu/config",
     "//ipc",
     "//ui/base",
     "//ui/display",
@@ -149,6 +158,7 @@ source_set("test_support") {
     "//testing/gtest:gtest",
   ]
   deps = [
+    "//base/test:test_support",
     "//gpu/ipc/common",
     "//ui/gl:test_support",
   ]

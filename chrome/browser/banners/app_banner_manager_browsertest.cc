@@ -86,7 +86,7 @@ class AppBannerManagerTest : public AppBannerManager {
     // Fake the call to ReportStatus here - this is usually called in
     // platform-specific code which is not exposed here.
     ReportStatus(SHOWING_WEB_APP_BANNER);
-    RecordDidShowBanner("AppBanner.WebApp.Shown");
+    RecordDidShowBanner();
 
     ASSERT_FALSE(banner_shown_.get());
     banner_shown_.reset(new bool(true));
@@ -103,8 +103,9 @@ class AppBannerManagerTest : public AppBannerManager {
     }
   }
 
-  void OnBannerPromptReply(blink::mojom::AppBannerControllerPtr controller,
-                           blink::mojom::AppBannerPromptReply reply) override {
+  void OnBannerPromptReply(
+      mojo::Remote<blink::mojom::AppBannerController> controller,
+      blink::mojom::AppBannerPromptReply reply) override {
     AppBannerManager::OnBannerPromptReply(std::move(controller), reply);
     if (on_banner_prompt_reply_) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(

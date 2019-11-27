@@ -143,6 +143,7 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
   DCHECK_EQ(type, syncer::ARC_PACKAGE);
   DCHECK(!sync_processor_.get());
   DCHECK(!IsArcAppSyncFlowDisabled());
+  DCHECK(prefs_->package_list_initial_refreshed());
 
   sync_processor_ = std::move(sync_processor);
   sync_error_handler_ = std::move(error_handler);
@@ -159,6 +160,10 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
     std::unique_ptr<ArcSyncItem> sync_item(
         CreateSyncItemFromSyncData(sync_data));
     const std::string& package_name = sync_item->package_name;
+
+    if (!ShouldSyncPackage(package_name))
+      continue;
+
     if (!base::Contains(local_package_set, package_name)) {
       pending_install_items_[package_name] = std::move(sync_item);
       InstallPackage(pending_install_items_[package_name].get());
@@ -223,9 +228,15 @@ syncer::SyncError ArcPackageSyncableService::ProcessSyncChanges(
   }
 
   for (const auto& change : change_list) {
-    VLOG(2) << this << "  Change: "
-            << change.sync_data().GetSpecifics().arc_package().package_name()
-            << " (" << change.change_type() << ")";
+    const std::string package_name =
+        change.sync_data().GetSpecifics().arc_package().package_name();
+    VLOG(2) << this << "  Change: " << package_name << " ("
+            << change.change_type() << ")";
+    if (!ShouldSyncPackage(package_name)) {
+      VLOG(2) << this << package_name
+              << " is default app, ignore remote update.";
+      continue;
+    }
 
     if (change.change_type() == SyncChange::ACTION_ADD ||
         change.change_type() == SyncChange::ACTION_UPDATE) {
@@ -259,6 +270,9 @@ void ArcPackageSyncableService::OnPackageRemoved(
   if (!uninstalled)
     return;
 
+  if (!ShouldSyncPackage(package_name))
+    return;
+
   SyncItemMap::iterator delete_iter =
       pending_uninstall_items_.find(package_name);
 
@@ -289,10 +303,11 @@ void ArcPackageSyncableService::OnPackageRemoved(
 
 void ArcPackageSyncableService::OnPackageInstalled(
     const mojom::ArcPackageInfo& package_info) {
-  if (!package_info.sync)
+  const std::string& package_name = package_info.package_name;
+
+  if (!ShouldSyncPackage(package_name))
     return;
 
-  const std::string& package_name = package_info.package_name;
   SyncItemMap::iterator install_iter =
       pending_install_items_.find(package_name);
 
@@ -323,7 +338,7 @@ void ArcPackageSyncableService::OnPackageModified(
     const mojom::ArcPackageInfo& package_info) {
   const std::string& package_name = package_info.package_name;
 
-  if (!package_info.sync)
+  if (!ShouldSyncPackage(package_name))
     return;
 
   SyncItemMap::iterator iter = sync_items_.find(package_name);
@@ -464,10 +479,17 @@ void ArcPackageSyncableService::UninstallPackage(const ArcSyncItem* sync_item) {
 
 bool ArcPackageSyncableService::ShouldSyncPackage(
     const std::string& package_name) const {
+  // Don't sync default apps.
+  if (prefs_->IsDefaultPackage(package_name))
+    return false;
+
   std::unique_ptr<ArcAppListPrefs::PackageInfo> package(
       prefs_->GetPackage(package_name));
-  DCHECK(package.get());
-  return package->should_sync;
+  if (package.get())
+    return package->should_sync;
+
+  // A non default package from remote should be synced.
+  return true;
 }
 
 }  // namespace arc

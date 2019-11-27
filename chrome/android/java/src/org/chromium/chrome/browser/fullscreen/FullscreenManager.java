@@ -4,13 +4,15 @@
 
 package org.chromium.chrome.browser.fullscreen;
 
-import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.Window;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.browser.fullscreen.FullscreenHtmlApiHandler.FullscreenHtmlApiDelegate;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabBrowserControlsState;
+import org.chromium.chrome.browser.tab.TabBrowserControlsConstraintsHelper;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.WebContents;
 
@@ -20,8 +22,6 @@ import org.chromium.content_public.browser.WebContents;
 // TODO(tedchoc): Remove Tab's requirement on the fullscreen tokens to slim down the API of this
 //                class.
 public abstract class FullscreenManager {
-    public static final int INVALID_TOKEN = -1;
-
     private final FullscreenHtmlApiHandler mHtmlApiHandler;
     private boolean mOverlayVideoMode;
     @Nullable private Tab mTab;
@@ -138,7 +138,7 @@ public abstract class FullscreenManager {
      */
     protected void enterPersistentFullscreenMode(FullscreenOptions options) {
         mHtmlApiHandler.enterPersistentFullscreenMode(options);
-        TabBrowserControlsState.updateEnabledState(getTab());
+        TabBrowserControlsConstraintsHelper.updateEnabledState(getTab());
         updateMultiTouchZoomSupport(false);
     }
 
@@ -148,7 +148,7 @@ public abstract class FullscreenManager {
      */
     public void exitPersistentFullscreenMode() {
         mHtmlApiHandler.exitPersistentFullscreenMode();
-        TabBrowserControlsState.updateEnabledState(getTab());
+        TabBrowserControlsConstraintsHelper.updateEnabledState(getTab());
         updateMultiTouchZoomSupport(true);
     }
 
@@ -157,7 +157,7 @@ public abstract class FullscreenManager {
      */
     protected void updateMultiTouchZoomSupport(boolean enable) {
         Tab tab = getTab();
-        if (tab == null || tab.isHidden()) return;
+        if (tab == null || ((TabImpl) tab).isHidden()) return;
         WebContents webContents = tab.getWebContents();
         if (webContents != null) {
             GestureListenerManager manager = GestureListenerManager.fromWebContents(webContents);

@@ -124,8 +124,8 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
   // auto hidden when in immersive fullscreen.
   ScreenLockerTester tester;
   BrowserWindow* browser_window = browser()->window();
-  ash::wm::WindowState* window_state =
-      ash::wm::GetWindowState(browser_window->GetNativeWindow());
+  ash::WindowState* window_state =
+      ash::WindowState::Get(browser_window->GetNativeWindow());
   {
     FullscreenNotificationObserver fullscreen_waiter(browser());
     browser()
@@ -158,7 +158,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
 
   // Browser window should be activated after screen locker is gone. Otherwise,
   // the rest of the test would fail.
-  ASSERT_EQ(window_state, ash::wm::GetActiveWindowState());
+  ASSERT_EQ(window_state, ash::WindowState::ForActiveWindow());
 
   // 2) If the active browser window is in fullscreen and the fullscreen window
   // has all of the pixels, locking the screen should exit fullscreen. The
@@ -223,7 +223,8 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, PasswordAuthWhenAuthDisabled) {
       user_manager::StubAccountId(),
       ash::AuthDisabledData(ash::AuthDisabledReason::kTimeWindowLimit,
                             base::Time::Now() + base::TimeDelta::FromHours(1),
-                            base::TimeDelta::FromHours(1)));
+                            base::TimeDelta::FromHours(1),
+                            true /*disable_lock_screen_media*/));
 
   // Try to authenticate with password.
   tester.UnlockWithPassword(user_manager::StubAccountId(), kPassword);
@@ -261,7 +262,8 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, FingerprintAuthWhenAuthDisabled) {
       user_manager::StubAccountId(),
       ash::AuthDisabledData(ash::AuthDisabledReason::kTimeUsageLimit,
                             base::Time::Now() + base::TimeDelta::FromHours(1),
-                            base::TimeDelta::FromHours(3)));
+                            base::TimeDelta::FromHours(3),
+                            true /*disable_lock_screen_media*/));
 
   // Try to authenticate with fingerprint.
   AuthenticateWithFingerprint();

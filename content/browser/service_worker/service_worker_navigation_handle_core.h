@@ -14,7 +14,7 @@
 #include "content/browser/service_worker/service_worker_controllee_request_handler.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/common/content_export.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_provider.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace content {
 
@@ -22,9 +22,12 @@ class ServiceWorkerContextWrapper;
 class ServiceWorkerNavigationHandle;
 
 // This class is created on the UI thread, but should only be accessed from the
-// IO thread afterwards. It is the IO thread pendant of
+// service worker core thread afterwards. It is the core thread pendant of
 // ServiceWorkerNavigationHandle. See the ServiceWorkerNavigationHandle header
 // for more details about the lifetime of both classes.
+//
+// TODO(crbug.com/824858): Merge this class into ServiceWorkerNavigationHandle
+// when the core thread moves to the UI thread.
 class CONTENT_EXPORT ServiceWorkerNavigationHandleCore {
  public:
   ServiceWorkerNavigationHandleCore(
@@ -32,28 +35,27 @@ class CONTENT_EXPORT ServiceWorkerNavigationHandleCore {
       ServiceWorkerContextWrapper* context_wrapper);
   ~ServiceWorkerNavigationHandleCore();
 
-  // Called when a ServiceWorkerProviderHost was created for the navigation.
-  void OnCreatedProviderHost(
-      base::WeakPtr<ServiceWorkerProviderHost> provider_host,
-      blink::mojom::ServiceWorkerProviderInfoForWindowPtr provider_info);
-
-  // Called when the navigation is ready to commit, set the 2 IDs for the
-  // pre-created provider host.
-  void OnBeginNavigationCommit(int render_process_id, int render_frame_id);
+  // Called by corresponding methods in ServiceWorkerNavigationHandle. See
+  // comments in the header of ServiceWorkerNavigationHandle for details.
+  void OnBeginNavigationCommit(
+      int render_process_id,
+      int render_frame_id,
+      network::mojom::CrossOriginEmbedderPolicy cross_origin_embedder_policy);
+  void OnBeginWorkerCommit(
+      network::mojom::CrossOriginEmbedderPolicy cross_origin_embedder_policy);
 
   ServiceWorkerContextWrapper* context_wrapper() const {
     return context_wrapper_.get();
   }
-
-  /////////////////////////////////////////////////////////////////////////////
-  // NavigationLoaderOnUI:
 
   void set_provider_host(
       base::WeakPtr<ServiceWorkerProviderHost> provider_host) {
     provider_host_ = std::move(provider_host);
   }
 
-  ServiceWorkerProviderHost* provider_host() { return provider_host_.get(); }
+  base::WeakPtr<ServiceWorkerProviderHost> provider_host() {
+    return provider_host_;
+  }
 
   void set_interceptor(
       std::unique_ptr<ServiceWorkerControlleeRequestHandler> interceptor) {
@@ -63,15 +65,17 @@ class CONTENT_EXPORT ServiceWorkerNavigationHandleCore {
   ServiceWorkerControlleeRequestHandler* interceptor() {
     return interceptor_.get();
   }
-  /////////////////////////////////////////////////////////////////////////////
+
+  base::WeakPtr<ServiceWorkerNavigationHandleCore> AsWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
 
  private:
   scoped_refptr<ServiceWorkerContextWrapper> context_wrapper_;
   base::WeakPtr<ServiceWorkerNavigationHandle> ui_handle_;
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
-
-  // NavigationLoaderOnUI:
   std::unique_ptr<ServiceWorkerControlleeRequestHandler> interceptor_;
+  base::WeakPtrFactory<ServiceWorkerNavigationHandleCore> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerNavigationHandleCore);
 };

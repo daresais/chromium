@@ -44,11 +44,20 @@ SecurityLevel GetSecurityLevelForNonSecureFieldTrial(
     if (parameter == features::kMarkHttpAsParameterDangerous) {
       return DANGEROUS;
     }
+    if (parameter == features::kMarkHttpAsParameterDangerWarning) {
+      return WARNING;
+    }
   }
 
   // Default to dangerous on editing form fields and otherwise
   // warning.
-  return input_events.insecure_field_edited ? DANGEROUS : HTTP_SHOW_WARNING;
+  return input_events.insecure_field_edited ? DANGEROUS : WARNING;
+}
+
+SecurityLevel GetSecurityLevelForDisplayedMixedContent() {
+  if (base::FeatureList::IsEnabled(features::kPassiveMixedContentWarning))
+    return kDisplayedInsecureContentWarningLevel;
+  return kDisplayedInsecureContentLevel;
 }
 
 std::string GetHistogramSuffixForSecurityLevel(
@@ -60,8 +69,8 @@ std::string GetHistogramSuffixForSecurityLevel(
       return "SECURE";
     case NONE:
       return "NONE";
-    case HTTP_SHOW_WARNING:
-      return "HTTP_SHOW_WARNING";
+    case WARNING:
+      return "WARNING";
     case SECURE_WITH_POLICY_INSTALLED_CERT:
       return "SECURE_WITH_POLICY_INSTALLED_CERT";
     case DANGEROUS:
@@ -69,6 +78,55 @@ std::string GetHistogramSuffixForSecurityLevel(
     default:
       return "OTHER";
   }
+}
+
+std::string GetHistogramSuffixForSafetyTipStatus(
+    security_state::SafetyTipStatus safety_tip_status) {
+  switch (safety_tip_status) {
+    case security_state::SafetyTipStatus::kUnknown:
+      return "SafetyTip_Unknown";
+    case security_state::SafetyTipStatus::kNone:
+      return "SafetyTip_None";
+    case security_state::SafetyTipStatus::kBadReputation:
+      return "SafetyTip_BadReputation";
+    case security_state::SafetyTipStatus::kLookalike:
+      return "SafetyTip_Lookalike";
+    case security_state::SafetyTipStatus::kBadReputationIgnored:
+      return "SafetyTip_BadReputationIgnored";
+    case security_state::SafetyTipStatus::kLookalikeIgnored:
+      return "SafetyTip_LookalikeIgnored";
+    case security_state::SafetyTipStatus::kBadKeyword:
+      NOTREACHED();
+      return std::string();
+  }
+  NOTREACHED();
+  return std::string();
+}
+
+// Returns whether to set the security level based on the safety tip status.
+// Sets |level| to the right value if status should be set.
+bool ShouldSetSecurityLevelFromSafetyTip(security_state::SafetyTipStatus status,
+                                         SecurityLevel* level) {
+  if (!base::FeatureList::IsEnabled(security_state::features::kSafetyTipUI)) {
+    return false;
+  }
+
+  switch (status) {
+    case security_state::SafetyTipStatus::kBadReputation:
+      *level = security_state::NONE;
+      return true;
+    case security_state::SafetyTipStatus::kBadReputationIgnored:
+    case security_state::SafetyTipStatus::kLookalike:
+    case security_state::SafetyTipStatus::kLookalikeIgnored:
+    case security_state::SafetyTipStatus::kBadKeyword:
+      // TODO(crbug/1012982): Decide whether to degrade the indicator once the
+      // UI lands.
+    case security_state::SafetyTipStatus::kUnknown:
+    case security_state::SafetyTipStatus::kNone:
+      return false;
+  }
+  NOTREACHED();
+  return false;
 }
 
 }  // namespace
@@ -92,6 +150,7 @@ SecurityLevel GetSecurityLevel(
   if (HasMajorCertificateError(visible_security_state)) {
     return DANGEROUS;
   }
+  DCHECK(!net::IsCertStatusError(visible_security_state.cert_status));
 
   const GURL& url = visible_security_state.url;
 
@@ -101,7 +160,13 @@ SecurityLevel GetSecurityLevel(
   //
   // Display a "Not secure" badge for all these URLs.
   if (url.SchemeIs(url::kDataScheme) || url.SchemeIs(url::kFtpScheme)) {
-    return HTTP_SHOW_WARNING;
+    return WARNING;
+  }
+
+  // Display DevTools pages as neutral since we can't be confident the page
+  // is secure, but also don't want the "Not secure" badge.
+  if (visible_security_state.is_devtools) {
+    return NONE;
   }
 
   // Choose the appropriate security level for requests to HTTP and remaining
@@ -129,6 +194,21 @@ SecurityLevel GetSecurityLevel(
     return kRanInsecureContentLevel;
   }
 
+  // Downgrade the security level for pages loaded over legacy TLS versions.
+  if (base::FeatureList::IsEnabled(
+          security_state::features::kLegacyTLSWarnings) &&
+      visible_security_state.connection_used_legacy_tls &&
+      !visible_security_state.should_suppress_legacy_tls_warning) {
+    return WARNING;
+  }
+
+  // Downgrade the security level for pages that trigger a Safety Tip.
+  SecurityLevel safety_tip_level;
+  if (ShouldSetSecurityLevelFromSafetyTip(
+          visible_security_state.safety_tip_info.status, &safety_tip_level)) {
+    return safety_tip_level;
+  }
+
   // In most cases, SHA1 use is treated as a certificate error, in which case
   // DANGEROUS will have been returned above. If SHA1 was permitted by policy,
   // downgrade the security level to Neutral.
@@ -140,16 +220,13 @@ SecurityLevel GetSecurityLevel(
   DCHECK(!visible_security_state.ran_mixed_content);
   DCHECK(!visible_security_state.ran_content_with_cert_errors);
 
-  if (visible_security_state.contained_mixed_form ||
-      visible_security_state.displayed_mixed_content ||
-      visible_security_state.displayed_content_with_cert_errors) {
-    return kDisplayedInsecureContentLevel;
+  if (visible_security_state.displayed_mixed_content) {
+    return GetSecurityLevelForDisplayedMixedContent();
   }
 
-  if (net::IsCertStatusError(visible_security_state.cert_status)) {
-    // Major cert errors are handled above.
-    DCHECK(net::IsCertStatusMinorError(visible_security_state.cert_status));
-    return NONE;
+  if (visible_security_state.contained_mixed_form ||
+      visible_security_state.displayed_content_with_cert_errors) {
+    return kDisplayedInsecureContentLevel;
   }
 
   if (visible_security_state.is_view_source) {
@@ -180,8 +257,7 @@ bool HasMajorCertificateError(
       visible_security_state.certificate;
 
   const bool is_major_cert_error =
-      net::IsCertStatusError(visible_security_state.cert_status) &&
-      !net::IsCertStatusMinorError(visible_security_state.cert_status);
+      net::IsCertStatusError(visible_security_state.cert_status);
 
   return is_cryptographic_with_certificate && is_major_cert_error;
 }
@@ -200,7 +276,15 @@ VisibleSecurityState::VisibleSecurityState()
       ran_content_with_cert_errors(false),
       pkp_bypassed(false),
       is_error_page(false),
-      is_view_source(false) {}
+      is_view_source(false),
+      is_devtools(false),
+      connection_used_legacy_tls(false),
+      should_suppress_legacy_tls_warning(false) {}
+
+VisibleSecurityState::VisibleSecurityState(const VisibleSecurityState& other) =
+    default;
+VisibleSecurityState& VisibleSecurityState::operator=(
+    const VisibleSecurityState& other) = default;
 
 VisibleSecurityState::~VisibleSecurityState() {}
 
@@ -223,10 +307,88 @@ std::string GetSecurityLevelHistogramName(
   return prefix + "." + GetHistogramSuffixForSecurityLevel(level);
 }
 
+std::string GetSafetyTipHistogramName(const std::string& prefix,
+                                      SafetyTipStatus safety_tip_status) {
+  return prefix + "." + GetHistogramSuffixForSafetyTipStatus(safety_tip_status);
+}
+
+bool GetLegacyTLSWarningStatus(
+    const VisibleSecurityState& visible_security_state) {
+  return visible_security_state.connection_used_legacy_tls &&
+         !visible_security_state.should_suppress_legacy_tls_warning;
+}
+
+std::string GetLegacyTLSHistogramName(
+    const std::string& prefix,
+    const VisibleSecurityState& visible_security_state) {
+  if (GetLegacyTLSWarningStatus(visible_security_state)) {
+    return prefix + "." + "LegacyTLS_Triggered";
+  } else {
+    return prefix + "." + "LegacyTLS_NotTriggered";
+  }
+}
+
 bool IsSHA1InChain(const VisibleSecurityState& visible_security_state) {
   return visible_security_state.certificate &&
          (visible_security_state.cert_status &
           net::CERT_STATUS_SHA1_SIGNATURE_PRESENT);
+}
+
+// As an experiment, the info icon should be downgraded to a grey triangle for
+// non-secure connections (crbug.com/997972). This method helps distinguish
+// between cases where the NONE and WARNING security levels should map to
+// neutral (info) or insecure (triangle) for styling purposes.
+//
+// TODO(crbug.com/1015626): Clean this up once the experiment is fully
+// launched and security states refactored.
+bool ShouldDowngradeNeutralStyling(
+    security_state::SecurityLevel security_level,
+    GURL url,
+    IsOriginSecureCallback is_origin_secure_callback) {
+  // This method is only relevant if the info icon is shown, which only occurs
+  // for NONE and WARNING security states.
+  if (security_level != security_state::NONE &&
+      security_level != security_state::WARNING) {
+    return false;
+  }
+
+  // The state should not be downgraded unless the grey triangle experiment
+  // is enabled.
+  bool http_danger_warning_enabled = false;
+  if (base::FeatureList::IsEnabled(features::kMarkHttpAsFeature)) {
+    std::string parameter = base::GetFieldTrialParamValueByFeature(
+        features::kMarkHttpAsFeature,
+        features::kMarkHttpAsFeatureParameterName);
+    if (parameter ==
+        security_state::features::kMarkHttpAsParameterDangerWarning) {
+      http_danger_warning_enabled = true;
+    }
+  }
+  if (!http_danger_warning_enabled)
+    return false;
+
+  bool scheme_is_cryptographic = security_state::IsSchemeCryptographic(url);
+  bool origin_is_secure = scheme_is_cryptographic;
+  if (!scheme_is_cryptographic)
+    origin_is_secure = is_origin_secure_callback.Run(url);
+
+  // The grey danger triangle should be shown on HTTPS pages with passive
+  // mixed content. These pages currently use the NONE security state, but
+  // this is undergoing a refactor.
+  if (security_level == security_state::NONE && scheme_is_cryptographic)
+    return true;
+
+  // data: URLs should continue to have danger warnings even though data: is
+  // considered a secure origin.
+  if (url.SchemeIs(url::kDataScheme))
+    return true;
+
+  // The info icon should be used on non-HTTPS secure origins, but other
+  // WARNING states should use they grey danger triangle.
+  if (security_level == security_state::WARNING && !origin_is_secure)
+    return true;
+
+  return false;
 }
 
 }  // namespace security_state

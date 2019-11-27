@@ -11,6 +11,7 @@ namespace GaiaConstants {
 // Gaia uses this for accounting where login is coming from.
 const char kChromeOSSource[] = "chromeos";
 const char kChromeSource[] = "ChromiumBrowser";
+const char kUnexpectedServiceResponse[] = "UnexpectedServiceResponse";
 
 // Service name for Gaia.  Used to convert to cookie auth.
 const char kGaiaService[] = "gaia";
@@ -59,6 +60,17 @@ const char kGoogleUserInfoProfile[] =
 const char kPeopleApiReadOnlyOAuth2Scope[] =
     "https://www.googleapis.com/auth/peopleapi.readonly";
 
+// OAuth scope for access to the Reauth flow.
+const char kAccountsReauthOAuth2Scope[] =
+    "https://www.googleapis.com/auth/accounts.reauth";
+
+// OAuth scope for access to audit recording (ARI).
+const char kAuditRecordingOAuth2Scope[] =
+    "https://www.googleapis.com/auth/auditrecording-pa";
+
+// OAuth scope for access to clear cut logs.
+const char kClearCutOAuth2Scope[] = "https://www.googleapis.com/auth/cclog";
+
 // Used to mint uber auth tokens when needed.
 const char kGaiaSid[] = "sid";
 const char kGaiaLsid[] = "lsid";
@@ -78,4 +90,6 @@ const char kObfuscatedGaiaId[] = "obfuscatedGaiaId";
 // Canonical email of the account to sign in.
 const char kClientOAuthEmailKey[] = "email";
 
+// Used as an Invalid refresh token.
+const char kInvalidRefreshToken[] = "invalid_refresh_token";
 }  // namespace GaiaConstants

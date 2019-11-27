@@ -23,7 +23,9 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHDownloadHomeFeature,
     &kIPHDownloadPageFeature,
     &kIPHDownloadPageScreenshotFeature,
-    &kIPHChromeDuetFeature,
+    &kIPHChromeDuetHomeButtonFeature,
+    &kIPHChromeDuetSearchFeature,
+    &kIPHChromeDuetTabSwitcherFeature,
     &kIPHChromeHomeExpandFeature,
     &kIPHChromeHomePullToRefreshFeature,
     &kIPHContextualSearchWebSearchFeature,
@@ -34,17 +36,15 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHDownloadInfoBarDownloadContinuingFeature,
     &kIPHDownloadInfoBarDownloadsAreFasterFeature,
     &kIPHFeedCardMenuFeature,
-    &kIPHHomePageButtonFeature,
-    &kIPHHomepageTileFeature,
     &kIPHIdentityDiscFeature,
     &kIPHKeyboardAccessoryAddressFillingFeature,
     &kIPHKeyboardAccessoryPasswordFillingFeature,
     &kIPHKeyboardAccessoryPaymentFillingFeature,
-    &kIPHNewTabPageButtonFeature,
     &kIPHPreviewsOmniboxUIFeature,
     &kIPHTabGroupsQuicklyComparePagesFeature,
     &kIPHTabGroupsTapToSeeAnotherTabFeature,
     &kIPHTabGroupsYourTabsAreTogetherFeature,
+    &kIPHTabGroupsDragAndDropFeature,
     &kIPHTranslateMenuButtonFeature,
     &kIPHExploreSitesTileFeature,
 #endif  // defined(OS_ANDROID)
@@ -58,8 +58,9 @@ const base::Feature* const kAllFeatures[] = {
 #endif  // defined(OS_IOS)
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
     defined(OS_CHROMEOS)
-    &kIPHReopenTabFeature,
     &kIPHFocusModeFeature,
+    &kIPHGlobalMediaControlsFeature,
+    &kIPHReopenTabFeature,
 #if BUILDFLAG(ENABLE_LEGACY_DESKTOP_IN_PRODUCT_HELP)
     &kIPHBookmarkFeature,
     &kIPHIncognitoWindowFeature,

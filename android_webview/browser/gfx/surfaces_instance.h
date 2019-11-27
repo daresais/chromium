@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-#include "android_webview/browser/gfx/aw_gl_surface.h"
+#include "android_webview/browser/gfx/output_surface_provider_webview.h"
 #include "base/memory/ref_counted.h"
 #include "components/viz/common/frame_timing_details_map.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
@@ -17,7 +17,7 @@
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/service/display/display_client.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
-#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
+#include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 #include "ui/gfx/color_space.h"
 
 namespace gfx {
@@ -55,7 +55,8 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   void AddChildId(const viz::SurfaceId& child_id);
   void RemoveChildId(const viz::SurfaceId& child_id);
   bool is_using_vulkan() const {
-    return shared_context_state_ && shared_context_state_->GrContextIsVulkan();
+    return output_surface_provider_.shared_context_state() &&
+           output_surface_provider_.shared_context_state()->GrContextIsVulkan();
   }
 
  private:
@@ -89,11 +90,15 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
 
   std::vector<viz::SurfaceRange> GetChildIdsRanges();
 
+  bool BackdropFiltersPreventMerge(const viz::SurfaceId& surface_id);
+
   viz::FrameSinkIdAllocator frame_sink_id_allocator_;
 
   viz::FrameSinkId frame_sink_id_;
 
-  scoped_refptr<AwGLSurface> gl_surface_;
+  // Used to create viz::OutputSurface and gl::GLSurface
+  OutputSurfaceProviderWebview output_surface_provider_;
+
   std::unique_ptr<viz::FrameSinkManagerImpl> frame_sink_manager_;
   std::unique_ptr<viz::BeginFrameSource> begin_frame_source_;
   std::unique_ptr<viz::Display> display_;
@@ -107,8 +112,6 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   viz::FrameTokenGenerator next_frame_token_;
 
   gfx::Size surface_size_;
-
-  scoped_refptr<gpu::SharedContextState> shared_context_state_;
 
   DISALLOW_COPY_AND_ASSIGN(SurfacesInstance);
 };

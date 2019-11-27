@@ -9,9 +9,11 @@
 #include "base/time/time.h"
 #include "chrome/browser/download/offline_item_utils.h"
 #include "chrome/browser/safe_browsing/advanced_protection_status_manager.h"
+#include "chrome/browser/safe_browsing/advanced_protection_status_manager_factory.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/download/public/common/download_danger_type.h"
+#include "components/safe_browsing/buildflags.h"
 #include "net/base/mime_util.h"
 #include "net/url_request/url_request_status.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
@@ -235,14 +237,14 @@ base::string16 DownloadUIModel::GetStatusText() const {
 
 base::string16 DownloadUIModel::GetTooltipText(const gfx::FontList& font_list,
                                                int max_width) const {
-  base::string16 tooltip = gfx::ElideFilename(
-      GetFileNameToReportUser(), font_list, max_width, gfx::Typesetter::NATIVE);
+  base::string16 tooltip =
+      gfx::ElideFilename(GetFileNameToReportUser(), font_list, max_width);
   if (GetState() == DownloadItem::INTERRUPTED &&
       GetLastFailState() != FailState::USER_CANCELED) {
     tooltip += base::ASCIIToUTF16("\n");
     tooltip += gfx::ElideText(
         OfflineItemUtils::GetFailStateMessage(GetLastFailState()), font_list,
-        max_width, gfx::ELIDE_TAIL, gfx::Typesetter::NATIVE);
+        max_width, gfx::ELIDE_TAIL);
   }
   return tooltip;
 }
@@ -252,8 +254,7 @@ base::string16 DownloadUIModel::GetWarningText(const gfx::FontList& font_list,
   // Should only be called if IsDangerous().
   DCHECK(IsDangerous());
   base::string16 elided_filename =
-      gfx::ElideFilename(GetFileNameToReportUser(), font_list, base_width,
-                         gfx::Typesetter::BROWSER);
+      gfx::ElideFilename(GetFileNameToReportUser(), font_list, base_width);
 
   switch (GetDangerType()) {
     case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL: {
@@ -275,9 +276,11 @@ base::string16 DownloadUIModel::GetWarningText(const gfx::FontList& font_list,
     }
     case download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT: {
       bool request_ap_verdicts = false;
-#if defined(FULL_SAFE_BROWSING)
-      request_ap_verdicts = safe_browsing::AdvancedProtectionStatusManager::
-          RequestsAdvancedProtectionVerdicts(profile());
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+      request_ap_verdicts =
+          safe_browsing::AdvancedProtectionStatusManagerFactory::GetForProfile(
+              profile())
+              ->RequestsAdvancedProtectionVerdicts();
 #endif
       return l10n_util::GetStringFUTF16(
           request_ap_verdicts
@@ -289,7 +292,24 @@ base::string16 DownloadUIModel::GetWarningText(const gfx::FontList& font_list,
       return l10n_util::GetStringFUTF16(IDS_PROMPT_DOWNLOAD_CHANGES_SETTINGS,
                                         elided_filename);
     }
-    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE: {
+      return l10n_util::GetStringFUTF16(IDS_PROMPT_DOWNLOAD_BLOCKED_TOO_LARGE,
+                                        elided_filename);
+    }
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED: {
+      return l10n_util::GetStringFUTF16(
+          IDS_PROMPT_DOWNLOAD_BLOCKED_PASSWORD_PROTECTED, elided_filename);
+    }
+    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING: {
+      return l10n_util::GetStringFUTF16(
+          IDS_PROMPT_DOWNLOAD_SENSITIVE_CONTENT_WARNING, elided_filename);
+    }
+    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK: {
+      return l10n_util::GetStringFUTF16(
+          IDS_PROMPT_DOWNLOAD_SENSITIVE_CONTENT_BLOCKED, elided_filename);
+    }
+    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE:
+    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS:
     case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
     case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
@@ -651,3 +671,7 @@ base::string16 DownloadUIModel::GetInProgressStatusString() const {
   // Instead of displaying "0 B" we say "Starting..."
   return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_STARTING);
 }
+
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+void DownloadUIModel::CompleteSafeBrowsingScan() {}
+#endif

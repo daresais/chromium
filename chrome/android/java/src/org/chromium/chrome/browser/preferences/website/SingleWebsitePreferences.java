@@ -8,12 +8,10 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.res.Resources;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.support.annotation.Nullable;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.preference.ListPreference;
 import android.support.v7.preference.Preference;
@@ -22,18 +20,19 @@ import android.support.v7.preference.PreferenceScreen;
 import android.text.format.Formatter;
 import android.view.View;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Callback;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.browserservices.Origin;
 import org.chromium.chrome.browser.browserservices.permissiondelegation.TrustedWebActivityPermissionManager;
 import org.chromium.chrome.browser.notifications.channels.SiteChannelsManager;
-import org.chromium.chrome.browser.preferences.ChromeImageViewPreferenceCompat;
-import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegateCompat;
+import org.chromium.chrome.browser.preferences.ChromeImageViewPreference;
+import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 
 import java.util.Arrays;
@@ -77,7 +76,6 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
             "ads_permission_list", // ContentSettingException.Type.ADS
             "automatic_downloads_permission_list",
             // ContentSettingException.Type.AUTOMATIC_DOWNLOADS
-            "autoplay_permission_list", // ContentSettingException.Type.AUTOPLAY
             "background_sync_permission_list", // ContentSettingException.Type.BACKGROUND_SYNC
             "bluetooth_scanning_permission_list", // ContentSettingException.Type.BLUETOOTH_SCANNING
             "cookies_permission_list", // ContentSettingException.Type.COOKIE
@@ -90,6 +88,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
             "location_access_list", // PermissionInfo.Type.GEOLOCATION
             "microphone_permission_list", // PermissionInfo.Type.MICROPHONE
             "midi_sysex_permission_list", // PermissionInfo.Type.MIDI
+            "nfc_permission_list", // PermissionInfo.Type.NFC
             "push_notifications_list", // PermissionInfo.Type.NOTIFICATION
             "protected_media_identifier_permission_list",
             // PermissionInfo.Type.PROTECTED_MEDIA_IDENTIFIER
@@ -158,14 +157,15 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
      */
     public static Bundle createFragmentArgsForSite(String url) {
         Bundle fragmentArgs = new Bundle();
-        String origin = new Origin(url).toString();
+        String origin = Origin.createOrThrow(url).toString();
         fragmentArgs.putSerializable(EXTRA_SITE_ADDRESS, WebsiteAddress.create(origin));
         return fragmentArgs;
     }
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
-        PreferenceUtils.addPreferencesFromResource(this, R.xml.single_website_preferences);
+        // Handled in displaySitePermissions. Moving the addPreferencesFromResource call up to here
+        // causes animation jank (crbug.com/985734).
     }
 
     @Override
@@ -293,6 +293,8 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
      * Must only be called once mSite is set.
      */
     private void displaySitePermissions() {
+        PreferenceUtils.addPreferencesFromResource(this, R.xml.single_website_preferences);
+
         Set<String> permissionPreferenceKeys =
                 new HashSet<>(Arrays.asList(PERMISSION_PREFERENCE_KEYS));
         int maxPermissionOrder = 0;
@@ -393,10 +395,10 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
      * summary and (intentionally) loses its click handler.
      * @return A read-only copy of the preference passed in as |oldPreference|.
      */
-    private ChromeImageViewPreferenceCompat replaceWithReadOnlyCopyOf(
+    private ChromeImageViewPreference replaceWithReadOnlyCopyOf(
             Preference oldPreference, String newSummary) {
-        ChromeImageViewPreferenceCompat newPreference =
-                new ChromeImageViewPreferenceCompat(oldPreference.getContext());
+        ChromeImageViewPreference newPreference =
+                new ChromeImageViewPreference(oldPreference.getContext());
         newPreference.setKey(oldPreference.getKey());
         setUpPreferenceCommon(newPreference);
         newPreference.setSummary(newSummary);
@@ -411,7 +413,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
     }
 
     private void setupNotificationManagedByPreference(
-            ChromeImageViewPreferenceCompat preference, Intent settingsIntent) {
+            ChromeImageViewPreference preference, Intent settingsIntent) {
         preference.setImageView(
                 R.drawable.permission_popups, R.string.website_notification_settings, null);
         // By disabling the ImageView, clicks will go through to the preference.
@@ -425,18 +427,19 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
 
     private void setUpNotificationsPreference(Preference preference) {
         TrustedWebActivityPermissionManager manager = TrustedWebActivityPermissionManager.get();
-        Origin origin = new Origin(mSite.getAddress().getOrigin());
-        String managedBy = manager.getDelegateAppName(origin);
-        if (managedBy != null) {
-            final Intent notificationSettingsIntent =
-                    getNotificationSettingsIntent(manager.getDelegatePackageName(origin));
-            String summaryText = String.format(
-                    getResources().getString(R.string.website_notification_managed_by_app),
-                    managedBy);
-            ChromeImageViewPreferenceCompat newPreference =
-                    replaceWithReadOnlyCopyOf(preference, summaryText);
-            setupNotificationManagedByPreference(newPreference, notificationSettingsIntent);
-            return;
+        Origin origin = Origin.create(mSite.getAddress().getOrigin());
+        if (origin != null) {
+            String managedBy = manager.getDelegateAppName(origin);
+            if (managedBy != null) {
+                final Intent notificationSettingsIntent =
+                        getNotificationSettingsIntent(manager.getDelegatePackageName(origin));
+                String summaryText = getString(R.string.website_notification_managed_by_app,
+                        managedBy);
+                ChromeImageViewPreference newPreference =
+                        replaceWithReadOnlyCopyOf(preference, summaryText);
+                setupNotificationManagedByPreference(newPreference, notificationSettingsIntent);
+                return;
+            }
         }
 
         final @ContentSettingValues @Nullable Integer value =
@@ -453,20 +456,17 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
             }
 
             String overrideSummary;
-            if (isPermissionControlledByDSE(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS)) {
-                overrideSummary = getResources().getString(
-                        value != null && value == ContentSettingValues.ALLOW
+            if (isPermissionControlledByDSE(ContentSettingsType.NOTIFICATIONS)) {
+                overrideSummary = getString(value != null && value == ContentSettingValues.ALLOW
                                 ? R.string.website_settings_permissions_allow_dse
                                 : R.string.website_settings_permissions_block_dse);
             } else {
-                overrideSummary =
-                        getResources().getString(ContentSettingsResources.getSiteSummary(value));
+                overrideSummary = getString(ContentSettingsResources.getSiteSummary(value));
             }
 
             // On Android O this preference is read-only, so we replace the existing pref with a
             // regular Preference that takes users to OS settings on click.
-            ChromeImageViewPreferenceCompat newPreference =
+            ChromeImageViewPreference newPreference =
                     replaceWithReadOnlyCopyOf(preference, overrideSummary);
             newPreference.setDefaultValue(value);
 
@@ -484,8 +484,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
             });
         } else {
             setUpListPreference(preference, value);
-            if (isPermissionControlledByDSE(ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
-                    && value != null) {
+            if (isPermissionControlledByDSE(ContentSettingsType.NOTIFICATIONS) && value != null) {
                 updatePreferenceForDSESetting(preference);
             }
         }
@@ -533,7 +532,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
             int newPermission = mSite.getPermission(PermissionInfo.Type.NOTIFICATION);
             if (mPreviousNotificationPermission == ContentSettingValues.ALLOW
                     && newPermission != ContentSettingValues.ALLOW) {
-                WebsitePreferenceBridge.nativeReportNotificationRevokedForOrigin(
+                WebsitePreferenceBridgeJni.get().reportNotificationRevokedForOrigin(
                         mSite.getAddress().getOrigin(), newPermission,
                         mSite.getPermissionInfo(PermissionInfo.Type.NOTIFICATION).isIncognito());
                 mPreviousNotificationPermission = null;
@@ -556,8 +555,8 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
         PreferenceScreen preferenceScreen = getPreferenceScreen();
 
         for (ChosenObjectInfo info : mSite.getChosenObjectInfo()) {
-            ChromeImageViewPreferenceCompat preference =
-                    new ChromeImageViewPreferenceCompat(getStyledContext());
+            ChromeImageViewPreference preference =
+                    new ChromeImageViewPreference(getStyledContext());
 
             preference.setKey(CHOOSER_PERMISSION_PREFERENCE_KEY);
             preference.setIcon(ContentSettingsResources.getIcon(info.getContentSettingsType()));
@@ -574,7 +573,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
                         }
                     });
 
-            preference.setManagedPreferenceDelegate(new ManagedPreferenceDelegateCompat() {
+            preference.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
                 @Override
                 public boolean isPreferenceControlledByPolicy(Preference preference) {
                     return info.isManaged();
@@ -703,10 +702,10 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
         CharSequence[] descriptions = new String[2];
         keys[0] = ContentSetting.toString(ContentSettingValues.ALLOW);
         keys[1] = ContentSetting.toString(ContentSettingValues.BLOCK);
-        descriptions[0] = getResources().getString(
-                ContentSettingsResources.getSiteSummary(ContentSettingValues.ALLOW));
-        descriptions[1] = getResources().getString(
-                ContentSettingsResources.getSiteSummary(ContentSettingValues.BLOCK));
+        descriptions[0] =
+                getString(ContentSettingsResources.getSiteSummary(ContentSettingValues.ALLOW));
+        descriptions[1] =
+                getString(ContentSettingsResources.getSiteSummary(ContentSettingValues.BLOCK));
         listPreference.setEntryValues(keys);
         listPreference.setEntries(descriptions);
         // TODO(crbug.com/735110): Figure out if this is the correct thing to do - here we are
@@ -748,8 +747,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
         @Nullable
         Integer permission = mSite.getPermission(PermissionInfo.Type.GEOLOCATION);
         setUpListPreference(preference, permission);
-        if (isPermissionControlledByDSE(ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION)
-                && permission != null) {
+        if (isPermissionControlledByDSE(ContentSettingsType.GEOLOCATION) && permission != null) {
             updatePreferenceForDSESetting(preference);
         }
     }
@@ -762,8 +760,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
         // In order to always show the sound permission, set it up with the default value if it
         // doesn't have a current value.
         if (currentValue == null) {
-            currentValue = PrefServiceBridge.getInstance().isCategoryEnabled(
-                                   ContentSettingsType.CONTENT_SETTINGS_TYPE_SOUND)
+            currentValue = WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.SOUND)
                     ? ContentSettingValues.ALLOW
                     : ContentSettingValues.BLOCK;
         }
@@ -802,8 +799,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
         // However, if the blocking is activated, we still want to show the permission, even if it
         // is in the default state.
         if (permission == null) {
-            permission = PrefServiceBridge.getInstance().isCategoryEnabled(
-                                 ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS)
+            permission = WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.ADS)
                     ? ContentSettingValues.ALLOW
                     : ContentSettingValues.BLOCK;
         }
@@ -811,10 +807,9 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
 
         // The subresource filter permission has a custom BLOCK string.
         ListPreference listPreference = (ListPreference) preference;
-        Resources res = getResources();
         listPreference.setEntries(
-                new String[] {res.getString(R.string.website_settings_permissions_allow),
-                        res.getString(R.string.website_settings_permissions_ads_block)});
+                new String[] {getString(R.string.website_settings_permissions_allow),
+                        getString(R.string.website_settings_permissions_ads_block)});
         listPreference.setValueIndex(permission == ContentSettingValues.ALLOW ? 0 : 1);
     }
 
@@ -834,10 +829,9 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
      */
     private void updatePreferenceForDSESetting(Preference preference) {
         ListPreference listPreference = (ListPreference) preference;
-        Resources res = getResources();
         listPreference.setEntries(new String[] {
-                res.getString(R.string.website_settings_permissions_allow_dse),
-                res.getString(R.string.website_settings_permissions_block_dse),
+                getString(R.string.website_settings_permissions_allow_dse),
+                getString(R.string.website_settings_permissions_block_dse),
         });
     }
 
@@ -941,7 +935,7 @@ public class SingleWebsitePreferences extends PreferenceFragmentCompat
      */
     private void removeUserChosenObjectPreferences() {
         Preference preference = findPreference(CHOOSER_PERMISSION_PREFERENCE_KEY);
-        if (preference != null && !((ChromeImageViewPreferenceCompat) preference).isManaged()) {
+        if (preference != null && !((ChromeImageViewPreference) preference).isManaged()) {
             getPreferenceScreen().removePreference(preference);
         }
         mObjectUserPermissionCount = 0;

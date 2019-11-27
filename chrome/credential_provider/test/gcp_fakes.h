@@ -85,6 +85,9 @@ class FakeOSUserManager : public OSUserManager {
   HRESULT SetUserPassword(const wchar_t* domain,
                           const wchar_t* username,
                           const wchar_t* password) override;
+  HRESULT SetUserFullname(const wchar_t* domain,
+                          const wchar_t* username,
+                          const wchar_t* full_name) override;
   HRESULT IsWindowsPasswordValid(const wchar_t* domain,
                                  const wchar_t* username,
                                  const wchar_t* password) override;
@@ -216,6 +219,7 @@ class FakeScopedLsaPolicy : public ScopedLsaPolicy {
   HRESULT RetrievePrivateData(const wchar_t* key,
                               wchar_t* value,
                               size_t length) override;
+  bool PrivateDataExists(const wchar_t* key) override;
   HRESULT AddAccountRights(PSID sid, const wchar_t* right) override;
   HRESULT RemoveAccount(PSID sid) override;
 
@@ -375,7 +379,9 @@ class FakeInternetAvailabilityChecker : public InternetAvailabilityChecker {
 class FakePasswordRecoveryManager : public PasswordRecoveryManager {
  public:
   FakePasswordRecoveryManager();
-  explicit FakePasswordRecoveryManager(base::TimeDelta request_timeout);
+  explicit FakePasswordRecoveryManager(
+      base::TimeDelta encryption_key_request_timeout,
+      base::TimeDelta decryption_key_request_timeout);
   ~FakePasswordRecoveryManager() override;
 
   using PasswordRecoveryManager::MakeGenerateKeyPairResponseForTesting;

@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.preferences.privacy;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -23,7 +23,7 @@ public class BandwidthType {
         int NUM_ENTRIES = 3;
     }
 
-    private final static String[] TITLES = {
+    private static final String[] TITLES = {
             "never_prefetch", "prefetch_on_wifi", "always_prefetch"};
 
     /**

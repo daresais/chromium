@@ -211,6 +211,19 @@ cr.define('gpu', function() {
         } else {
           diagnosticsDiv.hidden = true;
         }
+
+        if (gpuInfo.vulkanInfo) {
+          const vulkanInfo = new gpu.VulkanInfo(gpuInfo.vulkanInfo);
+          const data = [{
+            'description': 'info',
+            'value': vulkanInfo.toString(),
+            'id': 'vulkan-info-value'
+          }];
+          this.setTable_('vulkan-info', data);
+        } else {
+          this.setTable_('vulkan-info', []);
+        }
+
       } else {
         this.setText_('basic-info', '... loading ...');
         diagnosticsDiv.hidden = true;
@@ -241,6 +254,7 @@ cr.define('gpu', function() {
         'rasterization': 'Rasterization',
         'oop_rasterization': 'Out-of-process Rasterization',
         'metal': 'Metal',
+        'vulkan': 'Vulkan',
         'multiple_raster_threads': 'Multiple Raster Threads',
         'native_gpu_memory_buffers': 'Native GpuMemoryBuffers',
         'protected_video_decode': 'Hardware Protected Video Decode',
@@ -454,6 +468,13 @@ cr.define('gpu', function() {
         status.classList.add('feature-red');
       }
       ANGLEFeatureEl.appendChild(status);
+
+      if (ANGLEFeature.condition) {
+        const condition = document.createElement('span');
+        condition.textContent = ': ' + ANGLEFeature.condition;
+        condition.classList.add('feature-gray');
+        ANGLEFeatureEl.appendChild(condition);
+      }
 
       // if there's a description, put on new line, italicized
       if (ANGLEFeature.description) {

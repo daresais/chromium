@@ -15,7 +15,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "components/sync_sessions/session_sync_service.h"
-#include "components/unified_consent/feature.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/metrics/new_tab_page_uma.h"
 #include "ios/chrome/browser/sessions/session_util.h"
@@ -46,7 +45,6 @@
 #import "ios/chrome/browser/ui/table_view/cells/table_view_url_item.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #import "ios/chrome/browser/ui/table_view/table_view_favicon_data_source.h"
-#import "ios/chrome/browser/ui/util/top_view_controller.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
@@ -60,7 +58,7 @@
 #import "ios/chrome/common/favicon/favicon_view.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 
@@ -143,7 +141,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 }
 
 - (void)dealloc {
-  [_signinPromoViewMediator signinPromoViewRemoved];
+  [_signinPromoViewMediator signinPromoViewIsRemoved];
 }
 
 - (void)viewDidLoad {
@@ -229,7 +227,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
   if (self.styler.tintColor) {
     historyItem.textColor = self.styler.tintColor;
   } else {
-    historyItem.textColor = [UIColor colorNamed:kTintColor];
+    historyItem.textColor = [UIColor colorNamed:kBlueColor];
   }
   historyItem.accessibilityIdentifier =
       kRecentTabsShowFullHistoryCellAccessibilityIdentifier;
@@ -478,13 +476,8 @@ const int kRecentlyClosedTabsSectionIndex = 0;
   // Configure and add a TableViewSigninPromoItem to the model.
   TableViewSigninPromoItem* signinPromoItem = [[TableViewSigninPromoItem alloc]
       initWithType:ItemTypeOtherDevicesSigninPromo];
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    signinPromoItem.text =
-        l10n_util::GetNSString(IDS_IOS_SIGNIN_PROMO_RECENT_TABS_WITH_UNITY);
-  } else {
-    signinPromoItem.text =
-        l10n_util::GetNSString(IDS_IOS_SIGNIN_PROMO_RECENT_TABS);
-  }
+  signinPromoItem.text =
+      l10n_util::GetNSString(IDS_IOS_SIGNIN_PROMO_RECENT_TABS_WITH_UNITY);
   signinPromoItem.delegate = self.signinPromoViewMediator;
   signinPromoItem.configurator =
       [self.signinPromoViewMediator createConfigurator];
@@ -548,7 +541,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
   if ((newSessionState == self.sessionState &&
        self.sessionState !=
            SessionsSyncUserState::USER_SIGNED_IN_SYNC_ON_WITH_SESSIONS) ||
-      self.signinPromoViewMediator.isSigninInProgress) {
+      self.signinPromoViewMediator.signinInProgress) {
     // No need to refresh the sections since all states other than
     // USER_SIGNED_IN_SYNC_ON_WITH_SESSIONS only have static content. This means
     // that if the previous State is the same as the new one the static content
@@ -563,6 +556,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
     // Update the TableView and TableViewModel sections to match the new
     // sessionState.
     // Turn Off animations since UITableViewRowAnimationNone still animates.
+    BOOL animationsWereEnabled = [UIView areAnimationsEnabled];
     [UIView setAnimationsEnabled:NO];
     if (newSessionState ==
         SessionsSyncUserState::USER_SIGNED_IN_SYNC_ON_WITH_SESSIONS) {
@@ -576,14 +570,14 @@ const int kRecentlyClosedTabsSectionIndex = 0;
       }
                                completion:nil];
     }
-    [UIView setAnimationsEnabled:YES];
+    [UIView setAnimationsEnabled:animationsWereEnabled];
   }
 
   // Table updates must happen before |sessionState| gets updated, since some
   // table updates rely on knowing the previous state.
   self.sessionState = newSessionState;
   if (self.sessionState != SessionsSyncUserState::USER_SIGNED_OUT) {
-    [self.signinPromoViewMediator signinPromoViewRemoved];
+    [self.signinPromoViewMediator signinPromoViewIsRemoved];
     self.signinPromoViewMediator.consumer = nil;
     self.signinPromoViewMediator = nil;
   }
@@ -628,7 +622,15 @@ const int kRecentlyClosedTabsSectionIndex = 0;
       break;
     case ItemTypeShowFullHistory:
       [tableView deselectRowAtIndexPath:indexPath animated:NO];
-      [self.presentationDelegate showHistoryFromRecentTabs];
+
+      // Tapping "show full history" attempts to dismiss recent tabs to show the
+      // history UI. It is reasonable to ignore this if a modal UI is already
+      // showing above recent tabs. This can happen when a user simultaneously
+      // taps "show full history" and "enable sync". The sync settings UI
+      // appears first and we should not dismiss it to display history.
+      if (!self.presentedViewController) {
+        [self.presentationDelegate showHistoryFromRecentTabs];
+      }
       break;
     case ItemTypeOtherDevicesSyncOff:
     case ItemTypeOtherDevicesNoSessions:
@@ -664,7 +666,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
       [self.tableViewModel itemTypeForIndexPath:indexPath];
   // If SigninPromo will be shown, |self.signinPromoViewMediator| must know.
   if (itemTypeSelected == ItemTypeOtherDevicesSigninPromo) {
-    [self.signinPromoViewMediator signinPromoViewVisible];
+    [self.signinPromoViewMediator signinPromoViewIsVisible];
   }
   // Retrieve favicons for closed tabs and remote sessions.
   if (itemTypeSelected == ItemTypeRecentlyClosed ||
@@ -861,6 +863,16 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 
 - (void)openTabWithContentOfDistantTab:
     (synced_sessions::DistantTab const*)distantTab {
+  // Shouldn't reach this if in incognito.
+  DCHECK(!self.isIncognito);
+
+  // It is reasonable to ignore this request if a modal UI is already showing
+  // above recent tabs. This can happen when a user simultaneously taps a
+  // distant tab and "enable sync". The sync settings UI appears first and we
+  // should not dismiss it to show a distant tab.
+  if (self.presentedViewController)
+    return;
+
   sync_sessions::OpenTabsUIDelegate* openTabs =
       SessionSyncServiceFactory::GetForBrowserState(self.browserState)
           ->GetOpenTabsUIDelegate();
@@ -896,6 +908,13 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 
 - (void)openTabWithTabRestoreEntry:
     (const sessions::TabRestoreService::Entry*)entry {
+  // It is reasonable to ignore this request if a modal UI is already showing
+  // above recent tabs. This can happen when a user simultaneously taps a
+  // recently closed tab and "enable sync". The sync settings UI appears first
+  // and we should not dismiss it to restore a recently closed tab.
+  if (self.presentedViewController)
+    return;
+
   // Only TAB type is handled.
   DCHECK_EQ(entry->type, sessions::TabRestoreService::TAB);
   base::RecordAction(
@@ -981,6 +1000,12 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 - (void)handleLongPress:(UILongPressGestureRecognizer*)sender {
   if (sender.state != UIGestureRecognizerStateBegan)
     return;
+
+  // Do not handle the long press and present the context menu if the recent
+  // tabs UI is not visible.
+  if (!self.viewLoaded || !self.view.window || self.presentedViewController)
+    return;
+
   UIView* headerTapped = sender.view;
   NSInteger tappedHeaderSectionIdentifier = headerTapped.tag;
   NSInteger sectionIdentifier = tappedHeaderSectionIdentifier;
@@ -1005,11 +1030,8 @@ const int kRecentlyClosedTabsSectionIndex = 0;
   // Get view coordinates in local space.
   CGPoint viewCoordinate = [sender locationInView:self.tableView];
   // Present sheet/popover using controller that is added to view hierarchy.
-  // TODO(crbug.com/754642): Remove TopPresentedViewController().
-  UIViewController* topController =
-      top_view_controller::TopPresentedViewController();
   self.contextMenuCoordinator = [[ContextMenuCoordinator alloc]
-      initWithBaseViewController:topController
+      initWithBaseViewController:self
                            title:nil
                           inView:self.tableView
                       atLocation:viewCoordinate];
@@ -1126,14 +1148,6 @@ const int kRecentlyClosedTabsSectionIndex = 0;
       baseViewController:self];
 }
 
-- (void)showSyncSettings {
-  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    [self.dispatcher showGoogleServicesSettingsFromViewController:self];
-  } else {
-    [self.dispatcher showSyncSettingsFromViewController:self];
-  }
-}
-
 - (void)showSyncPassphraseSettings {
   [self.dispatcher showSyncPassphraseSettingsFromViewController:self];
 }
@@ -1146,6 +1160,13 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 
 - (void)showSignin:(ShowSigninCommand*)command {
   [self.dispatcher showSignin:command baseViewController:self];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  // Call dismissRecentTabs so the Coordinator cleans up any state it needs to.
+  [self.presentationDelegate dismissRecentTabs];
 }
 
 #pragma mark - Accessibility
@@ -1163,7 +1184,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
   if (ShouldShowSyncSignin(syncState)) {
     [self showReauthenticateSignin];
   } else if (ShouldShowSyncSettings(syncState)) {
-    [self showSyncSettings];
+    [self showGoogleServicesSettings];
   } else if (ShouldShowSyncPassphraseSettings(syncState)) {
     [self showSyncPassphraseSettings];
   }

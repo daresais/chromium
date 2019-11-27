@@ -7,7 +7,7 @@
 #include "build/build_config.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
-#include "third_party/blink/public/mojom/frame/document_interface_broker.mojom-blink.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -31,7 +31,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
@@ -54,6 +54,13 @@ AudioContext* AudioContext::Create(Document& document,
                                    const AudioContextOptions* context_options,
                                    ExceptionState& exception_state) {
   DCHECK(IsMainThread());
+
+  if (document.IsDetached()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotSupportedError,
+        "Cannot create AudioContext on a detached document.");
+    return nullptr;
+  }
 
   document.CountUseOnlyInCrossOriginIframe(
       WebFeature::kAudioContextCrossOriginIframe);
@@ -148,6 +155,20 @@ AudioContext::AudioContext(Document& document,
   }
 
   Initialize();
+
+  // Compute the base latency now and cache the value since it doesn't change
+  // once the context is constructed.  We need the destination to be initialized
+  // so we have to compute it here.
+  //
+  // TODO(hongchan): Due to the incompatible constructor between
+  // AudioDestinationNode and RealtimeAudioDestinationNode, casting directly
+  // from |destination()| is impossible. This is a temporary workaround until
+  // the refactoring is completed.
+  RealtimeAudioDestinationHandler& destination_handler =
+      static_cast<RealtimeAudioDestinationHandler&>(
+          destination()->GetAudioDestinationHandler());
+  base_latency_ = destination_handler.GetFramesPerBuffer() /
+                  static_cast<double>(sampleRate());
 }
 
 void AudioContext::Uninitialize() {
@@ -250,6 +271,21 @@ ScriptPromise AudioContext::resumeContext(ScriptState* script_state) {
   return promise;
 }
 
+bool AudioContext::IsPullingAudioGraph() const {
+  DCHECK(IsMainThread());
+
+  if (!destination())
+    return false;
+
+  RealtimeAudioDestinationHandler& destination_handler =
+      static_cast<RealtimeAudioDestinationHandler&>(
+          destination()->GetAudioDestinationHandler());
+
+  // The realtime context is pulling on the audio graph if the realtime
+  // destination allows it.
+  return destination_handler.IsPullingAudioGraphAllowed();
+}
+
 AudioTimestamp* AudioContext::getOutputTimestamp(
     ScriptState* script_state) const {
   AudioTimestamp* result = AudioTimestamp::Create();
@@ -337,15 +373,7 @@ double AudioContext::baseLatency() const {
   DCHECK(IsMainThread());
   DCHECK(destination());
 
-  // TODO(hongchan): Due to the incompatible constructor between
-  // AudioDestinationNode and RealtimeAudioDestinationNode, casting directly
-  // from |destination()| is impossible. This is a temporary workaround until
-  // the refactoring is completed.
-  RealtimeAudioDestinationHandler& destination_handler =
-      static_cast<RealtimeAudioDestinationHandler&>(
-          destination()->GetAudioDestinationHandler());
-  return destination_handler.GetFramesPerBuffer() /
-         static_cast<double>(sampleRate());
+  return base_latency_;
 }
 
 MediaElementAudioSourceNode* AudioContext::createMediaElementSource(
@@ -454,8 +482,8 @@ bool AudioContext::IsAllowedToStart() const {
       NOTREACHED();
       break;
     case AutoplayPolicy::Type::kUserGestureRequired:
-      DCHECK(document->GetFrame() &&
-             document->GetFrame()->IsCrossOriginSubframe());
+      DCHECK(document->GetFrame());
+      DCHECK(document->GetFrame()->IsCrossOriginSubframe());
       document->AddConsoleMessage(ConsoleMessage::Create(
           mojom::ConsoleMessageSource::kOther,
           mojom::ConsoleMessageLevel::kWarning,
@@ -661,11 +689,10 @@ void AudioContext::EnsureAudioContextManagerService() {
   if (audio_context_manager_ || !GetDocument())
     return;
 
-  GetDocument()
-      ->GetFrame()
-      ->GetDocumentInterfaceBroker()
-      .GetAudioContextManager(
-          audio_context_manager_.BindNewPipeAndPassReceiver());
+  GetDocument()->GetFrame()->GetBrowserInterfaceBroker().GetInterface(
+      mojo::GenericPendingReceiver(
+          audio_context_manager_.BindNewPipeAndPassReceiver()));
+
   audio_context_manager_.set_disconnect_handler(
       WTF::Bind(&AudioContext::OnAudioContextManagerServiceConnectionError,
                 WrapWeakPersistent(this)));

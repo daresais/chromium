@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "components/leveldb_proto/internal/leveldb_proto_feature_list.h"
 #include "components/leveldb_proto/internal/shared_proto_database_provider.h"
@@ -162,11 +162,6 @@ class ProtoDatabaseImplTest : public testing::Test {
     ASSERT_TRUE(test_thread_->Start());
     shared_db_ = base::WrapRefCounted(new SharedProtoDatabase(
         kDefaultClientName, shared_db_temp_dir_->GetPath()));
-  }
-
-  void TearDown() override {
-    temp_dir_.reset();
-    shared_db_temp_dir_.reset();
   }
 
   void SetUpExperimentParams(std::map<std::string, std::string> params) {
@@ -394,14 +389,14 @@ class ProtoDatabaseImplTest : public testing::Test {
 
  private:
   std::unique_ptr<base::ScopedTempDir> temp_dir_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  std::unique_ptr<base::ScopedTempDir> shared_db_temp_dir_;
+  base::test::TaskEnvironment task_environment_;
   base::test::ScopedFeatureList scoped_feature_list_;
 
   // Shared database.
   std::unique_ptr<base::Thread> test_thread_;
   std::unique_ptr<base::Thread> shared_db_thread_;
   scoped_refptr<SharedProtoDatabase> shared_db_;
-  std::unique_ptr<base::ScopedTempDir> shared_db_temp_dir_;
 };
 
 using ProtoDatabaseImplTestConfig = testing::Types<TestProto, ClientStruct>;

@@ -36,7 +36,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
-#include "net/cert/pem_tokenizer.h"
+#include "net/cert/pem.h"
 #include "net/cert/x509_certificate.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 
@@ -49,8 +49,6 @@ const char kAttestationResultHistogram[] =
     "ChromeOS.PlatformVerification.Result";
 const char kAttestationAvailableHistogram[] =
     "ChromeOS.PlatformVerification.Available";
-const char kAttestationExpiryHistogram[] =
-    "ChromeOS.PlatformVerification.ExpiryStatus";
 const int kOpportunisticRenewalThresholdInDays = 30;
 
 // A callback method to handle DBus errors.
@@ -72,12 +70,6 @@ void ReportError(
   UMA_HISTOGRAM_ENUMERATION(kAttestationResultHistogram, error,
                             PlatformVerificationFlow::RESULT_MAX);
   callback.Run(error, std::string(), std::string(), std::string());
-}
-
-// A helper to report expiry status to UMA.
-void ReportExpiryStatus(PlatformVerificationFlow::ExpiryStatus status) {
-  UMA_HISTOGRAM_ENUMERATION(kAttestationExpiryHistogram, status,
-                            PlatformVerificationFlow::EXPIRY_STATUS_MAX);
 }
 
 }  // namespace
@@ -115,7 +107,7 @@ class DefaultDelegate : public PlatformVerificationFlow::Delegate {
         PermissionManager::Get(
             Profile::FromBrowserContext(web_contents->GetBrowserContext()))
             ->GetPermissionStatus(
-                CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
+                ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER,
                 requesting_origin, embedding_origin)
             .content_setting;
 
@@ -273,9 +265,9 @@ void PlatformVerificationFlow::GetCertificate(const ChallengeContext& context,
   AttestationFlow::CertificateCallback certificate_callback =
       base::Bind(&PlatformVerificationFlow::OnCertificateReady, this, context,
                  account_id, base::Passed(&timer));
-  attestation_flow_->GetCertificate(PROFILE_CONTENT_PROTECTION_CERTIFICATE,
-                                    account_id, context.service_id,
-                                    force_new_key, certificate_callback);
+  attestation_flow_->GetCertificate(
+      PROFILE_CONTENT_PROTECTION_CERTIFICATE, account_id, context.service_id,
+      force_new_key, std::string() /*key_name*/, certificate_callback);
 }
 
 void PlatformVerificationFlow::OnCertificateReady(
@@ -300,20 +292,19 @@ void PlatformVerificationFlow::OnCertificateReady(
     return;
   }
   ExpiryStatus expiry_status = CheckExpiry(certificate_chain);
-  ReportExpiryStatus(expiry_status);
   if (expiry_status == EXPIRY_STATUS_EXPIRED) {
     GetCertificate(context, account_id, true /* Force a new key */);
     return;
   }
   bool is_expiring_soon = (expiry_status == EXPIRY_STATUS_EXPIRING_SOON);
   cryptohome::AsyncMethodCaller::DataCallback cryptohome_callback =
-      base::Bind(&PlatformVerificationFlow::OnChallengeReady, this, context,
-                 account_id, certificate_chain, is_expiring_soon);
+      base::BindOnce(&PlatformVerificationFlow::OnChallengeReady, this, context,
+                     account_id, certificate_chain, is_expiring_soon);
   std::string key_name = kContentProtectionKeyPrefix;
   key_name += context.service_id;
   async_caller_->TpmAttestationSignSimpleChallenge(
       KEY_USER, cryptohome::Identification(account_id), key_name,
-      context.challenge, cryptohome_callback);
+      context.challenge, std::move(cryptohome_callback));
 }
 
 void PlatformVerificationFlow::OnCertificateTimeout(
@@ -350,10 +341,12 @@ void PlatformVerificationFlow::OnChallengeReady(
     AttestationFlow::CertificateCallback renew_callback =
         base::Bind(&PlatformVerificationFlow::RenewCertificateCallback, this,
                    certificate_chain);
-    attestation_flow_->GetCertificate(PROFILE_CONTENT_PROTECTION_CERTIFICATE,
-                                      account_id, context.service_id,
-                                      true,  // force_new_key
-                                      renew_callback);
+    attestation_flow_->GetCertificate(
+        PROFILE_CONTENT_PROTECTION_CERTIFICATE, account_id, context.service_id,
+        true,           // force_new_key
+        std::string(),  // key_name, empty means a default one will be
+                        // generated.
+        renew_callback);
   }
 }
 

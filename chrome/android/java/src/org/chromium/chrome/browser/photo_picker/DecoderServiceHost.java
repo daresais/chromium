@@ -19,10 +19,11 @@ import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.os.StrictMode;
 import android.os.SystemClock;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
@@ -214,7 +215,7 @@ public class DecoderServiceHost
             ImagesDecodedCallback callback) {
         DecoderServiceParams params = new DecoderServiceParams(uri, size, fileType, callback);
         mHighPriorityRequests.put(uri.getPath(), params);
-        if (mHighPriorityRequests.size() == 1) dispatchNextDecodeRequest();
+        if (mProcessingRequests.size() == 0) dispatchNextDecodeRequest();
     }
 
     /**
@@ -331,10 +332,11 @@ public class DecoderServiceHost
             @DecodeVideoTask.DecodingResult int decodingResult) {
         switch (decodingResult) {
             case DecodeVideoTask.DecodingResult.SUCCESS:
-                if (bitmaps == null || bitmaps.size() == 0)
+                if (bitmaps == null || bitmaps.size() == 0) {
                     mFailedVideoDecodesUnknown++;
-                else
+                } else {
                     mSuccessfulVideoDecodes++;
+                }
                 break;
             case DecodeVideoTask.DecodingResult.FILE_ERROR:
                 mFailedVideoDecodesFile++;

@@ -13,6 +13,7 @@
 #include "base/task/post_task.h"
 #include "base/task/single_thread_task_runner_thread_mode.h"
 #include "base/task/task_traits.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/child_process_launcher_utils.h"
@@ -66,7 +67,6 @@ ChildProcessLauncherHelper::Process::Process::operator=(
 
 ChildProcessLauncherHelper::ChildProcessLauncherHelper(
     int child_process_id,
-    BrowserThread::ID client_thread_id,
     std::unique_ptr<base::CommandLine> command_line,
     std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
     const base::WeakPtr<ChildProcessLauncher>& child_process_launcher,
@@ -75,15 +75,17 @@ ChildProcessLauncherHelper::ChildProcessLauncherHelper(
     bool can_use_warm_up_connection,
 #endif
     mojo::OutgoingInvitation mojo_invitation,
-    const mojo::ProcessErrorCallback& process_error_callback)
+    const mojo::ProcessErrorCallback& process_error_callback,
+    std::map<std::string, base::FilePath> files_to_preload)
     : child_process_id_(child_process_id),
-      client_thread_id_(client_thread_id),
+      client_task_runner_(base::SequencedTaskRunnerHandle::Get()),
       command_line_(std::move(command_line)),
       delegate_(std::move(delegate)),
       child_process_launcher_(child_process_launcher),
       terminate_on_shutdown_(terminate_on_shutdown),
       mojo_invitation_(std::move(mojo_invitation)),
-      process_error_callback_(process_error_callback)
+      process_error_callback_(process_error_callback),
+      files_to_preload_(std::move(files_to_preload))
 #if defined(OS_ANDROID)
       ,
       can_use_warm_up_connection_(can_use_warm_up_connection)
@@ -94,7 +96,7 @@ ChildProcessLauncherHelper::ChildProcessLauncherHelper(
 ChildProcessLauncherHelper::~ChildProcessLauncherHelper() = default;
 
 void ChildProcessLauncherHelper::StartLaunchOnClientThread() {
-  DCHECK_CURRENTLY_ON(client_thread_id_);
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
 
   BeforeLaunchOnClientThread();
 
@@ -173,8 +175,8 @@ void ChildProcessLauncherHelper::PostLaunchOnLauncherThread(
     }
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {client_thread_id_},
+  client_task_runner_->PostTask(
+      FROM_HERE,
       base::BindOnce(&ChildProcessLauncherHelper::PostLaunchOnClientThread,
                      this, std::move(process), launch_result));
 }

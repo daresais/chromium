@@ -26,7 +26,6 @@
 #include "components/sync/syncable/entry_kernel.h"
 #include "components/sync/syncable/metahandle_set.h"
 #include "components/sync/syncable/parent_child_index.h"
-#include "components/sync/syncable/syncable_delete_journal.h"
 
 namespace base {
 namespace trace_event {
@@ -144,8 +143,6 @@ class Directory {
     PersistedKernelInfo kernel_info;
     OwnedEntryKernelSet dirty_metas;
     MetahandleSet metahandles_to_purge;
-    OwnedEntryKernelSet delete_journals;
-    MetahandleSet delete_journals_to_purge;
   };
 
   struct Kernel {
@@ -245,8 +242,7 @@ class Directory {
       std::unique_ptr<DirectoryBackingStore> store,
       const WeakHandle<UnrecoverableErrorHandler>& unrecoverable_error_handler,
       const base::Closure& report_unrecoverable_error_function,
-      NigoriHandler* nigori_handler,
-      Cryptographer* cryptographer);
+      NigoriHandler* nigori_handler);
   virtual ~Directory();
 
   // Does not take ownership of |delegate|, which must not be null.
@@ -334,7 +330,7 @@ class Directory {
 
   // Returns a pointer to our cryptographer. Does not transfer ownership.
   // Not thread safe, so should only be accessed while holding a transaction.
-  Cryptographer* GetCryptographer(const BaseTransaction* trans);
+  const Cryptographer* GetCryptographer(const BaseTransaction* trans);
 
   // Called to immediately report an unrecoverable error (but don't
   // propagate it up).
@@ -345,8 +341,6 @@ class Directory {
   void OnUnrecoverableError(const BaseTransaction* trans,
                             const base::Location& location,
                             const std::string& message);
-
-  DeleteJournal* delete_journal();
 
   // Returns the child meta handles (even those for deleted/unlinked
   // nodes) for given parent id.  Clears |result| if there are no
@@ -509,7 +503,6 @@ class Directory {
  private:
   friend class SyncableDirectoryTest;
   friend class syncer::TestUserShare;
-  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, ManageDeleteJournals);
   FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
                            TakeSnapshotGetsAllDirtyHandlesTest);
   FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
@@ -587,10 +580,7 @@ class Directory {
 
   // Helper methods used by PurgeDisabledTypes.
   void UnapplyEntry(EntryKernel* entry);
-  void DeleteEntry(const ScopedKernelLock& lock,
-                   bool save_to_journal,
-                   EntryKernel* entry,
-                   OwnedEntryKernelSet* entries_to_journal);
+  void DeleteEntry(const ScopedKernelLock& lock, EntryKernel* entry);
 
   // A private version of the public GetMetaHandlesOfType for when you already
   // have a ScopedKernelLock.
@@ -625,13 +615,8 @@ class Directory {
 
   // Not owned.
   NigoriHandler* const nigori_handler_;
-  Cryptographer* const cryptographer_;
 
   InvariantCheckLevel invariant_check_level_;
-
-  // Maintain deleted entries not in |kernel_| until it's verified that they
-  // are deleted in native models as well.
-  std::unique_ptr<DeleteJournal> delete_journal_;
 
   base::WeakPtrFactory<Directory> weak_ptr_factory_{this};
 

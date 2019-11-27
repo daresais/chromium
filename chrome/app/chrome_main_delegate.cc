@@ -37,6 +37,7 @@
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
+#include "chrome/common/heap_profiler_controller.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/gpu/chrome_content_gpu_client.h"
@@ -74,7 +75,6 @@
 
 #include "base/debug/close_handle_hook_win.h"
 #include "base/win/atl.h"
-#include "chrome/browser/downgrade/user_data_downgrade.h"
 #include "chrome/child/v8_crashpad_support_win.h"
 #include "chrome/chrome_elf/chrome_elf_main.h"
 #include "chrome/common/child_process_logging.h"
@@ -113,13 +113,18 @@
 #include "chromeos/constants/chromeos_paths.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/hugepage_text/hugepage_text.h"
+#include "chromeos/memory/kstaled.h"
+#include "chromeos/memory/memory.h"
+#include "chromeos/memory/swap_configuration.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "base/android/java_exception_reporter.h"
+#include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/crash/pure_java_exception_handler.h"
 #include "chrome/common/chrome_descriptors.h"
-#else
+#include "net/android/network_change_notifier_factory_android.h"
+#else  // defined(OS_ANDROID)
 // Diagnostics is only available on non-android platforms.
 #include "chrome/browser/diagnostics/diagnostics_controller.h"
 #include "chrome/browser/diagnostics/diagnostics_writer.h"
@@ -141,7 +146,8 @@
 #include "base/environment.h"
 #endif
 
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_ANDROID)
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_ANDROID) || \
+    defined(OS_LINUX)
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "components/crash/content/app/crashpad.h"
 #endif
@@ -542,6 +548,23 @@ void ChromeMainDelegate::PostEarlyInitialization(bool is_running_tests) {
   // Initialize D-Bus clients that depend on feature list.
   chromeos::InitializeFeatureListDependentDBus();
 #endif
+
+#if defined(OS_ANDROID)
+  startup_data_->CreateProfilePrefService();
+  net::NetworkChangeNotifier::SetFactory(
+      new net::NetworkChangeNotifierFactoryAndroid());
+#endif
+
+  if (base::FeatureList::IsEnabled(
+          features::kWriteBasicSystemProfileToPersistentHistogramsFile)) {
+    bool record = true;
+#if defined(OS_ANDROID)
+    record =
+        base::FeatureList::IsEnabled(chrome::android::kUmaBackgroundSessions);
+#endif
+    if (record)
+      startup_data_->RecordCoreSystemProfile();
+  }
 }
 
 bool ChromeMainDelegate::ShouldCreateFeatureList() {
@@ -549,29 +572,19 @@ bool ChromeMainDelegate::ShouldCreateFeatureList() {
   return false;
 }
 
-void ChromeMainDelegate::PostTaskSchedulerStart() {
-#if defined(OS_ANDROID)
-  startup_data_->CreateProfilePrefService();
-#endif
-  if (base::FeatureList::IsEnabled(
-          features::kWriteBasicSystemProfileToPersistentHistogramsFile)) {
-    startup_data_->RecordCoreSystemProfile();
-  }
-}
-
 #endif
 
 void ChromeMainDelegate::PostFieldTrialInitialization() {
+  std::string process_type =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kProcessType);
+  bool is_browser_process = process_type.empty();
+
 #if BUILDFLAG(ENABLE_GWP_ASAN_MALLOC)
   {
     version_info::Channel channel = chrome::GetChannel();
     bool is_canary_dev = (channel == version_info::Channel::CANARY ||
                           channel == version_info::Channel::DEV);
-    const base::CommandLine& command_line =
-        *base::CommandLine::ForCurrentProcess();
-    std::string process_type =
-        command_line.GetSwitchValueASCII(switches::kProcessType);
-    bool is_browser_process = process_type.empty();
     gwp_asan::EnableForMalloc(is_canary_dev || is_browser_process,
                               process_type.c_str());
   }
@@ -582,13 +595,25 @@ void ChromeMainDelegate::PostFieldTrialInitialization() {
     version_info::Channel channel = chrome::GetChannel();
     bool is_canary_dev = (channel == version_info::Channel::CANARY ||
                           channel == version_info::Channel::DEV);
-    const base::CommandLine& command_line =
-        *base::CommandLine::ForCurrentProcess();
-    std::string process_type =
-        command_line.GetSwitchValueASCII(switches::kProcessType);
     gwp_asan::EnableForPartitionAlloc(is_canary_dev, process_type.c_str());
   }
 #endif
+
+  // Start heap profiling as early as possible so it can start recording
+  // memory allocations.
+  if (is_browser_process) {
+    heap_profiler_controller_ = std::make_unique<HeapProfilerController>();
+    heap_profiler_controller_->Start();
+
+#if defined(OS_CHROMEOS)
+    chromeos::ConfigureSwap();
+    chromeos::InitializeKstaled();
+
+    // If we're in an experimental group that locks the browser text we will do
+    // that now.
+    chromeos::LockMainProgramText();
+#endif
+  }
 }
 
 bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
@@ -607,12 +632,19 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
   // because this is the earliest callback. Many places in Chromium gate
   // security features around kDisableWebSecurity, and it is unreasonable to
   // expect them all to properly also check for kUserDataDir.
-  if (command_line.HasSwitch(switches::kDisableWebSecurity) &&
-      !command_line.HasSwitch(switches::kUserDataDir)) {
-    LOG(ERROR) << "Web security may only be disabled if '--user-data-dir' is "
-                  "also specified.";
-    base::CommandLine::ForCurrentProcess()->RemoveSwitch(
-        switches::kDisableWebSecurity);
+  if (command_line.HasSwitch(switches::kDisableWebSecurity)) {
+    base::FilePath default_user_data_dir;
+    chrome::GetDefaultUserDataDirectory(&default_user_data_dir);
+    const base::FilePath specified_user_data_dir =
+        command_line.GetSwitchValuePath(switches::kUserDataDir)
+            .StripTrailingSeparators();
+    if (specified_user_data_dir.empty() ||
+        specified_user_data_dir == default_user_data_dir) {
+      LOG(ERROR) << "Web security may only be disabled if '--user-data-dir' is "
+                    "also specified with a non-default value.";
+      base::CommandLine::ForCurrentProcess()->RemoveSwitch(
+          switches::kDisableWebSecurity);
+    }
   }
 
 #if defined(OS_WIN)
@@ -634,13 +666,17 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
   content::Profiling::ProcessStarted();
 
   // Setup tracing sampler profiler as early as possible at startup if needed.
-  tracing::TracingSamplerProfiler::CreateForCurrentThread();
+  tracing_sampler_profiler_ =
+      tracing::TracingSamplerProfiler::CreateOnMainThread();
 
 #if defined(OS_WIN) && !defined(CHROME_MULTIPLE_DLL_BROWSER)
   v8_crashpad_support::SetUp();
 #endif
+
 #if defined(OS_LINUX)
-  breakpad::SetFirstChanceExceptionHandler(v8::TryHandleWebAssemblyTrapPosix);
+  if (!crash_reporter::IsCrashpadEnabled()) {
+    breakpad::SetFirstChanceExceptionHandler(v8::TryHandleWebAssemblyTrapPosix);
+  }
 #endif
 
 #if defined(OS_POSIX)
@@ -873,16 +909,8 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #endif
 
   // Initialize the user data dir for any process type that needs it.
-  if (chrome::ProcessNeedsProfileDir(process_type)) {
+  if (chrome::ProcessNeedsProfileDir(process_type))
     InitializeUserDataDir(base::CommandLine::ForCurrentProcess());
-#if defined(OS_WIN) && !defined(CHROME_MULTIPLE_DLL_CHILD)
-    // TODO(grt): Enable this codepath for all desktop platforms.
-    downgrade::MoveUserDataForFirstRunAfterDowngrade();
-    base::FilePath user_data_dir;
-    if (base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
-      downgrade::UpdateLastVersion(user_data_dir);
-#endif
-  }
 
   // Register component_updater PathProvider after DIR_USER_DATA overidden by
   // command line flags. Maybe move the chrome PathProvider down here also?
@@ -966,12 +994,16 @@ void ChromeMainDelegate::PreSandboxStartup() {
       kAndroidChrome100PercentPakDescriptor,
       kAndroidUIResourcesPakDescriptor,
     };
-    for (size_t i = 0; i < base::size(extra_pak_keys); ++i) {
-      pak_fd = global_descriptors->Get(extra_pak_keys[i]);
-      pak_region = global_descriptors->GetRegion(extra_pak_keys[i]);
+    for (int extra_pak_key : extra_pak_keys) {
+      pak_fd = global_descriptors->Get(extra_pak_key);
+      pak_region = global_descriptors->GetRegion(extra_pak_key);
       ui::ResourceBundle::GetSharedInstance().AddDataPackFromFileRegion(
           base::File(pak_fd), pak_region, ui::SCALE_FACTOR_100P);
     }
+
+    // For Android: Native resources for DFMs should only be used by the browser
+    // process. Their file descriptors and memory mapped file region are not
+    // passed to child processes, and are therefore not loaded here.
 
     base::i18n::SetICUDefaultLocale(locale);
     const std::string loaded_locale = locale;
@@ -1006,7 +1038,13 @@ void ChromeMainDelegate::PreSandboxStartup() {
       base::android::InitJavaExceptionReporterForChildProcess();
     }
 #else  // !defined(OS_ANDROID)
-    breakpad::InitCrashReporter(process_type);
+    if (crash_reporter::IsCrashpadEnabled()) {
+      crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
+      crash_reporter::SetFirstChanceExceptionHandler(
+          v8::TryHandleWebAssemblyTrapPosix);
+    } else {
+      breakpad::InitCrashReporter(process_type);
+    }
 #endif  // defined(OS_ANDROID)
   }
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -1139,7 +1177,13 @@ void ChromeMainDelegate::ZygoteForked() {
       base::CommandLine::ForCurrentProcess();
   std::string process_type =
       command_line->GetSwitchValueASCII(switches::kProcessType);
-  breakpad::InitCrashReporter(process_type);
+  if (crash_reporter::IsCrashpadEnabled()) {
+    crash_reporter::InitializeCrashpad(false, process_type);
+    crash_reporter::SetFirstChanceExceptionHandler(
+        v8::TryHandleWebAssemblyTrapPosix);
+  } else {
+    breakpad::InitCrashReporter(process_type);
+  }
 
   // Reset the command line for the newly spawned process.
   crash_keys::SetCrashKeysFromCommandLine(*command_line);

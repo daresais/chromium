@@ -43,6 +43,9 @@ BookmarkAppConfirmationView::BookmarkAppConfirmationView(
     chrome::AppInstallationAcceptanceCallback callback)
     : web_app_info_(std::move(web_app_info)), callback_(std::move(callback)) {
   DCHECK(web_app_info_);
+  DialogDelegate::set_button_label(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_BUTTON_LABEL));
   const ChromeLayoutProvider* layout_provider = ChromeLayoutProvider::Get();
   set_margins(layout_provider->GetDialogInsetsForContentType(views::CONTROL,
                                                              views::TEXT));
@@ -95,9 +98,6 @@ BookmarkAppConfirmationView::BookmarkAppConfirmationView(
   title_tf_->SelectAll(true);
   chrome::RecordDialogCreation(
       chrome::DialogIdentifier::BOOKMARK_APP_CONFIRMATION);
-
-  if (g_auto_accept_bookmark_app_for_testing)
-    Accept();
 }
 
 views::View* BookmarkAppConfirmationView::GetInitiallyFocusedView() {
@@ -132,13 +132,6 @@ bool BookmarkAppConfirmationView::Accept() {
   return true;
 }
 
-base::string16 BookmarkAppConfirmationView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK
-                                       ? IDS_CREATE_SHORTCUTS_BUTTON_LABEL
-                                       : IDS_CANCEL);
-}
-
 bool BookmarkAppConfirmationView::IsDialogButtonEnabled(
     ui::DialogButton button) const {
   return button == ui::DIALOG_BUTTON_OK ? !GetTrimmedTitle().empty() : true;
@@ -152,7 +145,7 @@ void BookmarkAppConfirmationView::ContentsChanged(
 }
 
 base::string16 BookmarkAppConfirmationView::GetTrimmedTitle() const {
-  base::string16 title(title_tf_->text());
+  base::string16 title(title_tf_->GetText());
   base::TrimWhitespace(title, base::TRIM_ALL, &title);
   return title;
 }
@@ -162,10 +155,13 @@ namespace chrome {
 void ShowBookmarkAppDialog(content::WebContents* web_contents,
                            std::unique_ptr<WebApplicationInfo> web_app_info,
                            AppInstallationAcceptanceCallback callback) {
-  constrained_window::ShowWebModalDialogViews(
-      new BookmarkAppConfirmationView(std::move(web_app_info),
-                                      std::move(callback)),
-      web_contents);
+  auto* dialog = new BookmarkAppConfirmationView(std::move(web_app_info),
+                                                 std::move(callback));
+  constrained_window::ShowWebModalDialogViews(dialog, web_contents);
+
+  if (g_auto_accept_bookmark_app_for_testing) {
+    dialog->AcceptDialog();
+  }
 }
 
 void SetAutoAcceptBookmarkAppDialogForTesting(bool auto_accept) {

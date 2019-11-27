@@ -12,7 +12,8 @@
 
 #include "base/macros.h"
 #include "content/browser/appcache/appcache_update_job.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/io_buffer.h"
 #include "services/network/public/cpp/net_adapters.h"
@@ -26,16 +27,13 @@ class HttpResponseInfo;
 
 namespace content {
 
-class URLLoaderFactoryGetter;
-
 // URLLoaderClient subclass for the UpdateRequestBase class. Provides
 // functionality to update the AppCache using functionality provided by the
 // network URL loader.
 class AppCacheUpdateJob::UpdateURLLoaderRequest
     : public network::mojom::URLLoaderClient {
  public:
-  UpdateURLLoaderRequest(URLLoaderFactoryGetter* loader_factory_getter,
-                         base::WeakPtr<StoragePartitionImpl> partition,
+  UpdateURLLoaderRequest(base::WeakPtr<StoragePartitionImpl> partition,
                          const GURL& url,
                          int buffer_size,
                          URLFetcher* fetcher);
@@ -90,13 +88,22 @@ class AppCacheUpdateJob::UpdateURLLoaderRequest
   // Returns net::ERR_ABORTED or any applicable net error.
   int Cancel();
 
+  // Set fetch metadata headers ( only `Sec-Fetch-Dest` for now ) for secure
+  // resources.
+  // TODO(lyf): Remove this function after moving `Sec-Fetch-Dest` to the
+  // network service.
+  void SetFetchMetadataHeaders() {
+    if (GetURL().SchemeIsCryptographic())
+      request_.headers.SetHeader("Sec-Fetch-Dest", "empty");
+  }
+
   // network::mojom::URLLoaderClient implementation.
   // These methods are called by the network loader.
   void OnReceiveResponse(
-      const network::ResourceResponseHead& response_head) override;
+      network::mojom::URLResponseHeadPtr response_head) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
-      const network::ResourceResponseHead& response_head) override;
+      network::mojom::URLResponseHeadPtr response_head) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback ack_callback) override;
@@ -116,11 +123,7 @@ class AppCacheUpdateJob::UpdateURLLoaderRequest
   void MaybeStartReading();
 
   URLFetcher* fetcher_;
-  // Used to retrieve the network URLLoader interface to issue network
-  // requests
-  scoped_refptr<URLLoaderFactoryGetter> loader_factory_getter_;
-  // If NavigationLoaderOnUI is enabled, |partition_| is used to get the network
-  // URLLoader.
+  // |partition_| is used to get the network URLLoader.
   base::WeakPtr<StoragePartitionImpl> partition_;
 
   network::ResourceRequest request_;
@@ -129,9 +132,9 @@ class AppCacheUpdateJob::UpdateURLLoaderRequest
   // Response details.
   std::unique_ptr<net::HttpResponseInfo> http_response_info_;
   // Binds the URLLoaderClient interface to the channel.
-  mojo::Binding<network::mojom::URLLoaderClient> client_binding_;
+  mojo::Receiver<network::mojom::URLLoaderClient> client_receiver_{this};
   // The network URL loader.
-  network::mojom::URLLoaderPtr url_loader_;
+  mojo::Remote<network::mojom::URLLoader> url_loader_;
   // Caller buffer size.
   int buffer_size_;
   // The mojo data pipe.

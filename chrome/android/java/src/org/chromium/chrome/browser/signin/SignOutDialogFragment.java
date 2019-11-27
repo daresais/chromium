@@ -5,9 +5,9 @@
 package org.chromium.chrome.browser.signin;
 
 import android.app.Dialog;
-import android.app.DialogFragment;
 import android.content.DialogInterface;
 import android.os.Bundle;
+import android.support.v4.app.DialogFragment;
 import android.support.v7.app.AlertDialog;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -16,7 +16,6 @@ import android.widget.TextView;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.ProfileAccountManagementMetrics;
 import org.chromium.components.signin.GAIAServiceType;
 
@@ -70,19 +69,7 @@ public class SignOutDialogFragment extends DialogFragment implements
             return createDialogForManagedAccount(domain);
         }
 
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OFFER_WIPE_DATA_ON_SIGNOUT)) {
-            return createDialogForceWipeDataFeatureEnabled();
-        }
         return createDialog();
-    }
-
-    private Dialog createDialog() {
-        return new AlertDialog.Builder(getActivity(), R.style.Theme_Chromium_AlertDialog)
-                .setTitle(R.string.signout_title)
-                .setPositiveButton(R.string.continue_button, this)
-                .setNegativeButton(R.string.cancel, this)
-                .setMessage(R.string.signout_message_without_remove_local_data)
-                .create();
     }
 
     private Dialog createDialogForManagedAccount(String domain) {
@@ -94,7 +81,7 @@ public class SignOutDialogFragment extends DialogFragment implements
                 .create();
     }
 
-    private Dialog createDialogForceWipeDataFeatureEnabled() {
+    private Dialog createDialog() {
         AlertDialog.Builder builder =
                 new AlertDialog.Builder(getActivity(), R.style.Theme_Chromium_AlertDialog);
         LayoutInflater inflater = LayoutInflater.from(builder.getContext());
@@ -115,8 +102,7 @@ public class SignOutDialogFragment extends DialogFragment implements
             SigninUtils.logEvent(ProfileAccountManagementMetrics.SIGNOUT_SIGNOUT, mGaiaServiceType);
 
             mSignOutClicked = true;
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.OFFER_WIPE_DATA_ON_SIGNOUT)
-                    && IdentityServicesProvider.getSigninManager().getManagementDomain() == null) {
+            if (IdentityServicesProvider.getSigninManager().getManagementDomain() == null) {
                 RecordHistogram.recordBooleanHistogram(
                         "Signin.UserRequestedWipeDataOnSignout", mWipeUserData.isChecked());
             }

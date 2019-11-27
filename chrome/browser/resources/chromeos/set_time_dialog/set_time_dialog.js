@@ -12,8 +12,19 @@
  * when the user changes the time or timezone.
  */
 
-(function() {
-'use strict';
+import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
+import 'chrome://resources/cr_elements/cr_page_host_style_css.m.js';
+import 'chrome://resources/cr_elements/md_select_css.m.js';
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
+import './strings.m.js';
+
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {SetTimeBrowserProxy, SetTimeBrowserProxyImpl} from './set_time_browser_proxy.js';
 
 /**
  * @return {!Array<!{id: string, name: string, selected: Boolean}>} Items for
@@ -103,6 +114,8 @@ function getTimezoneDelta(firstTimezoneId, secondsTimezoneId) {
 Polymer({
   is: 'set-time-dialog',
 
+  _template: html`{__html_template__}`,
+
   // Remove listeners on detach.
   behaviors: [WebUIListenerBehavior],
 
@@ -159,10 +172,11 @@ Polymer({
   },
 
   /**
-   * Values for reverting inputs when the user's date/time is invalid.
-   * @private {?Object}
+   * Values for reverting inputs when the user's date/time is invalid. The
+   * keys are element ids.
+   * @private {{dateInput: string, timeInput: string}}
    */
-  prevValues_: null,
+  prevValues_: {dateInput: '', timeInput: ''},
 
   /**
    * ID of the setTimeout() used to refresh the current time.
@@ -170,13 +184,12 @@ Polymer({
    */
   timeTimeoutId_: null,
 
-  /** @private {?settime.SetTimeBrowserProxy} */
+  /** @private {?SetTimeBrowserProxy} */
   browserProxy_: null,
 
   /** @override */
   created: function() {
-    this.prevValues_ = {};
-    this.browserProxy_ = settime.SetTimeBrowserProxyImpl.getInstance();
+    this.browserProxy_ = SetTimeBrowserProxyImpl.getInstance();
   },
 
   /** @override */
@@ -216,6 +229,27 @@ Polymer({
   },
 
   /**
+   * @return {!number} Seconds since epoch representing the date on the dialog
+   *     inputs.
+   * @private
+   */
+  getInputTimeSinceEpoch_: function() {
+    const now = this.getInputTime_();
+
+    if (this.isTimezoneVisible_) {
+      // Add timezone offset to get real time. This is only necessary when the
+      // timezone was updated, which is only possible when the dropdown is
+      // visible.
+      const timezoneDelta = getTimezoneDelta(
+          /** @type {string} */ (loadTimeData.getValue('currentTimezoneId')),
+          this.selectedTimezone_);
+      now.setMilliseconds(now.getMilliseconds() + timezoneDelta);
+    }
+
+    return Math.floor(now / 1000);
+  },
+
+  /**
    * Sets the current timezone.
    * @param {string} timezoneId The timezone ID to select.
    * @private
@@ -244,8 +278,8 @@ Polymer({
     if (document.activeElement.id != 'dateInput' &&
         document.activeElement.id != 'timeInput') {
       const htmlValues = dateToHtmlValues(newTime);
-      this.prevValues_.date = this.$.dateInput.value = htmlValues.date;
-      this.prevValues_.time = this.$.timeInput.value = htmlValues.time;
+      this.prevValues_.dateInput = this.$.dateInput.value = htmlValues.date;
+      this.prevValues_.timeInput = this.$.timeInput.value = htmlValues.time;
     }
 
     if (this.timeTimeoutId_) {
@@ -265,16 +299,7 @@ Polymer({
    * @private
    */
   applyTime_: function() {
-    const now = this.getInputTime_();
-
-    // Add timezone offset to get real time.
-    const timezoneDelta = getTimezoneDelta(
-        /** @type {string} */ (loadTimeData.getValue('currentTimezoneId')),
-        this.selectedTimezone_);
-    now.setMilliseconds(now.getMilliseconds() + timezoneDelta);
-
-    const seconds = Math.floor(now / 1000);
-    this.browserProxy_.setTimeInSeconds(seconds);
+    this.browserProxy_.setTimeInSeconds(this.getInputTimeSinceEpoch_());
   },
 
   /**
@@ -306,21 +331,24 @@ Polymer({
   /**
    * Called when the done button is clicked. Child accounts need parental
    * approval to change time, which requires an extra step after the button is
-   * clicked. This method notifyies the dialog delegate to start the approval
+   * clicked. This method notifies the dialog delegate to start the approval
    * step, once the approval is granted the 'validation-complete' event is
    * triggered invoking saveAndClose_. For regular accounts, this step is
    * skipped and saveAndClose_ is called immediately after the button click.
    * @private
    */
   onDoneClick_: function() {
-    this.browserProxy_.doneClicked();
+    this.browserProxy_.doneClicked(this.getInputTimeSinceEpoch_());
   },
 
   /** @private */
   saveAndClose_: function() {
     this.applyTime_();
-    this.browserProxy_.setTimezone(this.selectedTimezone_);
+    // Timezone change should only be applied when the UI displays timezone
+    // setting. Otherwise |selectedTimezone_| will be empty/invalid.
+    if (this.isTimezoneVisible_) {
+      this.browserProxy_.setTimezone(this.selectedTimezone_);
+    }
     this.browserProxy_.dialogClose();
   },
 });
-})();

@@ -1,19 +1,18 @@
 {
   "sandbox": {
     "features": [
-      "isolated-persistent-storage",
-      "deprecated-ambient-replace-as-executable"
+      "isolated-persistent-storage"
     ],
     "services": [
+      "fuchsia.accessibility.semantics.SemanticsManager",
       "fuchsia.deprecatedtimezone.Timezone",
       "fuchsia.device.NameProvider",
       "fuchsia.fonts.Provider",
       "fuchsia.logger.LogSink",
       "fuchsia.media.Audio",
-      "fuchsia.media.drm.WidevineContentDecryptionModule",
+      "fuchsia.media.drm.Widevine",
       "fuchsia.mediacodec.CodecFactory",
       "fuchsia.net.NameLookup",
-      "fuchsia.net.SocketProvider",
       "fuchsia.netstack.Netstack",
       "fuchsia.posix.socket.Provider",
       "fuchsia.process.Launcher",
@@ -21,6 +20,7 @@
       "fuchsia.ui.input.ImeService",
       "fuchsia.ui.input.ImeVisibilityService",
       "fuchsia.ui.scenic.Scenic",
+      "fuchsia.vulkan.loader.Loader",
       "fuchsia.web.ContextProvider"
     ]
   }

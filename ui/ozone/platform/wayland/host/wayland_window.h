@@ -31,7 +31,6 @@ namespace ui {
 
 class BitmapCursorOzone;
 class OSExchangeData;
-class PlatformWindowDelegate;
 class WaylandConnection;
 class XDGPopupWrapper;
 class XDGSurfaceWrapper;
@@ -73,16 +72,17 @@ class WaylandWindow : public PlatformWindow,
   void ApplyPendingBounds();
 
   // Set whether this window has pointer focus and should dispatch mouse events.
-  void set_pointer_focus(bool focus) { has_pointer_focus_ = focus; }
+  void SetPointerFocus(bool focus);
   bool has_pointer_focus() const { return has_pointer_focus_; }
 
   // Set whether this window has keyboard focus and should dispatch key events.
   void set_keyboard_focus(bool focus) { has_keyboard_focus_ = focus; }
-
   bool has_keyboard_focus() const { return has_keyboard_focus_; }
 
-  // Set whether this window has touch focus and should dispatch touch events.
+  // The methods set or return whether this window has touch focus and should
+  // dispatch touch events.
   void set_touch_focus(bool focus) { has_touch_focus_ = focus; }
+  bool has_touch_focus() const { return has_touch_focus_; }
 
   // Set a child of this window. It is very important in case of nested
   // xdg_popups as long as they must be destroyed in the back order.
@@ -104,7 +104,7 @@ class WaylandWindow : public PlatformWindow,
   // WmMoveResizeHandler
   void DispatchHostWindowDragMovement(
       int hittest,
-      const gfx::Point& pointer_location) override;
+      const gfx::Point& pointer_location_in_px) override;
 
   // WmDragHandler
   void StartDrag(const ui::OSExchangeData& data,
@@ -113,9 +113,10 @@ class WaylandWindow : public PlatformWindow,
                  base::OnceCallback<void(int)> callback) override;
 
   // PlatformWindow
-  void Show() override;
+  void Show(bool inactive) override;
   void Hide() override;
   void Close() override;
+  bool IsVisible() const override;
   void PrepareForShutdown() override;
   void SetBounds(const gfx::Rect& bounds) override;
   gfx::Rect GetBounds() override;
@@ -130,11 +131,18 @@ class WaylandWindow : public PlatformWindow,
   PlatformWindowState GetPlatformWindowState() const override;
   void Activate() override;
   void Deactivate() override;
+  void SetUseNativeFrame(bool use_native_frame) override;
+  bool ShouldUseNativeFrame() const override;
   void SetCursor(PlatformCursor cursor) override;
   void MoveCursorTo(const gfx::Point& location) override;
   void ConfineCursorToBounds(const gfx::Rect& bounds) override;
   void SetRestoredBoundsInPixels(const gfx::Rect& bounds) override;
   gfx::Rect GetRestoredBoundsInPixels() const override;
+  bool ShouldWindowContentsBeTransparent() const override;
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio) override;
+  void SetWindowIcons(const gfx::ImageSkia& window_icon,
+                      const gfx::ImageSkia& app_icon) override;
+  void SizeConstraintsChanged() override;
 
   // PlatformEventDispatcher
   bool CanDispatchEvent(const PlatformEvent& event) override;
@@ -183,6 +191,9 @@ class WaylandWindow : public PlatformWindow,
 
   // Gets a parent window for this window.
   WaylandWindow* GetParentWindow(gfx::AcceleratedWidget parent_widget);
+
+  // Returns a root parent window.
+  WaylandWindow* GetRootParentWindow();
 
   WmMoveResizeHandler* AsWmMoveResizeHandler();
 

@@ -117,12 +117,15 @@ class SyncManagerImpl
       const KeyDerivationParams& key_derivation_params,
       const sync_pb::EncryptedData& pending_keys) override;
   void OnPassphraseAccepted() override;
+  void OnTrustedVaultKeyRequired() override;
+  void OnTrustedVaultKeyAccepted() override;
   void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
                                BootstrapTokenType type) override;
   void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
                                bool encrypt_everything) override;
   void OnEncryptionComplete() override;
-  void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
+  void OnCryptographerStateChanged(Cryptographer* cryptographer,
+                                   bool has_pending_keys) override;
   void OnPassphraseTypeChanged(PassphraseType type,
                                base::Time explicit_passphrase_time) override;
 
@@ -169,9 +172,6 @@ class SyncManagerImpl
   // NudgeHandler implementation.
   void NudgeForInitialDownload(ModelType type) override;
   void NudgeForCommit(ModelType type) override;
-  void NudgeForRefresh(ModelType type) override;
-
-  const SyncScheduler* scheduler() const;
 
   static std::string GenerateCacheGUIDForTest();
 
@@ -197,8 +197,6 @@ class SyncManagerImpl
     base::DictionaryValue* ToValue() const;
   };
 
-  base::TimeDelta GetNudgeDelayTimeDelta(const ModelType& model_type);
-
   using NotificationInfoMap = std::map<ModelType, NotificationInfo>;
 
   // Determine if the parents or predecessors differ between the old and new
@@ -213,7 +211,7 @@ class SyncManagerImpl
   // differ between the versions of an entry stored in |a| and |b|. A return
   // value of false means that it should be OK to ignore this change.
   bool VisiblePropertiesDiffer(const syncable::EntryKernelMutation& mutation,
-                               Cryptographer* cryptographer) const;
+                               const Cryptographer* cryptographer) const;
 
   // Opens the directory.
   bool OpenDirectory(InitArgs* args);
@@ -227,7 +225,7 @@ class SyncManagerImpl
   void SetExtraChangeRecordData(int64_t id,
                                 ModelType type,
                                 ChangeReorderBuffer* buffer,
-                                Cryptographer* cryptographer,
+                                const Cryptographer* cryptographer,
                                 const syncable::EntryKernel& original,
                                 bool existed_before,
                                 bool exists_now);

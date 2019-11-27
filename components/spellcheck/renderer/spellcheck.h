@@ -19,8 +19,8 @@
 #include "components/spellcheck/common/spellcheck.mojom.h"
 #include "components/spellcheck/renderer/custom_dictionary_engine.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 
 class SpellcheckLanguage;
 struct SpellCheckResult;
@@ -59,8 +59,8 @@ class SpellCheck : public base::SupportsWeakPtr<SpellCheck>,
     USE_NATIVE_CHECKER,  // Use native checker to double-check.
   };
 
-  SpellCheck(service_manager::BinderRegistry* registry,
-             service_manager::LocalInterfaceProvider* embedder_provider);
+  explicit SpellCheck(
+      service_manager::LocalInterfaceProvider* embedder_provider);
   ~SpellCheck() override;
 
   void AddSpellcheckLanguage(base::File file, const std::string& language);
@@ -126,6 +126,10 @@ class SpellCheck : public base::SupportsWeakPtr<SpellCheck>,
   // Remove observer on dictionary update event.
   void RemoveDictionaryUpdateObserver(DictionaryUpdateObserver* observer);
 
+  // Binds receivers for the SpellChecker interface.
+  void BindReceiver(
+      mojo::PendingReceiver<spellcheck::mojom::SpellChecker> receiver);
+
  private:
    friend class SpellCheckTest;
    FRIEND_TEST_ALL_PREFIXES(SpellCheckTest, GetAutoCorrectionWord_EN_US);
@@ -139,9 +143,6 @@ class SpellCheck : public base::SupportsWeakPtr<SpellCheck>,
    static void FillSuggestions(
        const std::vector<std::vector<base::string16>>& suggestions_list,
        std::vector<base::string16>* optional_suggestions);
-
-   // Binds requests for the SpellChecker interface.
-   void SpellCheckerRequest(spellcheck::mojom::SpellCheckerRequest request);
 
    // spellcheck::mojom::SpellChecker:
    void Initialize(
@@ -172,8 +173,8 @@ class SpellCheck : public base::SupportsWeakPtr<SpellCheck>,
    std::unique_ptr<SpellcheckRequest> pending_request_param_;
 #endif
 
-  // Bindings for SpellChecker clients.
-  mojo::BindingSet<spellcheck::mojom::SpellChecker> bindings_;
+  // Receivers for SpellChecker clients.
+  mojo::ReceiverSet<spellcheck::mojom::SpellChecker> receivers_;
 
   // A vector of objects used to actually check spelling, one for each enabled
   // language.

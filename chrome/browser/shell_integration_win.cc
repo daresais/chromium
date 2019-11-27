@@ -45,6 +45,7 @@
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/components/web_app_shortcut_win.h"
 #include "chrome/browser/win/settings_app_monitor.h"
+#include "chrome/browser/win/util_win_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -52,10 +53,9 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/scoped_user_protocol_entry.h"
 #include "chrome/installer/util/shell_util.h"
-#include "chrome/services/util_win/public/mojom/constants.mojom.h"
 #include "chrome/services/util_win/public/mojom/util_win.mojom.h"
 #include "components/variations/variations_associated_data.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace shell_integration {
 
@@ -68,6 +68,16 @@ base::string16 GetProfileIdFromPath(const base::FilePath& profile_path) {
   // Return empty string if profile_path is empty
   if (profile_path.empty())
     return base::string16();
+
+  base::FilePath default_user_data_dir;
+  // Return empty string if profile_path is in default user data
+  // dir and is the default profile.
+  if (chrome::GetDefaultUserDataDirectory(&default_user_data_dir) &&
+      profile_path.DirName() == default_user_data_dir &&
+      profile_path.BaseName().value() ==
+          base::ASCIIToUTF16(chrome::kInitialProfile)) {
+    return base::string16();
+  }
 
   // Get joined basenames of user data dir and profile.
   base::string16 basenames = profile_path.DirName().BaseName().value() +
@@ -317,8 +327,7 @@ class OpenSystemSettingsHelper {
   OpenSystemSettingsHelper(const wchar_t* const protocols[],
                            const base::Closure& on_finished_callback)
       : scoped_user_protocol_entry_(protocols[0]),
-        on_finished_callback_(on_finished_callback),
-        weak_ptr_factory_(this) {
+        on_finished_callback_(on_finished_callback) {
     static const wchar_t kUrlAssociationFormat[] =
         L"SOFTWARE\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\"
         L"%ls\\UserChoice";
@@ -418,7 +427,7 @@ class OpenSystemSettingsHelper {
   // Weak ptrs are used to bind this class to the callbacks of the timer and the
   // registry watcher. This makes it possible to self-delete after one of the
   // callbacks is executed to cancel the remaining ones.
-  base::WeakPtrFactory<OpenSystemSettingsHelper> weak_ptr_factory_;
+  base::WeakPtrFactory<OpenSystemSettingsHelper> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(OpenSystemSettingsHelper);
 };
@@ -432,21 +441,17 @@ class IsPinnedToTaskbarHelper {
  public:
   using ResultCallback = win::IsPinnedToTaskbarCallback;
   using ErrorCallback = win::ConnectionErrorCallback;
-  static void GetState(std::unique_ptr<service_manager::Connector> connector,
-                       const ErrorCallback& error_callback,
+  static void GetState(const ErrorCallback& error_callback,
                        const ResultCallback& result_callback);
 
  private:
-  IsPinnedToTaskbarHelper(std::unique_ptr<service_manager::Connector> connector,
-                          const ErrorCallback& error_callback,
+  IsPinnedToTaskbarHelper(const ErrorCallback& error_callback,
                           const ResultCallback& result_callback);
 
   void OnConnectionError();
   void OnIsPinnedToTaskbarResult(bool succeeded, bool is_pinned_to_taskbar);
 
-  chrome::mojom::UtilWinPtr util_win_ptr_;
-  // The connector used to retrieve the Patch service.
-  std::unique_ptr<service_manager::Connector> connector_;
+  mojo::Remote<chrome::mojom::UtilWin> remote_util_win_;
 
   ErrorCallback error_callback_;
   ResultCallback result_callback_;
@@ -458,30 +463,26 @@ class IsPinnedToTaskbarHelper {
 
 // static
 void IsPinnedToTaskbarHelper::GetState(
-    std::unique_ptr<service_manager::Connector> connector,
     const ErrorCallback& error_callback,
     const ResultCallback& result_callback) {
   // Self-deleting when the ShellHandler completes.
-  new IsPinnedToTaskbarHelper(std::move(connector), error_callback,
-                              result_callback);
+  new IsPinnedToTaskbarHelper(error_callback, result_callback);
 }
 
 IsPinnedToTaskbarHelper::IsPinnedToTaskbarHelper(
-    std::unique_ptr<service_manager::Connector> connector,
     const ErrorCallback& error_callback,
     const ResultCallback& result_callback)
-    : connector_(std::move(connector)),
+    : remote_util_win_(LaunchUtilWinServiceInstance()),
       error_callback_(error_callback),
       result_callback_(result_callback) {
   DCHECK(error_callback_);
   DCHECK(result_callback_);
 
-  connector_->BindInterface(chrome::mojom::kUtilWinServiceName, &util_win_ptr_);
-  // |util_win_ptr_| owns the callbacks and is guaranteed to be destroyed before
-  // |this|, therefore making base::Unretained() safe to use.
-  util_win_ptr_.set_connection_error_handler(base::Bind(
+  // |remote_util_win_| owns the callbacks and is guaranteed to be destroyed
+  // before |this|, therefore making base::Unretained() safe to use.
+  remote_util_win_.set_disconnect_handler(base::BindOnce(
       &IsPinnedToTaskbarHelper::OnConnectionError, base::Unretained(this)));
-  util_win_ptr_->IsPinnedToTaskbar(
+  remote_util_win_->IsPinnedToTaskbar(
       base::Bind(&IsPinnedToTaskbarHelper::OnIsPinnedToTaskbarResult,
                  base::Unretained(this)));
 }
@@ -499,6 +500,25 @@ void IsPinnedToTaskbarHelper::OnIsPinnedToTaskbarResult(
 
   result_callback_.Run(succeeded, is_pinned_to_taskbar);
   delete this;
+}
+
+void MigrateChromeAndChromeProxyShortcuts(
+    const base::FilePath& chrome_exe,
+    const base::FilePath& chrome_proxy_path,
+    const base::FilePath& shortcut_path) {
+  win::MigrateShortcutsInPathInternal(chrome_exe, shortcut_path);
+
+  // Migrate any pinned PWA shortcuts in taskbar directory.
+  win::MigrateShortcutsInPathInternal(chrome_proxy_path, shortcut_path);
+}
+
+base::string16 GetHttpProtocolUserChoiceProgId() {
+  base::string16 prog_id;
+  base::win::RegKey key(HKEY_CURRENT_USER, ShellUtil::kRegVistaUrlPrefs,
+                        KEY_QUERY_VALUE);
+  if (key.Valid())
+    key.ReadValue(L"ProgId", &prog_id);
+  return prog_id;
 }
 
 }  // namespace
@@ -578,23 +598,28 @@ DefaultWebClientState GetDefaultBrowser() {
       ShellUtil::GetChromeDefaultState());
 }
 
-// There is no reliable way to say which browser is default on a machine (each
-// browser can have some of the protocols/shortcuts). So we look for only HTTP
-// protocol handler. Even this handler is located at different places in
-// registry on XP and Vista:
-// - HKCR\http\shell\open\command (XP)
-// - HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\
-//   http\UserChoice (Vista)
-// This method checks if Firefox is default browser by checking these
-// locations and returns true if Firefox traces are found there. In case of
-// error (or if Firefox is not found)it returns the default value which
-// is false.
+// This method checks if Firefox is default browser by checking for the default
+// HTTP protocol handler. Returns false in case of error or if Firefox is not
+// the user's default http protocol client.
 bool IsFirefoxDefaultBrowser() {
-  base::string16 app_cmd;
-  base::win::RegKey key(HKEY_CURRENT_USER, ShellUtil::kRegVistaUrlPrefs,
-                        KEY_READ);
-  return key.Valid() && key.ReadValue(L"Progid", &app_cmd) == ERROR_SUCCESS &&
-         app_cmd == L"FirefoxURL";
+  return base::StartsWith(GetHttpProtocolUserChoiceProgId(), L"FirefoxURL",
+                          base::CompareCase::SENSITIVE);
+}
+
+std::string GetFirefoxProgIdSuffix() {
+  const base::string16 app_cmd = GetHttpProtocolUserChoiceProgId();
+  static constexpr base::StringPiece16 kFirefoxProgIdPrefix(L"FirefoxURL-");
+  if (base::StartsWith(app_cmd, kFirefoxProgIdPrefix,
+                       base::CompareCase::SENSITIVE)) {
+    // Returns the id that appears after the prefix "FirefoxURL-".
+    return std::string(app_cmd.begin() + kFirefoxProgIdPrefix.size(),
+                       app_cmd.end());
+  }
+  return std::string();
+}
+
+bool IsIEDefaultBrowser() {
+  return GetHttpProtocolUserChoiceProgId() == L"IE.HTTP";
 }
 
 DefaultWebClientState IsDefaultProtocolClient(const std::string& protocol) {
@@ -709,36 +734,50 @@ void MigrateTaskbarPins() {
   // This needs to happen (e.g. so that the appid is fixed and the
   // run-time Chrome icon is merged with the taskbar shortcut), but it is not an
   // urgent task.
-  base::FilePath pins_path;
-  if (!base::PathService::Get(base::DIR_TASKBAR_PINS, &pins_path)) {
+  base::FilePath taskbar_path;
+  if (!base::PathService::Get(base::DIR_TASKBAR_PINS, &taskbar_path)) {
     NOTREACHED();
     return;
   }
 
-  base::CreateCOMSTATaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT})
-      ->PostTask(FROM_HERE,
-                 base::BindOnce(&MigrateTaskbarPinsCallback, pins_path));
+  // Migrate any pinned shortcuts in ImplicitApps sub-directories.
+  base::FilePath implicit_apps_path;
+  if (!base::PathService::Get(base::DIR_IMPLICIT_APP_SHORTCUTS,
+                              &implicit_apps_path)) {
+    NOTREACHED();
+    return;
+  }
+
+  base::CreateCOMSTATaskRunner(
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT})
+      ->PostTask(FROM_HERE, base::BindOnce(&MigrateTaskbarPinsCallback,
+                                           taskbar_path, implicit_apps_path));
 }
 
-void MigrateTaskbarPinsCallback(const base::FilePath& pins_path) {
+void MigrateTaskbarPinsCallback(const base::FilePath& taskbar_path,
+                                const base::FilePath& implicit_apps_path) {
   // Get full path of chrome.
   base::FilePath chrome_exe;
   if (!base::PathService::Get(base::FILE_EXE, &chrome_exe))
     return;
+  base::FilePath chrome_proxy_path(web_app::GetChromeProxyPath());
 
-  win::MigrateShortcutsInPathInternal(chrome_exe, pins_path);
-
-  // Migrate any pinned PWA shortcuts.
-  win::MigrateShortcutsInPathInternal(web_app::GetChromeProxyPath(), pins_path);
+  MigrateChromeAndChromeProxyShortcuts(chrome_exe, chrome_proxy_path,
+                                       taskbar_path);
+  base::FileEnumerator directory_enum(implicit_apps_path, /*recursive=*/false,
+                                      base::FileEnumerator::DIRECTORIES);
+  for (base::FilePath implicit_app_sub_directory = directory_enum.Next();
+       !implicit_app_sub_directory.empty();
+       implicit_app_sub_directory = directory_enum.Next()) {
+    MigrateChromeAndChromeProxyShortcuts(chrome_exe, chrome_proxy_path,
+                                         implicit_app_sub_directory);
+  }
 }
 
 void GetIsPinnedToTaskbarState(
-    std::unique_ptr<service_manager::Connector> connector,
     const ConnectionErrorCallback& on_error_callback,
     const IsPinnedToTaskbarCallback& result_callback) {
-  IsPinnedToTaskbarHelper::GetState(std::move(connector), on_error_callback,
-                                    result_callback);
+  IsPinnedToTaskbarHelper::GetState(on_error_callback, result_callback);
 }
 
 int MigrateShortcutsInPathInternal(const base::FilePath& chrome_exe,
@@ -791,8 +830,6 @@ int MigrateShortcutsInPathInternal(const base::FilePath& chrome_exe,
     // |updated_properties|.
     base::win::ShortcutProperties updated_properties;
 
-    base::string16 current_app_id;
-
     // Validate the existing app id for the shortcut.
     Microsoft::WRL::ComPtr<IPropertyStore> property_store;
     propvariant.Reset();
@@ -810,8 +847,7 @@ int MigrateShortcutsInPathInternal(const base::FilePath& chrome_exe,
             updated_properties.set_app_id(expected_app_id);
           break;
         case VT_LPWSTR:
-          current_app_id = base::string16(propvariant.get().pwszVal);
-          if (expected_app_id != current_app_id)
+          if (expected_app_id != base::string16(propvariant.get().pwszVal))
             updated_properties.set_app_id(expected_app_id);
           break;
         default:
@@ -825,7 +861,7 @@ int MigrateShortcutsInPathInternal(const base::FilePath& chrome_exe,
     // |default_chromium_model_id|).
     base::string16 default_chromium_model_id(
         ShellUtil::GetBrowserModelId(is_per_user_install));
-    if (current_app_id == default_chromium_model_id) {
+    if (expected_app_id == default_chromium_model_id) {
       propvariant.Reset();
       if (property_store->GetValue(PKEY_AppUserModel_IsDualMode,
                                    propvariant.Receive()) != S_OK) {

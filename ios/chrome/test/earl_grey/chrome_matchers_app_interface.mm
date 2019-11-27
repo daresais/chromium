@@ -7,9 +7,19 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/unified_consent/feature.h"
-#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view.h"
+#import "ios/chrome/browser/autofill/form_suggestion_constants.h"
+#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view_constants.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/address_mediator.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/address_view_controller.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/card_coordinator.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/card_mediator.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/card_view_controller.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_accessory_view_controller.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_password_cell.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_password_mediator.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/password_view_controller.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_ui_constants.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_constants.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/history/history_ui_constants.h"
@@ -21,20 +31,29 @@
 #import "ios/chrome/browser/ui/payments/payment_request_view_controller.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_constants.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_add_credit_card_view_controller.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_constants.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_credit_card_table_view_controller.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_profile_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/cells/clear_browsing_data_constants.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_item.h"
 #import "ios/chrome/browser/ui/settings/clear_browsing_data/clear_browsing_data_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/clear_browsing_data/clear_browsing_data_ui_constants.h"
+#import "ios/chrome/browser/ui/settings/credit_card_scanner/credit_card_scanner_view_controller.h"
 #import "ios/chrome/browser/ui/settings/google_services/accounts_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/google_services/advanced_signin_settings_coordinator.h"
+#import "ios/chrome/browser/ui/settings/google_services/google_services_settings_view_controller.h"
 #import "ios/chrome/browser/ui/settings/import_data_table_view_controller.h"
+#import "ios/chrome/browser/ui/settings/password/passwords_table_view_constants.h"
 #import "ios/chrome/browser/ui/settings/privacy_table_view_controller.h"
-#import "ios/chrome/browser/ui/settings/settings_table_view_controller.h"
-#import "ios/chrome/browser/ui/settings/sync/sync_settings_table_view_controller.h"
+#import "ios/chrome/browser/ui/settings/settings_root_table_constants.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller_constants.h"
 #import "ios/chrome/browser/ui/static_content/static_html_view_controller.h"
 #import "ios/chrome/browser/ui/tab_grid/grid/grid_constants.h"
 #import "ios/chrome/browser/ui/tab_grid/tab_grid_constants.h"
+#import "ios/chrome/browser/ui/toolbar/keyboard_assist/toolbar_assistive_keyboard_views_utils.h"
+#import "ios/chrome/browser/ui/toolbar/primary_toolbar_view.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
@@ -197,14 +216,39 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
                     grey_accessibilityTrait(UIAccessibilityTraitHeader), nil);
 }
 
++ (id<GREYMatcher>)textFieldForCellWithLabelID:(int)messageID {
+  return grey_allOf(grey_accessibilityID([l10n_util::GetNSStringWithFixup(
+                        messageID) stringByAppendingString:@"_textField"]),
+                    grey_kindOfClass([UITextField class]), nil);
+}
+
++ (id<GREYMatcher>)iconViewForCellWithLabelID:(int)messageID
+                                     iconType:(NSString*)iconType {
+  return grey_allOf(grey_accessibilityID([l10n_util::GetNSStringWithFixup(
+                        messageID) stringByAppendingString:iconType]),
+                    grey_kindOfClass([UIImageView class]), nil);
+}
+
++ (id<GREYMatcher>)primaryToolbar {
+  return grey_kindOfClass([PrimaryToolbarView class]);
+}
+
 + (id<GREYMatcher>)cancelButton {
   return
       [ChromeMatchersAppInterface buttonWithAccessibilityLabelID:(IDS_CANCEL)];
 }
 
++ (id<GREYMatcher>)navigationBarCancelButton {
+  return grey_allOf(
+      grey_ancestor(grey_kindOfClass([UINavigationBar class])),
+      [self cancelButton],
+      grey_not(grey_accessibilityTrait(UIAccessibilityTraitNotEnabled)), nil);
+}
+
 + (id<GREYMatcher>)closeButton {
-  return
-      [ChromeMatchersAppInterface buttonWithAccessibilityLabelID:(IDS_CLOSE)];
+  return grey_allOf(
+      [ChromeMatchersAppInterface buttonWithAccessibilityLabelID:(IDS_CLOSE)],
+      grey_not(grey_accessibilityTrait(UIAccessibilityTraitNotEnabled)), nil);
 }
 
 + (id<GREYMatcher>)forwardButton {
@@ -354,17 +398,9 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
   return grey_accessibilityID(kBookmarkHomeNavigationBarDoneButtonIdentifier);
 }
 
-+ (id<GREYMatcher>)accountConsistencySetupSigninButton {
-  return [ChromeMatchersAppInterface
-      buttonWithAccessibilityLabelID:
-          (IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SIGNIN_BUTTON)];
-}
-
 + (id<GREYMatcher>)accountConsistencyConfirmationOKButton {
-  int labelID = unified_consent::IsUnifiedConsentFeatureEnabled()
-                    ? IDS_IOS_ACCOUNT_UNIFIED_CONSENT_OK_BUTTON
-                    : IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_OK_BUTTON;
-  return [ChromeMatchersAppInterface buttonWithAccessibilityLabelID:(labelID)];
+  int labelID = IDS_IOS_ACCOUNT_UNIFIED_CONSENT_OK_BUTTON;
+  return [ChromeMatchersAppInterface buttonWithAccessibilityLabelID:labelID];
 }
 
 + (id<GREYMatcher>)unifiedConsentAddAccountButton {
@@ -414,6 +450,35 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
   return grey_accessibilityID(kSyncSettingsConfirmButtonId);
 }
 
++ (id<GREYMatcher>)paymentMethodsButton {
+  return [ChromeMatchersAppInterface
+      buttonWithAccessibilityLabelID:(IDS_AUTOFILL_PAYMENT_METHODS)];
+}
+
++ (id<GREYMatcher>)addCreditCardView {
+  return grey_accessibilityID(kAddCreditCardViewID);
+}
+
++ (id<GREYMatcher>)autofillCreditCardTableView {
+  return grey_accessibilityID(kAutofillCreditCardTableViewId);
+}
+
++ (id<GREYMatcher>)addPaymentMethodButton {
+  return grey_accessibilityID(kSettingsAddPaymentMethodButtonId);
+}
+
++ (id<GREYMatcher>)addCreditCardButton {
+  return grey_accessibilityID(kSettingsAddCreditCardButtonID);
+}
+
++ (id<GREYMatcher>)addCreditCardCancelButton {
+  return grey_accessibilityID(kSettingsAddCreditCardCancelButtonID);
+}
+
++ (id<GREYMatcher>)creditCardScannerView {
+  return grey_accessibilityID(kCreditCardScannerViewID);
+}
+
 + (id<GREYMatcher>)toolsMenuView {
   return grey_accessibilityID(kPopupMenuToolsMenuTableViewId);
 }
@@ -454,10 +519,6 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
   return grey_accessibilityID(kPrivacyTableViewId);
 }
 
-+ (id<GREYMatcher>)settingsSyncManageSyncedDataButton {
-  return grey_accessibilityID(kSettingsSyncId);
-}
-
 + (id<GREYMatcher>)accountsSyncButton {
   return grey_allOf(grey_accessibilityID(kSettingsAccountsTableViewSyncCellId),
                     grey_sufficientlyVisible(), nil);
@@ -477,6 +538,10 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
   return grey_allOf(grey_kindOfClass([UITableViewCell class]),
                     grey_sufficientlyVisible(),
                     grey_descendant(mainTextLabelMatcher), nil);
+}
+
++ (id<GREYMatcher>)googleServicesSettingsView {
+  return grey_accessibilityID(kGoogleServicesSettingsViewIdentifier);
 }
 
 + (id<GREYMatcher>)settingsMenuBackButton {
@@ -516,6 +581,10 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
                     grey_accessibilityTrait(UIAccessibilityTraitButton), nil);
 }
 
++ (id<GREYMatcher>)voiceSearchInputAccessoryButton {
+  return grey_accessibilityID(kVoiceSearchInputAccessoryViewID);
+}
+
 + (id<GREYMatcher>)settingsCollectionView {
   return grey_accessibilityID(kSettingsTableViewId);
 }
@@ -541,8 +610,7 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
 }
 
 + (id<GREYMatcher>)contentSuggestionCollectionView {
-  return grey_accessibilityID(
-      [ContentSuggestionsViewController collectionAccessibilityIdentifier]);
+  return grey_accessibilityID(kContentSuggestionsCollectionIdentifier);
 }
 
 + (id<GREYMatcher>)warningMessageView {
@@ -555,6 +623,10 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
 
 + (id<GREYMatcher>)paymentRequestPickerSearchBar {
   return grey_accessibilityID(kPaymentRequestPickerSearchBarAccessibilityID);
+}
+
++ (id<GREYMatcher>)readingListMenuButton {
+  return grey_accessibilityID(kToolsMenuReadingListId);
 }
 
 + (id<GREYMatcher>)bookmarksMenuButton {
@@ -676,6 +748,145 @@ UIView* SubviewWithAccessibilityIdentifier(NSString* accessibility_id,
       grey_ancestor(grey_accessibilityID(IdentifierForCellAtIndex(index))),
       grey_accessibilityID(kGridCellCloseButtonIdentifier),
       grey_sufficientlyVisible(), nil);
+}
+
++ (id<GREYMatcher>)settingsPasswordMatcher {
+  return grey_accessibilityID(kPasswordsTableViewId);
+}
+
++ (id<GREYMatcher>)settingsPasswordSearchMatcher {
+  return grey_accessibilityID(kPasswordsSearchBarId);
+}
+
++ (id<GREYMatcher>)settingsProfileMatcher {
+  return grey_accessibilityID(kAutofillProfileTableViewID);
+}
+
++ (id<GREYMatcher>)settingsCreditCardMatcher {
+  return grey_accessibilityID(kAutofillCreditCardTableViewId);
+}
+
++ (id<GREYMatcher>)autofillSuggestionViewMatcher {
+  return grey_accessibilityID(kFormSuggestionLabelAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)settingsBottomToolbarDeleteButton {
+  return grey_accessibilityID(kSettingsToolbarDeleteButtonId);
+}
+
++ (id<GREYMatcher>)contentViewSmallerThanScrollView {
+  GREYMatchesBlock matches = ^BOOL(UIView* view) {
+    UIScrollView* scrollView = base::mac::ObjCCast<UIScrollView>(view);
+    return scrollView &&
+           scrollView.contentSize.height < scrollView.bounds.size.height;
+  };
+  GREYDescribeToBlock describe = ^void(id<GREYDescription> description) {
+    [description
+        appendText:@"Not a scroll view or the scroll view content is bigger "
+                   @"than the scroll view bounds"];
+  };
+  return [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
+                                              descriptionBlock:describe];
+}
+
+#pragma mark - Manual Fallback
+
++ (id<GREYMatcher>)manualFallbackFormSuggestionViewMatcher {
+  return grey_accessibilityID(kFormSuggestionsViewAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackPasswordIconMatcher {
+  return grey_accessibilityID(
+      manual_fill::AccessoryPasswordAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackKeyboardIconMatcher {
+  return grey_accessibilityID(
+      manual_fill::AccessoryKeyboardAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackPasswordTableViewMatcher {
+  return grey_accessibilityID(
+      manual_fill::kPasswordTableViewAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackPasswordSearchBarMatcher {
+  return grey_accessibilityID(
+      manual_fill::kPasswordSearchBarAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackManagePasswordsMatcher {
+  return grey_accessibilityID(
+      manual_fill::ManagePasswordsAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackOtherPasswordsMatcher {
+  return grey_accessibilityID(
+      manual_fill::OtherPasswordsAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackOtherPasswordsDismissMatcher {
+  return grey_accessibilityID(
+      manual_fill::kPasswordDoneButtonAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackPasswordButtonMatcher {
+  return grey_buttonTitle(kMaskedPasswordTitle);
+}
+
++ (id<GREYMatcher>)manualFallbackPasswordTableViewWindowMatcher {
+  id<GREYMatcher> classMatcher = grey_kindOfClass([UIWindow class]);
+  id<GREYMatcher> parentMatcher =
+      grey_descendant([self manualFallbackPasswordTableViewMatcher]);
+  return grey_allOf(classMatcher, parentMatcher, nil);
+}
+
++ (id<GREYMatcher>)manualFallbackProfilesIconMatcher {
+  return grey_accessibilityID(
+      manual_fill::AccessoryAddressAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackProfilesTableViewMatcher {
+  return grey_accessibilityID(
+      manual_fill::AddressTableViewAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackManageProfilesMatcher {
+  return grey_accessibilityID(
+      manual_fill::ManageAddressAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackProfileTableViewWindowMatcher {
+  id<GREYMatcher> classMatcher = grey_kindOfClass([UIWindow class]);
+  id<GREYMatcher> parentMatcher =
+      grey_descendant([self manualFallbackProfilesTableViewMatcher]);
+  return grey_allOf(classMatcher, parentMatcher, nil);
+}
+
++ (id<GREYMatcher>)manualFallbackCreditCardIconMatcher {
+  return grey_accessibilityID(
+      manual_fill::AccessoryCreditCardAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackCreditCardTableViewMatcher {
+  return grey_accessibilityID(
+      manual_fill::CardTableViewAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackManageCreditCardsMatcher {
+  return grey_accessibilityID(manual_fill::ManageCardsAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackAddCreditCardsMatcher {
+  return grey_accessibilityID(
+      manual_fill::kAddCreditCardsAccessibilityIdentifier);
+}
+
++ (id<GREYMatcher>)manualFallbackCreditCardTableViewWindowMatcher {
+  id<GREYMatcher> classMatcher = grey_kindOfClass([UIWindow class]);
+  id<GREYMatcher> parentMatcher =
+      grey_descendant([self manualFallbackCreditCardTableViewMatcher]);
+  return grey_allOf(classMatcher, parentMatcher, nil);
 }
 
 @end

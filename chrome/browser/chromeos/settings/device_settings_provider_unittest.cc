@@ -45,14 +45,6 @@ namespace {
 
 const char kDisabledMessage[] = "This device has been disabled.";
 
-constexpr em::AutoUpdateSettingsProto_ConnectionType kConnectionTypes[] = {
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_ETHERNET,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_WIFI,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_WIMAX,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_BLUETOOTH,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_CELLULAR,
-};
-
 }  // namespace
 
 class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
@@ -217,12 +209,13 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
   }
 
   // Helper routine to set AutoUpdates connection types policy.
-  void SetAutoUpdateConnectionTypes(const std::vector<int>& values) {
+  void SetAutoUpdateConnectionTypes(
+      const std::vector<em::AutoUpdateSettingsProto::ConnectionType>& values) {
     em::AutoUpdateSettingsProto* proto =
         device_policy_->payload().mutable_auto_update_settings();
     proto->set_update_disabled(false);
     for (auto const& value : values) {
-      proto->add_allowed_connection_types(kConnectionTypes[value]);
+      proto->add_allowed_connection_types(value);
     }
     BuildAndInstallDevicePolicy();
   }
@@ -315,6 +308,23 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
     em::DevicePowerwashAllowedProto* proto =
         device_policy_->payload().mutable_device_powerwash_allowed();
     proto->set_device_powerwash_allowed(device_powerwash_allowed);
+    BuildAndInstallDevicePolicy();
+  }
+
+  // Helper routine to set DeviceLoginScreenSystemInfoEnforced policy.
+  void SetSystemInfoEnforced(bool enabled) {
+    em::BooleanPolicyProto* proto =
+        device_policy_->payload()
+            .mutable_device_login_screen_system_info_enforced();
+    proto->set_value(enabled);
+    BuildAndInstallDevicePolicy();
+  }
+
+  void SetShowNumericKeyboardForPassword(bool show_numeric_keyboard) {
+    em::BooleanPolicyProto* proto =
+        device_policy_->payload()
+            .mutable_device_show_numeric_keyboard_for_password();
+    proto->set_value(show_numeric_keyboard);
     BuildAndInstallDevicePolicy();
   }
 
@@ -631,11 +641,12 @@ TEST_F(DeviceSettingsProviderTest, EmptyAllowedConnectionTypesForUpdate) {
   VerifyPolicyValue(kAllowedConnectionTypesForUpdate, nullptr);
 
   // In case of empty list policy should not be set.
-  const std::vector<int> no_values = {};
+  const std::vector<em::AutoUpdateSettingsProto::ConnectionType> no_values = {};
   SetAutoUpdateConnectionTypes(no_values);
   VerifyPolicyValue(kAllowedConnectionTypesForUpdate, nullptr);
 
-  const std::vector<int> single_value = {0};
+  const std::vector<em::AutoUpdateSettingsProto::ConnectionType> single_value =
+      {em::AutoUpdateSettingsProto::CONNECTION_TYPE_ETHERNET};
   // Check some meaningful value. Policy should be set.
   SetAutoUpdateConnectionTypes(single_value);
   base::ListValue allowed_connections;
@@ -721,7 +732,7 @@ TEST_F(DeviceSettingsProviderTest, DeviceAutoUpdateTimeRestrictionsExtra) {
   interval.SetPath({"end", "day_of_week"}, base::Value("Wednesday"));
   interval.SetPath({"end", "hours"}, base::Value(1));
   interval.SetPath({"end", "minutes"}, base::Value(20));
-  test_list.GetList().push_back(std::move(interval));
+  test_list.Append(std::move(interval));
   SetDeviceAutoUpdateTimeRestrictions(extra_field);
   VerifyPolicyValue(kDeviceAutoUpdateTimeRestrictions, &test_list);
 }
@@ -775,6 +786,12 @@ TEST_F(DeviceSettingsProviderTest, DeviceRebootAfterUserSignout) {
   {
     SetDeviceRebootOnUserSignout(PolicyProto::ALWAYS);
     base::Value expected_value(PolicyProto::ALWAYS);
+    VerifyPolicyValue(kDeviceRebootOnUserSignout, &expected_value);
+  }
+
+  {
+    SetDeviceRebootOnUserSignout(PolicyProto::VM_STARTED_OR_ARC_SESSION);
+    base::Value expected_value(PolicyProto::VM_STARTED_OR_ARC_SESSION);
     VerifyPolicyValue(kDeviceRebootOnUserSignout, &expected_value);
   }
 }
@@ -841,6 +858,32 @@ TEST_F(DeviceSettingsProviderTest, DevicePowerwashAllowed) {
 
   SetDevicePowerwashAllowed(false);
   EXPECT_EQ(base::Value(false), *provider_->Get(kDevicePowerwashAllowed));
+}
+
+TEST_F(DeviceSettingsProviderTest, DeviceLoginScreenSystemInfoEnforced) {
+  // Policy should not be set by default
+  VerifyPolicyValue(kDeviceLoginScreenSystemInfoEnforced, nullptr);
+
+  SetSystemInfoEnforced(true);
+  EXPECT_EQ(base::Value(true),
+            *provider_->Get(kDeviceLoginScreenSystemInfoEnforced));
+
+  SetSystemInfoEnforced(false);
+  EXPECT_EQ(base::Value(false),
+            *provider_->Get(kDeviceLoginScreenSystemInfoEnforced));
+}
+
+TEST_F(DeviceSettingsProviderTest, DeviceShowNumericKeyboardForPassword) {
+  // Policy should not be set by default
+  VerifyPolicyValue(kDeviceShowNumericKeyboardForPassword, nullptr);
+
+  SetShowNumericKeyboardForPassword(true);
+  EXPECT_EQ(base::Value(true),
+            *provider_->Get(kDeviceShowNumericKeyboardForPassword));
+
+  SetShowNumericKeyboardForPassword(false);
+  EXPECT_EQ(base::Value(false),
+            *provider_->Get(kDeviceShowNumericKeyboardForPassword));
 }
 
 }  // namespace chromeos

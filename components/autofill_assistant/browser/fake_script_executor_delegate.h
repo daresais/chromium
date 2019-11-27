@@ -29,12 +29,14 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   const GURL& GetCurrentURL() override;
   const GURL& GetDeeplinkURL() override;
   Service* GetService() override;
-  UiController* GetUiController() override;
   WebController* GetWebController() override;
   ClientMemory* GetClientMemory() override;
   TriggerContext* GetTriggerContext() override;
   autofill::PersonalDataManager* GetPersonalDataManager() override;
+  WebsiteLoginFetcher* GetWebsiteLoginFetcher() override;
   content::WebContents* GetWebContents() override;
+  std::string GetAccountEmailAddress() override;
+  std::string GetLocale() override;
   void EnterState(AutofillAssistantState state) override;
   void SetTouchableElementArea(const ElementAreaProto& element) override;
   void SetStatusMessage(const std::string& message) override;
@@ -48,17 +50,23 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   void SetProgressVisible(bool visible) override;
   void SetUserActions(
       std::unique_ptr<std::vector<UserAction>> user_actions) override;
-  void SetPaymentRequestOptions(
-      std::unique_ptr<PaymentRequestOptions> options) override;
-  void SetResizeViewport(bool resize_viewport) override;
-  bool GetResizeViewport() override;
+  void SetCollectUserDataOptions(
+      std::unique_ptr<CollectUserDataOptions> options,
+      std::unique_ptr<UserData> information) override;
+  void WriteUserData(base::OnceCallback<void(const CollectUserDataOptions*,
+                                             UserData*,
+                                             UserData::FieldChange*)>) override;
+  void SetViewportMode(ViewportMode mode) override;
+  ViewportMode GetViewportMode() override;
   void SetPeekMode(ConfigureBottomSheetProto::PeekMode peek_mode) override;
   ConfigureBottomSheetProto::PeekMode GetPeekMode() override;
-  bool SetForm(std::unique_ptr<FormProto> form,
-               base::RepeatingCallback<void(const FormProto::Result*)> callback)
-      override;
+  bool SetForm(
+      std::unique_ptr<FormProto> form,
+      base::RepeatingCallback<void(const FormProto::Result*)> changed_callback,
+      base::OnceCallback<void(const ClientStatus&)> cancel_callback) override;
   bool HasNavigationError() override;
   bool IsNavigatingToNewDocument() override;
+  void RequireUI() override;
   void AddListener(Listener* listener) override;
   void RemoveListener(Listener* listener) override;
 
@@ -67,10 +75,6 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   void SetCurrentURL(const GURL& url) { current_url_ = url; }
 
   void SetService(Service* service) { service_ = service; }
-
-  void SetUiController(UiController* ui_controller) {
-    ui_controller_ = ui_controller;
-  }
 
   void SetWebController(WebController* web_controller) {
     web_controller_ = web_controller;
@@ -88,7 +92,9 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
 
   std::vector<UserAction>* GetUserActions() { return user_actions_.get(); }
 
-  PaymentRequestOptions* GetOptions() { return payment_request_options_.get(); }
+  CollectUserDataOptions* GetOptions() {
+    return payment_request_options_.get();
+  }
 
   void UpdateNavigationState(bool navigating, bool error) {
     navigating_to_new_document_ = navigating;
@@ -101,11 +107,12 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
 
   bool HasListeners() { return !listeners_.empty(); }
 
+  bool IsUIRequired() { return require_ui_; }
+
  private:
   ClientSettings client_settings_;
   GURL current_url_;
   Service* service_ = nullptr;
-  UiController* ui_controller_ = nullptr;
   WebController* web_controller_ = nullptr;
   ClientMemory memory_;
   std::unique_ptr<TriggerContext> trigger_context_;
@@ -114,13 +121,15 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   std::unique_ptr<Details> details_;
   std::unique_ptr<InfoBox> info_box_;
   std::unique_ptr<std::vector<UserAction>> user_actions_;
-  std::unique_ptr<PaymentRequestOptions> payment_request_options_;
+  std::unique_ptr<CollectUserDataOptions> payment_request_options_;
+  std::unique_ptr<UserData> payment_request_info_;
   bool navigating_to_new_document_ = false;
   bool navigation_error_ = false;
   std::set<ScriptExecutorDelegate::Listener*> listeners_;
-  bool resize_viewport_ = false;
+  ViewportMode viewport_mode_ = ViewportMode::NO_RESIZE;
   ConfigureBottomSheetProto::PeekMode peek_mode_ =
       ConfigureBottomSheetProto::HANDLE;
+  bool require_ui_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FakeScriptExecutorDelegate);
 };

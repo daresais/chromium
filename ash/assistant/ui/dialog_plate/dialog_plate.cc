@@ -86,8 +86,9 @@ int DialogPlate::GetHeightForWidth(int width) const {
   return kPreferredHeightDip;
 }
 
-void DialogPlate::ButtonPressed(views::Button* sender, const ui::Event& event) {
-  OnButtonPressed(static_cast<AssistantButtonId>(sender->GetID()));
+void DialogPlate::OnButtonPressed(AssistantButtonId button_id) {
+  delegate_->OnDialogPlateButtonPressed(button_id);
+  textfield_->SetText(base::string16());
 }
 
 bool DialogPlate::HandleKeyEvent(views::Textfield* textfield,
@@ -103,7 +104,7 @@ bool DialogPlate::HandleKeyEvent(views::Textfield* textfield,
         textfield_->GetFocusManager()->ClearFocus();
 
       const base::StringPiece16& trimmed_text = base::TrimWhitespace(
-          textfield_->text(), base::TrimPositions::TRIM_ALL);
+          textfield_->GetText(), base::TrimPositions::TRIM_ALL);
 
       // Only non-empty trimmed text is consider a valid contents commit.
       // Anything else will simply result in the DialogPlate being cleared.
@@ -318,7 +319,7 @@ void DialogPlate::InitKeyboardLayoutContainer() {
 
   auto textfield_hint =
       l10n_util::GetStringUTF16(IDS_ASH_ASSISTANT_DIALOG_PLATE_HINT);
-  textfield_->set_placeholder_text(textfield_hint);
+  textfield_->SetPlaceholderText(textfield_hint);
   textfield_->SetAccessibleName(textfield_hint);
   textfield_->set_placeholder_text_color(kTextColorSecondary);
   textfield_->SetTextColor(kTextColorPrimary);
@@ -380,11 +381,6 @@ void DialogPlate::InitVoiceLayoutContainer() {
   layout_manager->SetFlexForView(spacer, 1);
 
   input_modality_layout_container_->AddChildView(voice_layout_container_);
-}
-
-void DialogPlate::OnButtonPressed(AssistantButtonId id) {
-  delegate_->OnDialogPlateButtonPressed(id);
-  textfield_->SetText(base::string16());
 }
 
 void DialogPlate::OnAnimationStarted(

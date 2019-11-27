@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
@@ -99,7 +100,6 @@ FormData* FormData::Create(HTMLFormElement* form,
                            ExceptionState& exception_state) {
   FormData* form_data = form->ConstructEntryList(nullptr, UTF8Encoding());
   if (!form_data) {
-    DCHECK(RuntimeEnabledFeatures::FormDataEventEnabled());
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "The form is constructing entry list.");
     return nullptr;
@@ -359,7 +359,7 @@ File* FormData::Entry::GetFile() const {
   String filename = filename_;
   if (filename.IsNull())
     filename = "blob";
-  return File::Create(filename, CurrentTimeMS(),
+  return File::Create(filename, base::Time::Now().ToDoubleT() * 1000.0,
                       GetBlob()->GetBlobDataHandle());
 }
 

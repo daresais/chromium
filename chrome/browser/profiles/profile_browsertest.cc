@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/files/file_path_watcher.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
@@ -24,7 +23,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
@@ -49,6 +48,7 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -90,6 +90,13 @@ class SimpleURLLoaderHelper {
     auto request = std::make_unique<network::ResourceRequest>();
     request->url = url;
     request->load_flags = load_flags;
+
+    // Populate Network Isolation Key so that the request is cacheable.
+    url::Origin origin = url::Origin::Create(url);
+    request->trusted_params = network::ResourceRequest::TrustedParams();
+    request->trusted_params->network_isolation_key =
+        net::NetworkIsolationKey(origin, origin);
+
     loader_ = network::SimpleURLLoader::Create(std::move(request),
                                                TRAFFIC_ANNOTATION_FOR_TESTS);
 
@@ -217,7 +224,7 @@ class ProfileBrowserTest : public InProcessBrowserTest {
     // This ensures the first request has reached the network stack.
     SimpleURLLoaderHelper simple_loader_helper2(
         factory, embedded_test_server()->GetURL("/echo?status=400"),
-        net::ERR_FAILED);
+        net::ERR_HTTP_RESPONSE_CODE_FAILURE);
     simple_loader_helper2.WaitForCompletion();
 
     // The first request should still be hung.
@@ -240,7 +247,7 @@ class ProfileBrowserTest : public InProcessBrowserTest {
     // This ensures the first request has reached the network stack.
     SimpleURLLoaderHelper simple_loader_helper2(
         factory, embedded_test_server->GetURL("/echo?status=400"),
-        net::ERR_FAILED);
+        net::ERR_HTTP_RESPONSE_CODE_FAILURE);
     simple_loader_helper2.WaitForCompletion();
 
     // The first request should still be hung.
@@ -585,13 +592,12 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DiskCacheDirOverride) {
   ASSERT_TRUE(mock_user_data_dir.CreateUniqueTempDir());
   base::FilePath profile_path =
       mock_user_data_dir.GetPath().Append(profile_name);
-  ProfileImpl* profile_impl = static_cast<ProfileImpl*>(browser()->profile());
 
   {
     base::ScopedTempDir temp_disk_cache_dir;
     ASSERT_TRUE(temp_disk_cache_dir.CreateUniqueTempDir());
-    profile_impl->GetPrefs()->SetFilePath(prefs::kDiskCacheDir,
-                                          temp_disk_cache_dir.GetPath());
+    g_browser_process->local_state()->SetFilePath(
+        prefs::kDiskCacheDir, temp_disk_cache_dir.GetPath());
   }
 }
 
@@ -603,142 +609,63 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, LastSelectedDirectory) {
   ASSERT_EQ(profile_impl->last_selected_directory(), home);
 }
 
-class ProfileWithoutMediaCacheBrowserTest : public ProfileBrowserTest {
- public:
-  ProfileWithoutMediaCacheBrowserTest() {
-    feature_list_.InitAndEnableFeature(features::kUseSameCacheForMedia);
+IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, Notifications) {
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Create the profile and check that a notification is received for it.
+  std::unique_ptr<Profile> profile;
+  {
+    content::WindowedNotificationObserver profile_created_observer(
+        chrome::NOTIFICATION_PROFILE_CREATED,
+        content::NotificationService::AllSources());
+
+    profile = CreateProfile(temp_dir.GetPath(), nullptr,
+                            Profile::CREATE_MODE_SYNCHRONOUS);
+    profile_created_observer.Wait();
+
+    EXPECT_EQ(profile_created_observer.source(),
+              content::Source<Profile>(profile.get()));
   }
 
-  ~ProfileWithoutMediaCacheBrowserTest() override {}
+  // Now retrieve the off-the-record profile, which will be created because it
+  // doesn't exist yet.
+  Profile* otr_profile = nullptr;
+  {
+    content::WindowedNotificationObserver profile_created_observer(
+        chrome::NOTIFICATION_PROFILE_CREATED,
+        content::NotificationService::AllSources());
 
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
+    otr_profile = profile->GetOffTheRecordProfile();
+    profile_created_observer.Wait();
 
-// Verifies that when kUseSameCacheForMedia is enabled, the media
-// URLRequestContext uses the same disk cache as the main one.
-IN_PROC_BROWSER_TEST_F(ProfileWithoutMediaCacheBrowserTest,
-                       NoSeparateMediaCache) {
-  ASSERT_TRUE(embedded_test_server()->Start());
+    EXPECT_EQ(profile_created_observer.source(),
+              content::Source<Profile>(otr_profile));
+    EXPECT_TRUE(profile->HasOffTheRecordProfile());
+    EXPECT_TRUE(otr_profile->IsOffTheRecord());
+    EXPECT_FALSE(otr_profile->IsIndependentOffTheRecordProfile());
+  }
 
-  // Do a normal load using the media URLRequestContext, populating the cache.
-  SimpleURLLoaderHelper simple_loader_helper(
-      // TODO(svillar): this should be media request
-      content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
-          ->GetURLLoaderFactoryForBrowserProcess()
-          .get(),
-      embedded_test_server()->GetURL("/cachetime"), net::OK);
-  simple_loader_helper.WaitForCompletion();
+  // Destroy the off-the-record profile.
+  {
+    content::WindowedNotificationObserver profile_destroyed_observer(
+        chrome::NOTIFICATION_PROFILE_DESTROYED,
+        content::Source<Profile>(otr_profile));
 
-  // Cache-only load from the main request context should succeed, since the
-  // media request context uses the same cache.
-  SimpleURLLoaderHelper simple_loader_helper2(
-      content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
-          ->GetURLLoaderFactoryForBrowserProcess()
-          .get(),
-      embedded_test_server()->GetURL("/cachetime"), net::OK,
-      net::LOAD_ONLY_FROM_CACHE);
-  simple_loader_helper2.WaitForCompletion();
+    profile->DestroyOffTheRecordProfile();
+    profile_destroyed_observer.Wait();
 
-  // Cache-only load from the media request context should also succeed.
-  SimpleURLLoaderHelper simple_loader_helper3(
-      content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
-          ->GetURLLoaderFactoryForBrowserProcess()
-          .get(),
-      embedded_test_server()->GetURL("/cachetime"), net::OK,
-      net::LOAD_ONLY_FROM_CACHE);
-  simple_loader_helper3.WaitForCompletion();
+    EXPECT_FALSE(profile->HasOffTheRecordProfile());
+  }
+
+  // Destroy the regular profile.
+  {
+    content::WindowedNotificationObserver profile_destroyed_observer(
+        chrome::NOTIFICATION_PROFILE_DESTROYED,
+        content::Source<Profile>(profile.get()));
+
+    profile.reset();
+    profile_destroyed_observer.Wait();
+  }
 }
-
-namespace {
-
-// Watches for the destruction of the specified path (Which, in the tests that
-// use it, is typically a directory), and expects the parent directory not to be
-// deleted.
-//
-// This is used the the media cache deletion tests, so handles all the possible
-// orderings of events that could happen:
-//
-// * In PRE_* tests, the media cache could deleted before the test completes, by
-// the task posted on Profile / isolated app URLRequestContext creation.
-//
-// * In the followup test, the media cache could be deleted by the off-thread
-// delete media cache task before the FileDestructionWatcher starts watching for
-// deletion, or even before it's created.
-//
-// * In the followup test, the media cache could be deleted after the
-// FileDestructionWatcher starts watching.
-//
-// It also may be possible to get a notification of the media cache being
-// created from the the previous test, so this allows multiple watch events to
-// happen, before the path is actually deleted.
-//
-// The public methods are called on the UI thread, the private ones called on a
-// separate SequencedTaskRunner.
-class FileDestructionWatcher {
- public:
-  explicit FileDestructionWatcher(const base::FilePath& watched_file_path)
-      : watched_file_path_(watched_file_path) {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  }
-
-  void WaitForDestruction() {
-    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    DCHECK(!watcher_);
-    base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()})
-        ->PostTask(FROM_HERE,
-                   base::BindOnce(&FileDestructionWatcher::StartWatchingPath,
-                                  base::Unretained(this)));
-    run_loop_.Run();
-    // The watcher should be destroyed before quitting the run loop, once the
-    // file has been destroyed.
-    DCHECK(!watcher_);
-
-    // Double check that the file was destroyed, and that the parent directory
-    // was not.
-    base::ScopedAllowBlockingForTesting allow_blocking;
-    EXPECT_FALSE(base::PathExists(watched_file_path_));
-    EXPECT_TRUE(base::PathExists(watched_file_path_.DirName()));
-  }
-
- private:
-  void StartWatchingPath() {
-    DCHECK(!watcher_);
-    watcher_ = std::make_unique<base::FilePathWatcher>();
-    // Start watching before checking if the file exists, as the file could be
-    // destroyed between the existence check and when we start watching, if the
-    // order were reversed.
-    EXPECT_TRUE(watcher_->Watch(
-        watched_file_path_, false /* recursive */,
-        base::BindRepeating(&FileDestructionWatcher::OnPathChanged,
-                            base::Unretained(this))));
-    CheckIfPathExists();
-  }
-
-  void OnPathChanged(const base::FilePath& path, bool error) {
-    EXPECT_EQ(watched_file_path_, path);
-    EXPECT_FALSE(error);
-    CheckIfPathExists();
-  }
-
-  // Checks if the path exists, and if so, destroys the watcher and quits
-  // |run_loop_|.
-  void CheckIfPathExists() {
-    if (!base::PathExists(watched_file_path_)) {
-      watcher_.reset();
-      run_loop_.Quit();
-      return;
-    }
-  }
-
-  base::RunLoop run_loop_;
-  const base::FilePath watched_file_path_;
-
-  // Created and destroyed off of the UI thread, on the sequence used to watch
-  // for changes.
-  std::unique_ptr<base::FilePathWatcher> watcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileDestructionWatcher);
-};
-
-}  // namespace

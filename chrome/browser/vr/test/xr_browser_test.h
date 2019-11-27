@@ -12,6 +12,7 @@
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/vr/test/conditional_skipping.h"
 #include "chrome/common/chrome_features.h"
@@ -22,6 +23,10 @@
 #include "device/vr/test/test_hook.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
+
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
 
 namespace vr {
 
@@ -50,6 +55,9 @@ class XrBrowserTestBase : public InProcessBrowserTest {
   static constexpr char kVrConfigPathVal[] = "./";
   static constexpr char kVrLogPathEnvVar[] = "VR_LOG_PATH";
   static constexpr char kVrLogPathVal[] = "./";
+  static constexpr char kOpenXrConfigPathEnvVar[] = "XR_RUNTIME_JSON";
+  static constexpr char kOpenXrConfigPathVal[] =
+      "./mock_vr_clients/bin/openxr/openxr.json";
   static constexpr char kTestFileDir[] =
       "chrome/test/data/xr/e2e_test_files/html/";
   static constexpr char kSwitchIgnoreRuntimeRequirements[] =
@@ -66,7 +74,8 @@ class XrBrowserTestBase : public InProcessBrowserTest {
   enum class RuntimeType {
     RUNTIME_NONE = 0,
     RUNTIME_OPENVR = 1,
-    RUNTIME_WMR = 2
+    RUNTIME_WMR = 2,
+    RUNTIME_OPENXR = 3
   };
 
   XrBrowserTestBase();
@@ -76,8 +85,6 @@ class XrBrowserTestBase : public InProcessBrowserTest {
   void TearDown() override;
 
   virtual RuntimeType GetRuntimeType() const;
-  device::XrAxisType GetPrimaryAxisType() const;
-  device::XrAxisType GetSecondaryAxisType() const;
 
   // Returns a GURL to the XR test HTML file of the given name, e.g.
   // GetHtmlTestFile("foo") returns a GURL for the foo.html file in the XR
@@ -194,8 +201,9 @@ class XrBrowserTestBase : public InProcessBrowserTest {
 
   // Convenience function for running PollJavaScriptBooleanOrFail with the
   // return value of GetCurrentWebContents.
-  void PollJavaScriptBooleanOrFail(const std::string& bool_expression,
-                                   const base::TimeDelta& timeout);
+  void PollJavaScriptBooleanOrFail(
+      const std::string& bool_expression,
+      const base::TimeDelta& timeout = kPollTimeoutShort);
 
   // Convenience function for running WaitOnJavaScriptStep with the return value
   // of GetCurrentWebContents.
@@ -225,8 +233,13 @@ class XrBrowserTestBase : public InProcessBrowserTest {
   std::vector<base::Feature> enable_features_;
   std::vector<base::Feature> disable_features_;
   std::vector<std::string> append_switches_;
+  std::vector<std::string> enable_blink_features_;
   std::vector<XrTestRequirement> runtime_requirements_;
   std::unordered_set<std::string> ignored_requirements_;
+
+#if defined(OS_WIN)
+  HWND hwnd_;
+#endif
 
  private:
   void LogJavaScriptFailure();

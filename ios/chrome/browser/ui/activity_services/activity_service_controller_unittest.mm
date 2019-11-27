@@ -12,8 +12,6 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
-#include "components/send_tab_to_self/features.h"
-#include "components/sync/driver/sync_driver_switches.h"
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #import "ios/chrome/browser/passwords/password_form_filler.h"
@@ -35,7 +33,7 @@
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -163,10 +161,15 @@
   return self.parentViewController.view;
 }
 
-#pragma mark - ActivityServicePositioner
+#pragma mark - SnackbarCommands
 
 - (void)showSnackbarMessage:(MDCSnackbarMessage*)message {
   _latestSnackbarMessage = [message.text copy];
+}
+
+- (void)showSnackbarMessage:(MDCSnackbarMessage*)message
+               bottomOffset:(CGFloat)offset {
+  // NO-OP.
 }
 
 @end
@@ -312,7 +315,7 @@ class ActivityServiceControllerTest : public PlatformTest {
     EXPECT_FALSE(provider.fakePasswordFormFiller.methodCalled);
   }
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   UIViewController* parentController_;
   ShareToData* shareData_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
@@ -912,10 +915,6 @@ TEST_F(ActivityServiceControllerTest, SendTabToSelfActivity) {
 
 TEST_F(ActivityServiceControllerTest, PresentWhenOffTheRecord) {
   base::test::ScopedFeatureList scoped_features;
-  scoped_features.InitWithFeatures(
-      /*enabled_features=*/{switches::kSyncSendTabToSelf,
-                            send_tab_to_self::kSendTabToSelfShowSendingUI},
-      /*disabled_features=*/{});
 
   UIViewController* parentController =
       static_cast<UIViewController*>(parentController_);

@@ -49,11 +49,15 @@ constexpr std::array<ZoomListBucket, 8> kZoomListBuckets{{
 // zoom values that includes a zoom level to go to the native resolution of the
 // display. Ensure that the list of DSFs are in sync with the list of default
 // device scale factors in display_change_observer.cc.
-constexpr std::array<ZoomListBucketDsf, 4> kZoomListBucketsForDsf{{
+constexpr std::array<ZoomListBucketDsf, 6> kZoomListBucketsForDsf{{
     {1.25f, {0.7f, 1.f / 1.25f, 0.85f, 0.9f, 0.95f, 1.f, 1.1f, 1.2f, 1.3f}},
     {1.6f, {1.f / 1.6f, 0.7f, 0.75f, 0.8f, 0.85f, 0.9f, 1.f, 1.15f, 1.3f}},
+    {1.77777f,
+     {1.f / 1.77777f, 0.65f, 0.75f, 0.8f, 0.9f, 1.f, 1.1f, 1.2f, 1.3f}},
     {2.f, {1.f / 2.f, 0.6f, 0.7f, 0.8f, 0.9f, 1.f, 1.1f, 1.25f, 1.5f}},
     {2.25f, {1.f / 2.25f, 0.6f, 0.7f, 0.8f, 0.9f, 1.f, 1.15f, 1.3f, 1.5f}},
+    {2.66666f,
+     {1.f / 2.66666f, 0.5f, 0.6f, 0.8f, 0.9f, 1.f, 1.2f, 1.35f, 1.5f}},
 }};
 
 bool WithinEpsilon(float a, float b) {
@@ -119,10 +123,6 @@ std::string MultipleDisplayStateToString(MultipleDisplayState state) {
   return "INVALID";
 }
 
-bool IsPhysicalDisplayType(DisplayConnectionType type) {
-  return !(type & DISPLAY_CONNECTION_TYPE_NETWORK);
-}
-
 bool GetContentProtectionMethods(DisplayConnectionType type,
                                  uint32_t* protection_mask) {
   switch (type) {
@@ -170,7 +170,8 @@ std::vector<float> GetDisplayZoomFactors(const ManagedDisplayMode& mode) {
   // There may be cases where the device scale factor is less than 1. This can
   // happen during testing or local linux builds.
   const int effective_width = std::round(
-      static_cast<float>(mode.size().width()) / mode.device_scale_factor());
+      static_cast<float>(std::max(mode.size().width(), mode.size().height())) /
+      mode.device_scale_factor());
 
   std::size_t index = kZoomListBuckets.size() - 1;
   while (index > 0 && effective_width < kZoomListBuckets[index].first)

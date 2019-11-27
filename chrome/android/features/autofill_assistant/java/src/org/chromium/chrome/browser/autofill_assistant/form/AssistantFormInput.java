@@ -45,16 +45,18 @@ public abstract class AssistantFormInput {
     }
 
     @CalledByNative
-    private static AssistantFormCounter createCounter(String label, String subtext,
-            int initialValue, int minValue, int maxValue, int[] allowedValues) {
-        return AssistantFormCounter.create(
-                label, subtext, initialValue, minValue, maxValue, allowedValues);
+    private static AssistantFormCounter createCounter(String label, String descriptionLine1,
+            String descriptionLine2, int initialValue, int minValue, int maxValue,
+            int[] allowedValues) {
+        return AssistantFormCounter.create(label, descriptionLine1, descriptionLine2, initialValue,
+                minValue, maxValue, allowedValues);
     }
 
     @CalledByNative
-    private static AssistantFormSelectionChoice createChoice(
-            String label, boolean initiallySelected) {
-        return new AssistantFormSelectionChoice(label, initiallySelected);
+    private static AssistantFormSelectionChoice createChoice(String label, String descriptionLine1,
+            String descriptionLine2, boolean initiallySelected) {
+        return new AssistantFormSelectionChoice(
+                label, descriptionLine1, descriptionLine2, initiallySelected);
     }
 
     @CalledByNative
@@ -64,16 +66,34 @@ public abstract class AssistantFormInput {
             AssistantFormDelegate delegate) {
         return new AssistantFormCounterInput(label, expandText, minimizeText, counters,
                 minimizedCount, minCountersSum, maxCountersSum,
-                (counterIndex,
-                        value) -> delegate.onCounterChanged(inputIndex, counterIndex, value));
+                new AssistantFormCounterInput.Delegate() {
+                    @Override
+                    public void onCounterChanged(int counterIndex, int value) {
+                        delegate.onCounterChanged(inputIndex, counterIndex, value);
+                    }
+
+                    @Override
+                    public void onLinkClicked(int link) {
+                        delegate.onLinkClicked(link);
+                    }
+                });
     }
 
     @CalledByNative
     private static AssistantFormSelectionInput createSelectionInput(int inputIndex, String label,
             List<AssistantFormSelectionChoice> choices, boolean allowMultipleChoices,
             AssistantFormDelegate delegate) {
-        return new AssistantFormSelectionInput(label, choices, allowMultipleChoices,
-                (choiceIndex, selected)
-                        -> delegate.onChoiceSelectionChanged(inputIndex, choiceIndex, selected));
+        return new AssistantFormSelectionInput(
+                label, choices, allowMultipleChoices, new AssistantFormSelectionInput.Delegate() {
+                    @Override
+                    public void onChoiceSelectionChanged(int choiceIndex, boolean selected) {
+                        delegate.onChoiceSelectionChanged(inputIndex, choiceIndex, selected);
+                    }
+
+                    @Override
+                    public void onLinkClicked(int link) {
+                        delegate.onLinkClicked(link);
+                    }
+                });
     }
 }

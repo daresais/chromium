@@ -14,8 +14,11 @@
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/payments/card_unmask_delegate.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/payments/strike_database.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/ui/payments/card_expiration_date_fix_flow_controller_impl.h"
+#include "components/autofill/core/browser/ui/payments/card_name_fix_flow_controller_impl.h"
 #include "components/autofill/core/browser/ui/payments/card_unmask_prompt_controller_impl.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #import "components/autofill/ios/browser/autofill_client_ios_bridge.h"
@@ -24,9 +27,12 @@
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/sync_service.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#import "ios/web/public/web_state/web_state.h"
 
 @class UIViewController;
+
+namespace web {
+class WebState;
+}
 
 namespace autofill {
 
@@ -49,7 +55,7 @@ class ChromeAutofillClientIOS : public AutofillClient {
   AutocompleteHistoryManager* GetAutocompleteHistoryManager() override;
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
-  identity::IdentityManager* GetIdentityManager() override;
+  signin::IdentityManager* GetIdentityManager() override;
   FormDataImporter* GetFormDataImporter() override;
   payments::PaymentsClient* GetPaymentsClient() override;
   StrikeDatabase* GetStrikeDatabase() override;
@@ -67,7 +73,7 @@ class ChromeAutofillClientIOS : public AutofillClient {
   void ShowLocalCardMigrationDialog(
       base::OnceClosure show_migration_dialog_closure) override;
   void ConfirmMigrateLocalCardToCloud(
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const LegalMessageLines& legal_message_lines,
       const std::string& user_email,
       const std::vector<MigratableCreditCard>& migratable_credit_cards,
       LocalCardMigrationCallback start_migrating_cards_callback) override;
@@ -82,9 +88,15 @@ class ChromeAutofillClientIOS : public AutofillClient {
       const CreditCard& card,
       SaveCreditCardOptions options,
       LocalSaveCardPromptCallback callback) override;
+  void ConfirmAccountNameFixFlow(
+      base::OnceCallback<void(const base::string16&)> callback) override;
+  void ConfirmExpirationDateFixFlow(
+      const CreditCard& card,
+      base::OnceCallback<void(const base::string16&, const base::string16&)>
+          callback) override;
   void ConfirmSaveCreditCardToCloud(
       const CreditCard& card,
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const LegalMessageLines& legal_message_lines,
       SaveCreditCardOptions options,
       UploadSaveCardPromptCallback callback) override;
   void CreditCardUploadCompleted(bool card_saved) override;
@@ -118,6 +130,8 @@ class ChromeAutofillClientIOS : public AutofillClient {
   void LoadRiskData(
       base::OnceCallback<void(const std::string&)> callback) override;
 
+  LogManager* GetLogManager() const override;
+
  private:
   PrefService* pref_service_;
   syncer::SyncService* sync_service_;
@@ -126,13 +140,17 @@ class ChromeAutofillClientIOS : public AutofillClient {
   ios::ChromeBrowserState* browser_state_;
   web::WebState* web_state_;
   __weak id<AutofillClientIOSBridge> bridge_;
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
   std::unique_ptr<payments::PaymentsClient> payments_client_;
   std::unique_ptr<FormDataImporter> form_data_importer_;
   scoped_refptr<AutofillWebDataService> autofill_web_data_service_;
   infobars::InfoBarManager* infobar_manager_;
   password_manager::PasswordManager* password_manager_;
   CardUnmaskPromptControllerImpl unmask_controller_;
+  std::unique_ptr<LogManager> log_manager_;
+  CardNameFixFlowControllerImpl card_name_fix_flow_controller_;
+  CardExpirationDateFixFlowControllerImpl
+      card_expiration_date_fix_flow_controller_;
 
   // A weak reference to the view controller used to present UI.
   __weak UIViewController* base_view_controller_;

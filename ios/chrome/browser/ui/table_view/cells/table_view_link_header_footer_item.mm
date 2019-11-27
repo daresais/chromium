@@ -7,6 +7,7 @@
 #import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/string_util.h"
 #import "net/base/mac/url_conversions.h"
 
@@ -40,6 +41,10 @@ const CGFloat kVerticalPadding = 8;
   [super configureHeaderFooterView:headerFooter withStyler:styler];
 
   headerFooter.linkURL = self.linkURL;
+  if (self.linkURL.is_valid())
+    headerFooter.accessibilityTraits |= UIAccessibilityTraitLink;
+  else
+    headerFooter.accessibilityTraits &= ~UIAccessibilityTraitLink;
   [headerFooter setText:self.text];
 }
 
@@ -70,6 +75,8 @@ const CGFloat kVerticalPadding = 8;
         [UIFont preferredFontForTextStyle:kTableViewSublabelFontStyle];
     _textView.adjustsFontForContentSizeCategory = YES;
     _textView.translatesAutoresizingMaskIntoConstraints = NO;
+    _textView.linkTextAttributes =
+        @{NSForegroundColorAttributeName : [UIColor colorNamed:kBlueColor]};
 
     [self.contentView addSubview:_textView];
 
@@ -136,6 +143,12 @@ const CGFloat kVerticalPadding = 8;
   [self.delegate view:self didTapLinkURL:convertedURL];
   // Returns NO as the app is handling the opening of the URL.
   return NO;
+}
+
+#pragma mark - NSObject(Accessibility)
+
+- (NSString*)accessibilityLabel {
+  return [self.textView.attributedText string];
 }
 
 @end

@@ -17,7 +17,7 @@
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_attach_helper.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_constants.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
-#include "extensions/common/mojo/guest_view.mojom.h"
+#include "extensions/common/mojom/guest_view.mojom.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/frame/sandbox_flags.h"
@@ -143,7 +143,8 @@ void MimeHandlerViewEmbedder::FrameDeleted(
 }
 
 void MimeHandlerViewEmbedder::CreateMimeHandlerViewGuest(
-    mime_handler::BeforeUnloadControlPtr before_unload_control) {
+    mojo::PendingRemote<mime_handler::BeforeUnloadControl>
+        before_unload_control) {
   auto* browser_context = web_contents()->GetBrowserContext();
   auto* manager =
       guest_view::GuestViewManager::FromBrowserContext(browser_context);
@@ -153,7 +154,7 @@ void MimeHandlerViewEmbedder::CreateMimeHandlerViewGuest(
         ExtensionsAPIClient::Get()->CreateGuestViewManagerDelegate(
             browser_context));
   }
-  pending_before_unload_control_ = before_unload_control.PassInterface();
+  pending_before_unload_control_ = std::move(before_unload_control);
   base::DictionaryValue create_params;
   create_params.SetString(mime_handler_view::kViewId, stream_id_);
   manager->CreateGuest(

@@ -203,27 +203,35 @@ class ChromeOSTermsHandler
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (path_ == chrome::kOemEulaURLPath) {
       // Load local OEM EULA from the disk.
-      base::PostTaskWithTraitsAndReply(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::PostTaskAndReply(
+          FROM_HERE,
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE},
           base::BindOnce(&ChromeOSTermsHandler::LoadOemEulaFileAsync, this),
           base::BindOnce(&ChromeOSTermsHandler::ResponseOnUIThread, this));
     } else if (path_ == chrome::kArcTermsURLPath) {
       // Load ARC++ terms from the file.
-      base::PostTaskWithTraitsAndReply(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::PostTaskAndReply(
+          FROM_HERE,
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE},
           base::BindOnce(&ChromeOSTermsHandler::LoadArcTermsFileAsync, this),
           base::BindOnce(&ChromeOSTermsHandler::ResponseOnUIThread, this));
     } else if (path_ == chrome::kArcPrivacyPolicyURLPath) {
       // Load ARC++ privacy policy from the file.
-      base::PostTaskWithTraitsAndReply(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::PostTaskAndReply(
+          FROM_HERE,
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE},
           base::BindOnce(&ChromeOSTermsHandler::LoadArcPrivacyPolicyFileAsync,
                          this),
           base::BindOnce(&ChromeOSTermsHandler::ResponseOnUIThread, this));
     } else {
       // Load local ChromeOS terms from the file.
-      base::PostTaskWithTraitsAndReply(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::PostTaskAndReply(
+          FROM_HERE,
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::USER_VISIBLE},
           base::BindOnce(&ChromeOSTermsHandler::LoadEulaFileAsync, this),
           base::BindOnce(&ChromeOSTermsHandler::ResponseOnUIThread, this));
     }
@@ -383,8 +391,9 @@ class ChromeOSCreditsHandler
       return;
     }
     // Load local Chrome OS credits from the disk.
-    base::PostTaskWithTraitsAndReply(
-        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+    base::PostTaskAndReply(
+        FROM_HERE,
+        {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT},
         base::Bind(&ChromeOSCreditsHandler::LoadCreditsFileAsync, this),
         base::Bind(&ChromeOSCreditsHandler::ResponseOnUIThread, this));
   }
@@ -402,9 +411,9 @@ class ChromeOSCreditsHandler
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     // If we fail to load Chrome OS credits from disk, load it from resources.
     if (contents_.empty() && path_ != kKeyboardUtilsPath) {
-      contents_ = ui::ResourceBundle::GetSharedInstance()
-                      .GetRawDataResource(IDR_OS_CREDITS_HTML)
-                      .as_string();
+      contents_ =
+          ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+              IDR_OS_CREDITS_HTML);
     }
     callback_.Run(base::RefCountedString::TakeString(&contents_));
   }
@@ -450,8 +459,9 @@ class LinuxCreditsHandler
       return;
     }
     // Load local Linux credits from the disk.
-    base::PostTaskWithTraitsAndReply(
-        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+    base::PostTaskAndReply(
+        FROM_HERE,
+        {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT},
         base::Bind(&LinuxCreditsHandler::LoadLinuxCreditsFileAsync, this),
         base::Bind(&LinuxCreditsHandler::ResponseOnUIThread, this));
   }
@@ -471,9 +481,9 @@ class LinuxCreditsHandler
     // resources.
     // TODO(rjwright): Add a linux-specific placeholder in resources.
     if (contents_.empty() && path_ != kKeyboardUtilsPath) {
-      contents_ = ui::ResourceBundle::GetSharedInstance()
-                      .GetRawDataResource(IDR_OS_CREDITS_HTML)
-                      .as_string();
+      contents_ =
+          ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+              IDR_OS_CREDITS_HTML);
     }
     callback_.Run(base::RefCountedString::TakeString(&contents_));
   }
@@ -585,9 +595,11 @@ std::string AboutUIHTMLSource::GetSource() {
 }
 
 void AboutUIHTMLSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path = content::URLDataSource::URLToRequestPath(url);
   std::string response;
   // Add your data source here, in alphabetical order.
   if (source_name_ == chrome::kChromeUIChromeURLsHost) {
@@ -603,9 +615,8 @@ void AboutUIHTMLSource::StartDataRequest(
     if (idr == IDR_ABOUT_UI_CREDITS_HTML) {
       response = about_ui::GetCredits(true /*include_scripts*/);
     } else {
-      response = ui::ResourceBundle::GetSharedInstance()
-                     .GetRawDataResource(idr)
-                     .as_string();
+      response =
+          ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(idr);
     }
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   } else if (source_name_ == chrome::kChromeUILinuxProxyConfigHost) {

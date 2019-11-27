@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_action_data.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/ime/text_input_type.h"
@@ -43,6 +44,7 @@
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/animation/ink_drop_ripple.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/button_controller.h"
 #include "ui/views/controls/combobox/combobox_util.h"
 #include "ui/views/controls/editable_combobox/editable_combobox_listener.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -67,7 +69,8 @@ class Arrow : public Button {
       : Button(listener), color_(color) {
     // Similar to Combobox's TransparentButton.
     SetFocusBehavior(FocusBehavior::NEVER);
-    set_notify_action(PlatformStyle::kMenuNotifyActivationAction);
+    button_controller()->set_notify_action(
+        ButtonController::NotifyAction::kOnPress);
 
     SetInkDropMode(InkDropMode::ON);
     set_has_ink_drop_action_on_click(true);
@@ -225,7 +228,7 @@ class EditableCombobox::EditableComboboxMenuModel
 
   int GetGroupIdAt(int index) const override { return -1; }
 
-  bool GetIconAt(int index, gfx::Image* icon) override { return false; }
+  bool GetIconAt(int index, gfx::Image* icon) const override { return false; }
 
   ui::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const override {
     return nullptr;
@@ -274,7 +277,7 @@ class EditableCombobox::EditableComboboxPreTargetHandler
   // ui::EventHandler overrides.
   void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->type() == ui::ET_MOUSE_PRESSED &&
-        event->flags() == event->changed_button_flags())
+        event->button_flags() == event->changed_button_flags())
       HandlePressEvent(event->root_location());
   }
 
@@ -349,7 +352,7 @@ EditableCombobox::~EditableCombobox() {
 }
 
 const base::string16& EditableCombobox::GetText() const {
-  return textfield_->text();
+  return textfield_->GetText();
 }
 
 void EditableCombobox::SetText(const base::string16& text) {
@@ -364,7 +367,7 @@ const gfx::FontList& EditableCombobox::GetFontList() const {
 }
 
 void EditableCombobox::SelectRange(const gfx::Range& range) {
-  textfield_->SelectRange(range);
+  textfield_->SetSelectedRange(range);
 }
 
 void EditableCombobox::SetAccessibleName(const base::string16& name) {
@@ -385,7 +388,6 @@ void EditableCombobox::RevealPasswords(bool revealed) {
   textfield_->SetTextInputType(revealed ? ui::TEXT_INPUT_TYPE_TEXT
                                         : ui::TEXT_INPUT_TYPE_PASSWORD);
   menu_model_->UpdateItemsShown();
-  ShowDropDownMenu();
 }
 
 int EditableCombobox::GetItemCountForTest() {
@@ -415,7 +417,7 @@ void EditableCombobox::OnThemeChanged() {
 void EditableCombobox::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ax::mojom::Role::kComboBoxGrouping;
 
-  node_data->SetName(textfield_->accessible_name());
+  node_data->SetName(textfield_->GetAccessibleName());
   node_data->SetValue(GetText());
 }
 
@@ -439,24 +441,6 @@ bool EditableCombobox::HandleKeyEvent(Textfield* sender,
   return false;
 }
 
-bool EditableCombobox::HandleMouseEvent(Textfield* sender,
-                                        const ui::MouseEvent& mouse_event) {
-  // We show the menu on mouse release instead of mouse press so that the menu
-  // showing up doesn't interrupt a potential text selection operation by the
-  // user.
-  if (mouse_event.type() == ui::ET_MOUSE_RELEASED) {
-    ShowDropDownMenu(ui::MENU_SOURCE_MOUSE);
-  }
-  return false;
-}
-
-bool EditableCombobox::HandleGestureEvent(
-    Textfield* sender,
-    const ui::GestureEvent& gesture_event) {
-  ShowDropDownMenu(ui::MENU_SOURCE_TOUCH);
-  return false;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // EditableCombobox, View overrides:
 
@@ -468,11 +452,11 @@ void EditableCombobox::OnViewBlurred(View* observed_view) {
 // EditableCombobox, ButtonListener overrides:
 
 void EditableCombobox::ButtonPressed(Button* sender, const ui::Event& event) {
+  textfield_->RequestFocus();
   if (menu_runner_ && menu_runner_->IsRunning()) {
     CloseMenu();
     return;
   }
-  textfield_->RequestFocus();
   ui::MenuSourceType source_type = ui::MENU_SOURCE_MOUSE;
   if (event.IsKeyEvent())
     source_type = ui::MENU_SOURCE_KEYBOARD;
@@ -528,6 +512,8 @@ void EditableCombobox::ShowDropDownMenu(ui::MenuSourceType source_type) {
     return;
   }
   if (menu_runner_ && menu_runner_->IsRunning())
+    return;
+  if (!GetWidget())
     return;
 
   // Since we don't capture the mouse, we want to see the events that happen in

@@ -33,7 +33,7 @@
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/schema_registry_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/localized_string.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
@@ -211,8 +211,10 @@ void GetUserAffiliationStatus(base::DictionaryValue* dict, Profile* profile) {
 void GetOffHoursStatus(base::DictionaryValue* dict) {
   policy::off_hours::DeviceOffHoursController* off_hours_controller =
       chromeos::DeviceSettingsService::Get()->device_off_hours_controller();
-  if (off_hours_controller)
-    dict->SetBoolean("isOffHoursActive", off_hours_controller->is_off_hours_mode());
+  if (off_hours_controller) {
+    dict->SetBoolean("isOffHoursActive",
+                     off_hours_controller->is_off_hours_mode());
+  }
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -712,10 +714,9 @@ PolicyUIHandler::~PolicyUIHandler() {
 
 void PolicyUIHandler::AddCommonLocalizedStringsToSource(
     content::WebUIDataSource* source) {
-  AddLocalizedStringsBulk(source, policy::kPolicySources,
-                          policy::POLICY_SOURCE_COUNT);
+  AddLocalizedStringsBulk(source, policy::kPolicySources);
 
-  static constexpr LocalizedString kStrings[] = {
+  static constexpr webui::LocalizedString kStrings[] = {
       {"conflict", IDS_POLICY_LABEL_CONFLICT},
       {"headerLevel", IDS_POLICY_HEADER_LEVEL},
       {"headerName", IDS_POLICY_HEADER_NAME},
@@ -737,9 +738,9 @@ void PolicyUIHandler::AddCommonLocalizedStringsToSource(
       {"unset", IDS_POLICY_UNSET},
       {"value", IDS_POLICY_LABEL_VALUE},
   };
-  AddLocalizedStringsBulk(source, kStrings, base::size(kStrings));
+  AddLocalizedStringsBulk(source, kStrings);
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
 }
 
 void PolicyUIHandler::RegisterMessages() {
@@ -885,7 +886,7 @@ base::Value PolicyUIHandler::GetPolicyNames() const {
   const policy::Schema* chrome_schema = schema_map->GetSchema(chrome_ns);
   for (auto it = chrome_schema->GetPropertiesIterator(); !it.IsAtEnd();
        it.Advance()) {
-    chrome_policy_names->GetList().push_back(base::Value(it.key()));
+    chrome_policy_names->Append(base::Value(it.key()));
   }
   auto chrome_values = std::make_unique<base::DictionaryValue>();
   chrome_values->SetString("name", "Chrome Policies");
@@ -911,7 +912,7 @@ base::Value PolicyUIHandler::GetPolicyNames() const {
       // Store in a map, not an array, for faster lookup on JS side.
       for (auto prop = schema->GetPropertiesIterator(); !prop.IsAtEnd();
            prop.Advance()) {
-        policy_names->GetList().push_back(base::Value(prop.key()));
+        policy_names->Append(base::Value(prop.key()));
       }
     }
     extension_value->Set("policyNames", std::move(policy_names));
@@ -923,11 +924,10 @@ base::Value PolicyUIHandler::GetPolicyNames() const {
 }
 
 base::Value PolicyUIHandler::GetPolicyValues() const {
-  return policy::GetAllPolicyValuesAsArray(
-      web_ui()->GetWebContents()->GetBrowserContext(),
-      true /* with_user_policies */, true /* convert_values */,
-      false /* with_device_data */, true /* is_pretty_print */,
-      true /* convert_types */);
+  return policy::ArrayPolicyConversions()
+      .WithBrowserContext(web_ui()->GetWebContents()->GetBrowserContext())
+      .EnableConvertValues(true)
+      .ToValue();
 }
 
 void PolicyUIHandler::SendStatus() {
@@ -1030,11 +1030,10 @@ void DoWritePoliciesToJSONFile(const base::FilePath& path,
 
 void PolicyUIHandler::WritePoliciesToJSONFile(
     const base::FilePath& path) const {
-  constexpr bool is_pretty_print = true;
-  base::Value dict = policy::GetAllPolicyValuesAsDictionary(
-      web_ui()->GetWebContents()->GetBrowserContext(),
-      true /* with_user_policies */, false /* convert_values */,
-      false /* with_device_data */, is_pretty_print, true /* convert_types */);
+  base::Value dict =
+      policy::DictionaryPolicyConversions()
+          .WithBrowserContext(web_ui()->GetWebContents()->GetBrowserContext())
+          .ToValue();
 
   base::Value chrome_metadata(base::Value::Type::DICTIONARY);
 
@@ -1085,12 +1084,11 @@ void PolicyUIHandler::WritePoliciesToJSONFile(
 
   std::string json_policies;
   base::JSONWriter::WriteWithOptions(
-      dict, (is_pretty_print ? base::JSONWriter::OPTIONS_PRETTY_PRINT : 0),
-      &json_policies);
+      dict, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json_policies);
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+      {base::ThreadPool(), base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
       base::BindOnce(&DoWritePoliciesToJSONFile, path, json_policies));
 }

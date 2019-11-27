@@ -10,7 +10,7 @@
 Polymer({
   is: 'settings-manage-a11y-page',
 
-  behaviors: [WebUIListenerBehavior],
+  behaviors: [WebUIListenerBehavior, settings.RouteOriginBehavior],
 
   properties: {
     /**
@@ -98,17 +98,6 @@ Polymer({
       },
     },
 
-    /**
-     * Whether to show experimental accessibility features.
-     * @private {boolean}
-     */
-    showExperimentalFeatures_: {
-      type: Boolean,
-      value: function() {
-        return loadTimeData.getBoolean('showExperimentalA11yFeatures');
-      },
-    },
-
     showExperimentalSwitchAccess_: {
       type: Boolean,
       value: function() {
@@ -126,12 +115,27 @@ Polymer({
     },
 
     /**
-     * |hasKeyboard_|starts undefined so observers don't trigger
+     * Whether this page shown as part of OS settings.
+     * TODO(crbug.com/986596): Remove this when SplitSettings is the default.
+     * @private
+     */
+    isOSSettings_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('isOSSettings');
+      },
+    },
+
+    /**
+     * |hasKeyboard_| starts undefined so observers don't trigger
      * until it has been populated.
      * @private
      */
     hasKeyboard_: Boolean,
   },
+
+  /** settings.RouteOriginBehavior override */
+  route_: settings.routes.MANAGE_ACCESSIBILITY,
 
   /** @override */
   attached: function() {
@@ -146,6 +150,16 @@ Polymer({
         'startup-sound-enabled-updated',
         this.updateStartupSoundEnabled_.bind(this));
     chrome.send('getStartupSoundEnabled');
+
+    const r = settings.routes;
+    this.addFocusConfig_(r.MANAGE_TTS_SETTINGS, '#ttsSubpageButton');
+    this.addFocusConfig_(r.MANAGE_CAPTION_SETTINGS, '#captionsSubpageButton');
+    this.addFocusConfig_(
+        r.MANAGE_SWITCH_ACCESS_SETTINGS, '#switchAccessSubpageButton');
+    this.addFocusConfig_(r.DISPLAY, '#displaySubpageButton');
+    this.addFocusConfig_(r.APPEARANCE, '#appearanceSubpageButton');
+    this.addFocusConfig_(r.KEYBOARD, '#keyboardSubpageButton');
+    this.addFocusConfig_(r.POINTERS, '#pointerSubpageButton');
   },
 
   /**
@@ -194,13 +208,18 @@ Polymer({
   },
 
   /** @private */
+  onCaptionsClick_: function() {
+    settings.navigateTo(settings.routes.MANAGE_CAPTION_SETTINGS);
+  },
+
+  /** @private */
   onSelectToSpeakSettingsTap_: function() {
     chrome.send('showSelectToSpeakSettings');
   },
 
   /** @private */
   onSwitchAccessSettingsTap_: function() {
-    chrome.send('showSwitchAccessSettings');
+    settings.navigateTo(settings.routes.MANAGE_SWITCH_ACCESS_SETTINGS);
   },
 
   /** @private */
@@ -212,9 +231,16 @@ Polymer({
 
   /** @private */
   onAppearanceTap_: function() {
-    settings.navigateTo(
-        settings.routes.APPEARANCE,
-        /* dynamicParams */ null, /* removeSearch */ true);
+    if (loadTimeData.getBoolean('isOSSettings')) {
+      // Open browser appearance section in a new browser tab.
+      window.open('chrome://settings/appearance');
+    } else {
+      // Open browser appearance in this settings window.
+      // TODO(crbug.com/986596): Remove this when SplitSettings is the default.
+      settings.navigateTo(
+          settings.routes.APPEARANCE,
+          /* dynamicParams */ null, /* removeSearch */ true);
+    }
   },
 
   /** @private */

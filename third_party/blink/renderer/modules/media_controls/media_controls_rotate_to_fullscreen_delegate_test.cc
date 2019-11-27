@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/modules/media_controls/media_controls_rotate_to_fullscreen_delegate.h"
 
-#include "mojo/public/cpp/bindings/associated_interface_ptr.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "services/device/public/mojom/screen_orientation.mojom-blink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,12 +34,11 @@
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
+using testing::_;
 using testing::AtLeast;
 using testing::Return;
 
 namespace blink {
-
-using namespace html_names;
 
 namespace {
 
@@ -57,10 +56,12 @@ class MockChromeClient : public EmptyChromeClient {
   void InstallSupplements(LocalFrame& frame) override {
     EmptyChromeClient::InstallSupplements(frame);
     ScreenOrientationControllerImpl::ProvideTo(frame);
-    device::mojom::blink::ScreenOrientationAssociatedPtr screen_orientation;
-    mojo::MakeRequestAssociatedWithDedicatedPipe(&screen_orientation);
+    mojo::AssociatedRemote<device::mojom::blink::ScreenOrientation>
+        screen_orientation;
+    ignore_result(
+        screen_orientation.BindNewEndpointAndPassDedicatedReceiverForTesting());
     ScreenOrientationControllerImpl::From(frame)
-        ->SetScreenOrientationAssociatedPtrForTests(
+        ->SetScreenOrientationAssociatedRemoteForTests(
             std::move(screen_orientation));
   }
   void EnterFullscreen(LocalFrame& frame, const FullscreenOptions*) override {
@@ -70,7 +71,7 @@ class MockChromeClient : public EmptyChromeClient {
     Fullscreen::DidExitFullscreen(*frame.GetDocument());
   }
 
-  MOCK_CONST_METHOD0(GetScreenInfo, WebScreenInfo());
+  MOCK_CONST_METHOD1(GetScreenInfo, WebScreenInfo(LocalFrame&));
 };
 
 class StubLocalFrameClient : public EmptyLocalFrameClient {
@@ -78,8 +79,7 @@ class StubLocalFrameClient : public EmptyLocalFrameClient {
   std::unique_ptr<WebMediaPlayer> CreateWebMediaPlayer(
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
-      WebMediaPlayerClient*,
-      WebLayerTreeView*) override {
+      WebMediaPlayerClient*) override {
     return std::make_unique<MockVideoWebMediaPlayer>();
   }
 };
@@ -109,7 +109,7 @@ class MediaControlsRotateToFullscreenDelegateTest
     SetupPageWithClients(&clients,
                          MakeGarbageCollected<StubLocalFrameClient>());
     video_ = MakeGarbageCollected<HTMLVideoElement>(GetDocument());
-    GetVideo().setAttribute(kControlsAttr, g_empty_atom);
+    GetVideo().setAttribute(html_names::kControlsAttr, g_empty_atom);
     // Most tests should call GetDocument().body()->AppendChild(&GetVideo());
     // This is not done automatically, so that tests control timing of `Attach`.
   }
@@ -146,7 +146,7 @@ class MediaControlsRotateToFullscreenDelegateTest
     // If scripts are not enabled, controls will always be shown.
     GetFrame().GetSettings()->SetScriptEnabled(true);
 
-    GetVideo().removeAttribute(kControlsAttr);
+    GetVideo().removeAttribute(html_names::kControlsAttr);
   }
 
   void DispatchEvent(EventTarget& target, const AtomicString& type) {
@@ -190,7 +190,7 @@ void MediaControlsRotateToFullscreenDelegateTest::InitScreenAndVideo(
   // Set initial screen orientation (called by `Attach` during `AppendChild`).
   WebScreenInfo screen_info;
   screen_info.orientation_type = initial_screen_orientation;
-  EXPECT_CALL(GetChromeClient(), GetScreenInfo())
+  EXPECT_CALL(GetChromeClient(), GetScreenInfo(_))
       .Times(AtLeast(1))
       .WillRepeatedly(Return(screen_info));
 
@@ -231,7 +231,7 @@ void MediaControlsRotateToFullscreenDelegateTest::RotateTo(
   WebScreenInfo screen_info;
   screen_info.orientation_type = new_screen_orientation;
   testing::Mock::VerifyAndClearExpectations(&GetChromeClient());
-  EXPECT_CALL(GetChromeClient(), GetScreenInfo())
+  EXPECT_CALL(GetChromeClient(), GetScreenInfo(_))
       .Times(AtLeast(1))
       .WillRepeatedly(Return(screen_info));
   DispatchEvent(GetWindow(), event_type_names::kOrientationchange);

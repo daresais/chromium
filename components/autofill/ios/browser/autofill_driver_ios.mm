@@ -10,8 +10,8 @@
 #include "components/autofill/ios/browser/autofill_driver_ios_webframe.h"
 #import "ios/web/common/origin_util.h"
 #include "ios/web/public/browser_state.h"
-#import "ios/web/public/js_messaging/web_frame_util.h"
-#import "ios/web/public/web_state/web_state.h"
+#include "ios/web/public/js_messaging/web_frame_util.h"
+#import "ios/web/public/web_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "ui/accessibility/ax_tree_id.h"
@@ -77,10 +77,6 @@ ui::AXTreeID AutofillDriverIOS::GetAxTreeId() const {
   return ui::AXTreeIDUnknown();
 }
 
-net::URLRequestContextGetter* AutofillDriverIOS::GetURLRequestContext() {
-  return web_state_->GetBrowserState()->GetRequestContext();
-}
-
 scoped_refptr<network::SharedURLLoaderFactory>
 AutofillDriverIOS::GetURLLoaderFactory() {
   return base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
@@ -135,7 +131,7 @@ void AutofillDriverIOS::RendererShouldPreviewFieldWithValue(
 }
 
 void AutofillDriverIOS::RendererShouldSetSuggestionAvailability(
-    bool available) {}
+    const mojom::AutofillState state) {}
 
 void AutofillDriverIOS::PopupHidden() {
 }
@@ -143,6 +139,22 @@ void AutofillDriverIOS::PopupHidden() {
 gfx::RectF AutofillDriverIOS::TransformBoundingBoxToViewportCoordinates(
     const gfx::RectF& bounding_box) {
   return bounding_box;
+}
+
+net::NetworkIsolationKey AutofillDriverIOS::NetworkIsolationKey() {
+  std::string main_web_frame_id = web::GetMainWebFrameId(web_state_);
+  web::WebFrame* main_web_frame =
+      web::GetWebFrameWithId(web_state_, main_web_frame_id);
+  if (!main_web_frame)
+    return net::NetworkIsolationKey();
+
+  web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
+  if (!web_frame)
+    return net::NetworkIsolationKey();
+
+  return net::NetworkIsolationKey(
+      url::Origin::Create(main_web_frame->GetSecurityOrigin()),
+      url::Origin::Create(web_frame->GetSecurityOrigin()));
 }
 
 }  // namespace autofill

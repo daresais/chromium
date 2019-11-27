@@ -9,6 +9,7 @@ import util
 import command_executor
 from command_executor import Command
 from webelement import WebElement
+from websocket_connection import WebSocketConnection
 
 ELEMENT_KEY_W3C = "element-6066-11e4-a52e-4f735466cecf"
 ELEMENT_KEY = "ELEMENT"
@@ -152,7 +153,9 @@ class ChromeDriver(object):
       devtools_events_to_log=None, accept_insecure_certs=None,
       timeouts=None, test_name=None):
     self._executor = command_executor.CommandExecutor(server_url)
+    self._server_url = server_url
     self.w3c_compliant = False
+    self._websocket = None
 
     options = {}
 
@@ -186,6 +189,10 @@ class ChromeDriver(object):
     if chrome_switches:
       assert type(chrome_switches) is list
       options['args'] = chrome_switches
+
+      # TODO(crbug.com/1011000): Work around a bug with headless on Mac.
+      if util.GetPlatformName() == 'mac' and '--headless' in chrome_switches:
+        options['excludeSwitches'] = ['--enable-logging']
 
     if mobile_emulation:
       assert type(mobile_emulation) is dict
@@ -329,6 +336,13 @@ class ChromeDriver(object):
     response = self._ExecuteCommand(command, params)
     return self._UnwrapValue(response['value'])
 
+  def CreateWebSocketConnection(self):
+    if self._websocket:
+      return self._websocket
+    else:
+      self._websocket = WebSocketConnection(self._server_url, self._session_id)
+      return self._websocket
+
   def GetWindowHandles(self):
     return self.ExecuteCommand(Command.GET_WINDOW_HANDLES)
 
@@ -354,6 +368,9 @@ class ChromeDriver(object):
     converted_args = list(args)
     return self.ExecuteCommand(
         Command.EXECUTE_SCRIPT, {'script': script, 'args': converted_args})
+
+  def SetPermission(self, parameters):
+    return self.ExecuteCommand(Command.SET_PERMISSION, parameters)
 
   def ExecuteAsyncScript(self, script, *args):
     converted_args = list(args)
@@ -615,7 +632,7 @@ class ChromeDriver(object):
 
   def AddVirtualAuthenticator(self, protocol=None, transport=None,
                               hasResidentKey=None, hasUserVerification=None,
-                              isUserVerified=None):
+                              isUserConsenting=None, isUserVerified=None):
     options = {}
     if protocol is not None:
       options['protocol'] = protocol
@@ -625,7 +642,51 @@ class ChromeDriver(object):
       options['hasResidentKey'] = hasResidentKey
     if hasUserVerification is not None:
       options['hasUserVerification'] = hasUserVerification
+    if isUserConsenting is not None:
+      options['isUserConsenting'] = isUserConsenting
     if isUserVerified is not None:
       options['isUserVerified'] = isUserVerified
 
     return self.ExecuteCommand(Command.ADD_VIRTUAL_AUTHENTICATOR, options)
+
+  def RemoveVirtualAuthenticator(self, authenticatorId):
+    params = {'authenticatorId': authenticatorId}
+    return self.ExecuteCommand(Command.REMOVE_VIRTUAL_AUTHENTICATOR, params)
+
+  def AddCredential(self, authenticatorId=None, credentialId=None,
+                    isResidentCredential=None, rpId=None, privateKey=None,
+                    userHandle=None, signCount=None):
+    options = {}
+    if authenticatorId is not None:
+      options['authenticatorId'] = authenticatorId
+    if credentialId is not None:
+      options['credentialId'] = credentialId
+    if isResidentCredential is not None:
+      options['isResidentCredential'] = isResidentCredential
+    if rpId is not None:
+      options['rpId'] = rpId
+    if privateKey is not None:
+      options['privateKey'] = privateKey
+    if userHandle is not None:
+      options['userHandle'] = userHandle
+    if signCount is not None:
+      options['signCount'] = signCount
+    return self.ExecuteCommand(Command.ADD_CREDENTIAL, options)
+
+  def GetCredentials(self, authenticatorId):
+    params = {'authenticatorId': authenticatorId}
+    return self.ExecuteCommand(Command.GET_CREDENTIALS, params)
+
+  def RemoveCredential(self, authenticatorId, credentialId):
+    params = {'authenticatorId': authenticatorId,
+              'credentialId': credentialId}
+    return self.ExecuteCommand(Command.REMOVE_CREDENTIAL, params)
+
+  def RemoveAllCredentials(self, authenticatorId):
+    params = {'authenticatorId': authenticatorId}
+    return self.ExecuteCommand(Command.REMOVE_ALL_CREDENTIALS, params)
+
+  def SetUserVerified(self, authenticatorId, isUserVerified):
+    params = {'authenticatorId': authenticatorId,
+              'isUserVerified': isUserVerified}
+    return self.ExecuteCommand(Command.SET_USER_VERIFIED, params)

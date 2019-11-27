@@ -7,7 +7,10 @@
 #import <UIKit/UIKit.h>
 
 #include "base/logging.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "ios/web/public/test/error_test_util.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/test/test_url_constants.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -35,6 +38,15 @@ bool TestWebClient::IsAppSpecificURL(const GURL& url) const {
          url.SchemeIs(kTestAppSpecificScheme);
 }
 
+bool TestWebClient::ShouldBlockUrlDuringRestore(const GURL& url,
+                                                WebState* web_state) const {
+  return false;
+}
+
+void TestWebClient::AddSerializableData(
+    web::SerializableUserDataManager* user_data_manager,
+    web::WebState* web_state) {}
+
 base::string16 TestWebClient::GetPluginNotSupportedText() const {
   return plugin_not_supported_text_;
 }
@@ -49,12 +61,6 @@ base::RefCountedMemory* TestWebClient::GetDataResourceBytes(
     return nullptr;
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
       resource_id);
-}
-
-bool TestWebClient::IsDataResourceGzipped(int resource_id) const {
-  if (!ui::ResourceBundle::HasSharedInstance())
-    return false;
-  return ui::ResourceBundle::GetSharedInstance().IsGzipped(resource_id);
 }
 
 NSString* TestWebClient::GetDocumentStartScriptForMainFrame(
@@ -76,6 +82,7 @@ void TestWebClient::AllowCertificateError(
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
     bool overridable,
+    int64_t navigation_id,
     const base::Callback<void(bool)>& callback) {
   last_cert_error_code_ = cert_error;
   last_cert_error_ssl_info_ = ssl_info;
@@ -83,12 +90,26 @@ void TestWebClient::AllowCertificateError(
   last_cert_error_overridable_ = overridable;
 
   // Embedder should consult the user, so reply is asynchronous.
-  base::PostTaskWithTraits(FROM_HERE, {WebThread::UI},
-                           base::BindOnce(callback, allow_certificate_errors_));
+  base::PostTask(FROM_HERE, {WebThread::UI},
+                 base::BindOnce(callback, allow_certificate_errors_));
 }
 
 void TestWebClient::SetAllowCertificateErrors(bool flag) {
   allow_certificate_errors_ = flag;
+}
+
+void TestWebClient::PrepareErrorPage(
+    WebState* web_state,
+    const GURL& url,
+    NSError* error,
+    bool is_post,
+    bool is_off_the_record,
+    const base::Optional<net::SSLInfo>& info,
+    int64_t navigation_id,
+    base::OnceCallback<void(NSString*)> callback) {
+  std::move(callback).Run(base::SysUTF8ToNSString(testing::GetErrorText(
+      web_state, url, base::SysNSStringToUTF8(error.domain), error.code,
+      is_post, is_off_the_record, info.has_value())));
 }
 
 UIView* TestWebClient::GetWindowedContainer() {

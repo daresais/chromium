@@ -102,7 +102,8 @@ base::FilePath CreateTestingProfile(const std::string& name,
   base::FilePath profile_path =
       manager->user_data_dir().AppendASCII(relative_path);
   storage.AddProfile(profile_path, base::ASCIIToUTF16(name), std::string(),
-                     base::string16(), 0u, std::string(), EmptyAccountId());
+                     base::string16(), false, 0u, std::string(),
+                     EmptyAccountId());
 
   EXPECT_EQ(starting_number_of_profiles + 1u, storage.GetNumberOfProfiles());
   return profile_path;
@@ -202,7 +203,7 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestClearsCookies) {
 IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestCannotSignin) {
   Browser* guest_browser = OpenGuestBrowser();
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(guest_browser->profile());
 
   // Guest profiles can't sign in without a IdentityManager.

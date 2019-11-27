@@ -8,14 +8,12 @@
 
 #include "base/macros.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/simple_test_tick_clock.h"
-#include "chrome/browser/performance_manager/performance_manager_clock.h"
 #include "chrome/browser/performance_manager/persistence/site_data/site_data_cache_factory.h"
 #include "chrome/browser/performance_manager/persistence/site_data/site_data_cache_inspector.h"
 #include "chrome/browser/performance_manager/persistence/site_data/site_data_impl.h"
 #include "chrome/browser/performance_manager/persistence/site_data/unittest_utils.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -47,27 +45,21 @@ class MockSiteCache : public testing::NoopSiteDataStore {
 class SiteDataCacheImplTest : public ::testing::Test {
  protected:
   SiteDataCacheImplTest()
-      : data_cache_factory_(SiteDataCacheFactory::CreateForTesting(
-            test_browser_thread_bundle_.GetMainThreadTaskRunner())) {
-    PerformanceManagerClock::SetClockForTesting(&test_clock_);
+      : data_cache_factory_(std::make_unique<SiteDataCacheFactory>()) {
     data_cache_ = std::make_unique<SiteDataCacheImpl>(profile_.UniqueId(),
                                                       profile_.GetPath());
     mock_db_ = new ::testing::StrictMock<MockSiteCache>();
     data_cache_->SetDataStoreForTesting(base::WrapUnique(mock_db_));
-    test_clock_.SetNowTicks(base::TimeTicks::UnixEpoch());
-    test_clock_.Advance(base::TimeDelta::FromHours(1));
     WaitForAsyncOperationsToComplete();
-  }
-
-  ~SiteDataCacheImplTest() override {
-    PerformanceManagerClock::ResetClockForTesting();
   }
 
   void TearDown() override { WaitForAsyncOperationsToComplete(); }
 
-  void WaitForAsyncOperationsToComplete() {
-    test_browser_thread_bundle_.RunUntilIdle();
+  void AdvanceClock(base::TimeDelta delta) {
+    task_environment_.FastForwardBy(delta);
   }
+
+  void WaitForAsyncOperationsToComplete() { task_environment_.RunUntilIdle(); }
 
   // Populates |writer_|, |reader_| and |data_| to refer to a tab navigated to
   // |kTestOrigin| that updated its title in background. Populates |writer2_|,
@@ -95,7 +87,7 @@ class SiteDataCacheImplTest : public ::testing::Test {
     writer_->NotifyUpdatesTitleInBackground();
     EXPECT_EQ(performance_manager::SiteFeatureUsage::kSiteFeatureInUse,
               reader_->UpdatesTitleInBackground());
-    test_clock_.Advance(kDelay);
+    AdvanceClock(kDelay);
 
     // Load a second origin, make use of a feature on it too.
     ASSERT_FALSE(reader2_);
@@ -118,18 +110,17 @@ class SiteDataCacheImplTest : public ::testing::Test {
     writer2_->NotifyUpdatesFaviconInBackground();
     EXPECT_EQ(performance_manager::SiteFeatureUsage::kSiteFeatureInUse,
               reader2_->UpdatesFaviconInBackground());
-    test_clock_.Advance(kDelay);
+    AdvanceClock(kDelay);
   }
 
-  base::SimpleTestTickClock test_clock_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   base::test::ScopedFeatureList scoped_feature_list_;
   TestingProfile profile_;
 
   // Owned by |data_cache_|.
   ::testing::StrictMock<MockSiteCache>* mock_db_ = nullptr;
-  std::unique_ptr<SiteDataCacheFactory, base::OnTaskRunnerDeleter>
-      data_cache_factory_;
+  std::unique_ptr<SiteDataCacheFactory> data_cache_factory_;
   std::unique_ptr<SiteDataCacheImpl> data_cache_;
 
   std::unique_ptr<SiteDataReader> reader_;
@@ -196,10 +187,9 @@ TEST_F(SiteDataCacheImplTest, ClearSiteDataForOrigins) {
   data_cache_->ClearSiteDataForOrigins(origins_to_remove);
   ::testing::Mock::VerifyAndClear(mock_db_);
 
-  // The information for the first site should have been cleared. The last
-  // loaded time should be equal to the current time.
-  EXPECT_EQ(data_->last_loaded_time_for_testing(),
-            test_clock_.NowTicks() - base::TimeTicks::UnixEpoch());
+  // The information for the first site should have been cleared.
+  EXPECT_GE((base::TimeTicks::Now() - base::TimeTicks::UnixEpoch()).InSeconds(),
+            data_->last_loaded_time_for_testing().InSeconds());
   EXPECT_EQ(performance_manager::SiteFeatureUsage::kSiteFeatureUsageUnknown,
             reader_->UpdatesTitleInBackground());
   // The second site shouldn't have been cleared.
@@ -221,12 +211,12 @@ TEST_F(SiteDataCacheImplTest, ClearAllSiteData) {
   ::testing::Mock::VerifyAndClear(mock_db_);
 
   // The information for both sites should have been cleared.
-  EXPECT_EQ(data_->last_loaded_time_for_testing(),
-            test_clock_.NowTicks() - base::TimeTicks::UnixEpoch());
+  EXPECT_GE((base::TimeTicks::Now() - base::TimeTicks::UnixEpoch()).InSeconds(),
+            data_->last_loaded_time_for_testing().InSeconds());
   EXPECT_EQ(performance_manager::SiteFeatureUsage::kSiteFeatureUsageUnknown,
             reader_->UpdatesTitleInBackground());
-  EXPECT_EQ(data2_->last_loaded_time_for_testing(),
-            test_clock_.NowTicks() - base::TimeTicks::UnixEpoch());
+  EXPECT_GE((base::TimeTicks::Now() - base::TimeTicks::UnixEpoch()).InSeconds(),
+            data2_->last_loaded_time_for_testing().InSeconds());
   EXPECT_EQ(performance_manager::SiteFeatureUsage::kSiteFeatureUsageUnknown,
             reader2_->UpdatesFaviconInBackground());
 

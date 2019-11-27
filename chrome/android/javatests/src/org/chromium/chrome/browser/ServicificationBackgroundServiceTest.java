@@ -56,7 +56,6 @@ public final class ServicificationBackgroundServiceTest {
     public void setUp() {
         mServicificationBackgroundService =
                 new ServicificationBackgroundService(true /*supportsServiceManagerOnly*/);
-        BackgroundSyncLauncher.setGCMEnabled(false);
         RecordHistogram.setDisabledForTests(true);
     }
 
@@ -119,8 +118,7 @@ public final class ServicificationBackgroundServiceTest {
     @Test
     @LargeTest
     @Feature({"ServicificationStartup"})
-    @CommandLineFlags.
-    Add({"enable-features=NetworkService,WriteBasicSystemProfileToPersistentHistogramsFile"})
+    @CommandLineFlags.Add({"force-fieldtrials=*Foo/Bar", "enable-features=UMABackgroundSessions"})
     public void testHistogramsPersistedWithServiceManagerOnlyStart() {
         createBrowserMetricsSpareFile();
         Assert.assertTrue(mSpareFile.exists());
@@ -135,7 +133,6 @@ public final class ServicificationBackgroundServiceTest {
     @Test
     @MediumTest
     @Feature({"ServicificationStartup"})
-    @CommandLineFlags.Add({"enable-features=NetworkService"})
     public void testFullBrowserStartsAfterServiceManager() {
         startServiceAndWaitForNative(mServicificationBackgroundService);
         ServicificationBackgroundService.assertOnlyServiceManagerStarted();

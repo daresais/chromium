@@ -57,7 +57,7 @@ BackgroundFetchTestDataManager::BackgroundFetchTestDataManager(
       browser_context_(browser_context),
       storage_partition_(storage_partition) {}
 
-void BackgroundFetchTestDataManager::InitializeOnIOThread() {
+void BackgroundFetchTestDataManager::InitializeOnCoreThread() {
   blob_storage_context_ = ChromeBlobStorageContext::GetFor(browser_context_);
   // Wait for ChromeBlobStorageContext to finish initializing.
   base::RunLoop().RunUntilIdle();
@@ -76,8 +76,12 @@ void BackgroundFetchTestDataManager::InitializeOnIOThread() {
       base::MakeRefCounted<CacheStorageContextImpl::ObserverList>());
   DCHECK(cache_manager_);
 
-  cache_manager_->SetBlobParametersForCache(
-      blob_storage_context_->context()->AsWeakPtr());
+  mojo::PendingRemote<storage::mojom::BlobStorageContext> remote;
+  blob_storage_context_->BindMojoContext(
+      remote.InitWithNewPipeAndPassReceiver());
+  auto context =
+      base::MakeRefCounted<BlobStorageContextWrapper>(std::move(remote));
+  cache_manager_->SetBlobParametersForCache(std::move(context));
 }
 
 BackgroundFetchTestDataManager::~BackgroundFetchTestDataManager() = default;

@@ -39,8 +39,9 @@
 #include "ipc/message_filter.h"
 #include "net/base/load_flags.h"
 #include "services/network/public/mojom/network_service.mojom.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/common/file_system/file_system_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/frame/user_activation_update_type.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/platform/web_mouse_event.h"
 #include "third_party/blink/public/platform/web_mouse_wheel_event.h"
@@ -69,6 +70,10 @@ class EmbeddedTestServer;
 using test_server::EmbeddedTestServer;
 }
 
+namespace ui {
+class AXPlatformNodeDelegate;
+}
+
 #if defined(OS_WIN)
 namespace Microsoft {
 namespace WRL {
@@ -89,13 +94,12 @@ typedef int PROPERTYID;
 
 namespace content {
 
-class BrowserAccessibility;
 class BrowserContext;
 struct FrameVisualProperties;
 class FrameTreeNode;
 class InterstitialPage;
 class NavigationHandle;
-class NavigationHandleImpl;
+class NavigationRequest;
 class RenderFrameMetadataProviderImpl;
 class RenderWidgetHost;
 class RenderWidgetHostView;
@@ -108,6 +112,15 @@ class WebContents;
 // typing |url| into the address bar.
 WARN_UNUSED_RESULT bool NavigateToURL(WebContents* web_contents,
                                       const GURL& url);
+
+// Same as above, but takes in an additional URL, |expected_commit_url|, to
+// which the navigation should eventually commit.  This is useful for cases
+// like redirects, where navigation starts on one URL but ends up committing a
+// different URL.  This function will return true if navigating to |url|
+// results in a successful commit to |expected_commit_url|.
+WARN_UNUSED_RESULT bool NavigateToURL(WebContents* web_contents,
+                                      const GURL& url,
+                                      const GURL& expected_commit_url);
 
 // Navigates |web_contents| to |url|, blocking until the given number of
 // navigations finishes.
@@ -145,8 +158,12 @@ void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents);
 bool WaitForLoadStop(WebContents* web_contents);
 
 // If a test uses a beforeunload dialog, it must be prepared to avoid flakes.
-// This function collects everything that needs to be done.
-void PrepContentsForBeforeUnloadTest(WebContents* web_contents);
+// This function collects everything that needs to be done, except for user
+// activation which is triggered only when |trigger_user_activation| is true.
+// Note that beforeunload dialog attempts are ignored unless the frame has
+// received a user activation.
+void PrepContentsForBeforeUnloadTest(WebContents* web_contents,
+                                     bool trigger_user_activation = true);
 
 #if defined(USE_AURA) || defined(OS_ANDROID)
 // If WebContent's view is currently being resized, this will wait for the ack
@@ -323,6 +340,12 @@ void MaybeSendSyntheticTapGesture(WebContents* guest_web_contents);
 // Spins a run loop until effects of previously forwarded input are fully
 // realized.
 void RunUntilInputProcessed(RenderWidgetHost* host);
+
+// Returns a string representation of a given |referrer_policy|. This is used to
+// setup <meta name=referrer> tags in documents used for referrer-policy-based
+// tests. The value `no-meta` indicates no tag should be created.
+std::string ReferrerPolicyToString(
+    network::mojom::ReferrerPolicy referrer_policy);
 
 // Holds down modifier keys for the duration of its lifetime and releases them
 // upon destruction. This allows simulating multiple input events without
@@ -755,7 +778,8 @@ enum EvalJsOptions {
 EvalJsResult EvalJs(const ToRenderFrameHost& execution_target,
                     const std::string& script,
                     int options = EXECUTE_SCRIPT_DEFAULT_OPTIONS,
-                    int world_id = ISOLATED_WORLD_ID_GLOBAL) WARN_UNUSED_RESULT;
+                    int32_t world_id = ISOLATED_WORLD_ID_GLOBAL)
+    WARN_UNUSED_RESULT;
 
 // Like EvalJs(), except that |script| must call domAutomationController.send()
 // itself. This is the same as specifying the EXECUTE_SCRIPT_USE_MANUAL_REPLY
@@ -763,7 +787,7 @@ EvalJsResult EvalJs(const ToRenderFrameHost& execution_target,
 EvalJsResult EvalJsWithManualReply(const ToRenderFrameHost& execution_target,
                                    const std::string& script,
                                    int options = EXECUTE_SCRIPT_DEFAULT_OPTIONS,
-                                   int world_id = ISOLATED_WORLD_ID_GLOBAL)
+                                   int32_t world_id = ISOLATED_WORLD_ID_GLOBAL)
     WARN_UNUSED_RESULT;
 
 // Run a script exactly the same as EvalJs(), but ignore the resulting value.
@@ -778,7 +802,7 @@ EvalJsResult EvalJsWithManualReply(const ToRenderFrameHost& execution_target,
 ::testing::AssertionResult ExecJs(const ToRenderFrameHost& execution_target,
                                   const std::string& script,
                                   int options = EXECUTE_SCRIPT_DEFAULT_OPTIONS,
-                                  int world_id = ISOLATED_WORLD_ID_GLOBAL)
+                                  int32_t world_id = ISOLATED_WORLD_ID_GLOBAL)
     WARN_UNUSED_RESULT;
 
 // Walks the frame tree of the specified WebContents and returns the sole
@@ -805,18 +829,28 @@ RenderFrameHost* ChildFrameAt(RenderFrameHost* frame, size_t index);
 bool ExecuteWebUIResourceTest(WebContents* web_contents,
                               const std::vector<int>& js_resource_ids);
 
-// Returns the serialized cookie string for the given url.
-std::string GetCookies(BrowserContext* browser_context, const GURL& url);
+// Returns the serialized cookie string for the given url. Uses a strictly
+// same-site SameSiteCookieContext by default, which gets cookies regardless of
+// their SameSite attribute.
+std::string GetCookies(
+    BrowserContext* browser_context,
+    const GURL& url,
+    net::CookieOptions::SameSiteCookieContext context =
+        net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
 
 // Returns the canonical cookies for the given url.
 std::vector<net::CanonicalCookie> GetCanonicalCookies(
     BrowserContext* browser_context,
     const GURL& url);
 
-// Sets a cookie for the given url. Returns true on success.
+// Sets a cookie for the given url. Uses a strictly same-site
+// SameSiteCookieContext by default, which gets cookies regardless of their
+// SameSite attribute. Returns true on success.
 bool SetCookie(BrowserContext* browser_context,
                const GURL& url,
-               const std::string& value);
+               const std::string& value,
+               net::CookieOptions::SameSiteCookieContext context =
+                   net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
 
 // Fetch the histograms data from other processes. This should be called after
 // the test code has been executed but before performing assertions.
@@ -883,7 +917,7 @@ void WaitForAccessibilityTreeToContainNodeWithName(WebContents* web_contents,
 ui::AXTreeUpdate GetAccessibilityTreeSnapshot(WebContents* web_contents);
 
 // Returns the root accessibility node for the given WebContents.
-BrowserAccessibility* GetRootAccessibilityNode(WebContents* web_contents);
+ui::AXPlatformNodeDelegate* GetRootAccessibilityNode(WebContents* web_contents);
 
 // Finds an accessibility node matching the given criteria.
 struct FindAccessibilityNodeCriteria {
@@ -892,18 +926,18 @@ struct FindAccessibilityNodeCriteria {
   base::Optional<ax::mojom::Role> role;
   base::Optional<std::string> name;
 };
-BrowserAccessibility* FindAccessibilityNode(
+ui::AXPlatformNodeDelegate* FindAccessibilityNode(
     WebContents* web_contents,
     const FindAccessibilityNodeCriteria& criteria);
-BrowserAccessibility* FindAccessibilityNodeInSubtree(
-    BrowserAccessibility* node,
+ui::AXPlatformNodeDelegate* FindAccessibilityNodeInSubtree(
+    ui::AXPlatformNodeDelegate* node,
     const FindAccessibilityNodeCriteria& criteria);
 
 #if defined(OS_WIN)
 // Retrieve the specified interface from an accessibility node.
 template <typename T>
 Microsoft::WRL::ComPtr<T> QueryInterfaceFromNode(
-    BrowserAccessibility* browser_accessibility);
+    ui::AXPlatformNodeDelegate* node);
 
 // Call GetPropertyValue with the given UIA property id with variant type
 // VT_ARRAY | VT_UNKNOWN  on the target browser accessibility node to retrieve
@@ -911,7 +945,7 @@ Microsoft::WRL::ComPtr<T> QueryInterfaceFromNode(
 // automation elements with the expected names.
 void UiaGetPropertyValueVtArrayVtUnknownValidate(
     PROPERTYID property_id,
-    BrowserAccessibility* target_browser_accessibility,
+    ui::AXPlatformNodeDelegate* target_node,
     const std::vector<std::string>& expected_names);
 #endif
 
@@ -955,6 +989,9 @@ std::vector<RenderWidgetHostView*> GetInputEventRouterRenderWidgetHostViews(
 
 // Returns the focused RenderWidgetHost.
 RenderWidgetHost* GetFocusedRenderWidgetHost(WebContents* web_contents);
+
+// Returns whether or not the RenderWidgetHost thinks it is focused.
+bool IsRenderWidgetHostFocused(const RenderWidgetHost*);
 
 // Returns the focused WebContents.
 WebContents* GetFocusedWebContents(WebContents* web_contents);
@@ -1014,10 +1051,11 @@ class TitleWatcher : public WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(TitleWatcher);
 };
 
-// Watches a RenderProcessHost and waits for specified destruction events.
+// Watches a RenderProcessHost and waits for a specified lifecycle event.
 class RenderProcessHostWatcher : public RenderProcessHostObserver {
  public:
   enum WatchType {
+    WATCH_FOR_PROCESS_READY,
     WATCH_FOR_PROCESS_EXIT,
     WATCH_FOR_HOST_DESTRUCTION
   };
@@ -1028,7 +1066,7 @@ class RenderProcessHostWatcher : public RenderProcessHostObserver {
   RenderProcessHostWatcher(WebContents* web_contents, WatchType type);
   ~RenderProcessHostWatcher() override;
 
-  // Waits until the renderer process exits.
+  // Waits until the expected event is triggered.
   void Wait();
 
   // Returns true if a renderer process exited cleanly (without hitting
@@ -1038,6 +1076,7 @@ class RenderProcessHostWatcher : public RenderProcessHostObserver {
 
  private:
   // Overridden RenderProcessHost::LifecycleObserver methods.
+  void RenderProcessReady(RenderProcessHost* host) override;
   void RenderProcessExited(RenderProcessHost* host,
                            const ChildProcessTerminationInfo& info) override;
   void RenderProcessHostDestroyed(RenderProcessHost* host) override;
@@ -1124,7 +1163,7 @@ class WebContentsAddedObserver {
   void WebContentsCreated(WebContents* web_contents);
 
   // Callback to WebContentCreated(). Cached so that we can unregister it.
-  base::Callback<void(WebContents*)> web_contents_created_callback_;
+  base::RepeatingCallback<void(WebContents*)> web_contents_created_callback_;
 
   WebContents* web_contents_;
   std::unique_ptr<RenderViewCreatedObserver> child_observer_;
@@ -1472,7 +1511,7 @@ class TestNavigationManager : public WebContentsObserver {
   void OnNavigationStateChanged();
 
   const GURL url_;
-  NavigationHandleImpl* handle_;
+  NavigationRequest* request_;
   bool navigation_paused_;
   NavigationState current_state_;
   NavigationState desired_state_;
@@ -1540,11 +1579,6 @@ class ConsoleObserverDelegate : public WebContentsDelegate {
 // came from |process|. Used to simulate a compromised renderer.
 class PwnMessageHelper {
  public:
-  // Sends BlobHostMsg_RegisterPublicURL
-  static void RegisterBlobURL(RenderProcessHost* process,
-                              GURL url,
-                              std::string uuid);
-
   // Sends FileSystemHostMsg_Create
   static void FileSystemCreate(RenderProcessHost* process,
                                int request_id,
@@ -1564,7 +1598,8 @@ class PwnMessageHelper {
   static void LockMouse(RenderProcessHost* process,
                         int routing_id,
                         bool user_gesture,
-                        bool privileged);
+                        bool privileged,
+                        bool request_unadjusted_movement);
 
  private:
   PwnMessageHelper();  // Not instantiable.
@@ -1589,6 +1624,12 @@ class MockOverscrollController {
   // Waits until the mock receives a consumed GestureScrollUpdate.
   virtual void WaitForConsumedScroll() = 0;
 };
+
+// Tests that a |render_widget_host_view| stores a stale content when its frame
+// gets evicted. |render_widget_host_view| has to be a RenderWidgetHostViewAura.
+void VerifyStaleContentOnFrameEviction(
+    RenderWidgetHostView* render_widget_host_view);
+
 #endif  // defined(USE_AURA)
 
 // This class filters for FrameHostMsg_ContextMenu messages coming in
@@ -1613,6 +1654,24 @@ class ContextMenuFilter : public content::BrowserMessageFilter {
   content::ContextMenuParams last_params_;
 
   DISALLOW_COPY_AND_ASSIGN(ContextMenuFilter);
+};
+
+// This class allows tests to wait until FrameHostMsg_UpdateUserActivationState
+// IPC reaches the browser process from a renderer.
+class UpdateUserActivationStateMsgWaiter : public BrowserMessageFilter {
+ public:
+  UpdateUserActivationStateMsgWaiter() : BrowserMessageFilter(FrameMsgStart) {}
+
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void Wait();
+
+ private:
+  ~UpdateUserActivationStateMsgWaiter() override = default;
+
+  void OnUpdateUserActivationState(blink::UserActivationUpdateType);
+
+  bool received_ = false;
+  base::RunLoop run_loop_;
 };
 
 WebContents* GetEmbedderForGuest(content::WebContents* guest);

@@ -15,16 +15,20 @@ import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.UserData;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
+import org.chromium.chrome.browser.media.MediaCaptureDevicesDispatcherAndroid;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsAccessibility;
 
 /**
  * Represents the suspension page presented when a user tries to visit a site whose fully-qualified
@@ -39,7 +43,7 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
     private static final Class<SuspendedTab> USER_DATA_KEY = SuspendedTab.class;
 
     public static boolean isShowing(Tab tab) {
-        if (tab == null || !tab.isInitialized()) return false;
+        if (tab == null || !((TabImpl) tab).isInitialized()) return false;
         SuspendedTab suspendedTab = get(tab);
         return suspendedTab != null && suspendedTab.isShowing();
     }
@@ -77,6 +81,14 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         WebContents webContents = mTab.getWebContents();
         if (webContents != null) {
             webContents.onHide();
+            webContents.suspendAllMediaPlayers();
+            webContents.setAudioMuted(true);
+            WebContentsAccessibility.fromWebContents(webContents).setObscuredByAnotherView(true);
+            if (MediaCaptureDevicesDispatcherAndroid.isCapturingAudio(webContents)
+                    || MediaCaptureDevicesDispatcherAndroid.isCapturingVideo(webContents)
+                    || MediaCaptureDevicesDispatcherAndroid.isCapturingScreen(webContents)) {
+                MediaCaptureDevicesDispatcherAndroid.notifyStopped(webContents);
+            }
         }
 
         InfoBarContainer infoBarContainer = InfoBarContainer.get(mTab);
@@ -89,9 +101,8 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         } else {
             attachView();
         }
-        mTab.updateAccessibilityVisibility();
 
-        TabContentManager tabContentManager = mTab.getActivity().getTabContentManager();
+        TabContentManager tabContentManager = ((TabImpl) mTab).getActivity().getTabContentManager();
         if (tabContentManager != null) {
             // We have to wait for the view to layout to cache a new thumbnail for it; otherwise,
             // its width and height won't be available yet.
@@ -109,8 +120,9 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         WebContents webContents = mTab.getWebContents();
         if (webContents != null) {
             webContents.onShow();
+            webContents.setAudioMuted(false);
+            WebContentsAccessibility.fromWebContents(webContents).setObscuredByAnotherView(false);
         }
-        mTab.updateAccessibilityVisibility();
 
         mView = null;
         mFqdn = null;

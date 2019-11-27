@@ -188,7 +188,7 @@ bool ContainerFloatingBehavior::HandlePointerEvent(
   if (keyboard_bounds_in_screen.height() <= 0)
     return false;
 
-  ui::PointerId pointer_id = ui::MouseEvent::kMousePointerId;
+  ui::PointerId pointer_id = ui::kPointerIdMouse;
   if (event.IsTouchEvent()) {
     const ui::TouchEvent* te = event.AsTouchEvent();
     pointer_id = te->pointer_details().id;
@@ -294,6 +294,10 @@ bool ContainerFloatingBehavior::OccludedBoundsAffectWorkspaceLayout() const {
 
 void ContainerFloatingBehavior::SetDraggableArea(const gfx::Rect& rect) {
   draggable_area_ = rect;
+}
+
+void ContainerFloatingBehavior::SetAreaToRemainOnScreen(const gfx::Rect& rect) {
+  area_to_remain_on_screen_ = rect;
 }
 
 }  //  namespace keyboard

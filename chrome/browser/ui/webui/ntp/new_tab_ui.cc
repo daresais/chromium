@@ -15,6 +15,7 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/cookie_controls_handler.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
@@ -56,8 +57,10 @@ NewTabUI::NewTabUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
 
   Profile* profile = GetProfile();
 
-  if (!profile->IsGuestSession())
+  if (!profile->IsGuestSession()) {
     web_ui->AddMessageHandler(std::make_unique<ThemeHandler>());
+    web_ui->AddMessageHandler(std::make_unique<CookieControlsHandler>());
+  }
 
   // content::URLDataSource assumes the ownership of the html source.
   content::URLDataSource::Add(profile, std::make_unique<NewTabHTMLSource>(
@@ -149,16 +152,17 @@ std::string NewTabUI::NewTabHTMLSource::GetSource() {
 }
 
 void NewTabUI::NewTabHTMLSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path = content::URLDataSource::URLToRequestPath(url);
   if (!path.empty() && path[0] != '#') {
     // A path under new-tab was requested; it's likely a bad relative
     // URL from the new tab page, but in any case it's an error.
     NOTREACHED() << path << " should not have been requested on the NTP";
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
 

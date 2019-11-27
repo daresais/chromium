@@ -61,11 +61,20 @@ public class TopView extends RelativeLayout
     // The callback to use when notifying that the Select All checkbox was toggled.
     private SelectAllToggleCallback mSelectAllCallback;
 
+    // A Chip for filtering out names.
+    private ChipView mNamesFilterChip;
+
+    // A Chip for filtering out addresses.
+    private ChipView mAddressFilterChip;
+
     // A Chip for filtering out emails.
     private ChipView mEmailFilterChip;
 
     // A Chip for filtering out telephones.
     private ChipView mTelephonesFilterChip;
+
+    // A Chip for filtering out telephones.
+    private ChipView mIconsFilterChip;
 
     // The callback to use to notify when the filter chips are toggled.
     private ChipToggledCallback mChipToggledCallback;
@@ -92,8 +101,20 @@ public class TopView extends RelativeLayout
         TextView title = findViewById(R.id.checkbox_title);
         title.setText(R.string.contacts_picker_all_contacts);
 
+        mNamesFilterChip = findViewById(R.id.names_filter);
+        TextView textView = mNamesFilterChip.getPrimaryTextView();
+        textView.setText(R.string.top_view_names_filter_label);
+        mNamesFilterChip.setSelected(true);
+        mNamesFilterChip.setOnClickListener(this);
+
+        mAddressFilterChip = findViewById(R.id.address_filter);
+        textView = mAddressFilterChip.getPrimaryTextView();
+        textView.setText(R.string.top_view_address_filter_label);
+        mAddressFilterChip.setSelected(true);
+        mAddressFilterChip.setOnClickListener(this);
+
         mEmailFilterChip = findViewById(R.id.email_filter);
-        TextView textView = mEmailFilterChip.getPrimaryTextView();
+        textView = mEmailFilterChip.getPrimaryTextView();
         textView.setText(R.string.top_view_email_filter_label);
         mEmailFilterChip.setSelected(true);
         mEmailFilterChip.setOnClickListener(this);
@@ -103,15 +124,27 @@ public class TopView extends RelativeLayout
         textView.setText(R.string.top_view_telephone_filter_label);
         mTelephonesFilterChip.setSelected(true);
         mTelephonesFilterChip.setOnClickListener(this);
+
+        mIconsFilterChip = findViewById(R.id.icon_filter);
+        textView = mIconsFilterChip.getPrimaryTextView();
+        textView.setText(R.string.top_view_icon_filter_label);
+        mIconsFilterChip.setSelected(true);
+        mIconsFilterChip.setOnClickListener(this);
     }
 
     @Override
     public void onClick(View view) {
         int id = view.getId();
-        if (id == R.id.email_filter) {
+        if (id == R.id.names_filter) {
+            notifyChipToggled(PickerAdapter.FilterType.NAMES);
+        } else if (id == R.id.address_filter) {
+            notifyChipToggled(PickerAdapter.FilterType.ADDRESSES);
+        } else if (id == R.id.email_filter) {
             notifyChipToggled(PickerAdapter.FilterType.EMAILS);
         } else if (id == R.id.tel_filter) {
             notifyChipToggled(PickerAdapter.FilterType.TELEPHONES);
+        } else if (id == R.id.icon_filter) {
+            notifyChipToggled(PickerAdapter.FilterType.ICONS);
         }
     }
 
@@ -120,8 +153,29 @@ public class TopView extends RelativeLayout
      * @param chip The id of the chip that was toggled.
      */
     public void notifyChipToggled(@PickerAdapter.FilterType int chip) {
-        ChipView chipView =
-                chip == PickerAdapter.FilterType.EMAILS ? mEmailFilterChip : mTelephonesFilterChip;
+        ChipView chipView;
+
+        switch (chip) {
+            case PickerAdapter.FilterType.NAMES:
+                chipView = mNamesFilterChip;
+                break;
+            case PickerAdapter.FilterType.ADDRESSES:
+                chipView = mAddressFilterChip;
+                break;
+            case PickerAdapter.FilterType.EMAILS:
+                chipView = mEmailFilterChip;
+                break;
+            case PickerAdapter.FilterType.TELEPHONES:
+                chipView = mTelephonesFilterChip;
+                break;
+            case PickerAdapter.FilterType.ICONS:
+                chipView = mIconsFilterChip;
+                break;
+            default:
+                assert false;
+                return;
+        }
+
         chipView.setSelected(!chipView.isSelected());
         mChipToggledCallback.onChipToggled(chip);
     }
@@ -163,6 +217,22 @@ public class TopView extends RelativeLayout
         } else {
             mCheckboxContainer.setVisibility(GONE);
         }
+    }
+
+    /**
+     * Updates which chips should be displayed as part of the top view.
+     * @param shouldDisplayNames Whether the names chip should be displayed.
+     * @param shouldDisplayAddresses Whether the addresses chip should be displayed.
+     * @param shouldDisplayEmails Whether the emails chip should be displayed.
+     * @param shouldDisplayTel Whether the telephone chip should be displayed.
+     */
+    public void updateChipVisibility(boolean shouldDisplayNames, boolean shouldDisplayAddresses,
+            boolean shouldDisplayEmails, boolean shouldDisplayTel, boolean shouldDisplayIcons) {
+        mNamesFilterChip.setVisibility(shouldDisplayNames ? View.VISIBLE : View.GONE);
+        mAddressFilterChip.setVisibility(shouldDisplayAddresses ? View.VISIBLE : View.GONE);
+        mEmailFilterChip.setVisibility(shouldDisplayEmails ? View.VISIBLE : View.GONE);
+        mTelephonesFilterChip.setVisibility(shouldDisplayTel ? View.VISIBLE : View.GONE);
+        mIconsFilterChip.setVisibility(shouldDisplayIcons ? View.VISIBLE : View.GONE);
     }
 
     /**

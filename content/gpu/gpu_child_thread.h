@@ -33,8 +33,7 @@
 #include "gpu/ipc/service/x_util.h"
 #include "media/base/android_overlay_mojo_factory.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
-#include "services/viz/privileged/interfaces/viz_main.mojom.h"
+#include "services/viz/privileged/mojom/viz_main.mojom.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -61,7 +60,7 @@ class GpuChildThread : public ChildThreadImpl,
 
  private:
   GpuChildThread(base::RepeatingClosure quit_closure,
-                 const ChildThreadImpl::Options& options,
+                 ChildThreadImpl::Options options,
                  std::unique_ptr<gpu::GpuInit> gpu_init);
 
   void CreateVizMainService(
@@ -74,6 +73,7 @@ class GpuChildThread : public ChildThreadImpl,
   void RunService(
       const std::string& service_name,
       mojo::PendingReceiver<service_manager::mojom::Service> receiver) override;
+  void BindServiceInterface(mojo::GenericPendingReceiver receiver) override;
 
   // IPC::Listener implementation via ChildThreadImpl:
   void OnAssociatedInterfaceRequest(
@@ -109,9 +109,6 @@ class GpuChildThread : public ChildThreadImpl,
   std::unique_ptr<GpuServiceFactory> service_factory_;
 
   blink::AssociatedInterfaceRegistry associated_interfaces_;
-
-  // Holds a closure that releases pending interface requests on the IO thread.
-  base::OnceClosure release_pending_requests_closure_;
 
   // A closure which quits the main message loop.
   base::RepeatingClosure quit_closure_;

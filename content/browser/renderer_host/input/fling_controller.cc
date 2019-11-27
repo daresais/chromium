@@ -30,8 +30,8 @@ constexpr base::TimeDelta kMaxMicrosecondsFromFlingTimestampToFirstProgress =
 // processing the GFS, it is possible to have a very small delta for the first
 // event. Don't send an event with deltas smaller than the
 // |kMinInertialScrollDelta| since the renderer ignores it and the fling gets
-// cancelled in FlingController::OnGestureEventAck due to an inertial GSU with
-// ack ignored.
+// cancelled in RenderWidgetHostViewAndroid::GestureEventAck due to an inertial
+// GSU with ack ignored.
 const float kMinInertialScrollDelta = 0.1f;
 
 const char* kFlingTraceName = "FlingController::HandlingGestureFling";
@@ -96,17 +96,22 @@ bool FlingController::ObserveAndFilterForTapSuppression(
 
 bool FlingController::ObserveAndMaybeConsumeGestureEvent(
     const GestureEventWithLatencyInfo& gesture_event) {
+  TRACE_EVENT0("input", "FlingController::ObserveAndMaybeConsumeGestureEvent");
   // FlingCancel events arrive when a finger is touched down regardless of
   // whether there is an ongoing fling. These can affect state so if there's no
   // on-going fling we should just discard these without letting the rest of
   // the fling system see it.
   if (gesture_event.event.GetType() == WebInputEvent::kGestureFlingCancel &&
       !fling_curve_) {
+    TRACE_EVENT_INSTANT0("input", "NoActiveFling", TRACE_EVENT_SCOPE_THREAD);
     return true;
   }
 
-  if (ObserveAndFilterForTapSuppression(gesture_event))
+  if (ObserveAndFilterForTapSuppression(gesture_event)) {
+    TRACE_EVENT_INSTANT0("input", "FilterTapSuppression",
+                         TRACE_EVENT_SCOPE_THREAD);
     return true;
+  }
 
   if (gesture_event.event.GetType() == WebInputEvent::kGestureScrollUpdate) {
     last_seen_scroll_update_ = gesture_event.event.TimeStamp();
@@ -143,6 +148,14 @@ bool FlingController::ObserveAndMaybeConsumeGestureEvent(
 
 void FlingController::ProcessGestureFlingStart(
     const GestureEventWithLatencyInfo& gesture_event) {
+  // Don't start a touchpad gesture fling if the previous scroll events were
+  // consumed.
+  if (gesture_event.event.SourceDevice() ==
+          blink::WebGestureDevice::kTouchpad &&
+      last_wheel_event_consumed_) {
+    return;
+  }
+
   if (!UpdateCurrentFlingState(gesture_event.event))
     return;
 
@@ -168,6 +181,11 @@ void FlingController::ScheduleFlingProgress() {
 void FlingController::ProcessGestureFlingCancel(
     const GestureEventWithLatencyInfo& gesture_event) {
   DCHECK(fling_curve_);
+
+  // Note: We don't want to reset the fling booster here because a FlingCancel
+  // will be received when the user puts their finger down for a potential
+  // boost. FlingBooster will process the event stream after the current fling
+  // is ended and decide whether or not to boost any subsequent FlingStart.
   EndCurrentFling();
 }
 
@@ -216,6 +234,7 @@ void FlingController::ProgressFling(base::TimeTicks current_time) {
 
   if (!fling_is_active && current_fling_parameters_.source_device !=
                               blink::WebGestureDevice::kSyntheticAutoscroll) {
+    fling_booster_.Reset();
     EndCurrentFling();
     return;
   }
@@ -232,6 +251,7 @@ void FlingController::ProgressFling(base::TimeTicks current_time) {
 }
 
 void FlingController::StopFling() {
+  fling_booster_.Reset();
   if (fling_curve_)
     EndCurrentFling();
 }
@@ -242,9 +262,10 @@ void FlingController::GenerateAndSendWheelEvents(
   MouseWheelEventWithLatencyInfo synthetic_wheel(
       WebInputEvent::kMouseWheel, current_fling_parameters_.modifiers,
       clock_->NowTicks(), ui::LatencyInfo(ui::SourceEventType::WHEEL));
+  synthetic_wheel.event.delta_units =
+      ui::input_types::ScrollGranularity::kScrollByPrecisePixel;
   synthetic_wheel.event.delta_x = delta.x();
   synthetic_wheel.event.delta_y = delta.y();
-  synthetic_wheel.event.has_precise_scrolling_deltas = true;
   synthetic_wheel.event.momentum_phase = phase;
   synthetic_wheel.event.has_synthetic_phase = true;
   synthetic_wheel.event.SetPositionInWidget(current_fling_parameters_.point);
@@ -365,6 +386,7 @@ bool FlingController::UpdateCurrentFlingState(
 
   if (velocity.IsZero() && fling_start_event.SourceDevice() !=
                                blink::WebGestureDevice::kSyntheticAutoscroll) {
+    fling_booster_.Reset();
     EndCurrentFling();
     return false;
   }
@@ -374,7 +396,9 @@ bool FlingController::UpdateCurrentFlingState(
           current_fling_parameters_.source_device,
           current_fling_parameters_.velocity,
           gfx::Vector2dF() /*initial_offset*/, false /*on_main_thread*/,
-          GetContentClient()->browser()->ShouldUseMobileFlingCurve()));
+          GetContentClient()->browser()->ShouldUseMobileFlingCurve(),
+          current_fling_parameters_.global_point,
+          event_sender_client_->GetRootWidgetViewportSize()));
   return true;
 }
 
@@ -385,6 +409,13 @@ gfx::Vector2dF FlingController::CurrentFlingVelocity() const {
 TouchpadTapSuppressionController*
 FlingController::GetTouchpadTapSuppressionController() {
   return &touchpad_tap_suppression_controller_;
+}
+
+void FlingController::OnWheelEventAck(
+    const MouseWheelEventWithLatencyInfo& event,
+    InputEventAckSource ack_source,
+    InputEventAckState ack_result) {
+  last_wheel_event_consumed_ = (ack_result == INPUT_EVENT_ACK_STATE_CONSUMED);
 }
 
 }  // namespace content

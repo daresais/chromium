@@ -19,7 +19,7 @@
 #include "ash/wm/wm_event.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -30,7 +30,6 @@
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace ash {
 
@@ -103,7 +102,7 @@ class MouseEventCapturer : public ui::EventHandler {
 class AutoclickTest : public AshTestBase {
  public:
   AutoclickTest()
-      : AshTestBase(base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME) {}
+      : AshTestBase(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
   ~AutoclickTest() override = default;
 
   void SetUp() override {
@@ -139,7 +138,7 @@ class AutoclickTest : public AshTestBase {
   }
 
   void FastForwardBy(int milliseconds) {
-    scoped_task_environment_->FastForwardBy(
+    task_environment_->FastForwardBy(
         base::TimeDelta::FromMilliseconds(milliseconds));
   }
 
@@ -244,6 +243,10 @@ TEST_F(AutoclickTest, ToggleEnabled) {
   EXPECT_FALSE(GetAutoclickController()->IsEnabled());
   events = WaitForMouseEvents();
   EXPECT_EQ(0u, events.size());
+
+  // After disable, autoclick should be set back to left click.
+  EXPECT_EQ(AutoclickEventType::kLeftClick,
+            Shell::Get()->accessibility_controller()->GetAutoclickEventType());
 }
 
 TEST_F(AutoclickTest, MouseMovement) {
@@ -1074,7 +1077,7 @@ TEST_F(AutoclickTest, ConfirmationDialogShownWhenDisablingFeature) {
   EXPECT_TRUE(dialog);
 
   // Canceling the dialog will cause the feature to continue to be enabled.
-  dialog->GetDialogClientView()->CancelWindow();
+  dialog->CancelDialog();
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(GetAutoclickController()->GetDisableDialogForTesting());
   EXPECT_TRUE(Shell::Get()->accessibility_controller()->autoclick_enabled());
@@ -1085,7 +1088,7 @@ TEST_F(AutoclickTest, ConfirmationDialogShownWhenDisablingFeature) {
   Shell::Get()->accessibility_controller()->SetAutoclickEnabled(false);
   dialog = GetAutoclickController()->GetDisableDialogForTesting();
   EXPECT_TRUE(dialog);
-  dialog->GetDialogClientView()->AcceptWindow();
+  dialog->AcceptDialog();
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(GetAutoclickController()->GetDisableDialogForTesting());
   EXPECT_FALSE(Shell::Get()->accessibility_controller()->autoclick_enabled());
@@ -1239,14 +1242,10 @@ TEST_F(AutoclickTest, ScrollOccursWhenHoveredOverScrollButtons) {
     int scroll_x;
     int scroll_y;
   } kTestCases[] = {
-      {AutoclickScrollView::ButtonId::kScrollUp, 0,
-       ui::MouseWheelEvent::kWheelDelta},
-      {AutoclickScrollView::ButtonId::kScrollDown, 0,
-       -ui::MouseWheelEvent::kWheelDelta},
-      {AutoclickScrollView::ButtonId::kScrollLeft,
-       ui::MouseWheelEvent::kWheelDelta, 0},
-      {AutoclickScrollView::ButtonId::kScrollRight,
-       -ui::MouseWheelEvent::kWheelDelta, 0},
+      {AutoclickScrollView::ButtonId::kScrollUp, 0, 10},
+      {AutoclickScrollView::ButtonId::kScrollDown, 0, -10},
+      {AutoclickScrollView::ButtonId::kScrollLeft, 10, 0},
+      {AutoclickScrollView::ButtonId::kScrollRight, -10, 0},
   };
   for (auto& test : kTestCases) {
     views::View* button = GetScrollButton(test.button_id);

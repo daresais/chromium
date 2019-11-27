@@ -18,7 +18,8 @@ ScriptPromise UnderlyingSourceBase::startWrapper(ScriptState* script_state,
   // construct multiple streams).
   DCHECK(!controller_);
 
-  controller_ = ReadableStreamDefaultControllerInterface::Create(js_controller);
+  controller_ = ReadableStreamDefaultControllerInterface::Create(script_state,
+                                                                 js_controller);
 
   return Start(script_state);
 }
@@ -44,7 +45,8 @@ ScriptPromise UnderlyingSourceBase::Cancel(ScriptState* script_state,
 }
 
 ScriptValue UnderlyingSourceBase::type(ScriptState* script_state) const {
-  return ScriptValue(script_state, v8::Undefined(script_state->GetIsolate()));
+  return ScriptValue(script_state->GetIsolate(),
+                     v8::Undefined(script_state->GetIsolate()));
 }
 
 void UnderlyingSourceBase::ContextDestroyed(ExecutionContext*) {

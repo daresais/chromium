@@ -68,16 +68,16 @@ class UpgradeDetectorChromeos : public UpgradeDetector,
   // Calculates |elevated_deadline_| and |high_deadline_|.
   void CalculateDeadlines();
 
-  // Handles a change to the browser.relaunch_heads_up_period Local State
-  // preference. Calls NotifyUpgrade if an upgrade is available.
-  void OnRelaunchHeadsUpPeriodPrefChanged();
+  // Handles a change to the browser.relaunch_heads_up_period or
+  // browser.relaunch_notification Local State preferences. Calls
+  // NotifyUpgrade() if an upgrade is available.
+  void OnRelaunchPrefChanged();
 
   // UpgradeDetector:
   void OnRelaunchNotificationPeriodPrefChanged() override;
 
   // chromeos::UpdateEngineClient::Observer implementation.
-  void UpdateStatusChanged(
-      const chromeos::UpdateEngineClient::Status& status) override;
+  void UpdateStatusChanged(const update_engine::StatusResult& status) override;
   void OnUpdateOverCellularOneTimePermissionGranted() override;
 
   // Triggers NotifyOnUpgrade if thresholds have been changed.
@@ -106,7 +106,7 @@ class UpgradeDetectorChromeos : public UpgradeDetector,
   base::OneShotTimer upgrade_notification_timer_;
   bool initialized_;
 
-  base::WeakPtrFactory<UpgradeDetectorChromeos> weak_factory_;
+  base::WeakPtrFactory<UpgradeDetectorChromeos> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UpgradeDetectorChromeos);
 };

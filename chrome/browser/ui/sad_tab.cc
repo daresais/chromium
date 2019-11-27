@@ -8,6 +8,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/browser/ui/browser.h"
@@ -56,7 +57,7 @@ void RecordEvent(bool feedback, ui_metrics::SadTabEvent event) {
 constexpr char kCategoryTagCrash[] = "Crash";
 
 bool ShouldShowFeedbackButton() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   const int kMinSecondsBetweenCrashesForFeedbackButton = 10;
 
   static int64_t last_called_ts = 0;
@@ -93,6 +94,9 @@ bool SadTab::ShouldShow(base::TerminationStatus status) {
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
 #endif
     case base::TERMINATION_STATUS_PROCESS_CRASHED:
+#if defined(OS_WIN)
+    case base::TERMINATION_STATUS_INTEGRITY_FAILURE:
+#endif
     case base::TERMINATION_STATUS_OOM:
       return true;
     case base::TERMINATION_STATUS_NORMAL_TERMINATION:

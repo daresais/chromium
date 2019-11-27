@@ -70,6 +70,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_load_info.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
@@ -539,17 +540,20 @@ BuildObjectForResourceResponse(const ResourceResponse& response,
 
   String security_state = protocol::Security::SecurityStateEnum::Unknown;
   switch (response.GetSecurityStyle()) {
-    case kWebSecurityStyleUnknown:
+    case SecurityStyle::kUnknown:
       security_state = protocol::Security::SecurityStateEnum::Unknown;
       break;
-    case kWebSecurityStyleNeutral:
+    case SecurityStyle::kNeutral:
       security_state = protocol::Security::SecurityStateEnum::Neutral;
       break;
-    case kWebSecurityStyleInsecure:
+    case SecurityStyle::kInsecure:
       security_state = protocol::Security::SecurityStateEnum::Insecure;
       break;
-    case kWebSecurityStyleSecure:
+    case SecurityStyle::kSecure:
       security_state = protocol::Security::SecurityStateEnum::Secure;
+      break;
+    case SecurityStyle::kInsecureBroken:
+      security_state = protocol::Security::SecurityStateEnum::InsecureBroken;
       break;
   }
 
@@ -804,8 +808,8 @@ void InspectorNetworkAgent::WillSendRequestInternal(
     maybe_frame_id = frame_id;
   GetFrontend()->requestWillBeSent(
       request_id, loader_id, documentURL, std::move(request_info),
-      base::TimeTicks::Now().since_origin().InSecondsF(), CurrentTime(),
-      std::move(initiator_object),
+      base::TimeTicks::Now().since_origin().InSecondsF(),
+      base::Time::Now().ToDoubleT(), std::move(initiator_object),
       BuildObjectForResourceResponse(redirect_response), resource_type,
       std::move(maybe_frame_id), request.HasUserGesture());
   if (is_handling_sync_xhr_)
@@ -861,8 +865,7 @@ void InspectorNetworkAgent::PrepareRequest(
       // inside state_'s kExtraRequestHeaders, somewhere else.
       if (header_name.LowerASCII() == http_names::kReferer.LowerASCII()) {
         request.SetHttpReferrer(
-            Referrer(value, network::mojom::ReferrerPolicy::kAlways),
-            ResourceRequest::SetHttpReferrerLocation::kInspectorNetworkAgent);
+            Referrer(value, network::mojom::ReferrerPolicy::kAlways));
       } else {
         request.SetHttpHeaderField(header_name, AtomicString(value));
       }
@@ -1245,8 +1248,8 @@ void InspectorNetworkAgent::WillSendWebSocketHandshakeRequest(
           .build();
   GetFrontend()->webSocketWillSendHandshakeRequest(
       IdentifiersFactory::SubresourceRequestId(identifier),
-      base::TimeTicks::Now().since_origin().InSecondsF(), CurrentTime(),
-      std::move(request_object));
+      base::TimeTicks::Now().since_origin().InSecondsF(),
+      base::Time::Now().ToDoubleT(), std::move(request_object));
 }
 
 void InspectorNetworkAgent::DidReceiveWebSocketHandshakeResponse(
@@ -1362,6 +1365,8 @@ void InspectorNetworkAgent::Enable() {
 
 Response InspectorNetworkAgent::disable() {
   DCHECK(!pending_request_type_);
+  if (IsMainThread())
+    GetNetworkStateNotifier().ClearOverride();
   instrumenting_agents_->RemoveInspectorNetworkAgent(this);
   agent_state_.ClearAllFields();
   resources_data_->Clear();
@@ -1566,7 +1571,7 @@ void InspectorNetworkAgent::DidCommitLoad(LocalFrame* frame,
 
 void InspectorNetworkAgent::FrameScheduledNavigation(LocalFrame* frame,
                                                      const KURL&,
-                                                     double,
+                                                     base::TimeDelta,
                                                      ClientNavigationReason) {
   // For navigations, we limit async stack trace to depth 1 to avoid the
   // base::Value depth limits with Mojo serialization / parsing.

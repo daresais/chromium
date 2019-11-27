@@ -11,6 +11,7 @@
 #include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/ranges.h"
 #include "content/browser/accessibility/browser_accessibility_android.h"
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
@@ -195,16 +196,17 @@ base::LazyInstance<base::string16>::Leaky g_all_search_keys =
 
 bool SectionPredicate(BrowserAccessibility* start, BrowserAccessibility* node) {
   switch (node->GetRole()) {
-    case ax::mojom::Role::kArticle:
     case ax::mojom::Role::kApplication:
+    case ax::mojom::Role::kArticle:
     case ax::mojom::Role::kBanner:
     case ax::mojom::Role::kComplementary:
     case ax::mojom::Role::kContentInfo:
     case ax::mojom::Role::kHeading:
     case ax::mojom::Role::kMain:
     case ax::mojom::Role::kNavigation:
-    case ax::mojom::Role::kSearch:
     case ax::mojom::Role::kRegion:
+    case ax::mojom::Role::kSearch:
+    case ax::mojom::Role::kSection:
       return true;
     default:
       return false;
@@ -649,7 +651,7 @@ jint WebContentsAccessibilityAndroid::GetEditableTextSelectionEnd(
 static size_t ActualUnignoredChildCount(const ui::AXNode* node) {
   size_t count = 0;
   for (const ui::AXNode* child : node->children()) {
-    if (child->data().HasState(ax::mojom::State::kIgnored)) {
+    if (child->IsIgnored()) {
       count += ActualUnignoredChildCount(child);
     } else {
       ++count;
@@ -667,61 +669,18 @@ jboolean WebContentsAccessibilityAndroid::PopulateAccessibilityNodeInfo(
   if (!node)
     return false;
 
-  // TODO(crbug.com/974444): This crash key string is temporary in order
-  // to get some useful information about the state when the crash occurs.
-  // Remove the crash key string and additional logic once resolved.
-  static auto* crbug_974444_crash_key = base::debug::AllocateCrashKeyString(
-      "crbug_974444", base::debug::CrashKeySize::Size64);
-  std::stringstream base_message;
-  base_message << "node_role: " << node->GetData().role;
-  std::string tag;
-  if (node->GetData().GetStringAttribute(ax::mojom::StringAttribute::kHtmlTag,
-                                         &tag))
-    base_message << ", node_tag: <" << tag.c_str() << ">";
-  if (node->GetData().HasState(ax::mojom::State::kIgnored))
-    base_message << ", IGNORED";
-  if (BrowserAccessibilityManager* manager = node->manager()) {
-    if (ui::AXTree* tree = manager->ax_tree()) {
-      if (tree->GetTreeUpdateInProgressState())
-        base_message << ", TREE_UPDATE_IN_PROGRESS";
-    } else {
-      base_message << ", NO_AX_TREE";
-    }
-  } else {
-    base_message << ", NO_MANAGER";
-  }
-
   if (node->PlatformGetParent()) {
     auto* android_node =
         static_cast<BrowserAccessibilityAndroid*>(node->PlatformGetParent());
-    std::stringstream message;
-    message << base_message.str() << ", PlatformGetParent";
-    base::debug::SetCrashKeyString(crbug_974444_crash_key, message.str());
     Java_WebContentsAccessibilityImpl_setAccessibilityNodeInfoParent(
         env, obj, info, android_node->unique_id());
-    base::debug::ClearCrashKeyString(crbug_974444_crash_key);
   }
-  unsigned child_index = 0;
   for (BrowserAccessibility::PlatformChildIterator it =
            node->PlatformChildrenBegin();
        it != node->PlatformChildrenEnd(); ++it) {
     auto* android_node = static_cast<BrowserAccessibilityAndroid*>(it.get());
-    if (!android_node) {
-      std::stringstream message;
-      message << base_message.str() << ", PlatformGetChild [" << child_index
-              << "/" << node->PlatformChildCount() << "]";
-      const size_t actual_unignored_child_count =
-          ActualUnignoredChildCount(node->node());
-      if (actual_unignored_child_count != node->PlatformChildCount()) {
-        message << ", unignored_child_count_ [found: "
-                << node->PlatformChildCount()
-                << ", expected: " << actual_unignored_child_count << "]";
-      }
-      base::debug::SetCrashKeyString(crbug_974444_crash_key, message.str());
-    }
     Java_WebContentsAccessibilityImpl_addAccessibilityNodeInfoChild(
         env, obj, info, android_node->unique_id());
-    base::debug::ClearCrashKeyString(crbug_974444_crash_key);
   }
   Java_WebContentsAccessibilityImpl_setAccessibilityNodeInfoBooleanAttributes(
       env, obj, info, unique_id, node->IsCheckable(), node->IsChecked(),
@@ -734,17 +693,39 @@ jboolean WebContentsAccessibilityAndroid::PopulateAccessibilityNodeInfo(
       node->CanScrollLeft(), node->CanScrollRight(), node->IsClickable(),
       node->IsEditableText(), node->IsEnabled(), node->IsFocusable(),
       node->IsFocused(), node->IsCollapsed(), node->IsExpanded(),
-      node->HasNonEmptyValue());
+      node->HasNonEmptyValue(), !node->GetInnerText().empty());
   Java_WebContentsAccessibilityImpl_setAccessibilityNodeInfoClassName(
       env, obj, info,
       base::android::ConvertUTF8ToJavaString(env, node->GetClassName()));
+
+  ScopedJavaLocalRef<jintArray> suggestion_starts_java;
+  ScopedJavaLocalRef<jintArray> suggestion_ends_java;
+  ScopedJavaLocalRef<jobjectArray> suggestion_text_java;
+  std::vector<int> suggestion_starts;
+  std::vector<int> suggestion_ends;
+  node->GetSuggestions(&suggestion_starts, &suggestion_ends);
+  if (suggestion_starts.size() && suggestion_ends.size()) {
+    suggestion_starts_java = base::android::ToJavaIntArray(
+        env, suggestion_starts.data(), suggestion_starts.size());
+    suggestion_ends_java = base::android::ToJavaIntArray(
+        env, suggestion_ends.data(), suggestion_ends.size());
+
+    // Currently we don't retrieve the text of each suggestion, so
+    // store a blank string for now.
+    std::vector<std::string> suggestion_text(suggestion_starts.size());
+    suggestion_text_java =
+        base::android::ToJavaArrayOfStrings(env, suggestion_text);
+  }
+
   Java_WebContentsAccessibilityImpl_setAccessibilityNodeInfoText(
       env, obj, info,
       base::android::ConvertUTF16ToJavaString(env, node->GetInnerText()),
       node->IsLink(), node->IsEditableText(),
       base::android::ConvertUTF16ToJavaString(
           env, node->GetInheritedString16Attribute(
-                   ax::mojom::StringAttribute::kLanguage)));
+                   ax::mojom::StringAttribute::kLanguage)),
+      suggestion_starts_java, suggestion_ends_java, suggestion_text_java);
+
   base::string16 element_id;
   if (node->GetHtmlAttribute("id", &element_id)) {
     Java_WebContentsAccessibilityImpl_setAccessibilityNodeInfoViewIdResourceName(
@@ -777,7 +758,8 @@ jboolean WebContentsAccessibilityAndroid::PopulateAccessibilityNodeInfo(
       base::android::ConvertUTF16ToJavaString(env, node->GetHint()),
       node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelStart),
       node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelEnd),
-      node->HasImage(), node->IsContentInvalid());
+      node->HasImage(), node->IsContentInvalid(),
+      base::android::ConvertUTF16ToJavaString(env, node->GetTargetUrl()));
 
   Java_WebContentsAccessibilityImpl_setAccessibilityNodeInfoLollipopAttributes(
       env, obj, info, node->CanOpenPopup(), node->IsContentInvalid(),
@@ -885,6 +867,13 @@ void WebContentsAccessibilityAndroid::Click(JNIEnv* env,
                                             const JavaParamRef<jobject>& obj,
                                             jint unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
+
+  // If it's a heading consisting of only a link, click the link.
+  if (node->IsHeadingLink()) {
+    node = static_cast<BrowserAccessibilityAndroid*>(
+        node->InternalChildrenBegin().get());
+  }
+
   if (node)
     node->manager()->DoDefaultAction(*node);
 }
@@ -975,7 +964,7 @@ jboolean WebContentsAccessibilityAndroid::AdjustSlider(
   // Slider does not move if the delta value is less than 1.
   delta = ((delta < 1) ? 1 : delta);
   value += (increment ? delta : -delta);
-  value = std::max(std::min(value, max), min);
+  value = base::ClampToRange(value, min, max);
   if (value != original_value) {
     node->manager()->SetValue(*node, base::NumberToString(value));
     return true;
@@ -1022,7 +1011,7 @@ jint WebContentsAccessibilityAndroid::FindElementType(
   // SetCanWrapToLastElement needs to be set as true after talkback pushes its
   // corresponding change for b/29103330.
   tree_search.SetCanWrapToLastElement(false);
-  tree_search.SetVisibleOnly(false);
+  tree_search.SetOnscreenOnly(false);
   tree_search.AddPredicate(predicate);
 
   if (tree_search.CountMatches() == 0)
@@ -1086,6 +1075,36 @@ jint WebContentsAccessibilityAndroid::GetTextLength(
   return text.size();
 }
 
+void WebContentsAccessibilityAndroid::AddSpellingErrorForTesting(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint unique_id,
+    jint start_offset,
+    jint end_offset) {
+  BrowserAccessibility* node = GetAXFromUniqueID(unique_id);
+  CHECK(node);
+
+  while (node->GetRole() != ax::mojom::Role::kStaticText &&
+         node->InternalChildCount() > 0) {
+    node = node->InternalChildrenBegin().get();
+  }
+
+  CHECK(node->GetRole() == ax::mojom::Role::kStaticText);
+  base::string16 text = node->GetInnerText();
+  CHECK_LT(start_offset, static_cast<int>(text.size()));
+  CHECK_LE(end_offset, static_cast<int>(text.size()));
+
+  ui::AXNodeData data = node->GetData();
+  data.AddIntListAttribute(ax::mojom::IntListAttribute::kMarkerStarts,
+                           {start_offset});
+  data.AddIntListAttribute(ax::mojom::IntListAttribute::kMarkerEnds,
+                           {end_offset});
+  data.AddIntListAttribute(
+      ax::mojom::IntListAttribute::kMarkerTypes,
+      {static_cast<int>(ax::mojom::MarkerType::kSuggestion)});
+  node->node()->SetData(data);
+}
+
 jboolean WebContentsAccessibilityAndroid::PreviousAtGranularity(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
@@ -1132,6 +1151,11 @@ void WebContentsAccessibilityAndroid::MoveAccessibilityFocus(
   // as that will result in loading inline text boxes for the whole tree.
   if (node != node->manager()->GetRoot())
     node->manager()->LoadInlineTextBoxes(*node);
+
+  // Auto-focus links, because some websites have skip links that are
+  // only visible when focused. See http://crbug.com/657157
+  if (node->IsLink() && node->manager()->GetFocus() != node)
+    node->manager()->SetFocus(*node);
 }
 
 bool WebContentsAccessibilityAndroid::IsSlider(JNIEnv* env,
@@ -1255,6 +1279,10 @@ WebContentsAccessibilityAndroid::GetCharacterBoundingBoxes(
     return nullptr;
   }
 
+  float dip_scale = use_zoom_for_dsf_enabled_
+                        ? 1 / root_manager_->device_scale_factor()
+                        : 1.0;
+
   gfx::Rect object_bounds = node->GetUnclippedRootFrameBoundsRect();
   int coords[4 * len];
   for (int i = 0; i < len; i++) {
@@ -1262,6 +1290,9 @@ WebContentsAccessibilityAndroid::GetCharacterBoundingBoxes(
         start + i, start + i + 1);
     if (char_bounds.IsEmpty())
       char_bounds = object_bounds;
+
+    char_bounds = gfx::ScaleToEnclosingRect(char_bounds, dip_scale, dip_scale);
+
     coords[4 * i + 0] = char_bounds.x();
     coords[4 * i + 1] = char_bounds.y();
     coords[4 * i + 2] = char_bounds.right();

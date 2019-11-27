@@ -2,13 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-(function() {
-'use strict';
-
 /**
  * @fileoverview 'settings-security-keys-credential-management-dialog' is a
  * dialog for viewing and erasing credentials stored on a security key.
  */
+
+cr.define('settings', function() {
+  /** @enum {string} */
+  const CredentialManagementDialogPage = {
+    INITIAL: 'initial',
+    PIN_PROMPT: 'pinPrompt',
+    CREDENTIALS: 'credentials',
+    ERROR: 'error',
+  };
+
+  return {
+    CredentialManagementDialogPage: CredentialManagementDialogPage,
+  };
+});
+
+(function() {
+'use strict';
+
+const CredentialManagementDialogPage = settings.CredentialManagementDialogPage;
+
 Polymer({
   is: 'settings-security-keys-credential-management-dialog',
 
@@ -20,11 +37,11 @@ Polymer({
   properties: {
     /**
      * The ID of the element currently shown in the dialog.
-     * @private
+     * @private {!settings.CredentialManagementDialogPage}
      */
     dialogPage_: {
       type: String,
-      value: 'initial',
+      value: CredentialManagementDialogPage.INITIAL,
       observer: 'dialogPageChanged_',
     },
 
@@ -59,7 +76,7 @@ Polymer({
     deleteInProgress_: Boolean,
   },
 
-  /** @private {?settings.SecurityKeysBrowserProxy} */
+  /** @private {?settings.SecurityKeysCredentialBrowserProxy} */
   browserProxy_: null,
 
   /** @private {?Set<string>} */
@@ -72,14 +89,15 @@ Polymer({
         'security-keys-credential-management-finished',
         this.onError_.bind(this));
     this.checkedCredentialIds_ = new Set();
-    this.browserProxy_ = settings.SecurityKeysBrowserProxyImpl.getInstance();
+    this.browserProxy_ =
+        settings.SecurityKeysCredentialBrowserProxyImpl.getInstance();
     this.browserProxy_.startCredentialManagement().then(
         this.collectPin_.bind(this));
   },
 
   /** @private */
   collectPin_: function() {
-    this.dialogPage_ = 'pinPrompt';
+    this.dialogPage_ = CredentialManagementDialogPage.PIN_PROMPT;
     this.$.pin.focus();
   },
 
@@ -89,7 +107,7 @@ Polymer({
    */
   onError_: function(error) {
     this.errorMsg_ = error;
-    this.dialogPage_ = 'error';
+    this.dialogPage_ = CredentialManagementDialogPage.ERROR;
   },
 
   /** @private */
@@ -97,16 +115,17 @@ Polymer({
     if (!this.$.pin.validate()) {
       return;
     }
-    this.browserProxy_.credentialManagementProvidePIN(this.$.pin.value)
-        .then((retries) => {
-          if (retries != null) {
-            this.$.pin.showIncorrectPINError(retries);
-            this.collectPin_();
-            return;
-          }
-          this.browserProxy_.credentialManagementEnumerate().then(
-              this.onCredentials_.bind(this));
-        });
+    this.confirmButtonDisabled_ = true;
+    this.browserProxy_.providePIN(this.$.pin.value).then((retries) => {
+      this.confirmButtonDisabled_ = false;
+      if (retries != null) {
+        this.$.pin.showIncorrectPINError(retries);
+        this.collectPin_();
+        return;
+      }
+      this.browserProxy_.enumerateCredentials().then(
+          this.onCredentials_.bind(this));
+    });
   },
 
   /**
@@ -135,37 +154,38 @@ Polymer({
     }
     this.credentials_ = credentials;
     this.$.credentialList.fire('iron-resize');
-    this.dialogPage_ = 'credentials';
+    this.dialogPage_ = CredentialManagementDialogPage.CREDENTIALS;
   },
 
   /** @private */
   dialogPageChanged_: function() {
     switch (this.dialogPage_) {
-      case 'initial':
+      case CredentialManagementDialogPage.INITIAL:
         this.cancelButtonVisible_ = true;
         this.confirmButtonVisible_ = false;
         this.closeButtonVisible_ = false;
         break;
-      case 'pinPrompt':
+      case CredentialManagementDialogPage.PIN_PROMPT:
         this.cancelButtonVisible_ = true;
         this.confirmButtonLabel_ = this.i18n('continue');
         this.confirmButtonDisabled_ = false;
         this.confirmButtonVisible_ = true;
         this.closeButtonVisible_ = false;
         break;
-      case 'credentials':
+      case CredentialManagementDialogPage.CREDENTIALS:
         this.cancelButtonVisible_ = true;
-        this.confirmButtonLabel_ =
-            this.i18n('securityKeysCredentialManagementErase');
+        this.confirmButtonLabel_ = this.i18n('delete');
         this.confirmButtonDisabled_ = true;
         this.confirmButtonVisible_ = true;
         this.closeButtonVisible_ = false;
         break;
-      case 'error':
+      case CredentialManagementDialogPage.ERROR:
         this.cancelButtonVisible_ = false;
         this.confirmButtonVisible_ = false;
         this.closeButtonVisible_ = true;
         break;
+      default:
+        assertNotReached();
     }
     this.fire('credential-management-dialog-ready-for-testing');
   },
@@ -173,10 +193,10 @@ Polymer({
   /** @private */
   confirmButtonClick_: function() {
     switch (this.dialogPage_) {
-      case 'pinPrompt':
+      case CredentialManagementDialogPage.PIN_PROMPT:
         this.submitPIN_();
         break;
-      case 'credentials':
+      case CredentialManagementDialogPage.CREDENTIALS:
         this.deleteSelectedCredentials_();
         break;
       default:
@@ -252,19 +272,18 @@ Polymer({
 
   /** @private */
   deleteSelectedCredentials_: function() {
-    assert(this.dialogPage_ == 'credentials');
+    assert(this.dialogPage_ == CredentialManagementDialogPage.CREDENTIALS);
     assert(this.credentials_ && this.credentials_.length > 0);
     assert(this.checkedCredentialIds_.size > 0);
 
+    this.confirmButtonDisabled_ = true;
     this.deleteInProgress_ = true;
-    this.browserProxy_
-        .credentialManagementDeleteCredentials(
-            Array.from(this.checkedCredentialIds_))
+    this.browserProxy_.deleteCredentials(Array.from(this.checkedCredentialIds_))
         .then((err) => {
+          this.confirmButtonDisabled_ = false;
           this.deleteInProgress_ = false;
           this.onError_(err);
         });
   },
-
 });
 })();

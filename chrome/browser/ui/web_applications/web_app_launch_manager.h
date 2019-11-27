@@ -9,7 +9,9 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/apps/launch_service/launch_manager.h"
 
+namespace apps {
 struct AppLaunchParams;
+}  // namespace apps
 
 namespace web_app {
 
@@ -23,6 +25,9 @@ class WebAppLaunchManager : public apps::LaunchManager {
   ~WebAppLaunchManager() override;
 
   // apps::LaunchManager:
+  content::WebContents* OpenApplication(
+      const apps::AppLaunchParams& params) override;
+
   bool OpenApplicationWindow(const std::string& app_id,
                              const base::CommandLine& command_line,
                              const base::FilePath& current_directory) override;
@@ -30,7 +35,7 @@ class WebAppLaunchManager : public apps::LaunchManager {
   bool OpenApplicationTab(const std::string& app_id) override;
 
  private:
-  void OpenWebApplication(const AppLaunchParams& params);
+  void OpenWebApplication(const apps::AppLaunchParams& params);
 
   WebAppProvider* const provider_;
 

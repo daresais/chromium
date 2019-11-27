@@ -23,7 +23,7 @@
 #include "media/base/limits.h"
 #include "media/base/video_util.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/web/modules/mediastream/video_track_adapter_settings.h"
+#include "third_party/blink/renderer/modules/mediastream/video_track_adapter_settings.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 
@@ -70,11 +70,6 @@ struct ComputedSettings {
   base::TimeTicks new_frame_rate_timestamp;
   base::TimeTicks last_update_timestamp;
 };
-
-// Empty method used for keeping a reference to the original media::VideoFrame
-// in VideoFrameResolutionAdapter::DeliverFrame if cropping is needed.
-// The reference to |frame| is kept in the closure that calls this method.
-void TrackReleaseOriginalFrame(scoped_refptr<media::VideoFrame> frame) {}
 
 int ClampToValidDimension(int dimension) {
   return std::min(static_cast<int>(media::limits::kMaxDimension),
@@ -265,7 +260,7 @@ void VideoTrackAdapter::VideoFrameResolutionAdapter::AddCallbacks(
   VideoTrackCallbacks track_callbacks = {std::move(frame_callback),
                                          std::move(settings_callback),
                                          std::move(format_callback)};
-  callbacks_.insert({track, std::move(track_callbacks)});
+  callbacks_.emplace(track, std::move(track_callbacks));
 }
 
 void VideoTrackAdapter::VideoFrameResolutionAdapter::RemoveCallbacks(
@@ -317,9 +312,15 @@ void VideoTrackAdapter::VideoFrameResolutionAdapter::DeliverFrame(
     return;
   }
 
-  // TODO(perkj): Allow cropping / scaling of textures once
-  // https://crbug/362521 is fixed.
-  if (frame->HasTextures()) {
+  // If the frame is a texture not backed up by GPU memory we don't apply
+  // cropping/scaling and deliver the frame as-is, leaving it up to the
+  // destination to rescale it. Otherwise, cropping and scaling is soft-applied
+  // before delivery for efficiency.
+  //
+  // TODO(crbug.com/362521): Allow cropping/scaling of non-GPU memory backed
+  // textures.
+  if (frame->HasTextures() &&
+      frame->storage_type() != media::VideoFrame::STORAGE_GPU_MEMORY_BUFFER) {
     DoDeliverFrame(std::move(frame), estimated_capture_time);
     return;
   }
@@ -337,15 +338,13 @@ void VideoTrackAdapter::VideoFrameResolutionAdapter::DeliverFrame(
         media::ComputeLetterboxRegion(frame->visible_rect(), desired_size);
 
     video_frame = media::VideoFrame::WrapVideoFrame(
-        *frame, frame->format(), region_in_frame, desired_size);
+        frame, frame->format(), region_in_frame, desired_size);
     if (!video_frame) {
       PostFrameDroppedToMainTaskRunner(
           media::VideoCaptureFrameDropReason::
               kResolutionAdapterWrappingFrameForCroppingFailed);
       return;
     }
-    video_frame->AddDestructionObserver(ConvertToBaseOnceCallback(
-        CrossThreadBindOnce(&TrackReleaseOriginalFrame, frame)));
 
     DVLOG(3) << "desired size  " << desired_size.ToString()
              << " output natural size "

@@ -87,35 +87,6 @@ FontRenderParams& GetFontRenderParams() {
 
 }  // namespace
 
-VizMainWrapper::VizMainWrapper(
-    mojo::PendingAssociatedRemote<mojom::VizMain> viz_main)
-    : viz_main_(std::move(viz_main)) {}
-
-VizMainWrapper::~VizMainWrapper() = default;
-
-void VizMainWrapper::CreateGpuService(
-    mojo::PendingReceiver<mojom::GpuService> receiver,
-    mojo::PendingRemote<mojom::GpuHost> gpu_host,
-    discardable_memory::mojom::DiscardableSharedMemoryManagerPtr
-        discardable_memory_manager,
-    mojo::ScopedSharedBufferHandle activity_flags,
-    gfx::FontRenderParams::SubpixelRendering subpixel_rendering) {
-  viz_main_->CreateGpuService(std::move(receiver), std::move(gpu_host),
-                              std::move(discardable_memory_manager),
-                              std::move(activity_flags), subpixel_rendering);
-}
-
-#if defined(USE_VIZ_DEVTOOLS)
-void VizMainWrapper::CreateVizDevTools(mojom::VizDevToolsParamsPtr params) {
-  viz_main_->CreateVizDevTools(std::move(params));
-}
-#endif
-
-void VizMainWrapper::CreateFrameSinkManager(
-    mojom::FrameSinkManagerParamsPtr params) {
-  viz_main_->CreateFrameSinkManager(std::move(params));
-}
-
 GpuHostImpl::InitParams::InitParams() = default;
 
 GpuHostImpl::InitParams::InitParams(InitParams&&) = default;
@@ -123,25 +94,25 @@ GpuHostImpl::InitParams::InitParams(InitParams&&) = default;
 GpuHostImpl::InitParams::~InitParams() = default;
 
 GpuHostImpl::GpuHostImpl(Delegate* delegate,
-                         std::unique_ptr<VizMainWrapper> viz_main_ptr,
+                         mojo::PendingAssociatedRemote<mojom::VizMain> viz_main,
                          InitParams params)
     : delegate_(delegate),
-      viz_main_ptr_(std::move(viz_main_ptr)),
+      viz_main_(std::move(viz_main)),
       params_(std::move(params)),
       host_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
   DCHECK(delegate_);
 
-  discardable_memory::mojom::DiscardableSharedMemoryManagerPtr
-      discardable_manager_ptr;
-  auto discardable_request = mojo::MakeRequest(&discardable_manager_ptr);
-  delegate_->BindDiscardableMemoryRequest(std::move(discardable_request));
+  mojo::PendingRemote<discardable_memory::mojom::DiscardableSharedMemoryManager>
+      discardable_manager_remote;
+  delegate_->BindDiscardableMemoryReceiver(
+      discardable_manager_remote.InitWithNewPipeAndPassReceiver());
 
   DCHECK(GetFontRenderParams().Get());
-  viz_main_ptr_->CreateGpuService(
-      gpu_service_remote_.BindNewPipeAndPassReceiver(),
-      gpu_host_receiver_.BindNewPipeAndPassRemote(),
-      std::move(discardable_manager_ptr), activity_flags_.CloneHandle(),
-      GetFontRenderParams().Get()->subpixel_rendering);
+  viz_main_->CreateGpuService(gpu_service_remote_.BindNewPipeAndPassReceiver(),
+                              gpu_host_receiver_.BindNewPipeAndPassRemote(),
+                              std::move(discardable_manager_remote),
+                              activity_flags_.CloneHandle(),
+                              GetFontRenderParams().Get()->subpixel_rendering);
 
 #if defined(USE_OZONE)
   InitOzone();
@@ -164,7 +135,7 @@ void GpuHostImpl::ResetFontRenderParams() {
   GetFontRenderParams().Reset();
 }
 
-void GpuHostImpl::OnProcessLaunched(base::ProcessId pid) {
+void GpuHostImpl::SetProcessId(base::ProcessId pid) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(base::kNullProcessId, pid_);
   DCHECK_NE(base::kNullProcessId, pid);
@@ -205,8 +176,8 @@ void GpuHostImpl::BlockLiveOffscreenContexts() {
 }
 
 void GpuHostImpl::ConnectFrameSinkManager(
-    mojom::FrameSinkManagerRequest request,
-    mojom::FrameSinkManagerClientPtrInfo client) {
+    mojo::PendingReceiver<mojom::FrameSinkManager> receiver,
+    mojo::PendingRemote<mojom::FrameSinkManagerClient> client) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   TRACE_EVENT0("gpu", "GpuHostImpl::ConnectFrameSinkManager");
 
@@ -217,14 +188,14 @@ void GpuHostImpl::ConnectFrameSinkManager(
       params_.deadline_to_synchronize_surfaces.has_value();
   params->activation_deadline_in_frames =
       params_.deadline_to_synchronize_surfaces.value_or(0u);
-  params->frame_sink_manager = std::move(request);
+  params->frame_sink_manager = std::move(receiver);
   params->frame_sink_manager_client = std::move(client);
-  viz_main_ptr_->CreateFrameSinkManager(std::move(params));
+  viz_main_->CreateFrameSinkManager(std::move(params));
 }
 
-#if defined(USE_VIZ_DEVTOOLS)
+#if BUILDFLAG(USE_VIZ_DEVTOOLS)
 void GpuHostImpl::ConnectVizDevTools(mojom::VizDevToolsParamsPtr params) {
-  viz_main_ptr_->CreateVizDevTools(std::move(params));
+  viz_main_->CreateVizDevTools(std::move(params));
 }
 #endif
 
@@ -301,6 +272,7 @@ mojom::GpuService* GpuHostImpl::gpu_service() {
 }
 
 #if defined(USE_OZONE)
+
 void GpuHostImpl::InitOzone() {
   // Ozone needs to send the primary DRM device to GPU service as early as
   // possible to ensure the latter always has a valid device.
@@ -309,9 +281,8 @@ void GpuHostImpl::InitOzone() {
   // The Ozone/Wayland requires mojo communication to be established to be
   // functional with a separate gpu process. Thus, using the PlatformProperties,
   // check if there is such a requirement.
-  if (features::IsOzoneDrmMojo() || ui::OzonePlatform::EnsureInstance()
-                                        ->GetPlatformProperties()
-                                        .requires_mojo) {
+  if (features::IsOzoneDrmMojo() ||
+      ui::OzonePlatform::GetInstance()->GetPlatformProperties().requires_mojo) {
     // TODO(rjkroege): Remove the legacy IPC code paths when no longer
     // necessary. https://crbug.com/806092
     auto interface_binder = base::BindRepeating(&GpuHostImpl::BindInterface,
@@ -453,10 +424,9 @@ void GpuHostImpl::DidInitialize(
     if (oopd_enabled)
       CreateChannelCache(gpu::kInProcessCommandBufferClientId);
 
-    bool use_gr_shader_cache =
-        base::FeatureList::IsEnabled(
-            features::kDefaultEnableOopRasterization) ||
-        base::FeatureList::IsEnabled(features::kUseSkiaRenderer);
+    bool use_gr_shader_cache = base::FeatureList::IsEnabled(
+                                   features::kDefaultEnableOopRasterization) ||
+                               features::IsUsingSkiaRenderer();
     if (use_gr_shader_cache)
       CreateChannelCache(gpu::kGrShaderCacheClientId);
   }

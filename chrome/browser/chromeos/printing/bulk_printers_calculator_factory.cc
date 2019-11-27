@@ -4,48 +4,27 @@
 
 #include "chrome/browser/chromeos/printing/bulk_printers_calculator_factory.h"
 
-#include "base/lazy_instance.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/chromeos/printing/bulk_printers_calculator.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/profiles/profile.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
 
 namespace chromeos {
 
-namespace {
-
-base::LazyInstance<BulkPrintersCalculatorFactory>::DestructorAtExit
-    g_printers_factory = LAZY_INSTANCE_INITIALIZER;
-
-}  // namespace
-
 // static
 BulkPrintersCalculatorFactory* BulkPrintersCalculatorFactory::Get() {
-  return g_printers_factory.Pointer();
+  static base::NoDestructor<BulkPrintersCalculatorFactory> instance;
+  return instance.get();
 }
 
 base::WeakPtr<BulkPrintersCalculator>
 BulkPrintersCalculatorFactory::GetForAccountId(const AccountId& account_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  auto found = printers_by_user_.find(account_id);
-  if (found != printers_by_user_.end()) {
-    return found->second->AsWeakPtr();
-  }
-
-  printers_by_user_[account_id] = BulkPrintersCalculator::Create();
+  auto it = printers_by_user_.find(account_id);
+  if (it != printers_by_user_.end())
+    return it->second->AsWeakPtr();
+  printers_by_user_.emplace(account_id, BulkPrintersCalculator::Create());
   return printers_by_user_[account_id]->AsWeakPtr();
-}
-
-base::WeakPtr<BulkPrintersCalculator>
-BulkPrintersCalculatorFactory::GetForProfile(Profile* profile) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  const user_manager::User* user =
-      ProfileHelper::Get()->GetUserByProfile(profile);
-  if (!user)
-    return nullptr;
-
-  return GetForAccountId(user->GetAccountId());
 }
 
 void BulkPrintersCalculatorFactory::RemoveForUserId(
@@ -57,18 +36,15 @@ void BulkPrintersCalculatorFactory::RemoveForUserId(
 base::WeakPtr<BulkPrintersCalculator>
 BulkPrintersCalculatorFactory::GetForDevice() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!device_printers_)
-    device_printers_ = BulkPrintersCalculator::Create();
+  if (device_printers_)
+    return device_printers_->AsWeakPtr();
+  device_printers_ = BulkPrintersCalculator::Create();
   return device_printers_->AsWeakPtr();
 }
 
-void BulkPrintersCalculatorFactory::ShutdownProfiles() {
+void BulkPrintersCalculatorFactory::Shutdown() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   printers_by_user_.clear();
-}
-
-void BulkPrintersCalculatorFactory::ShutdownForDevice() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   device_printers_.reset();
 }
 

@@ -11,7 +11,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/metrics/renderer_uptime_tracker.h"
 #include "components/ukm/test_ukm_recorder.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -145,7 +145,7 @@ void PopulateBrowserMetrics(GlobalMemoryDumpPtr& global_dump,
   // have a UKM value set for them, so don't appear in metrics_mb.
   SetAllocatorDumpMetric(pmd, "gpu/gl", "effective_size",
                          kGpuCommandBufferMB * 1024 * 1024);
-  SetAllocatorDumpMetric(pmd, "gpu/shared-images", "effective_size",
+  SetAllocatorDumpMetric(pmd, "gpu/shared_images", "effective_size",
                          kGpuSharedImagesSizeMB * 1024 * 1024);
   SetAllocatorDumpMetric(pmd, "skia/gpu_resources", "effective_size",
                          kGpuSkiaGpuResourcesMB * 1024 * 1024);
@@ -179,8 +179,7 @@ MetricMap GetExpectedBrowserMetrics() {
 #if defined(OS_LINUX) || defined(OS_ANDROID)
             {"PrivateSwapFootprint", 50},
 #endif
-      },
-      base::KEEP_FIRST_OF_DUPES);
+      });
 }
 
 void PopulateRendererMetrics(GlobalMemoryDumpPtr& global_dump,
@@ -375,8 +374,7 @@ MetricMap GetExpectedRendererMetrics() {
             {"NumberOfDocuments", 1}, {"NumberOfFrames", 2},
             {"NumberOfLayoutObjects", 5}, {"NumberOfNodes", 3},
             {"PartitionAlloc.Partitions.ArrayBuffer", 10},
-      },
-      base::KEEP_FIRST_OF_DUPES);
+      });
 }
 
 void AddPageMetrics(MetricMap& expected_metrics) {
@@ -396,7 +394,7 @@ void PopulateGpuMetrics(GlobalMemoryDumpPtr& global_dump,
                          metrics_mb["CommandBuffer"] * 1024 * 1024);
   // These two categories are required for total gpu memory, but do not
   // have a UKM value set for them, so don't appear in metrics_mb.
-  SetAllocatorDumpMetric(pmd, "gpu/shared-images", "effective_size",
+  SetAllocatorDumpMetric(pmd, "gpu/shared_images", "effective_size",
                          kGpuSharedImagesSizeMB * 1024 * 1024);
   SetAllocatorDumpMetric(pmd, "skia/gpu_resources", "effective_size",
                          kGpuSkiaGpuResourcesMB * 1024 * 1024);
@@ -431,8 +429,7 @@ MetricMap GetExpectedGpuMetrics() {
 #if defined(OS_LINUX) || defined(OS_ANDROID)
             {"PrivateSwapFootprint", 50},
 #endif
-      },
-      base::KEEP_FIRST_OF_DUPES);
+      });
 }
 
 void PopulateAudioServiceMetrics(GlobalMemoryDumpPtr& global_dump,
@@ -471,8 +468,7 @@ MetricMap GetExpectedAudioServiceMetrics() {
 #if defined(OS_LINUX) || defined(OS_ANDROID)
             {"PrivateSwapFootprint", 50},
 #endif
-      },
-      base::KEEP_FIRST_OF_DUPES);
+      });
 }
 
 void PopulateMetrics(GlobalMemoryDumpPtr& global_dump,
@@ -618,7 +614,7 @@ class ProcessMemoryMetricsEmitterTest
     EXPECT_EQ(expected.size() + expected_total_memory_entries, entries.size());
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder_;
 
  private:

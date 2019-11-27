@@ -89,7 +89,7 @@ SerializedScriptValue* History::state(ExceptionState& exception_state) {
 }
 
 SerializedScriptValue* History::StateInternal() const {
-  if (!GetFrame())
+  if (!GetFrame() || !GetFrame()->Loader().GetDocumentLoader())
     return nullptr;
 
   if (HistoryItem* history_item =
@@ -195,6 +195,8 @@ void History::go(ScriptState* script_state,
     return;
 
   if (delta) {
+    if (Page* page = GetFrame()->GetPage())
+      page->HistoryNavigationVirtualTimePauser().PauseVirtualTime();
     GetFrame()->Client()->NavigateBackForward(delta);
   } else {
     // We intentionally call reload() for the current frame if delta is zero.

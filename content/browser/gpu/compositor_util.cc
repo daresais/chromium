@@ -27,13 +27,15 @@
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "gpu/config/gpu_blacklist.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/config/gpu_blocklist.h"
 #include "gpu/config/gpu_driver_bug_list.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/config/gpu_switches.h"
 #include "gpu/ipc/host/gpu_memory_buffer_support.h"
+#include "gpu/vulkan/buildflags.h"
 #include "media/media_buildflags.h"
 #include "ui/gl/gl_switches.h"
 
@@ -88,27 +90,13 @@ gpu::GpuFeatureStatus SafeGetFeatureStatus(
 }
 
 gpu::GpuFeatureStatus GetGpuCompositingStatus(
-    const gpu::GpuFeatureInfo& gpu_feature_info,
-    GpuFeatureInfoType type) {
-  gpu::GpuFeatureStatus status = SafeGetFeatureStatus(
-      gpu_feature_info, gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING);
-#if defined(USE_AURA) || defined(OS_MACOSX)
-  if (type == GpuFeatureInfoType::kCurrent &&
-      status == gpu::kGpuFeatureStatusEnabled &&
-      ImageTransportFactory::GetInstance()->IsGpuCompositingDisabled()) {
-    // We only adjust the status for kCurrent, because compositing status
-    // affects other feature status, and we want to preserve the kHardwareGpu
-    // feature status and don't want them to be modified by the current
-    // compositing status.
-    status = gpu::kGpuFeatureStatusDisabled;
-  }
-#endif
-  return status;
+    const gpu::GpuFeatureInfo& gpu_feature_info) {
+  return SafeGetFeatureStatus(gpu_feature_info,
+                              gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING);
 }
 
 const GpuFeatureData GetGpuFeatureData(
     const gpu::GpuFeatureInfo& gpu_feature_info,
-    GpuFeatureInfoType type,
     size_t index,
     bool* eof) {
   const base::CommandLine& command_line =
@@ -123,7 +111,7 @@ const GpuFeatureData GetGpuFeatureData(
          "Accelerated 2D canvas is unavailable: either disabled "
          "via blacklist or the command line."),
      true},
-    {"gpu_compositing", GetGpuCompositingStatus(gpu_feature_info, type),
+    {"gpu_compositing", GetGpuCompositingStatus(gpu_feature_info),
      command_line.HasSwitch(switches::kDisableGpuCompositing),
      DisableInfo::Problem(
          "Gpu compositing has been disabled, either via blacklist, about:flags "
@@ -194,6 +182,13 @@ const GpuFeatureData GetGpuFeatureData(
      !base::FeatureList::IsEnabled(features::kMetal) /* disabled */,
      DisableInfo::NotProblem(), false /* fallback_to_software */},
 #endif
+#if BUILDFLAG(ENABLE_VULKAN)
+    {"vulkan",
+     SafeGetFeatureStatus(gpu_feature_info, gpu::GPU_FEATURE_TYPE_VULKAN),
+     !base::FeatureList::IsEnabled(features::kVulkan) &&
+         !command_line.HasSwitch(switches::kUseVulkan) /* disabled */,
+     DisableInfo::NotProblem(), false /* fallback_to_software */},
+#endif
     {"multiple_raster_threads", gpu::kGpuFeatureStatusEnabled,
      NumberOfRendererRasterThreads() == 1,
      DisableInfo::Problem("Raster is using a single thread."), false},
@@ -244,7 +239,7 @@ std::unique_ptr<base::DictionaryValue> GetFeatureStatusImpl(
   bool eof = false;
   for (size_t i = 0; !eof; ++i) {
     const GpuFeatureData gpu_feature_data =
-        GetGpuFeatureData(gpu_feature_info, type, i, &eof);
+        GetGpuFeatureData(gpu_feature_info, i, &eof);
     std::string status;
     // Features undergoing a finch controlled roll out.
     if (gpu_feature_data.name == "viz_display_compositor" ||
@@ -266,7 +261,7 @@ std::unique_ptr<base::DictionaryValue> GetFeatureStatusImpl(
       status = "enabled";
       if ((gpu_feature_data.name == "webgl" ||
            gpu_feature_data.name == "webgl2") &&
-          (GetGpuCompositingStatus(gpu_feature_info, type) !=
+          (GetGpuCompositingStatus(gpu_feature_info) !=
            gpu::kGpuFeatureStatusEnabled))
         status += "_readback";
       if (gpu_feature_data.name == "rasterization") {
@@ -281,6 +276,7 @@ std::unique_ptr<base::DictionaryValue> GetFeatureStatusImpl(
         status += "_on";
       }
       if (gpu_feature_data.name == "metal" ||
+          gpu_feature_data.name == "vulkan" ||
           gpu_feature_data.name == "surface_control") {
         status += "_on";
       }
@@ -302,7 +298,7 @@ std::unique_ptr<base::ListValue> GetProblemsImpl(GpuFeatureInfoType type) {
 
   auto problem_list = std::make_unique<base::ListValue>();
   if (!gpu_feature_info.applied_gpu_blacklist_entries.empty()) {
-    std::unique_ptr<gpu::GpuBlacklist> blacklist(gpu::GpuBlacklist::Create());
+    std::unique_ptr<gpu::GpuBlocklist> blacklist(gpu::GpuBlocklist::Create());
     blacklist->GetReasons(problem_list.get(), "disabledFeatures",
                           gpu_feature_info.applied_gpu_blacklist_entries);
   }
@@ -328,7 +324,7 @@ std::unique_ptr<base::ListValue> GetProblemsImpl(GpuFeatureInfoType type) {
   bool eof = false;
   for (size_t i = 0; !eof; ++i) {
     const GpuFeatureData gpu_feature_data =
-        GetGpuFeatureData(gpu_feature_info, type, i, &eof);
+        GetGpuFeatureData(gpu_feature_info, i, &eof);
     if (gpu_feature_data.disabled &&
         gpu_feature_data.disabled_info.is_problem) {
       auto problem = std::make_unique<base::DictionaryValue>();

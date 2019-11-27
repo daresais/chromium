@@ -10,13 +10,14 @@ import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
 import android.util.Pair;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
 import android.widget.FrameLayout;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -39,6 +40,7 @@ import org.chromium.chrome.browser.compositor.layouts.phone.stack.Stack;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.StackTab;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.compositor.scene_layer.TabListSceneLayer;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.tab.Tab;
@@ -46,7 +48,6 @@ import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.LocalizationUtils;
@@ -589,11 +590,6 @@ public abstract class StackLayoutBase extends Layout {
         Stack stack = getTabStackForTabId(id);
         if (stack == null) return;
         stack.tabClosingEffect(time, id);
-    }
-
-    @Override
-    public void onTabsAllClosing(long time, boolean incognito) {
-        super.onTabsAllClosing(time, incognito);
     }
 
     @Override
@@ -1589,7 +1585,7 @@ public abstract class StackLayoutBase extends Layout {
 
         mSceneLayer.pushLayers(getContext(), viewport, contentViewport, this, layerTitleCache,
                 tabContentManager, resourceManager, fullscreenManager,
-                SceneLayer.INVALID_RESOURCE_ID, 0);
+                SceneLayer.INVALID_RESOURCE_ID, 0, 0);
     }
 
     /**
@@ -1641,11 +1637,6 @@ public abstract class StackLayoutBase extends Layout {
                 mLayoutAnimations.get(i).first.cancel();
             }
         }
-    }
-
-    @Override
-    public void destroy() {
-        super.destroy();
     }
 
     @Override

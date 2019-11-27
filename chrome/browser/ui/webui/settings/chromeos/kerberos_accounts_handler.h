@@ -77,9 +77,9 @@ class KerberosAccountsHandler : public ::settings::SettingsPageUIHandler,
   // This class keeps track of that and removes this instance on destruction.
   ScopedObserver<KerberosCredentialsManager,
                  KerberosCredentialsManager::Observer>
-      credentials_manager_observer_;
+      credentials_manager_observer_{this};
 
-  base::WeakPtrFactory<KerberosAccountsHandler> weak_factory_;
+  base::WeakPtrFactory<KerberosAccountsHandler> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(KerberosAccountsHandler);
 };

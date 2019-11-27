@@ -5,6 +5,7 @@ per-file flag_descriptions.*=*
 per-file flag-metadata.json=*
 
 per-file about_flags_unittest.cc=file://components/flags_ui/OWNERS
+per-file about_flags_browsertest.cc=file://components/flags_ui/OWNERS
 
 # This is for the common case of adding or renaming files. If you're doing
 # structural changes, use usual OWNERS rules.
@@ -14,6 +15,7 @@ per-file BUILD.gn=*
 per-file *.xtb=file://tools/translation/TRANSLATION_OWNERS
 
 per-file *_android.*=file://chrome/browser/android/OWNERS
+per-file *.java=file://chrome/browser/android/OWNERS
 
 per-file browser_resources.grd=file://ui/webui/PLATFORM_OWNERS
 
@@ -48,10 +50,6 @@ per-file exo_parts.*=reveman@chromium.org
 per-file flag-never-expire-list.json=avi@chromium.org
 per-file flag-never-expire-list.json=ellyjones@chromium.org
 
-per-file io_thread*=mmenke@chromium.org
-per-file io_thread*=rch@chromium.org
-per-file io_thread*=rsleevi@chromium.org
-
 per-file *.mm=avi@chromium.org
 per-file *.mm=mark@chromium.org
 per-file *.mm=rsesek@chromium.org
@@ -69,3 +67,14 @@ per-file shell_integration_linux*=thomasanderson@chromium.org
 per-file unload_browsertest.cc=file://content/OWNERS
 
 per-file web_bluetooth*=file://content/browser/bluetooth/OWNERS
+
+# For security review.
+per-file chrome_browser_interface_binders.cc=set noparent
+per-file chrome_browser_interface_binders.cc=file://ipc/SECURITY_OWNERS
+per-file chrome_content_browser_client_receiver_bindings.cc=set noparent
+per-file chrome_content_browser_client_receiver_bindings.cc=file://ipc/SECURITY_OWNERS
+
+# BackForwardCache
+per-file chrome_back_forward_cache_browsertest.cc=arthursonzogni@chromium.org
+per-file chrome_back_forward_cache_browsertest.cc=altimin@chromium.org
+per-file chrome_back_forward_cache_browsertest.cc=file://content/OWNERS

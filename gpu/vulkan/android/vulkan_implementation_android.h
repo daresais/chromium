@@ -50,7 +50,8 @@ class COMPONENT_EXPORT(VULKAN_ANDROID) VulkanImplementationAndroid
       VkImage* vk_image,
       VkImageCreateInfo* vk_image_info,
       VkDeviceMemory* vk_device_memory,
-      VkDeviceSize* mem_allocation_size) override;
+      VkDeviceSize* mem_allocation_size,
+      base::Optional<VulkanYCbCrInfo>* ycbcr_info) override;
   bool CreateVkImageAndImportAHB(
       const VkDevice& vk_device,
       const VkPhysicalDevice& vk_physical_device,
@@ -68,8 +69,6 @@ class COMPONENT_EXPORT(VULKAN_ANDROID) VulkanImplementationAndroid
 
  private:
   VulkanInstance vulkan_instance_;
-
-  PFN_vkCreateAndroidSurfaceKHR vkCreateAndroidSurfaceKHR_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(VulkanImplementationAndroid);
 };

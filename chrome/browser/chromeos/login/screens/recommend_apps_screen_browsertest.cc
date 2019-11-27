@@ -13,7 +13,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
-#include "chrome/browser/chromeos/login/mixin_based_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/recommend_apps/recommend_apps_fetcher.h"
 #include "chrome/browser/chromeos/login/screens/recommend_apps/recommend_apps_fetcher_delegate.h"
@@ -26,6 +25,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/recommend_apps_screen_handler.h"
+#include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "components/arc/arc_prefs.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/test/browser_test_utils.h"
@@ -69,7 +69,7 @@ class FakeRecommendAppsFetcher : public RecommendAppsFetcher {
     EXPECT_TRUE(started_);
     base::Value app_list(base::Value::Type::LIST);
     for (const auto& app : apps) {
-      app_list.GetList().emplace_back(app.ToValue());
+      app_list.Append(app.ToValue());
     }
     delegate_->OnLoadSuccess(app_list);
   }
@@ -296,8 +296,8 @@ IN_PROC_BROWSER_TEST_F(RecommendAppsScreenTest, BasicSelection) {
   ASSERT_TRUE(fast_reinstall_packages);
 
   base::Value expected_pref_value(base::Value::Type::LIST);
-  expected_pref_value.GetList().emplace_back("test.app.foo.app1");
-  expected_pref_value.GetList().emplace_back("test.app.foo.app2");
+  expected_pref_value.Append("test.app.foo.app1");
+  expected_pref_value.Append("test.app.foo.app2");
   EXPECT_EQ(expected_pref_value, *fast_reinstall_packages);
 }
 
@@ -369,7 +369,7 @@ IN_PROC_BROWSER_TEST_F(RecommendAppsScreenTest, SelectionChange) {
   ASSERT_TRUE(fast_reinstall_packages);
 
   base::Value expected_pref_value(base::Value::Type::LIST);
-  expected_pref_value.GetList().emplace_back("test.app.foo.app2");
+  expected_pref_value.Append("test.app.foo.app2");
   EXPECT_EQ(expected_pref_value, *fast_reinstall_packages);
 }
 
@@ -557,8 +557,7 @@ IN_PROC_BROWSER_TEST_F(RecommendAppsScreenTest, InstallWithNoAppsSelected) {
   EXPECT_EQ(base::Value(base::Value::Type::LIST), *fast_reinstall_packages);
 }
 
-// Disabled due to flakiness: https://crbug.com/982161
-IN_PROC_BROWSER_TEST_F(RecommendAppsScreenTest, DISABLED_NoRecommendedApps) {
+IN_PROC_BROWSER_TEST_F(RecommendAppsScreenTest, NoRecommendedApps) {
   recommend_apps_screen_->Show();
 
   OobeScreenWaiter screen_waiter(RecommendAppsScreenView::kScreenId);
@@ -587,8 +586,7 @@ IN_PROC_BROWSER_TEST_F(RecommendAppsScreenTest, DISABLED_NoRecommendedApps) {
 
   test::OobeJS().CreateDisplayedWaiter(true, skip_button)->Wait();
   test::OobeJS().ExpectEnabledPath(skip_button);
-  test::OobeJS().ExpectPathDisplayed(false, install_button);
-  test::OobeJS().ExpectPathDisplayed(false, retry_button);
+  test::OobeJS().ExpectDisabledPath(install_button);
   test::OobeJS().ExpectPathDisplayed(false, retry_button);
 
   test::OobeJS().TapOnPath(skip_button);

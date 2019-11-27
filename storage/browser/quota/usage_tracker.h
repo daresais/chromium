@@ -88,7 +88,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) UsageTracker
   void AccumulateClientGlobalUsage(AccumulateInfo* info,
                                    int64_t usage,
                                    int64_t unlimited_usage);
-  void AccumulateClientHostUsage(const base::Closure& barrier,
+  void AccumulateClientHostUsage(base::OnceClosure callback,
                                  AccumulateInfo* info,
                                  const std::string& host,
                                  QuotaClient::ID client,
@@ -107,7 +107,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) UsageTracker
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<UsageTracker> weak_factory_;
+  base::WeakPtrFactory<UsageTracker> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(UsageTracker);
 };
 

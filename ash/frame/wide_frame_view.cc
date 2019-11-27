@@ -99,9 +99,9 @@ WideFrameView::WideFrameView(views::Widget* target)
   params.name = "WideFrameView";
   params.parent = target->GetNativeWindow();
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
 
-  widget_->Init(params);
+  widget_->Init(std::move(params));
 
   aura::Window* window = widget_->GetNativeWindow();
   // Overview normally clips the caption container which exists on the same
@@ -145,8 +145,8 @@ void WideFrameView::OnMouseEvent(ui::MouseEvent* event) {
     if ((event->flags() & ui::EF_IS_DOUBLE_CLICK)) {
       base::RecordAction(
           base::UserMetricsAction("Caption_ClickTogglesMaximize"));
-      const wm::WMEvent wm_event(wm::WM_EVENT_TOGGLE_MAXIMIZE_CAPTION);
-      wm::GetWindowState(target_->GetNativeWindow())->OnWMEvent(&wm_event);
+      const WMEvent wm_event(WM_EVENT_TOGGLE_MAXIMIZE_CAPTION);
+      WindowState::Get(target_->GetNativeWindow())->OnWMEvent(&wm_event);
     }
     event->SetHandled();
   }

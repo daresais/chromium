@@ -8,10 +8,11 @@ import android.os.Bundle;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.PreferenceFragmentCompat;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 
 /**
  * Fragment that allows the user to configure homepage related preferences.
@@ -28,19 +29,22 @@ public class HomepagePreferences extends PreferenceFragmentCompat {
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         mHomepageManager = HomepageManager.getInstance();
 
-        getActivity().setTitle(FeatureUtilities.isNewTabPageButtonEnabled()
-                        ? R.string.options_startup_page_title
-                        : R.string.options_homepage_title);
+        getActivity().setTitle(R.string.options_homepage_title);
         PreferenceUtils.addPreferencesFromResource(this, R.xml.homepage_preferences);
 
-        ChromeSwitchPreferenceCompat mHomepageSwitch =
-                (ChromeSwitchPreferenceCompat) findPreference(PREF_HOMEPAGE_SWITCH);
-        boolean isHomepageEnabled = mHomepageManager.getPrefHomepageEnabled();
-        mHomepageSwitch.setChecked(isHomepageEnabled);
-        mHomepageSwitch.setOnPreferenceChangeListener((preference, newValue) -> {
-            mHomepageManager.setPrefHomepageEnabled((boolean) newValue);
-            return true;
-        });
+        ChromeSwitchPreference homepageSwitch =
+                (ChromeSwitchPreference) findPreference(PREF_HOMEPAGE_SWITCH);
+
+        if (FeatureUtilities.isBottomToolbarEnabled()) {
+            homepageSwitch.setVisible(false);
+        } else {
+            boolean isHomepageEnabled = mHomepageManager.getPrefHomepageEnabled();
+            homepageSwitch.setChecked(isHomepageEnabled);
+            homepageSwitch.setOnPreferenceChangeListener((preference, newValue) -> {
+                mHomepageManager.setPrefHomepageEnabled((boolean) newValue);
+                return true;
+            });
+        }
 
         mHomepageEdit = findPreference(PREF_HOMEPAGE_EDIT);
         updateCurrentHomepageUrl();

@@ -4,15 +4,14 @@
 
 package org.chromium.chrome.browser.preferences.sync;
 
-import android.app.DialogFragment;
-import android.app.FragmentManager;
-import android.app.FragmentTransaction;
 import android.content.Context;
 import android.os.Bundle;
-import android.preference.CheckBoxPreference;
-import android.preference.Preference;
-import android.preference.PreferenceFragment;
-import android.support.annotation.Nullable;
+import android.support.v4.app.DialogFragment;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentTransaction;
+import android.support.v7.preference.CheckBoxPreference;
+import android.support.v7.preference.Preference;
+import android.support.v7.preference.PreferenceFragmentCompat;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
@@ -20,15 +19,16 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
-import org.chromium.chrome.browser.invalidation.InvalidationController;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -38,7 +38,7 @@ import org.chromium.chrome.browser.sync.ui.PassphraseDialogFragment;
 import org.chromium.chrome.browser.sync.ui.PassphraseTypeDialogFragment;
 import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.components.sync.ModelType;
-import org.chromium.components.sync.Passphrase;
+import org.chromium.components.sync.PassphraseType;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.util.HashSet;
@@ -48,7 +48,7 @@ import java.util.Set;
  * Settings fragment to customize Sync options (data types, encryption). Can be accessed from
  * {@link SyncAndServicesPreferences}.
  */
-public class ManageSyncPreferences extends PreferenceFragment
+public class ManageSyncPreferences extends PreferenceFragmentCompat
         implements PassphraseDialogFragment.Listener, PassphraseCreationDialogFragment.Listener,
                    PassphraseTypeDialogFragment.Listener, Preference.OnPreferenceChangeListener,
                    ProfileSyncService.SyncStateChangedListener {
@@ -59,17 +59,28 @@ public class ManageSyncPreferences extends PreferenceFragment
     @VisibleForTesting
     public static final String FRAGMENT_PASSPHRASE_TYPE = "password_type";
 
-    private static final String PREF_SYNC_EVERYTHING = "sync_everything";
-    private static final String PREF_SYNC_AUTOFILL = "sync_autofill";
-    private static final String PREF_SYNC_BOOKMARKS = "sync_bookmarks";
-    private static final String PREF_SYNC_PAYMENTS_INTEGRATION = "sync_payments_integration";
-    private static final String PREF_SYNC_HISTORY = "sync_history";
-    private static final String PREF_SYNC_PASSWORDS = "sync_passwords";
-    private static final String PREF_SYNC_RECENT_TABS = "sync_recent_tabs";
-    private static final String PREF_SYNC_SETTINGS = "sync_settings";
-    private static final String PREF_GOOGLE_ACTIVITY_CONTROLS = "google_activity_controls";
-    private static final String PREF_ENCRYPTION = "encryption";
-    private static final String PREF_SYNC_MANAGE_DATA = "sync_manage_data";
+    @VisibleForTesting
+    public static final String PREF_SYNC_EVERYTHING = "sync_everything";
+    @VisibleForTesting
+    public static final String PREF_SYNC_AUTOFILL = "sync_autofill";
+    @VisibleForTesting
+    public static final String PREF_SYNC_BOOKMARKS = "sync_bookmarks";
+    @VisibleForTesting
+    public static final String PREF_SYNC_PAYMENTS_INTEGRATION = "sync_payments_integration";
+    @VisibleForTesting
+    public static final String PREF_SYNC_HISTORY = "sync_history";
+    @VisibleForTesting
+    public static final String PREF_SYNC_PASSWORDS = "sync_passwords";
+    @VisibleForTesting
+    public static final String PREF_SYNC_RECENT_TABS = "sync_recent_tabs";
+    @VisibleForTesting
+    public static final String PREF_SYNC_SETTINGS = "sync_settings";
+    @VisibleForTesting
+    public static final String PREF_GOOGLE_ACTIVITY_CONTROLS = "google_activity_controls";
+    @VisibleForTesting
+    public static final String PREF_ENCRYPTION = "encryption";
+    @VisibleForTesting
+    public static final String PREF_SYNC_MANAGE_DATA = "sync_manage_data";
 
     private final ProfileSyncService mProfileSyncService = ProfileSyncService.get();
 
@@ -91,9 +102,7 @@ public class ManageSyncPreferences extends PreferenceFragment
     private ProfileSyncService.SyncSetupInProgressHandle mSyncSetupInProgressHandle;
 
     @Override
-    public void onCreate(@Nullable Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
+    public void onCreatePreferences(@Nullable Bundle savedInstanceState, String rootKey) {
         getActivity().setTitle(R.string.manage_sync_title);
         setHasOptionsMenu(true);
 
@@ -139,10 +148,6 @@ public class ManageSyncPreferences extends PreferenceFragment
     public void onDestroy() {
         super.onDestroy();
         mSyncSetupInProgressHandle.close();
-
-        if (mProfileSyncService.isSyncRequested()) {
-            InvalidationController.get().ensureStartedAndUpdateRegisteredTypes();
-        }
     }
 
     @Override
@@ -156,9 +161,9 @@ public class ManageSyncPreferences extends PreferenceFragment
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == R.id.menu_id_targeted_help) {
-            HelpAndFeedback.getInstance(getActivity())
-                    .show(getActivity(), getString(R.string.help_context_sync_and_services),
-                            Profile.getLastUsedProfile(), null);
+            HelpAndFeedback.getInstance().show(getActivity(),
+                    getString(R.string.help_context_sync_and_services),
+                    Profile.getLastUsedProfile(), null);
             return true;
         }
         return false;
@@ -232,8 +237,8 @@ public class ManageSyncPreferences extends PreferenceFragment
         // Note: mSyncPaymentsIntegration should be checked if mSyncEverything is checked, but if
         // mSyncEverything was just enabled, then that state may not have propagated to
         // mSyncPaymentsIntegration yet. See crbug.com/972863.
-        PersonalDataManager.setPaymentsIntegrationEnabled(
-                mSyncEverything.isChecked() || mSyncPaymentsIntegration.isChecked());
+        PersonalDataManager.setPaymentsIntegrationEnabled(mSyncEverything.isChecked()
+                || (mSyncPaymentsIntegration.isChecked() && mSyncAutofill.isChecked()));
         // Some calls to setChosenDataTypes don't trigger syncStateChanged, so schedule update here.
         PostTask.postTask(UiThreadTaskTraits.DEFAULT, this::updateSyncPreferences);
     }
@@ -258,10 +263,10 @@ public class ManageSyncPreferences extends PreferenceFragment
             closeDialogIfOpen(FRAGMENT_ENTER_PASSPHRASE);
             return;
         }
-        if (!mProfileSyncService.isPassphraseRequiredForDecryption()) {
+        if (!mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             closeDialogIfOpen(FRAGMENT_ENTER_PASSPHRASE);
         }
-        if (mProfileSyncService.isPassphraseRequiredForDecryption() && isAdded()) {
+        if (mProfileSyncService.isPassphraseRequiredForPreferredDataTypes() && isAdded()) {
             mSyncEncryption.setSummary(
                     errorSummary(getString(R.string.sync_need_passphrase), getActivity()));
         }
@@ -339,7 +344,7 @@ public class ManageSyncPreferences extends PreferenceFragment
     @Override
     public boolean onPassphraseEntered(String passphrase) {
         if (!mProfileSyncService.isEngineInitialized()
-                || !mProfileSyncService.isPassphraseRequiredForDecryption()) {
+                || !mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             // If the engine was shut down since the dialog was opened, or the passphrase isn't
             // required anymore, do nothing.
             return false;
@@ -367,7 +372,7 @@ public class ManageSyncPreferences extends PreferenceFragment
 
     /** Callback for PassphraseTypeDialogFragment.Listener */
     @Override
-    public void onPassphraseTypeSelected(@Passphrase.Type int type) {
+    public void onPassphraseTypeSelected(@PassphraseType int type) {
         if (!mProfileSyncService.isEngineInitialized()) {
             // If the engine was shut down since the dialog was opened, do nothing.
             return;
@@ -392,7 +397,7 @@ public class ManageSyncPreferences extends PreferenceFragment
     private void onSyncEncryptionClicked() {
         if (!mProfileSyncService.isEngineInitialized()) return;
 
-        if (mProfileSyncService.isPassphraseRequiredForDecryption()) {
+        if (mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             displayPassphraseDialog();
         } else {
             displayPassphraseTypeDialog();

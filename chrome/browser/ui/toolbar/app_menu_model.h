@@ -21,7 +21,6 @@
 class AppMenuIconController;
 class BookmarkSubMenuModel;
 class Browser;
-class RecentTabsSubMenuModel;
 
 namespace {
 class MockAppMenuModel;
@@ -35,7 +34,7 @@ enum AppMenuAction {
   MENU_ACTION_SHOW_BOOKMARK_BAR = 3,
   MENU_ACTION_SHOW_BOOKMARK_MANAGER = 4,
   MENU_ACTION_IMPORT_SETTINGS = 5,
-  MENU_ACTION_BOOKMARK_PAGE = 6,
+  MENU_ACTION_BOOKMARK_THIS_TAB = 6,
   MENU_ACTION_BOOKMARK_ALL_TABS = 7,
   MENU_ACTION_PIN_TO_START_SCREEN = 8,
   MENU_ACTION_RESTORE_TAB = 9,
@@ -180,7 +179,6 @@ class AppMenuModel : public ui::SimpleMenuModel,
   void CreateZoomMenu();
 
  private:
-  class HelpMenuModel;
   friend class ::MockAppMenuModel;
 
   bool ShouldShowNewIncognitoWindowMenuItem();
@@ -213,19 +211,11 @@ class AppMenuModel : public ui::SimpleMenuModel,
   // Label of the zoom label in the zoom menu item.
   base::string16 zoom_label_;
 
-#if defined(GOOGLE_CHROME_BUILD)
-  // Help menu.
-  std::unique_ptr<HelpMenuModel> help_menu_model_;
-#endif
-
-  // Tools menu.
-  std::unique_ptr<ToolsMenuModel> tools_menu_model_;
-
   // Bookmark submenu.
   std::unique_ptr<BookmarkSubMenuModel> bookmark_sub_menu_model_;
 
-  // Recent Tabs submenu.
-  std::unique_ptr<RecentTabsSubMenuModel> recent_tabs_sub_menu_model_;
+  // Other submenus.
+  std::vector<std::unique_ptr<ui::SimpleMenuModel>> sub_menus_;
 
   ui::AcceleratorProvider* provider_;  // weak
 

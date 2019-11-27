@@ -19,12 +19,13 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/printing/ppd_provider_factory.h"
 #include "chrome/browser/component_updater/cros_component_installer_chromeos.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon_client.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "chromeos/printing/ppd_provider.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "components/device_event_log/device_event_log.h"
@@ -109,7 +110,7 @@ void RecordValidPpdReference(const Printer& printer) {
 class PrinterConfigurerImpl : public PrinterConfigurer {
  public:
   explicit PrinterConfigurerImpl(Profile* profile)
-      : ppd_provider_(CreatePpdProvider(profile)), weak_factory_(this) {}
+      : ppd_provider_(CreatePpdProvider(profile)) {}
 
   ~PrinterConfigurerImpl() override {}
 
@@ -249,7 +250,7 @@ class PrinterConfigurerImpl : public PrinterConfigurer {
   }
 
   scoped_refptr<PpdProvider> ppd_provider_;
-  base::WeakPtrFactory<PrinterConfigurerImpl> weak_factory_;
+  base::WeakPtrFactory<PrinterConfigurerImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PrinterConfigurerImpl);
 };

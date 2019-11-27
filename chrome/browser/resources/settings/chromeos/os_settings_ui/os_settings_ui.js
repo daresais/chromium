@@ -21,9 +21,11 @@ Polymer({
   is: 'os-settings-ui',
 
   behaviors: [
-    settings.RouteObserverBehavior,
     CrContainerShadowBehavior,
     FindShortcutBehavior,
+    // Calls currentRouteChanged() in attached(), so ensure other behaviors run
+    // their attached() first.
+    settings.RouteObserverBehavior,
   ],
 
   properties: {
@@ -56,7 +58,7 @@ Polymer({
 
     /**
      * Whether settings is in the narrow state (side nav hidden). Controlled by
-     * a binding in the cr-toolbar element.
+     * a binding in the os-toolbar element.
      */
     isNarrow: {
       type: Boolean,
@@ -69,13 +71,16 @@ Polymer({
     pageVisibility_: {type: Object, value: settings.pageVisibility},
 
     /** @private */
-    showApps_: Boolean,
+    havePlayStoreApp_: Boolean,
 
     /** @private */
     showAndroidApps_: Boolean,
 
     /** @private */
-    showAssistant_: Boolean,
+    showAppManagement_: Boolean,
+
+    /** @private */
+    showApps_: Boolean,
 
     /** @private */
     showCrostini_: Boolean,
@@ -84,7 +89,7 @@ Polymer({
     showPluginVm_: Boolean,
 
     /** @private */
-    havePlayStoreApp_: Boolean,
+    showReset_: Boolean,
 
     /** @private */
     lastSearchQuery_: {
@@ -136,41 +141,17 @@ Polymer({
           loadTimeData.getString('controlledSettingNoOwner'),
       controlledSettingParent:
           loadTimeData.getString('controlledSettingParent'),
+      controlledSettingChildRestriction:
+          loadTimeData.getString('controlledSettingChildRestriction'),
     };
 
-    CrOncStrings = {
-      OncTypeCellular: loadTimeData.getString('OncTypeCellular'),
-      OncTypeEthernet: loadTimeData.getString('OncTypeEthernet'),
-      OncTypeMobile: loadTimeData.getString('OncTypeMobile'),
-      OncTypeTether: loadTimeData.getString('OncTypeTether'),
-      OncTypeVPN: loadTimeData.getString('OncTypeVPN'),
-      OncTypeWiFi: loadTimeData.getString('OncTypeWiFi'),
-      OncTypeWiMAX: loadTimeData.getString('OncTypeWiMAX'),
-      networkListItemConnected:
-          loadTimeData.getString('networkListItemConnected'),
-      networkListItemConnecting:
-          loadTimeData.getString('networkListItemConnecting'),
-      networkListItemConnectingTo:
-          loadTimeData.getString('networkListItemConnectingTo'),
-      networkListItemInitializing:
-          loadTimeData.getString('networkListItemInitializing'),
-      networkListItemScanning:
-          loadTimeData.getString('networkListItemScanning'),
-      networkListItemNotConnected:
-          loadTimeData.getString('networkListItemNotConnected'),
-      networkListItemNoNetwork:
-          loadTimeData.getString('networkListItemNoNetwork'),
-      vpnNameTemplate: loadTimeData.getString('vpnNameTemplate'),
-    };
-
-    this.showApps_ = loadTimeData.getBoolean('showApps');
+    this.havePlayStoreApp_ = loadTimeData.getBoolean('havePlayStoreApp');
+    this.showAppManagement_ = loadTimeData.getBoolean('showAppManagement');
     this.showAndroidApps_ = loadTimeData.getBoolean('androidAppsVisible');
-    // Assistant can be disallowed due to flag, policy, locale, etc.
-    this.showAssistant_ = loadTimeData.getBoolean('isAssistantAllowed');
-
+    this.showApps_ = this.showAppManagement_ || this.showAndroidApps_;
     this.showCrostini_ = loadTimeData.getBoolean('showCrostini');
     this.showPluginVm_ = loadTimeData.getBoolean('showPluginVm');
-    this.havePlayStoreApp_ = loadTimeData.getBoolean('havePlayStoreApp');
+    this.showReset_ = loadTimeData.getBoolean('allowPowerwash');
 
     this.addEventListener('show-container', () => {
       this.$.container.style.visibility = 'visible';
@@ -226,6 +207,15 @@ Polymer({
 
   /** @param {!settings.Route} route */
   currentRouteChanged: function(route) {
+    if (route.depth <= 1) {
+      // Main page uses scroll visibility to determine shadow.
+      this.enableShadowBehavior(true);
+    } else {
+      // Sub-pages always show the top-container shadow.
+      this.enableShadowBehavior(false);
+      this.showDropShadows();
+    }
+
     const urlSearchQuery = settings.getQueryParameters().get('search') || '';
     if (urlSearchQuery == this.lastSearchQuery_) {
       return;
@@ -233,7 +223,7 @@ Polymer({
 
     this.lastSearchQuery_ = urlSearchQuery;
 
-    const toolbar = /** @type {!CrToolbarElement} */ (this.$$('cr-toolbar'));
+    const toolbar = /** @type {!OsToolbarElement} */ (this.$$('os-toolbar'));
     const searchField =
         /** @type {CrToolbarSearchFieldElement} */ (toolbar.getSearchField());
 
@@ -253,13 +243,13 @@ Polymer({
     if (modalContextOpen) {
       return false;
     }
-    this.$$('cr-toolbar').getSearchField().showAndFocus();
+    this.$$('os-toolbar').getSearchField().showAndFocus();
     return true;
   },
 
   // Override FindShortcutBehavior methods.
   searchInputHasFocus: function() {
-    return this.$$('cr-toolbar').getSearchField().isSearchFocused();
+    return this.$$('os-toolbar').getSearchField().isSearchFocused();
   },
 
   /**

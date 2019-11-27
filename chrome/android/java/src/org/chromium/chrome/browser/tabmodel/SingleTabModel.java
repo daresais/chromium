@@ -7,11 +7,11 @@ package org.chromium.chrome.browser.tabmodel;
 import android.app.Activity;
 
 import org.chromium.base.ActivityState;
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ObserverList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 
 import java.util.List;
 
@@ -24,12 +24,10 @@ public class SingleTabModel implements TabModel {
 
     private Tab mTab;
     private boolean mIsIncognito;
-    private boolean mBlockNewWindows;
 
-    SingleTabModel(Activity activity, boolean incognito, boolean blockNewWindows) {
+    SingleTabModel(Activity activity, boolean incognito) {
         mActivity = activity;
         mIsIncognito = incognito;
-        mBlockNewWindows = blockNewWindows;
     }
 
     /**
@@ -37,32 +35,39 @@ public class SingleTabModel implements TabModel {
      * @param tab Tab to manage.
      */
     void setTab(Tab tab) {
+        if (mTab == tab) return;
         Tab oldTab = mTab;
         mTab = tab;
-        assert mTab.isIncognito() == mIsIncognito;
-        if (mBlockNewWindows) nativePermanentlyBlockAllNewWindows(mTab);
-
-        for (TabModelObserver observer : mObservers) {
-            observer.didAddTab(tab, TabLaunchType.FROM_LINK);
-            observer.didSelectTab(tab, TabSelectionType.FROM_USER, Tab.INVALID_TAB_ID);
+        if (oldTab != null) {
+            for (TabModelObserver observer : mObservers) {
+                observer.willCloseTab(oldTab, false);
+            }
         }
+        if (tab != null) {
+            assert mTab.isIncognito() == mIsIncognito;
 
-        int state = ApplicationStatus.getStateForActivity(mActivity);
-        if (state == ActivityState.CREATED || state == ActivityState.STARTED
-                || state == ActivityState.RESUMED) {
-            mTab.show(TabSelectionType.FROM_USER);
+            for (TabModelObserver observer : mObservers) {
+                observer.didAddTab(tab, TabLaunchType.FROM_LINK);
+                observer.didSelectTab(tab, TabSelectionType.FROM_USER, Tab.INVALID_TAB_ID);
+            }
+
+            int state = ApplicationStatus.getStateForActivity(mActivity);
+            if (state == ActivityState.CREATED || state == ActivityState.STARTED
+                    || state == ActivityState.RESUMED) {
+                ((TabImpl) mTab).show(TabSelectionType.FROM_USER);
+            }
         }
-        if (oldTab != null && oldTab.isInitialized()) {
+        if (oldTab != null && ((TabImpl) oldTab).isInitialized()) {
             for (TabModelObserver observer : mObservers) {
                 observer.didCloseTab(oldTab.getId(), oldTab.isIncognito());
             }
-            oldTab.destroy();
+            ((TabImpl) oldTab).destroy();
         }
     }
 
     @Override
     public Profile getProfile() {
-        return mTab == null ? null : mTab.getProfile();
+        return mTab == null ? null : ((TabImpl) mTab).getProfile();
     }
 
     @Override
@@ -77,6 +82,7 @@ public class SingleTabModel implements TabModel {
 
     @Override
     public int indexOf(Tab tab) {
+        if (tab == null) return INVALID_TAB_INDEX;
         return mTab != null && mTab.getId() == tab.getId() ? 0 : INVALID_TAB_INDEX;
     }
 
@@ -92,11 +98,9 @@ public class SingleTabModel implements TabModel {
 
     @Override
     public boolean closeTab(Tab tab, boolean animate, boolean uponExit, boolean canUndo) {
-        if (mTab != null && mTab.getId() == tab.getId()) {
-            completeActivity();
-            return true;
-        }
-        return false;
+        if (mTab == null || mTab.getId() != tab.getId()) return false;
+        setTab(null);
+        return true;
     }
 
     @Override
@@ -105,22 +109,15 @@ public class SingleTabModel implements TabModel {
         return closeTab(tab, animate, uponExit, canUndo);
     }
 
-    /**
-     * In webapps, calls finish on the activity, but keeps it in recents. In Document mode,
-     * finishes and removes from recents. We use mBlockNewWindows flag to distinguish the user
-     * of this model.
-     */
-    private void completeActivity() {
-        if (mBlockNewWindows) {
-            mActivity.finish();
-        } else {
-            ApiCompatibilityUtils.finishAndRemoveTask(mActivity);
-        }
-    }
-
     @Override
     public void closeMultipleTabs(List<Tab> tabs, boolean canUndo) {
-        completeActivity();
+        if (mTab == null) return;
+        for (Tab tab : tabs) {
+            if (tab.getId() == mTab.getId()) {
+                setTab(null);
+                return;
+            }
+        }
     }
 
     @Override
@@ -130,7 +127,7 @@ public class SingleTabModel implements TabModel {
 
     @Override
     public void closeAllTabs(boolean allowDelegation, boolean uponExit) {
-        completeActivity();
+        setTab(null);
     }
 
     // Tab retrieval functions.
@@ -156,7 +153,7 @@ public class SingleTabModel implements TabModel {
 
     @Override
     public void destroy() {
-        if (mTab != null) mTab.destroy();
+        if (mTab != null) ((TabImpl) mTab).destroy();
         mTab = null;
     }
 
@@ -190,7 +187,9 @@ public class SingleTabModel implements TabModel {
     }
 
     @Override
-    public void addTab(Tab tab, int index, @TabLaunchType int type) {}
+    public void addTab(Tab tab, int index, @TabLaunchType int type) {
+        setTab(tab);
+    }
 
     @Override
     public void removeTab(Tab tab) {
@@ -207,8 +206,6 @@ public class SingleTabModel implements TabModel {
     public void removeObserver(TabModelObserver observer) {
         mObservers.removeObserver(observer);
     }
-
-    private static native void nativePermanentlyBlockAllNewWindows(Tab nativeTabAndroid);
 
     @Override
     public void openMostRecentlyClosedTab() {}

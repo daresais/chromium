@@ -152,7 +152,7 @@ Still reading?
   </issue>
   <issue id="IconMissingDensityFolder">
     <!-- see crbug.com/542435 -->
-    <ignore regexp="android_webview/apk/java/res"/>
+    <ignore regexp="android_webview/nonembedded/java/res"/>
     <ignore regexp="android_webview/tools/system_webview_shell/apk/res"/>
     <ignore regexp="chrome/android/webapk/shell_apk/res"/>
     <ignore regexp="chromecast/internal"/>
@@ -162,7 +162,7 @@ Still reading?
     <ignore regexp="components/embedder_support/android/java/res"/>
   </issue>
   <issue id="ImpliedQuantity" severity="Error">
-    <ignore regexp="chrome/android/chrome_strings_grd"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd"/>
   </issue>
   <issue id="InconsistentArrays" severity="Error">
     <ignore regexp="android_webview/locale_paks.resources.zip/values/locale-paks.xml"/>
@@ -206,6 +206,7 @@ Still reading?
   -->
   <issue id="MissingQuantity">
     <ignore regexp="android_chrome_strings.xml"/>
+    <ignore regexp="android_chrome_tab_ui_strings.xml"/>
   </issue>
   <issue id="MissingRegistered" severity="ignore"/>
   <issue id="MissingSuperCall" severity="Error">
@@ -235,6 +236,8 @@ Still reading?
     <ignore regexp="Static interface  method requires API level 24"/>
     <!-- 1 This is for testonly target android_support_chromium_java in android_sdk. -->
     <ignore regexp="third_party/android_sdk/public/extras/chromium/support/src/org/chromium/android/support/PackageManagerWrapper.java"/>
+    <!-- 1 TaskInfo is refactored at API 29. -->
+    <ignore regexp="Field requires API level 29.*`android.app.TaskInfo"/>
     <!-- Endnote: Please specify number of suppressions when adding more -->
   </issue>
   <!-- This warning just adds a lot of false positives. -->
@@ -248,8 +251,8 @@ Still reading?
     <ignore regexp="chrome/android/java/src/org/chromium/chrome/browser/browserservices/OriginVerifier.java"/>
   </issue>
   <issue id="PluralsCandidate" severity="Error">
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-en-rGB/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-en-rGB/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
   </issue>
   <issue id="PrivateApi" severity="ignore"/>
   <!-- Chrome is a system app. -->
@@ -275,19 +278,19 @@ Still reading?
     <ignore regexp="This AsyncTask class should be static or leaks might occur"/>
   </issue>
   <issue id="StringFormatCount" severity="Error">
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-fr/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-pl/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-fr/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-pl/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values/android_chrome_strings.xml"/>
   </issue>
   <issue id="StringFormatInvalid" severity="Error">
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-da/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-et/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-pl/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-pt-rBR/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-sv/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-tl/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-da/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-et/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-pl/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-pt-rBR/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-sv/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-tl/android_chrome_strings.xml"/>
   </issue>
   <!-- We have many C++ enums that we don't care about in java -->
   <issue id="SwitchIntDef" severity="ignore"/>
@@ -302,22 +305,41 @@ Still reading?
   <issue id="UnusedAttribute" severity="ignore"/>
   <issue id="UnusedIds" severity="ignore"/>
   <issue id="UnusedQuantity" severity="Error">
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-in/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-ja/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-ko/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-lt/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-ms/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-sk/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-th/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-vi/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-zh-rCN/android_chrome_strings.xml"/>
-    <ignore regexp="chrome/android/chrome_strings_grd.resources.zip/values-zh-rTW/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-cs/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-in/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-ja/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-ko/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-lt/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-ms/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-sk/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-th/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-vi/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-zh-rCN/android_chrome_strings.xml"/>
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd.resources.zip/values-zh-rTW/android_chrome_strings.xml"/>
+
+    <!-- This is needed for suppressing warnings on upstream and downstream build bots -->
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-cs/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-in/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-ja/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-ko/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-lt/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-ms/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-sk/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-th/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-vi/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-zh-rCN/android_chrome_tab_ui_strings.xml"/>
+    <ignore regexp="chrome/android/features/tab_ui/java_strings_grd.resources.zip/values-zh-rTW/android_chrome_tab_ui_strings.xml"/>
   </issue>
   <!-- Our generated enums are allowed to have the same values. -->
   <issue id="UniqueConstants" severity="ignore"/>
   <issue id="UnusedResources">
     <!-- Do not add new suppressions without rationale. -->
+    <!-- crbug.com/1004570 remove this line and the following three lines after the bug resolved -->
+    <ignore regexp="The resource `R.string.tab_suggestion_review_button` appears to be unused"/>
+    <ignore regexp="The resource `R.string.tab_suggestion_close_tab_action_button` appears to be unused"/>
+    <ignore regexp="The resource `R.string.tab_suggestion_close_stale_message` appears to be unused"/>
+    <!-- crbug.com/1017492 remove this line and the following line after the bug is resolved -->
+    <ignore regexp="The resource `R.string.tab_grid_dialog_toolbar_share_group` appears to be unused"/>
     <!-- 3 raw resources are accessed by URL in various places -->
     <ignore regexp="PRODUCT_DIR/gen/remoting/android/.*/res/raw/credits.html"/>
     <ignore regexp="PRODUCT_DIR/gen/remoting/android/.*/res/raw/credits_css.css"/>
@@ -344,6 +366,16 @@ Still reading?
          not use R.style.SplashTheme but new-style WebAPKs do.
          TODO(crbug.com/971254): Remove suppression once old-style WebAPKs are deprecated. -->
     <ignore regexp="The resource `R.style.SplashTheme` appears to be unused"/>
+    <!-- The WAM server currently has 2 codes paths for minting a WebAPK, and
+         it needs these "unused" resources.
+         TODO(crbug.com/1001115): Remove suppression once 2 code paths are merged -->
+    <ignore regexp="The resource `R.mipmap.ic_launcher_background` appears to be unused"/>
+    <ignore regexp="The resource `R.mipmap.ic_launcher_foreground` appears to be unused"/>
+    <ignore regexp="The resource `R.mipmap.maskable_splash_icon_xxhdpi` appears to be unused"/>
+    <ignore regexp="The resource `R.mipmap.maskable_splash_icon_xxxhdpi` appears to be unused"/>
+    <!-- TODO(https://crbug.com/1017190): Remove suppression once we lint entire app rather than
+         each individual target -->
+    <ignore regexp="chrome/browser/ui/android/strings/ui_strings_grd" />
     <!-- Endnote: Please specify number of suppressions when adding more -->
   </issue>
   <issue id="UseCompoundDrawables">

@@ -29,6 +29,7 @@
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_link_item.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -109,24 +110,25 @@
                action:@selector(showClearBrowsingDataAlertController:)];
     _clearBrowsingDataBarButton.accessibilityIdentifier =
         kClearBrowsingDataButtonIdentifier;
-    _clearBrowsingDataBarButton.tintColor = [UIColor redColor];
+    _clearBrowsingDataBarButton.tintColor = [UIColor colorNamed:kRedColor];
   }
   return _clearBrowsingDataBarButton;
 }
 
 #pragma mark - UIViewController
 
-// Overrides parent class specification.
-- (NSArray<UIBarButtonItem*>*)toolbarItems {
+- (void)viewDidLoad {
+  [super viewDidLoad];
+
   UIBarButtonItem* flexibleSpace = [[UIBarButtonItem alloc]
       initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                            target:nil
                            action:nil];
-  return @[ flexibleSpace, self.clearBrowsingDataBarButton, flexibleSpace ];
-}
+  [self setToolbarItems:@[
+    flexibleSpace, self.clearBrowsingDataBarButton, flexibleSpace
+  ]
+               animated:YES];
 
-- (void)viewDidLoad {
-  [super viewDidLoad];
   if (IsNewClearBrowsingDataUIEnabled()) {
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
   }
@@ -422,6 +424,19 @@
                  style:UIAlertActionStyleCancel];
 
   [self.alertCoordinator start];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  // Call prepareForDismissal to clean up state and  stop the Coordinator.
+  [self prepareForDismissal];
+}
+
+- (BOOL)presentationControllerShouldDismiss:
+    (UIPresentationController*)presentationController {
+  return !self.chromeActivityOverlayCoordinator.started;
 }
 
 #pragma mark - Private Helpers

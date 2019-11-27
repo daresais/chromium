@@ -38,7 +38,6 @@ class PasswordItemsView : public PasswordBubbleViewBase,
  public:
   PasswordItemsView(content::WebContents* web_contents,
                     views::View* anchor_view,
-                    const gfx::Point& anchor_point,
                     DisplayReason reason);
   ~PasswordItemsView() override;
 
@@ -51,8 +50,6 @@ class PasswordItemsView : public PasswordBubbleViewBase,
   void RecreateLayout();
 
   // LocationBarBubbleDelegateView:
-  std::unique_ptr<views::View> CreateExtraView() override;
-  int GetDialogButtons() const override;
   bool ShouldShowCloseButton() const override;
   gfx::Size CalculatePreferredSize() const override;
 

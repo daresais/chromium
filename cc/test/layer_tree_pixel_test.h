@@ -78,11 +78,12 @@ class LayerTreePixelTest : public LayerTreeTest {
       int border_width,
       SkColor border_color);
 
-  // Initializes the root layer and root PropertyTrees for layer list mode.
-  // In this mode, all other layers are direct children of |root_layer| and
-  // any property nodes are descendants of node id 1 in the respective trees.
-  void InitializeForLayerListMode(scoped_refptr<Layer>* root_layer,
-                                  PropertyTrees* property_trees);
+  void CreateSolidColorLayerPlusBorders(
+      const gfx::Rect& rect,
+      SkColor color,
+      int border_width,
+      SkColor border_color,
+      std::vector<scoped_refptr<SolidColorLayer>>&);
 
   void RunPixelTest(RendererType renderer_type,
                     scoped_refptr<Layer> content_root,
@@ -93,9 +94,7 @@ class LayerTreePixelTest : public LayerTreeTest {
                     const SkBitmap& expected_bitmap);
 
   void RunPixelTestWithLayerList(RendererType renderer_type,
-                                 scoped_refptr<Layer> root_layer,
-                                 base::FilePath file_name,
-                                 PropertyTrees* property_trees);
+                                 base::FilePath file_name);
 
   void RunSingleThreadedPixelTest(RendererType renderer_type,
                                   scoped_refptr<Layer> content_root,
@@ -124,12 +123,12 @@ class LayerTreePixelTest : public LayerTreeTest {
   static const SkColor kCSSOrange = 0xffffa500;
   static const SkColor kCSSBrown = 0xffa52a2a;
   static const SkColor kCSSGreen = 0xff008000;
+  static const SkColor kCSSLime = 0xff00ff00;
   static const SkColor kCSSBlack = 0xff000000;
 
   gl::DisableNullDrawGLBindings enable_pixel_output_;
   std::unique_ptr<PixelComparator> pixel_comparator_;
-  scoped_refptr<Layer> content_root_;
-  PropertyTrees* property_trees_;
+  scoped_refptr<Layer> content_root_;  // Not used in layer list mode.
   Layer* readback_target_;
   base::FilePath ref_file_;
   SkBitmap expected_bitmap_;

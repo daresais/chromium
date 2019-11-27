@@ -6,31 +6,32 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_DEPRECATION_REPORT_BODY_H_
 
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
-#include "third_party/blink/renderer/core/frame/message_report_body.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/frame/location_report_body.h"
 
 namespace blink {
 
-class CORE_EXPORT DeprecationReportBody : public MessageReportBody {
+class CORE_EXPORT DeprecationReportBody : public LocationReportBody {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   DeprecationReportBody(const String& id,
                         double anticipatedRemoval,
                         const String& message)
-      : MessageReportBody(message),
-        id_(id),
-        anticipatedRemoval_(anticipatedRemoval) {}
+      : id_(id), message_(message), anticipatedRemoval_(anticipatedRemoval) {}
 
   ~DeprecationReportBody() override = default;
 
   String id() const { return id_; }
-  double anticipatedRemoval(bool& is_null) const {
-    is_null = !anticipatedRemoval_;
-    return anticipatedRemoval_;
-  }
+  String message() const { return message_; }
+  ScriptValue anticipatedRemoval(ScriptState* script_state) const;
+  base::Optional<base::Time> AnticipatedRemoval() const;
+
+  void BuildJSONValue(V8ObjectBuilder& builder) const override;
 
  private:
   const String id_;
+  const String message_;
   const double anticipatedRemoval_;
 };
 

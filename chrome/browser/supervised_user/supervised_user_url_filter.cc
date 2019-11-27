@@ -23,7 +23,6 @@
 #include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
 #include "chrome/browser/supervised_user/kids_management_url_checker_client.h"
 #include "chrome/common/chrome_features.h"
@@ -44,10 +43,11 @@
 #endif
 
 using content::BrowserThread;
-using net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES;
 using net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES;
+using net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES;
 using net::registry_controlled_domains::GetCanonicalHostRegistryLength;
-using policy::URLBlacklist;
+using policy::url_util::CreateConditionSet;
+using policy::url_util::FilterToComponents;
 using url_matcher::URLMatcher;
 using url_matcher::URLMatcherConditionSet;
 
@@ -91,8 +91,7 @@ namespace {
 
 // URL schemes not in this list (e.g., file:// and chrome://) will always be
 // allowed.
-const char* const kFilteredSchemes[] = {"http",   "https", "ftp",
-                                        "gopher", "ws",    "wss"};
+const char* const kFilteredSchemes[] = {"http", "https", "ftp", "ws", "wss"};
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 const char* const kCrxDownloadUrls[] = {
@@ -149,17 +148,15 @@ URLMatcherConditionSet::ID FilterBuilder::AddPattern(
   std::string path;
   std::string query;
   bool match_subdomains = true;
-  if (!URLBlacklist::FilterToComponents(pattern, &scheme, &host,
-                                        &match_subdomains, &port, &path,
-                                        &query)) {
+  if (!FilterToComponents(pattern, &scheme, &host, &match_subdomains, &port,
+                          &path, &query)) {
     LOG(ERROR) << "Invalid pattern " << pattern;
     return -1;
   }
 
   scoped_refptr<URLMatcherConditionSet> condition_set =
-      URLBlacklist::CreateConditionSet(
-          &contents_->url_matcher, ++matcher_id_,
-          scheme, host, match_subdomains, port, path, query, true);
+      CreateConditionSet(&contents_->url_matcher, ++matcher_id_, scheme, host,
+                         match_subdomains, port, path, query, true);
   all_conditions_.push_back(std::move(condition_set));
   return matcher_id_;
 }
@@ -218,8 +215,9 @@ SupervisedUserURLFilter::SupervisedUserURLFilter()
     : default_behavior_(ALLOW),
       contents_(new Contents()),
       blacklist_(nullptr),
-      blocking_task_runner_(base::CreateTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+      blocking_task_runner_(base::CreateTaskRunner(
+          {base::ThreadPool(), base::MayBlock(),
+           base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})) {}
 
 SupervisedUserURLFilter::~SupervisedUserURLFilter() {
@@ -534,8 +532,7 @@ void SupervisedUserURLFilter::SetManualURLs(std::map<GURL, bool> url_map) {
 }
 
 void SupervisedUserURLFilter::InitAsyncURLChecker(
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    identity::IdentityManager* identity_manager) {
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
   std::string country;
   variations::VariationsService* variations_service =
       g_browser_process->variations_service();
@@ -549,8 +546,8 @@ void SupervisedUserURLFilter::InitAsyncURLChecker(
 
   if ((base::FeatureList::IsEnabled(
           features::kKidsManagementUrlClassification))) {
-    url_checker_client = std::make_unique<KidsManagementURLCheckerClient>(
-        std::move(url_loader_factory), country, identity_manager);
+    url_checker_client =
+        std::make_unique<KidsManagementURLCheckerClient>(country);
   } else {
     // TODO(crbug.com/940454): remove safe_search_checker
     net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -600,11 +597,11 @@ void SupervisedUserURLFilter::Clear() {
   async_url_checker_.reset();
 }
 
-void SupervisedUserURLFilter::AddObserver(Observer* observer) const {
+void SupervisedUserURLFilter::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
 }
 
-void SupervisedUserURLFilter::RemoveObserver(Observer* observer) const {
+void SupervisedUserURLFilter::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 

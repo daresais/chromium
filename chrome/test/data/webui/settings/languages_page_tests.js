@@ -342,8 +342,8 @@ cr.define('languages_page_tests', function() {
         let translateTargetLabel = null;
         let item = null;
 
-        let listItems = languagesCollapse.querySelectorAll('.list-item');
-        let domRepeat = assert(languagesCollapse.querySelector('dom-repeat'));
+        const listItems = languagesCollapse.querySelectorAll('.list-item');
+        const domRepeat = assert(languagesCollapse.querySelector('dom-repeat'));
 
         let num_visibles = 0;
         Array.from(listItems).forEach(function(el) {
@@ -365,6 +365,7 @@ cr.define('languages_page_tests', function() {
         });
       });
 
+      // TODO(crbug.com/950007): Remove when SplitSettings is the default.
       test('changing UI language in CrOS', function() {
         if (!cr.isChromeOS) {
           return;
@@ -589,6 +590,7 @@ cr.define('languages_page_tests', function() {
       });
     });
 
+    // TODO(crbug.com/950007): Remove when SplitSettings is the default.
     test(TestNames.InputMethods, function() {
       const inputMethodsCollapse = languagesPage.$.inputMethodsCollapse;
       const inputMethodSettingsExist = !!inputMethodsCollapse;

@@ -6,82 +6,108 @@
 #define CHROME_BROWSER_PASSWORD_MANAGER_TOUCH_TO_FILL_CONTROLLER_H_
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/containers/span.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/autofill/accessory_controller.h"
-#include "content/public/browser/web_contents_user_data.h"
+#include "base/task/cancelable_task_tracker.h"
+#include "base/util/type_safety/pass_key.h"
+#include "chrome/browser/touch_to_fill/touch_to_fill_view.h"
+#include "chrome/browser/touch_to_fill/touch_to_fill_view_factory.h"
+#include "components/favicon_base/favicon_types.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "ui/gfx/native_widget_types.h"
+#include "url/gurl.h"
 
-namespace autofill {
-class AutofillPopupController;
-struct Suggestion;
-}
+namespace favicon {
+class FaviconService;
+}  // namespace favicon
 
-namespace content {
-class WebContents;
-}
+namespace password_manager {
+class PasswordManagerDriver;
+struct CredentialPair;
+}  // namespace password_manager
 
-class ManualFillingController;
+class ChromePasswordManagerClient;
 
-class TouchToFillController
-    : public base::SupportsWeakPtr<TouchToFillController>,
-      public content::WebContentsUserData<TouchToFillController>,
-      public AccessoryController {
+class TouchToFillController {
  public:
-  // Returns a reference to the unique TouchToFillController associated
-  // with |web_contents|. A new instance is created if the first time this
-  // function is called. Only valid to be called if
-  // TouchToFillController::AllowedForWebContents(web_contents).
-  static TouchToFillController* GetOrCreate(content::WebContents* web_contents);
+  // The action a user took when interacting with the Touch To Fill sheet.
+  //
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused. Needs to stay in sync with
+  // TouchToFill.UserAction in enums.xml and UserAction in
+  // TouchToFillComponent.java.
+  //
+  // TODO(crbug.com/1013134): De-duplicate the Java and C++ enum.
+  enum class UserAction {
+    kSelectedCredential = 0,
+    kDismissed = 1,
+    kSelectedManagePasswords = 2,
+  };
 
-  // Allow injecting a custom ManualFillingController for testing.
-  static std::unique_ptr<TouchToFillController> CreateForTesting(
-      base::WeakPtr<ManualFillingController> mf_controller);
-
+  // No-op constructor for tests.
+  explicit TouchToFillController(
+      util::PassKey<class TouchToFillControllerTest>);
+  TouchToFillController(ChromePasswordManagerClient* web_contents,
+                        favicon::FaviconService* favicon_service);
   TouchToFillController(const TouchToFillController&) = delete;
   TouchToFillController& operator=(const TouchToFillController&) = delete;
-  ~TouchToFillController() override;
+  ~TouchToFillController();
 
-  // Returns true if the touch to fill controller may exist for |web_contents|.
-  // Otherwise it returns false.
-  static bool AllowedForWebContents(content::WebContents* web_contents);
+  // Instructs the controller to show the provided |credentials| to the user.
+  void Show(base::span<const password_manager::CredentialPair> credentials,
+            base::WeakPtr<password_manager::PasswordManagerDriver> driver);
 
-  // Instructs the controller to show the provided |suggestions| to the user.
-  // Invokes AcceptSuggestion() on popup_controller once the user made a
-  // selection.
-  void Show(base::span<const autofill::Suggestion> suggestions,
-            base::WeakPtr<autofill::AutofillPopupController> popup_controller);
+  // Informs the controller that the user has made a selection. Invokes both
+  // FillSuggestion() and TouchToFillDismissed() on |driver_|. No-op if invoked
+  // repeatedly.
+  void OnCredentialSelected(const password_manager::CredentialPair& credential);
 
-  // AccessoryController:
-  void OnFillingTriggered(const autofill::UserInfo::Field& selection) override;
-  void OnOptionSelected(autofill::AccessoryAction selected_action) override;
+  // Informs the controller that the user has tapped the "Manage Passwords"
+  // button. This will open the password preferences.
+  void OnManagePasswordsSelected();
+
+  // Informs the controller that the user has dismissed the sheet. Invokes
+  // TouchToFillDismissed() on |driver_|. No-op if invoked repeatedly.
+  void OnDismiss();
+
+  // The web page view containing the focused field.
+  gfx::NativeView GetNativeView();
+
+  // Obtains a favicon for the origin and invokes the callback with a favicon
+  // image or with an empty image if a favicon could not be retrieved.
+  void FetchFavicon(const GURL& credential_origin,
+                    const GURL& frame_origin,
+                    int desired_size_in_pixel,
+                    base::OnceCallback<void(const gfx::Image&)> callback);
+
+#if defined(UNIT_TEST)
+  void set_view(std::unique_ptr<TouchToFillView> view) {
+    view_ = std::move(view);
+  }
+#endif
 
  private:
-  friend class content::WebContentsUserData<TouchToFillController>;
+  // Weak pointer to the ChromePasswordManagerClient this class is tied to.
+  ChromePasswordManagerClient* password_client_ = nullptr;
 
-  explicit TouchToFillController(content::WebContents* web_contents);
+  // Driver passed to the latest invocation of Show(). Gets cleared when
+  // OnCredentialSelected() or OnDismissed() gets called.
+  base::WeakPtr<password_manager::PasswordManagerDriver> driver_;
 
-  // Constructor corresponding to CreateForTesting().
-  explicit TouchToFillController(
-      base::WeakPtr<ManualFillingController> mf_controller);
+  // The favicon service used to retrieve icons for a given origin.
+  favicon::FaviconService* favicon_service_ = nullptr;
 
-  // Lazy-initializes and returns the ManualFillingController for the current
-  // |web_contents_|. The lazy initialization is required to break a circular
-  // dependency between the constructors of the TouchToFillController and
-  // ManualFillingController.
-  ManualFillingController* GetManualFillingController();
+  ukm::SourceId source_id_ = ukm::kInvalidSourceId;
 
-  // The tab for which this class is scoped.
-  content::WebContents* web_contents_ = nullptr;
+  // Used to track requested favicons. On destruction, requests are cancelled.
+  base::CancelableTaskTracker favicon_tracker_;
 
-  // Popup controller passed from the latest invocation of Show().
-  base::WeakPtr<autofill::AutofillPopupController> popup_controller_;
-
-  // The manual filling controller object to forward client requests to.
-  base::WeakPtr<ManualFillingController> mf_controller_;
-
-  WEB_CONTENTS_USER_DATA_KEY_DECL();
+  // View used to communicate with the Android frontend. Lazily instantiated so
+  // that it can be injected by tests.
+  std::unique_ptr<TouchToFillView> view_;
 };
 
 #endif  // CHROME_BROWSER_PASSWORD_MANAGER_TOUCH_TO_FILL_CONTROLLER_H_

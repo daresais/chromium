@@ -317,17 +317,9 @@ bool HaveConsistentPhase(const WebMouseWheelEvent& event_to_coalesce,
   }
 
   if (event.has_synthetic_phase) {
-    // Synthetic phase information is added based on a timer in
-    // MouseWheelPhaseHandler. This information is for simulating scroll
-    // sequences when the beginning and end of scrolls are not available. It is
-    // alright to coalesce an event with synthetic phaseBegan to its previous
-    // event with synthetic phaseEnded since these phase values don't correspond
-    // with real start and end of the scroll sequences.
-    // It is also alright to coalesce a wheel event with synthetic phaseChanged
-    // to its previous one with synthetic phaseBegan.
-    return (event.phase == WebMouseWheelEvent::kPhaseEnded &&
-            event_to_coalesce.phase == WebMouseWheelEvent::kPhaseBegan) ||
-           (event.phase == WebMouseWheelEvent::kPhaseBegan &&
+    // It is alright to coalesce a wheel event with synthetic phaseChanged to
+    // its previous one with synthetic phaseBegan.
+    return (event.phase == WebMouseWheelEvent::kPhaseBegan &&
             event_to_coalesce.phase == WebMouseWheelEvent::kPhaseChanged);
   }
   return false;
@@ -336,11 +328,9 @@ bool HaveConsistentPhase(const WebMouseWheelEvent& event_to_coalesce,
 bool CanCoalesce(const WebMouseWheelEvent& event_to_coalesce,
                  const WebMouseWheelEvent& event) {
   return event.GetModifiers() == event_to_coalesce.GetModifiers() &&
-         event.scroll_by_page == event_to_coalesce.scroll_by_page &&
+         event.delta_units == event_to_coalesce.delta_units &&
          HaveConsistentPhase(event_to_coalesce, event) &&
-         event.resending_plugin_id == event_to_coalesce.resending_plugin_id &&
-         event.has_precise_scrolling_deltas ==
-             event_to_coalesce.has_precise_scrolling_deltas;
+         event.resending_plugin_id == event_to_coalesce.resending_plugin_id;
 }
 
 void Coalesce(const WebMouseWheelEvent& event_to_coalesce,
@@ -377,18 +367,11 @@ void Coalesce(const WebMouseWheelEvent& event_to_coalesce,
       MergeDispatchTypes(old_dispatch_type, event_to_coalesce.dispatch_type);
   if (event_to_coalesce.has_synthetic_phase &&
       event_to_coalesce.phase != old_phase) {
-    if (event_to_coalesce.phase == WebMouseWheelEvent::kPhaseBegan) {
-      // Coalesce a wheel event with synthetic phase began with a wheel event
-      // with synthetic phase ended.
-      DCHECK_EQ(WebMouseWheelEvent::kPhaseEnded, old_phase);
-      event->phase = WebMouseWheelEvent::kPhaseChanged;
-    } else {
-      // Coalesce  a wheel event with synthetic phase changed to a wheel event
-      // with synthetic phase began.
-      DCHECK_EQ(WebMouseWheelEvent::kPhaseChanged, event_to_coalesce.phase);
-      DCHECK_EQ(WebMouseWheelEvent::kPhaseBegan, old_phase);
-      event->phase = WebMouseWheelEvent::kPhaseBegan;
-    }
+    // Coalesce  a wheel event with synthetic phase changed to a wheel event
+    // with synthetic phase began.
+    DCHECK_EQ(WebMouseWheelEvent::kPhaseChanged, event_to_coalesce.phase);
+    DCHECK_EQ(WebMouseWheelEvent::kPhaseBegan, old_phase);
+    event->phase = WebMouseWheelEvent::kPhaseBegan;
   }
 }
 
@@ -888,7 +871,8 @@ std::unique_ptr<blink::WebInputEvent> TranslateAndScaleWebInputEvent(
     float x = (wheel_event->PositionInWidget().x + delta.x()) * scale;
     float y = (wheel_event->PositionInWidget().y + delta.y()) * scale;
     wheel_event->SetPositionInWidget(x, y);
-    if (!wheel_event->scroll_by_page) {
+    if (wheel_event->delta_units !=
+        ui::input_types::ScrollGranularity::kScrollByPage) {
       wheel_event->delta_x *= scale;
       wheel_event->delta_y *= scale;
       wheel_event->wheel_ticks_x *= scale;
@@ -901,8 +885,11 @@ std::unique_ptr<blink::WebInputEvent> TranslateAndScaleWebInputEvent(
     float x = (mouse_event->PositionInWidget().x + delta.x()) * scale;
     float y = (mouse_event->PositionInWidget().y + delta.y()) * scale;
     mouse_event->SetPositionInWidget(x, y);
-    mouse_event->movement_x *= scale;
-    mouse_event->movement_y *= scale;
+    // Do not scale movement of raw movement events.
+    if (!mouse_event->is_raw_movement_event) {
+      mouse_event->movement_x *= scale;
+      mouse_event->movement_y *= scale;
+    }
   } else if (blink::WebInputEvent::IsTouchEventType(event.GetType())) {
     blink::WebTouchEvent* touch_event = new blink::WebTouchEvent;
     scaled_event.reset(touch_event);

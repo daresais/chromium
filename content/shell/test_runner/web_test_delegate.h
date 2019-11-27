@@ -22,7 +22,7 @@
 
 namespace base {
 class DictionaryValue;
-}
+}  // namespace base
 
 namespace blink {
 struct Manifest;
@@ -32,7 +32,7 @@ class WebPlugin;
 struct WebPluginParams;
 struct WebSize;
 class WebView;
-}
+}  // namespace blink
 
 namespace test_runner {
 
@@ -104,6 +104,8 @@ class WebTestDelegate {
   virtual void EnableAutoResizeMode(const blink::WebSize& min_size,
                                     const blink::WebSize& max_size) = 0;
   virtual void DisableAutoResizeMode(const blink::WebSize& new_size) = 0;
+  // Resets auto resize mode off in between tests, without requiring a size.
+  virtual void ResetAutoResizeMode() = 0;
 
   virtual void NavigateSecondaryWindow(const GURL& url) = 0;
   virtual void InspectSecondaryWindow() = 0;
@@ -121,13 +123,11 @@ class WebTestDelegate {
   virtual void SimulateWebNotificationClose(const std::string& title,
                                             bool by_user) = 0;
 
+  // Controls Content Index entries.
+  virtual void SimulateWebContentIndexDelete(const std::string& id) = 0;
+
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
-
-  // When use-zoom-for-dsf mode is enabled, this returns the scale to
-  // convert from window coordinates to viewport coordinates. When
-  // use-zoom-for-dsf is disabled, this return always 1.0f.
-  virtual float GetWindowToViewportScale() = 0;
 
   // Converts |event| from screen coordinates used by test_runner::EventSender
   // into coordinates that are understood by the widget associated with
@@ -246,8 +246,6 @@ class WebTestDelegate {
 
   virtual blink::WebPlugin* CreatePluginPlaceholder(
       const blink::WebPluginParams& params) = 0;
-
-  virtual float GetDeviceScaleFactor() const = 0;
 
   // Run all pending idle tasks, and then run callback.
   virtual void RunIdleTasks(base::OnceClosure callback) = 0;

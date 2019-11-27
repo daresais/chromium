@@ -8,6 +8,7 @@
 
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "printing/buildflags/buildflags.h"
@@ -31,7 +32,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
     {ui::VKEY_ESCAPE, ui::EF_NONE, IDC_CLOSE_FIND_OR_STOP},
 
 #if !defined(OS_MACOSX)
-    {ui::VKEY_D, ui::EF_PLATFORM_ACCELERATOR, IDC_BOOKMARK_PAGE},
+    {ui::VKEY_D, ui::EF_PLATFORM_ACCELERATOR, IDC_BOOKMARK_THIS_TAB},
     {ui::VKEY_D, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
      IDC_BOOKMARK_ALL_TABS},
     {ui::VKEY_W, ui::EF_PLATFORM_ACCELERATOR, IDC_CLOSE_TAB},
@@ -154,9 +155,9 @@ const AcceleratorMapping kAcceleratorMap[] = {
     {ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, IDC_FOCUS_SEARCH},
 #endif  // !OS_CHROMEOS
 
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_MACOSX)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !defined(OS_MACOSX)
     {ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FEEDBACK},
-#endif  // GOOGLE_CHROME_BUILD && !OS_MACOSX
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING) && !OS_MACOSX
     {ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
      IDC_NEW_INCOGNITO_WINDOW},
     {ui::VKEY_T, ui::EF_PLATFORM_ACCELERATOR, IDC_NEW_TAB},

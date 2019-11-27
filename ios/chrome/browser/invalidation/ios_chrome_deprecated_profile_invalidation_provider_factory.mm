@@ -25,6 +25,7 @@
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/web_client.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -40,21 +41,24 @@ namespace {
 void RequestProxyResolvingSocketFactoryOnUIThread(
     ios::ChromeBrowserState* browser_state,
     base::WeakPtr<TiclInvalidationService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
   if (!service)
     return;
-  browser_state->GetProxyResolvingSocketFactory(std::move(request));
+  browser_state->GetProxyResolvingSocketFactory(std::move(receiver));
 }
 
-// A thread-safe wrapper to request a ProxyResolvingSocketFactoryPtr.
+// A thread-safe wrapper to request a
+// network::mojom::ProxyResolvingSocketFactory.
 void RequestProxyResolvingSocketFactory(
     ios::ChromeBrowserState* browser_state,
     base::WeakPtr<TiclInvalidationService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
-  base::PostTaskWithTraits(
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
+  base::PostTask(
       FROM_HERE, {web::WebThread::UI},
       base::BindOnce(&RequestProxyResolvingSocketFactoryOnUIThread,
-                     browser_state, std::move(service), std::move(request)));
+                     browser_state, std::move(service), std::move(receiver)));
 }
 }
 
@@ -103,7 +107,7 @@ IOSChromeDeprecatedProfileInvalidationProviderFactory::BuildServiceInstanceFor(
       IOSChromeGCMProfileServiceFactory::GetForBrowserState(browser_state)
           ->driver(),
       base::BindRepeating(&RequestProxyResolvingSocketFactory, browser_state),
-      base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO}),
+      base::CreateSingleThreadTaskRunner({web::WebThread::IO}),
       browser_state->GetSharedURLLoaderFactory(),
       GetApplicationContext()->GetNetworkConnectionTracker()));
   service->Init(

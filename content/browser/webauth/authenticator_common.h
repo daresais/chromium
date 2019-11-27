@@ -35,10 +35,12 @@ class OneShotTimer;
 
 namespace device {
 
-struct PlatformAuthenticatorInfo;
 class FidoRequestHandlerBase;
 
 enum class FidoReturnCode : uint8_t;
+
+enum class GetAssertionStatus;
+enum class MakeCredentialStatus;
 
 }  // namespace device
 
@@ -87,11 +89,6 @@ class CONTENT_EXPORT AuthenticatorCommon {
           IsUserVerifyingPlatformAuthenticatorAvailableCallback callback);
   void Cancel();
 
-  // Synchronous implementation of
-  // IsUserVerifyingPlatformAuthenticatorAvailable.
-  bool IsUserVerifyingPlatformAuthenticatorAvailableImpl(
-      AuthenticatorRequestClientDelegate* request_delegate);
-
   void Cleanup();
 
   base::flat_set<device::FidoTransportProtocol> enabled_transports_for_testing()
@@ -104,7 +101,8 @@ class CONTENT_EXPORT AuthenticatorCommon {
   }
 
  protected:
-  virtual void UpdateRequestDelegate();
+  virtual std::unique_ptr<AuthenticatorRequestClientDelegate>
+  CreateRequestDelegate(std::string relying_party_id);
 
   std::unique_ptr<AuthenticatorRequestClientDelegate> request_delegate_;
 
@@ -119,11 +117,11 @@ class CONTENT_EXPORT AuthenticatorCommon {
 
   // Replaces the current |request_| with a |MakeCredentialRequestHandler|,
   // effectively restarting the request.
-  void StartMakeCredentialRequest();
+  void StartMakeCredentialRequest(bool allow_skipping_pin_touch);
 
   // Replaces the current |request_| with a |GetAssertionRequestHandler|,
   // effectively restarting the request.
-  void StartGetAssertionRequest();
+  void StartGetAssertionRequest(bool allow_skipping_pin_touch);
 
   bool IsFocused() const;
 
@@ -138,11 +136,12 @@ class CONTENT_EXPORT AuthenticatorCommon {
       const std::string& type,
       const std::string& origin,
       base::span<const uint8_t> challenge,
+      bool is_cross_origin,
       bool use_legacy_u2f_type_key = false);
 
   // Callback to handle the async response from a U2fDevice.
   void OnRegisterResponse(
-      device::FidoReturnCode status_code,
+      device::MakeCredentialStatus status_code,
       base::Optional<device::AuthenticatorMakeCredentialResponse> response_data,
       const device::FidoAuthenticator* authenticator);
 
@@ -155,7 +154,7 @@ class CONTENT_EXPORT AuthenticatorCommon {
 
   // Callback to handle the async response from a U2fDevice.
   void OnSignResponse(
-      device::FidoReturnCode status_code,
+      device::GetAssertionStatus status_code,
       base::Optional<std::vector<device::AuthenticatorGetAssertionResponse>>
           response_data,
       const device::FidoAuthenticator* authenticator);
@@ -172,11 +171,13 @@ class CONTENT_EXPORT AuthenticatorCommon {
   // account from the options.
   void OnAccountSelected(device::AuthenticatorGetAssertionResponse response);
 
-  // Decides whether or not UI is present that needs to block on user
-  // acknowledgement before returning the error, and handles the error
-  // appropriately.
+  // Signals to the request delegate that the request has failed for |reason|.
+  // The request delegate decides whether to present the user with a visual
+  // error before the request is finally resolved with |status|.
   void SignalFailureToRequestDelegate(
-      AuthenticatorRequestClientDelegate::InterestingFailureReason reason);
+      const device::FidoAuthenticator* authenticator,
+      AuthenticatorRequestClientDelegate::InterestingFailureReason reason,
+      blink::mojom::AuthenticatorStatus status);
 
   void InvokeCallbackAndCleanup(
       blink::mojom::Authenticator::MakeCredentialCallback callback,
@@ -188,18 +189,12 @@ class CONTENT_EXPORT AuthenticatorCommon {
       blink::mojom::AuthenticatorStatus status,
       blink::mojom::GetAssertionAuthenticatorResponsePtr response = nullptr);
 
-  base::Optional<device::PlatformAuthenticatorInfo>
-  CreatePlatformAuthenticatorIfAvailable();
-  base::Optional<device::PlatformAuthenticatorInfo>
-  CreatePlatformAuthenticatorIfAvailableAndCheckIfCredentialExists(
-      const device::CtapGetAssertionRequest& request);
-
   BrowserContext* browser_context() const;
 
   RenderFrameHost* const render_frame_host_;
   service_manager::Connector* connector_ = nullptr;
   base::flat_set<device::FidoTransportProtocol> transports_;
-
+  device::FidoDiscoveryFactory* discovery_factory_ = nullptr;
   std::unique_ptr<device::FidoRequestHandlerBase> request_;
   blink::mojom::Authenticator::MakeCredentialCallback
       make_credential_response_callback_;
@@ -207,6 +202,9 @@ class CONTENT_EXPORT AuthenticatorCommon {
       get_assertion_response_callback_;
   std::string client_data_json_;
   bool attestation_requested_;
+  // empty_allow_list_ is true iff a GetAssertion is currently pending and the
+  // request did not list any credential IDs in the allow list.
+  bool empty_allow_list_ = false;
   url::Origin caller_origin_;
   std::string relying_party_id_;
   std::unique_ptr<base::OneShotTimer> timer_;

@@ -10,7 +10,7 @@
 
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
-#include "components/arc/common/arc_bridge.mojom.h"
+#include "components/arc/mojom/arc_bridge.mojom.h"
 #include "components/arc/session/connection_holder.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
@@ -99,6 +99,8 @@ class ArcBridgeHostImpl : public mojom::ArcBridgeHost {
       mojom::RotationLockInstancePtr rotation_lock_ptr) override;
   void OnScreenCaptureInstanceReady(
       mojom::ScreenCaptureInstancePtr screen_capture_ptr) override;
+  void OnSmartCardManagerInstanceReady(
+      mojom::SmartCardManagerInstancePtr smart_card_manager_ptr) override;
   void OnStorageManagerInstanceReady(
       mojom::StorageManagerInstancePtr storage_manager_ptr) override;
   void OnTimerInstanceReady(mojom::TimerInstancePtr timer_ptr) override;

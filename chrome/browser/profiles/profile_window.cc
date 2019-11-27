@@ -368,11 +368,11 @@ bool IsLockAvailable(Profile* profile) {
   // TODO(mlerman): After one release remove any hosted_domain reference to the
   // pref, since all users will have this in the AccountTrackerService.
   if (hosted_domain.empty()) {
-    identity::IdentityManager* identity_manager =
+    signin::IdentityManager* identity_manager =
         IdentityManagerFactory::GetForProfile(profile);
 
     base::Optional<AccountInfo> primary_account_info =
-        identity_manager->FindExtendedAccountInfoForAccount(
+        identity_manager->FindExtendedAccountInfoForAccountWithRefreshToken(
             identity_manager->GetPrimaryAccountInfo());
 
     if (primary_account_info.has_value())

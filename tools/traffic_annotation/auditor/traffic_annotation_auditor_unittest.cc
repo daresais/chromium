@@ -50,8 +50,6 @@ const base::FilePath kClangToolPath =
 const std::set<int> kDummyDeprecatedIDs = {100, 101, 102};
 }  // namespace
 
-using namespace testing;
-
 class TrafficAnnotationAuditorTest : public ::testing::Test {
  public:
   void SetUp() override {
@@ -74,6 +72,7 @@ class TrafficAnnotationAuditorTest : public ::testing::Test {
 
     base::FilePath clang_tool_path =
         source_path_.Append(kClangToolPath).Append(platform_name);
+    std::vector<std::string> path_filters;
 
     // As build path is not available and not used in tests, the default (empty)
     // build path is passed to auditor.
@@ -81,7 +80,7 @@ class TrafficAnnotationAuditorTest : public ::testing::Test {
         source_path_,
         source_path_.Append(FILE_PATH_LITERAL("out"))
             .Append(FILE_PATH_LITERAL("Default")),
-        clang_tool_path);
+        clang_tool_path, path_filters);
 
     id_checker_ = std::make_unique<TrafficAnnotationIDChecker>(
         TrafficAnnotationAuditor::GetReservedIDsSet(), kDummyDeprecatedIDs);
@@ -286,7 +285,7 @@ TEST_F(TrafficAnnotationAuditorTest, IsSafeListed) {
                              AuditorException::ExceptionType::TEST_ANNOTATION));
 }
 
-// Tests if annotation instances are corrrectly deserialized.
+// Tests if annotation instances are correctly deserialized.
 TEST_F(TrafficAnnotationAuditorTest, AnnotationDeserialization) {
   struct AnnotationSample {
     std::string file_name;
@@ -340,7 +339,7 @@ TEST_F(TrafficAnnotationAuditorTest, AnnotationDeserialization) {
   }
 }
 
-// Tests if call instances are corrrectly deserialized.
+// Tests if call instances are correctly deserialized.
 TEST_F(TrafficAnnotationAuditorTest, CallDeserialization) {
   struct CallSample {
     std::string file_name;
@@ -369,7 +368,7 @@ TEST_F(TrafficAnnotationAuditorTest, CallDeserialization) {
   }
 }
 
-// Tests if call instances are corrrectly deserialized.
+// Tests if call instances are correctly deserialized.
 TEST_F(TrafficAnnotationAuditorTest, AssignmentDeserialization) {
   struct Assignmentample {
     std::string file_name;

@@ -6,12 +6,13 @@ package org.chromium.chrome.browser.browserservices.permissiondelegation;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.support.annotation.Nullable;
-import android.support.annotation.WorkerThread;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.annotation.WorkerThread;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.browserservices.Origin;
 
 import java.util.HashSet;

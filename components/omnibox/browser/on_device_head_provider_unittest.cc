@@ -8,7 +8,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
@@ -29,13 +29,13 @@ class OnDeviceHeadProviderTest : public testing::Test,
     client_.reset(new FakeAutocompleteProviderClient());
     SetTestOnDeviceHeadModel();
     provider_ = OnDeviceHeadProvider::Create(client_.get(), this);
-    base::RunLoop().RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void TearDown() override {
     provider_ = nullptr;
     client_.reset();
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   // AutocompleteProviderListener:
@@ -49,59 +49,91 @@ class OnDeviceHeadProviderTest : public testing::Test,
     // The same test model also used in ./on_device_head_serving_unittest.cc.
     file_path = file_path.AppendASCII("components/test/data/omnibox");
     ASSERT_TRUE(base::PathExists(file_path));
-    OnDeviceHeadProvider::OverrideEnumDirOnDeviceHeadSuggestForTest(file_path);
+    auto* update_listener = OnDeviceModelUpdateListener::GetInstance();
+    if (update_listener)
+      update_listener->OnModelUpdate(file_path);
+    task_environment_.RunUntilIdle();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  void ResetServingInstance() {
+    if (provider_) {
+      provider_->serving_.reset();
+      provider_->current_model_filename_.clear();
+    }
+  }
+
+  bool IsOnDeviceHeadProviderAllowed(const AutocompleteInput& input,
+                                     const std::string& incognito_serve_mode) {
+    return provider_->IsOnDeviceHeadProviderAllowed(input,
+                                                    incognito_serve_mode);
+  }
+
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<FakeAutocompleteProviderClient> client_;
   scoped_refptr<OnDeviceHeadProvider> provider_;
 };
 
 TEST_F(OnDeviceHeadProviderTest, ServingInstanceNotCreated) {
-  AutocompleteInput input(base::UTF8ToUTF16("a"),
+  AutocompleteInput input(base::UTF8ToUTF16("M"),
                           metrics::OmniboxEventProto::OTHER,
                           TestSchemeClassifier());
   input.set_want_asynchronous_matches(true);
+  ResetServingInstance();
 
-  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillOnce(Return(false));
-  EXPECT_CALL(*client_.get(), SearchSuggestEnabled()).WillOnce(Return(true));
+  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
+      .WillRepeatedly(Return(true));
+
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input, ""));
 
   provider_->Start(input, false);
   if (!provider_->done())
-    base::RunLoop().RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
   EXPECT_TRUE(provider_->matches().empty());
   EXPECT_TRUE(provider_->done());
 }
 
 TEST_F(OnDeviceHeadProviderTest, RejectSynchronousRequest) {
-  AutocompleteInput input(base::UTF8ToUTF16("a"),
+  AutocompleteInput input(base::UTF8ToUTF16("M"),
                           metrics::OmniboxEventProto::OTHER,
                           TestSchemeClassifier());
   input.set_want_asynchronous_matches(false);
 
-  provider_->Start(input, false);
-  if (!provider_->done())
-    base::RunLoop().RunUntilIdle();
-
-  EXPECT_TRUE(provider_->matches().empty());
-  EXPECT_TRUE(provider_->done());
+  ASSERT_FALSE(IsOnDeviceHeadProviderAllowed(input, ""));
 }
 
-TEST_F(OnDeviceHeadProviderTest, RejectIncognito) {
-  AutocompleteInput input(base::UTF8ToUTF16("a"),
+TEST_F(OnDeviceHeadProviderTest, TestIfIncognitoIsAllowed) {
+  AutocompleteInput input(base::UTF8ToUTF16("M"),
                           metrics::OmniboxEventProto::OTHER,
                           TestSchemeClassifier());
   input.set_want_asynchronous_matches(true);
 
-  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillOnce(Return(true));
+  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
+      .WillRepeatedly(Return(true));
 
-  provider_->Start(input, false);
-  if (!provider_->done())
-    base::RunLoop().RunUntilIdle();
+  // By default incognito request will be rejected.
+  ASSERT_FALSE(IsOnDeviceHeadProviderAllowed(input, ""));
 
-  EXPECT_TRUE(provider_->matches().empty());
-  EXPECT_TRUE(provider_->done());
+  // Now enable for incognito only.
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input, "incognito-only"));
+
+  // Test "always-serve" mode.
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input, "always-serve"));
+}
+
+TEST_F(OnDeviceHeadProviderTest, RejectOnFocusRequest) {
+  AutocompleteInput input(base::UTF8ToUTF16("M"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  input.set_want_asynchronous_matches(true);
+  input.set_from_omnibox_focus(true);
+
+  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*client_.get(), SearchSuggestEnabled()).WillOnce(Return(true));
+
+  ASSERT_FALSE(IsOnDeviceHeadProviderAllowed(input, ""));
 }
 
 TEST_F(OnDeviceHeadProviderTest, NoMatches) {
@@ -110,12 +142,15 @@ TEST_F(OnDeviceHeadProviderTest, NoMatches) {
                           TestSchemeClassifier());
   input.set_want_asynchronous_matches(true);
 
-  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillOnce(Return(false));
-  EXPECT_CALL(*client_.get(), SearchSuggestEnabled()).WillOnce(Return(true));
+  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
+      .WillRepeatedly(Return(true));
+
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input, ""));
 
   provider_->Start(input, false);
   if (!provider_->done())
-    base::RunLoop().RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
   EXPECT_TRUE(provider_->matches().empty());
   EXPECT_TRUE(provider_->done());
@@ -127,12 +162,15 @@ TEST_F(OnDeviceHeadProviderTest, HasMatches) {
                           TestSchemeClassifier());
   input.set_want_asynchronous_matches(true);
 
-  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillOnce(Return(false));
-  EXPECT_CALL(*client_.get(), SearchSuggestEnabled()).WillOnce(Return(true));
+  EXPECT_CALL(*client_.get(), IsOffTheRecord()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
+      .WillRepeatedly(Return(true));
+
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input, ""));
 
   provider_->Start(input, false);
   if (!provider_->done())
-    base::RunLoop().RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
   EXPECT_TRUE(provider_->done());
   ASSERT_EQ(3U, provider_->matches().size());
@@ -155,12 +193,15 @@ TEST_F(OnDeviceHeadProviderTest, CancelInProgressRequest) {
   EXPECT_CALL(*client_.get(), SearchSuggestEnabled())
       .WillRepeatedly(Return(true));
 
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input1, ""));
+  ASSERT_TRUE(IsOnDeviceHeadProviderAllowed(input2, ""));
+
   provider_->Start(input1, false);
   EXPECT_FALSE(provider_->done());
   provider_->Start(input2, false);
 
   if (!provider_->done())
-    base::RunLoop().RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
   EXPECT_TRUE(provider_->done());
   ASSERT_EQ(3U, provider_->matches().size());

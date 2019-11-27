@@ -29,6 +29,7 @@
 
 #include "base/bind_helpers.h"
 #include "cc/paint/paint_canvas.h"
+#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/web_fullscreen_video_status.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
@@ -57,14 +58,12 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
-
-using namespace html_names;
 
 namespace {
 
@@ -80,7 +79,7 @@ enum VideoPersistenceControlsType {
 }  // anonymous namespace
 
 HTMLVideoElement::HTMLVideoElement(Document& document)
-    : HTMLMediaElement(kVideoTag, document),
+    : HTMLMediaElement(html_names::kVideoTag, document),
       remoting_interstitial_(nullptr),
       picture_in_picture_interstitial_(nullptr),
       in_overlay_fullscreen_video_(false) {
@@ -175,9 +174,9 @@ void HTMLVideoElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == kWidthAttr)
+  if (name == html_names::kWidthAttr)
     AddHTMLLengthToStyle(style, CSSPropertyID::kWidth, value);
-  else if (name == kHeightAttr)
+  else if (name == html_names::kHeightAttr)
     AddHTMLLengthToStyle(style, CSSPropertyID::kHeight, value);
   else
     HTMLMediaElement::CollectStyleForPresentationAttribute(name, value, style);
@@ -185,14 +184,14 @@ void HTMLVideoElement::CollectStyleForPresentationAttribute(
 
 bool HTMLVideoElement::IsPresentationAttribute(
     const QualifiedName& name) const {
-  if (name == kWidthAttr || name == kHeightAttr)
+  if (name == html_names::kWidthAttr || name == html_names::kHeightAttr)
     return true;
   return HTMLMediaElement::IsPresentationAttribute(name);
 }
 
 void HTMLVideoElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == kPosterAttr) {
+  if (params.name == html_names::kPosterAttr) {
     // In case the poster attribute is set after playback, don't update the
     // display state, post playback the correct state will be picked up.
     if (GetDisplayMode() < kVideo || !HasAvailableVideoFrame()) {
@@ -222,24 +221,7 @@ void HTMLVideoElement::ParseAttribute(
       remoting_interstitial_->OnPosterImageChanged();
     if (picture_in_picture_interstitial_)
       picture_in_picture_interstitial_->OnPosterImageChanged();
-  } else if (params.name == kIntrinsicsizeAttr &&
-             RuntimeEnabledFeatures::
-                 ExperimentalProductivityFeaturesEnabled()) {
-    String message;
-    bool intrinsic_size_changed =
-        media_element_parser_helpers::ParseIntrinsicSizeAttribute(
-            params.new_value, this, &overridden_intrinsic_size_,
-            &is_default_overridden_intrinsic_size_, &message);
-    if (!message.IsEmpty()) {
-      GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-          mojom::ConsoleMessageSource::kOther,
-          mojom::ConsoleMessageLevel::kWarning, message));
-    }
-
-    if (intrinsic_size_changed && GetLayoutObject() &&
-        GetLayoutObject()->IsVideo())
-      ToLayoutVideo(GetLayoutObject())->IntrinsicSizeChanged();
-  } else if (params.name == kAutopictureinpictureAttr &&
+  } else if (params.name == html_names::kAutopictureinpictureAttr &&
              RuntimeEnabledFeatures::AutoPictureInPictureEnabled(
                  GetExecutionContext())) {
     if (!params.new_value.IsNull()) {
@@ -280,12 +262,12 @@ IntSize HTMLVideoElement::GetOverriddenIntrinsicSize() const {
 }
 
 bool HTMLVideoElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName() == kPosterAttr ||
+  return attribute.GetName() == html_names::kPosterAttr ||
          HTMLMediaElement::IsURLAttribute(attribute);
 }
 
 const AtomicString HTMLVideoElement::ImageSourceURL() const {
-  const AtomicString& url = getAttribute(kPosterAttr);
+  const AtomicString& url = FastGetAttribute(html_names::kPosterAttr);
   if (!StripLeadingAndTrailingHTMLSpaces(url).IsEmpty())
     return url;
   return default_poster_url_;
@@ -373,6 +355,7 @@ void HTMLVideoElement::ActivateViewportIntersectionMonitoring(bool activate) {
         {}, {kMostlyFillViewportThreshold}, &(GetDocument()),
         WTF::BindRepeating(&HTMLVideoElement::OnViewportIntersectionChanged,
                            WrapWeakPersistent(this)),
+        IntersectionObserver::kDeliverDuringPostLifecycleSteps,
         IntersectionObserver::kFractionOfRoot);
     viewport_intersection_observer_->observe(this);
   } else if (!activate && viewport_intersection_observer_) {
@@ -648,7 +631,8 @@ scoped_refptr<Image> HTMLVideoElement::GetSourceImageForCanvas(
           CanvasResourceProvider::ResourceUsage::kSoftwareResourceUsage,
           nullptr,  // context_provider_wrapper
           0,        // msaa_sample_count
-          CanvasColorParams(), CanvasResourceProvider::kDefaultPresentationMode,
+          kLow_SkFilterQuality, CanvasColorParams(),
+          CanvasResourceProvider::kDefaultPresentationMode,
           nullptr);  // canvas_resource_dispatcher
   if (!resource_provider) {
     *status = kInvalidSourceImageStatus;
@@ -717,10 +701,9 @@ void HTMLVideoElement::MediaRemotingStarted(
   remoting_interstitial_->Show(remote_device_friendly_name);
 }
 
-void HTMLVideoElement::MediaRemotingStopped(
-    WebLocalizedString::Name error_msg) {
+void HTMLVideoElement::MediaRemotingStopped(int error_code) {
   if (remoting_interstitial_)
-    remoting_interstitial_->Hide(error_msg);
+    remoting_interstitial_->Hide(error_code);
 }
 
 bool HTMLVideoElement::SupportsPictureInPicture() const {

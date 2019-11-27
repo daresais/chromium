@@ -15,7 +15,7 @@
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/ui/util/dynamic_type_util.h"
 #include "ios/web/public/security/web_interstitial.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -70,7 +70,7 @@ std::string IOSSecurityInterstitialPage::GetHtmlContents() const {
       GetApplicationContext()->GetApplicationLocale(), &load_time_data);
   AdjustFontSize(load_time_data);
   std::string html =
-      ui::ResourceBundle::GetSharedInstance().DecompressDataResource(
+      ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
           IDR_SECURITY_INTERSTITIAL_HTML);
   webui::AppendWebUiCssTextDefaults(&html);
   return webui::GetI18nTemplateHtml(html, &load_time_data);

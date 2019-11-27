@@ -7,7 +7,7 @@
 #include <sstream>
 #include <utility>
 
-#include "base/format_macros.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/notifications/scheduler/internal/notification_entry.h"
 #include "chrome/browser/notifications/scheduler/public/notification_data.h"
@@ -67,14 +67,12 @@ Impression CreateImpression(const base::Time& create_time,
                             UserFeedback feedback,
                             ImpressionResult impression_result,
                             bool integrated,
-                            SchedulerTaskTime task_start_time,
                             const std::string& guid,
                             SchedulerClientType type) {
   Impression impression(type, guid, create_time);
   impression.feedback = feedback;
   impression.impression = impression_result;
   impression.integrated = integrated;
-  impression.task_start_time = task_start_time;
   return impression;
 }
 
@@ -105,10 +103,16 @@ std::string DebugString(const NotificationEntry* entry) {
            << " : " << static_cast<int>(mapping.second);
   }
 
-  stream << " \n icons_id:";
-  for (const auto& icon_id : entry->icons_uuid)
-    stream << icon_id << "  ";
+  if (base::Contains(entry->icons_uuid, IconType::kSmallIcon))
+    stream << " \n small_icons_id:"
+           << entry->icons_uuid.at(IconType::kSmallIcon);
+  if (base::Contains(entry->icons_uuid, IconType::kLargeIcon))
+    stream << " \n large_icons_id:"
+           << entry->icons_uuid.at(IconType::kLargeIcon);
 
+  if (entry->schedule_params.custom_suppression_duration.has_value())
+    stream << " \n custom_suppression_duration:"
+           << entry->schedule_params.custom_suppression_duration.value();
   return stream.str();
 }
 
@@ -123,7 +127,8 @@ std::string DebugString(const ClientState* client_state) {
 
   for (const auto& impression : client_state->impressions) {
     std::ostringstream stream;
-    stream << "Impression, create_time:" << impression.create_time << "\n"
+    stream << "\n"
+           << "Impression, create_time:" << impression.create_time << "\n"
            << " create_time in microseconds:"
            << impression.create_time.ToDeltaSinceWindowsEpoch().InMicroseconds()
            << "\n"
@@ -131,8 +136,6 @@ std::string DebugString(const ClientState* client_state) {
            << "impression result: " << static_cast<int>(impression.impression)
            << " \n"
            << "integrated: " << impression.integrated << "\n"
-           << "task start time: "
-           << static_cast<int>(impression.task_start_time) << "\n"
            << "guid: " << impression.guid << "\n"
            << "type: " << static_cast<int>(impression.type);
 
@@ -141,12 +144,21 @@ std::string DebugString(const ClientState* client_state) {
              << " : " << static_cast<int>(mapping.second);
     }
 
+    for (const auto& pair : impression.custom_data) {
+      stream << " \n custom data, key: " << pair.first
+             << " value: " << pair.second;
+    }
+
+    if (impression.custom_suppression_duration.has_value()) {
+      stream << " \n custom suppression duration  "
+             << impression.custom_suppression_duration.value();
+    }
     log += stream.str();
   }
 
   if (client_state->suppression_info.has_value()) {
     std::ostringstream stream;
-    stream << "Suppression info, last_trigger_time:"
+    stream << "\n Suppression info, last_trigger_time: "
            << client_state->suppression_info->last_trigger_time << "\n"
            << "duration:" << client_state->suppression_info->duration << "\n"
            << "recover_goal:" << client_state->suppression_info->recover_goal;

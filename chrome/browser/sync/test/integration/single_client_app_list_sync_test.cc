@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/app_list/page_break_constants.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
-#include "extensions/browser/extension_system.h"
 
 namespace {
 
@@ -74,11 +73,8 @@ class AppListSyncUpdateWaiter
   }
 
   // StatusChangeChecker:
-  std::string GetDebugMessage() const override {
-    return "AwaitAppListSyncUpdated";
-  }
-
-  bool IsExitConditionSatisfied() override {
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    *os << "AwaitAppListSyncUpdated";
     return service_updated_;
   }
 
@@ -183,8 +179,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, LocalStorage) {
   SyncAppListHelper::GetInstance()->MoveAppToFolder(profile, app_ids[3],
                                                     "folder2");
 
-  app_list::AppListSyncableService compare_service(
-      profile, extensions::ExtensionSystem::Get(profile));
+  app_list::AppListSyncableService compare_service(profile);
 
   // Make sure that that on start, when sync has not been started yet, model
   // content is filled from local prefs and it matches latest state.

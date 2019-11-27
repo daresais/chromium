@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "content/public/browser/content_browser_client.h"
+#include "storage/browser/quota/quota_settings.h"
 
 namespace ash {
 namespace shell {
@@ -29,7 +30,6 @@ class ShellContentBrowserClient : public content::ContentBrowserClient {
       storage::OptionalQuotaSettingsCallback callback) override;
   base::Optional<service_manager::Manifest> GetServiceManifestOverlay(
       base::StringPiece name) override;
-  std::vector<service_manager::Manifest> GetExtraServiceManifests() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellContentBrowserClient);

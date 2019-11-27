@@ -12,6 +12,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * Helper class for publishing download files to the public download collection.
@@ -73,7 +74,7 @@ public class DownloadCollectionBridge {
      * @param filePath File path of the download.
      * @return True if the download needs to be published, or false otherwise.
      */
-    protected boolean needToPublishDownload(final String filePath) {
+    public boolean needToPublishDownload(final String filePath) {
         return false;
     }
 
@@ -116,10 +117,12 @@ public class DownloadCollectionBridge {
     }
 
     /**
-     * @return whether a download with the file name exists.
+     * Gets the content URI of the download that has the given file name.
+     * @param pendingUri name of the file.
+     * @return Uri of the download with the given display name.
      */
-    protected boolean checkFileNameExists(final String fileName) {
-        return false;
+    public Uri getDownloadUriForFileName(final String fileName) {
+        return null;
     }
 
     /**
@@ -178,7 +181,7 @@ public class DownloadCollectionBridge {
      * @param referrer Referrer of the download.
      */
     @CalledByNative
-    private static String createIntermediateUriForPublish(final String fileName,
+    public static String createIntermediateUriForPublish(final String fileName,
             final String mimeType, final String originalUrl, final String referrer) {
         Uri uri = getDownloadCollectionBridge().createPendingSession(
                 fileName, mimeType, originalUrl, referrer);
@@ -202,7 +205,7 @@ public class DownloadCollectionBridge {
      * @return True on success, or false otherwise.
      */
     @CalledByNative
-    private static boolean copyFileToIntermediateUri(
+    public static boolean copyFileToIntermediateUri(
             final String sourcePath, final String destinationUri) {
         return getDownloadCollectionBridge().copyFileToPendingUri(sourcePath, destinationUri);
     }
@@ -212,7 +215,7 @@ public class DownloadCollectionBridge {
      * @param uri Intermediate Uri that is going to be deleted.
      */
     @CalledByNative
-    private static void deleteIntermediateUri(final String uri) {
+    public static void deleteIntermediateUri(final String uri) {
         getDownloadCollectionBridge().abandonPendingUri(uri);
     }
 
@@ -222,7 +225,7 @@ public class DownloadCollectionBridge {
      * @return Uri of the published file.
      */
     @CalledByNative
-    private static String publishDownload(final String intermediateUri) {
+    public static String publishDownload(final String intermediateUri) {
         Uri uri = getDownloadCollectionBridge().publishCompletedDownload(intermediateUri);
         return uri == null ? null : uri.toString();
     }
@@ -251,7 +254,8 @@ public class DownloadCollectionBridge {
      */
     @CalledByNative
     private static boolean fileNameExists(final String fileName) {
-        return getDownloadCollectionBridge().checkFileNameExists(fileName);
+        Uri uri = getDownloadCollectionBridge().getDownloadUriForFileName(fileName);
+        return uri != null;
     }
 
     /**
@@ -293,7 +297,7 @@ public class DownloadCollectionBridge {
      * @return number of days for an intermediate download to expire.
      */
     public static int getExpirationDurationInDays() {
-        return nativeGetExpirationDurationInDays();
+        return DownloadCollectionBridgeJni.get().getExpirationDurationInDays();
     }
 
     /**
@@ -306,5 +310,8 @@ public class DownloadCollectionBridge {
         return getDownloadCollectionBridge().getDisplayNameForUri(downloadUri);
     }
 
-    private static native int nativeGetExpirationDurationInDays();
+    @NativeMethods
+    interface Natives {
+        int getExpirationDurationInDays();
+    }
 }

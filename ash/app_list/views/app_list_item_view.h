@@ -29,8 +29,9 @@ class Label;
 class ProgressBar;
 }  // namespace views
 
-namespace app_list {
+namespace ash {
 
+class AppListConfig;
 class AppListItem;
 class AppListMenuModelAdapter;
 class AppListViewDelegate;
@@ -70,6 +71,10 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   // Sets focus without a11y announcements or focus ring.
   void SilentlyRequestFocus();
 
+  // Helper for getting current app list config from the parents in the app list
+  // view hierarchy.
+  const AppListConfig& GetAppListConfig() const;
+
   AppListItem* item() const { return item_weak_; }
 
   views::Label* title() { return title_; }
@@ -96,12 +101,14 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   // Returns the icon bounds for with |target_bounds| as the bounds of this view
   // and given |icon_size|.
   static gfx::Rect GetIconBoundsForTargetViewBounds(
+      const AppListConfig& config,
       const gfx::Rect& target_bounds,
       const gfx::Size& icon_size);
 
   // Returns the title bounds for with |target_bounds| as the bounds of this
   // view and given |title_size|.
   static gfx::Rect GetTitleBoundsForTargetViewBounds(
+      const AppListConfig& config,
       const gfx::Rect& target_bounds,
       const gfx::Size& title_size);
 
@@ -128,6 +135,8 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
 
   // Ensures this item view has its own layer.
   void EnsureLayer();
+
+  void FireMouseDragTimerForTest();
 
   bool is_folder() const { return is_folder_; }
 
@@ -200,7 +209,7 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   void OnBlur() override;
 
   // AppListItemObserver overrides:
-  void ItemIconChanged() override;
+  void ItemIconChanged(ash::AppListConfigType config_type) override;
   void ItemNameChanged() override;
   void ItemIsInstallingChanged() override;
   void ItemPercentDownloadedChanged() override;
@@ -221,7 +230,7 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   // requests.
   bool waiting_for_context_menu_options_ = false;
 
-  AppListItem* item_weak_;  // Owned by AppListModel. Can be NULL.
+  AppListItem* item_weak_;  // Owned by AppListModel. Can be nullptr.
 
   AppListViewDelegate* delegate_;            // Unowned.
   AppsGridView* apps_grid_view_;             // Parent view, owns this.
@@ -271,11 +280,11 @@ class APP_LIST_EXPORT AppListItemView : public views::Button,
   // The shadow margins added to the app list item title.
   gfx::Insets title_shadow_margins_;
 
-  base::WeakPtrFactory<AppListItemView> weak_ptr_factory_;
+  base::WeakPtrFactory<AppListItemView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AppListItemView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_APP_LIST_ITEM_VIEW_H_

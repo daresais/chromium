@@ -34,7 +34,7 @@ class EnterpriseReportingPrivateUploadChromeDesktopReportTest
  public:
   EnterpriseReportingPrivateUploadChromeDesktopReportTest() {}
 
-  UIThreadExtensionFunction* CreateChromeDesktopReportingFunction(
+  ExtensionFunction* CreateChromeDesktopReportingFunction(
       const std::string& dm_token) {
     EnterpriseReportingPrivateUploadChromeDesktopReportFunction* function =
         EnterpriseReportingPrivateUploadChromeDesktopReportFunction::
@@ -43,7 +43,13 @@ class EnterpriseReportingPrivateUploadChromeDesktopReportTest
         test_url_loader_factory_.GetSafeWeakWrapper());
     client_ = client.get();
     function->SetCloudPolicyClientForTesting(std::move(client));
-    function->SetRegistrationInfoForTesting(dm_token, kFakeClientId);
+    if (dm_token.empty()) {
+      function->SetRegistrationInfoForTesting(
+          policy::DMToken::CreateEmptyTokenForTesting(), kFakeClientId);
+    } else {
+      function->SetRegistrationInfoForTesting(
+          policy::DMToken::CreateValidTokenForTesting(dm_token), kFakeClientId);
+    }
     return function;
   }
 
@@ -85,7 +91,7 @@ TEST_F(EnterpriseReportingPrivateUploadChromeDesktopReportTest,
 }
 
 TEST_F(EnterpriseReportingPrivateUploadChromeDesktopReportTest, UploadFailed) {
-  UIThreadExtensionFunction* function =
+  ExtensionFunction* function =
       CreateChromeDesktopReportingFunction(kFakeDMToken);
   EXPECT_CALL(*client_, SetupRegistration(kFakeDMToken, kFakeClientId, _))
       .Times(1);
@@ -99,7 +105,7 @@ TEST_F(EnterpriseReportingPrivateUploadChromeDesktopReportTest, UploadFailed) {
 
 TEST_F(EnterpriseReportingPrivateUploadChromeDesktopReportTest,
        UploadSucceeded) {
-  UIThreadExtensionFunction* function =
+  ExtensionFunction* function =
       CreateChromeDesktopReportingFunction(kFakeDMToken);
   EXPECT_CALL(*client_, SetupRegistration(kFakeDMToken, kFakeClientId, _))
       .Times(1);

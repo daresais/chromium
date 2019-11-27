@@ -18,9 +18,14 @@ class CommandLine;
 class FilePath;
 }  // namespace base
 
+namespace content {
+class WebContents;
+}
+
 namespace apps {
 
 class LaunchManager;
+struct AppLaunchParams;
 
 // This KeyedService receives app launch requests and forwards them
 // to the appropriate LaunchManager, based on the type of app.
@@ -35,6 +40,9 @@ class LaunchService : public KeyedService {
 
   explicit LaunchService(Profile* profile);
   ~LaunchService() override;
+
+  // Open the application in a way specified by |params|.
+  content::WebContents* OpenApplication(const AppLaunchParams& params);
 
   // Attempt to open |app_id| in a new window.
   bool OpenApplicationWindow(const std::string& app_id,

@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/time/default_tick_clock.h"
-#include "third_party/blink/public/platform/web_layer_tree_view.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -21,7 +20,7 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
@@ -112,19 +111,6 @@ void PaintTiming::SetFirstMeaningfulPaint(
     first_meaningful_paint_swap_ = swap_stamp;
     NotifyPaintTimingChanged();
   }
-
-  ReportUserInputHistogram(had_input);
-}
-
-void PaintTiming::ReportUserInputHistogram(
-    FirstMeaningfulPaintDetector::HadUserInput had_input) {
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, had_user_input_histogram,
-                      ("PageLoad.Internal.PaintTiming."
-                       "HadUserInputBeforeFirstMeaningfulPaint",
-                       FirstMeaningfulPaintDetector::kHadUserInputEnumMax));
-
-  if (GetFrame() && GetFrame()->IsMainFrame())
-    had_user_input_histogram.Count(had_input);
 }
 
 void PaintTiming::NotifyPaint(bool is_first_paint,
@@ -177,10 +163,13 @@ void PaintTiming::SetFirstContentfulPaint(base::TimeTicks stamp) {
   RegisterNotifySwapTime(PaintEvent::kFirstContentfulPaint);
 
   // Restart commits that may have been deferred.
-  if (!GetFrame() || !GetFrame()->IsMainFrame())
+  LocalFrame* frame = GetFrame();
+  if (!frame || !frame->IsMainFrame())
     return;
-  GetFrame()->GetPage()->GetChromeClient().StopDeferringCommits(
-      *GetFrame(), cc::PaintHoldingCommitTrigger::kFirstContentfulPaint);
+  frame->View()->OnFirstContentfulPaint();
+
+  if (frame->GetFrameScheduler())
+    frame->GetFrameScheduler()->OnFirstContentfulPaint();
 }
 
 void PaintTiming::RegisterNotifySwapTime(PaintEvent event) {

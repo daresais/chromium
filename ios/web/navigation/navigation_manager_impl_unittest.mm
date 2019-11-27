@@ -19,9 +19,10 @@
 #import "ios/web/navigation/navigation_manager_delegate.h"
 #import "ios/web/navigation/wk_based_navigation_manager_impl.h"
 #import "ios/web/navigation/wk_navigation_util.h"
-#include "ios/web/public/navigation_item.h"
+#include "ios/web/public/navigation/navigation_item.h"
 #include "ios/web/public/test/fakes/test_browser_state.h"
 #import "ios/web/public/test/fakes/test_navigation_manager.h"
+#import "ios/web/public/test/fakes/test_web_state.h"
 #import "ios/web/public/web_client.h"
 #import "ios/web/test/fakes/crw_fake_back_forward_list.h"
 #import "ios/web/test/fakes/crw_fake_session_controller_delegate.h"
@@ -79,8 +80,10 @@ class MockNavigationManagerDelegate : public NavigationManagerDelegate {
   }
 
   void SetWKWebView(id web_view) { mock_web_view_ = web_view; }
+  void SetWebState(WebState* web_state) { web_state_ = web_state; }
 
   MOCK_METHOD0(ClearTransientContent, void());
+  MOCK_METHOD0(ClearDialogs, void());
   MOCK_METHOD0(RecordPageStateInNavigationItem, void());
   MOCK_METHOD2(OnGoToIndexSameDocumentNavigation,
                void(NavigationInitiationType type, bool has_user_gesture));
@@ -99,7 +102,7 @@ class MockNavigationManagerDelegate : public NavigationManagerDelegate {
   MOCK_METHOD0(GetPendingItem, NavigationItemImpl*());
 
  private:
-  WebState* GetWebState() override { return nullptr; }
+  WebState* GetWebState() override { return web_state_; }
 
   id<CRWWebViewNavigationProxy> GetWebViewNavigationProxy() const override {
     return mock_web_view_;
@@ -107,6 +110,7 @@ class MockNavigationManagerDelegate : public NavigationManagerDelegate {
 
   CRWSessionController* session_controller_;
   id mock_web_view_;
+  WebState* web_state_ = nullptr;
 };
 
 }  // namespace
@@ -191,8 +195,9 @@ class NavigationManagerTest
   base::HistogramTester histogram_tester_;
   CRWFakeSessionControllerDelegate* session_controller_delegate_ = nil;
 
- private:
+ protected:
   TestBrowserState browser_state_;
+  TestWebState web_state_;
   MockNavigationManagerDelegate delegate_;
   std::unique_ptr<NavigationManagerImpl> manager_;
   CRWSessionController* controller_;
@@ -1848,6 +1853,7 @@ TEST_P(NavigationManagerTest, ReloadWithUserAgentType) {
   EXPECT_CALL(navigation_manager_delegate(), WillChangeUserAgentType());
   EXPECT_CALL(navigation_manager_delegate(), RecordPageStateInNavigationItem());
   EXPECT_CALL(navigation_manager_delegate(), ClearTransientContent());
+  EXPECT_CALL(navigation_manager_delegate(), ClearDialogs());
   EXPECT_CALL(navigation_manager_delegate(),
               LoadCurrentItem(NavigationInitiationType::BROWSER_INITIATED));
 
@@ -1869,6 +1875,9 @@ TEST_P(NavigationManagerTest, ReloadWithUserAgentType) {
 
 // Tests that ReloadWithUserAgentType does not expose internal URLs.
 TEST_P(NavigationManagerTest, ReloadWithUserAgentTypeOnIntenalUrl) {
+  delegate_.SetWebState(&web_state_);
+  web_state_.SetLoading(true);
+
   GURL url = wk_navigation_util::CreateRedirectUrl(GURL("http://www.1.com"));
   navigation_manager()->AddPendingItem(
       url, Referrer(), ui::PAGE_TRANSITION_TYPED,
@@ -1879,8 +1888,7 @@ TEST_P(NavigationManagerTest, ReloadWithUserAgentTypeOnIntenalUrl) {
       ->GetPendingItemInCurrentOrRestoredSession()
       ->SetVirtualURL(virtual_url);
   [mock_wk_list_ setCurrentURL:base::SysUTF8ToNSString(url.spec())];
-  navigation_manager()->OnRendererInitiatedNavigationStarted(
-      GURL("http://www.1.com/virtual"));
+  navigation_manager()->OnNavigationStarted(GURL("http://www.1.com/virtual"));
 
   navigation_manager()->ReloadWithUserAgentType(UserAgentType::DESKTOP);
 
@@ -1899,7 +1907,7 @@ TEST_P(NavigationManagerTest, ReloadWithUserAgentTypeOnIntenalUrl) {
 }
 
 // Tests that app-specific URLs are not rewritten for renderer-initiated loads
-// unless requested by a page with app-specific url.
+// or reloads unless requested by a page with app-specific url.
 TEST_P(NavigationManagerTest, RewritingAppSpecificUrls) {
   // URL should not be rewritten as there is no committed URL.
   GURL url1(url::SchemeHostPort(kSchemeToRewrite, "test", 0).Serialize());
@@ -1919,6 +1927,15 @@ TEST_P(NavigationManagerTest, RewritingAppSpecificUrls) {
       web::NavigationInitiationType::RENDERER_INITIATED,
       web::NavigationManager::UserAgentOverrideOption::INHERIT);
   EXPECT_EQ(url2, navigation_manager()->GetPendingItem()->GetURL());
+
+  // URL should not be rewritten for user initiated reload navigations.
+  GURL url_reload(
+      url::SchemeHostPort(kSchemeToRewrite, "test-reload", 0).Serialize());
+  navigation_manager()->AddPendingItem(
+      url_reload, Referrer(), ui::PAGE_TRANSITION_RELOAD,
+      web::NavigationInitiationType::BROWSER_INITIATED,
+      web::NavigationManager::UserAgentOverrideOption::INHERIT);
+  EXPECT_EQ(url_reload, navigation_manager()->GetPendingItem()->GetURL());
 
   // URL should be rewritten for user initiated navigations.
   GURL url3(url::SchemeHostPort(kSchemeToRewrite, "test3", 0).Serialize());
@@ -2087,14 +2104,14 @@ TEST_P(NavigationManagerTest, Restore) {
     EXPECT_TRUE(pending_url.SchemeIsFile());
     EXPECT_EQ("restore_session.html", pending_url.ExtractFileName());
     EXPECT_EQ("http://www.url.com/0", pending_item->GetVirtualURL());
+    navigation_manager()->OnNavigationStarted(pending_url);
 
     // Simulate the end effect of loading the restore session URL in web view.
     pending_item->SetURL(urls[1]);
     [mock_wk_list_ setCurrentURL:@"http://www.url.com/1"
                     backListURLs:@[ @"http://www.url.com/0" ]
                  forwardListURLs:@[ @"http://www.url.com/2" ]];
-    navigation_manager()->OnRendererInitiatedNavigationStarted(
-        GURL("http://www.url.com/2"));
+    navigation_manager()->OnNavigationStarted(GURL("http://www.url.com/2"));
   }
 
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
@@ -2106,7 +2123,7 @@ TEST_P(NavigationManagerTest, Restore) {
   EXPECT_EQ(1, navigation_manager()->GetLastCommittedItemIndex());
   EXPECT_EQ(urls[1], navigation_manager()->GetLastCommittedItem()->GetURL());
 
-  for (size_t i = 0; i < items.size(); ++i) {
+  for (size_t i = 0; i < base::size(urls); ++i) {
     EXPECT_EQ(urls[i], navigation_manager()->GetItemAtIndex(i)->GetURL());
   }
 
@@ -2217,6 +2234,9 @@ TEST_P(NavigationManagerTest, VisibleItemIsTransientItemIfPresent) {
 }
 
 TEST_P(NavigationManagerTest, PendingItemIsVisibleIfNewAndUserInitiated) {
+  delegate_.SetWebState(&web_state_);
+  web_state_.SetLoading(true);
+
   navigation_manager()->AddPendingItem(
       GURL("http://www.url.com/0"), Referrer(), ui::PAGE_TRANSITION_TYPED,
       web::NavigationInitiationType::BROWSER_INITIATED,
@@ -2242,6 +2262,9 @@ TEST_P(NavigationManagerTest, PendingItemIsVisibleIfNewAndUserInitiated) {
 }
 
 TEST_P(NavigationManagerTest, PendingItemIsNotVisibleIfNotUserInitiated) {
+  delegate_.SetWebState(&web_state_);
+  web_state_.SetLoading(true);
+
   navigation_manager()->AddPendingItem(
       GURL("http://www.url.com/0"), Referrer(), ui::PAGE_TRANSITION_TYPED,
       web::NavigationInitiationType::RENDERER_INITIATED,
@@ -2286,6 +2309,8 @@ TEST_P(NavigationManagerTest, PendingItemIsNotVisibleIfNotNewNavigation) {
   }
   ASSERT_EQ(0, navigation_manager()->GetPendingItemIndex());
 
+  delegate_.SetWebState(&web_state_);
+  web_state_.SetLoading(true);
   OCMExpect([mock_web_view_ URL])
       .andReturn([[NSURL alloc] initWithString:@"http://www.url.com/0"]);
   ASSERT_TRUE(navigation_manager()->GetVisibleItem());
@@ -2296,6 +2321,9 @@ TEST_P(NavigationManagerTest, PendingItemIsNotVisibleIfNotNewNavigation) {
 }
 
 TEST_P(NavigationManagerTest, VisibleItemDefaultsToLastCommittedItem) {
+  delegate_.SetWebState(&web_state_);
+  web_state_.SetLoading(true);
+
   navigation_manager()->AddPendingItem(
       GURL("http://www.url.com/0"), Referrer(), ui::PAGE_TRANSITION_TYPED,
       web::NavigationInitiationType::RENDERER_INITIATED,
@@ -2329,6 +2357,7 @@ TEST_P(NavigationManagerTest, LoadURLWithParamsWithExtraHeadersAndPostData) {
   EXPECT_CALL(navigation_manager_delegate(), RecordPageStateInNavigationItem())
       .Times(1);
   EXPECT_CALL(navigation_manager_delegate(), ClearTransientContent()).Times(1);
+  EXPECT_CALL(navigation_manager_delegate(), ClearDialogs()).Times(1);
   EXPECT_CALL(navigation_manager_delegate(),
               LoadCurrentItem(NavigationInitiationType::BROWSER_INITIATED))
       .Times(1);
@@ -2362,6 +2391,7 @@ TEST_P(NavigationManagerTest, LoadURLWithParamsSavesStateOnCurrentItem) {
   EXPECT_CALL(navigation_manager_delegate(), RecordPageStateInNavigationItem())
       .Times(1);
   EXPECT_CALL(navigation_manager_delegate(), ClearTransientContent()).Times(1);
+  EXPECT_CALL(navigation_manager_delegate(), ClearDialogs()).Times(1);
   EXPECT_CALL(navigation_manager_delegate(),
               LoadCurrentItem(NavigationInitiationType::BROWSER_INITIATED))
       .Times(1);
@@ -2438,6 +2468,7 @@ TEST_P(NavigationManagerTest, GoToIndexDifferentDocument) {
 
   EXPECT_CALL(navigation_manager_delegate(), RecordPageStateInNavigationItem());
   EXPECT_CALL(navigation_manager_delegate(), ClearTransientContent());
+  EXPECT_CALL(navigation_manager_delegate(), ClearDialogs());
   EXPECT_CALL(navigation_manager_delegate(), WillChangeUserAgentType())
       .Times(0);
 
@@ -2514,6 +2545,7 @@ TEST_P(NavigationManagerTest,
 
   EXPECT_CALL(navigation_manager_delegate(), RecordPageStateInNavigationItem());
   EXPECT_CALL(navigation_manager_delegate(), ClearTransientContent());
+  EXPECT_CALL(navigation_manager_delegate(), ClearDialogs());
   EXPECT_CALL(navigation_manager_delegate(), WillChangeUserAgentType())
       .Times(0);
 
@@ -2561,6 +2593,7 @@ TEST_P(NavigationManagerTest, GoToIndexSameDocument) {
 
   EXPECT_CALL(navigation_manager_delegate(), RecordPageStateInNavigationItem());
   EXPECT_CALL(navigation_manager_delegate(), ClearTransientContent());
+  EXPECT_CALL(navigation_manager_delegate(), ClearDialogs());
   EXPECT_CALL(navigation_manager_delegate(), WillChangeUserAgentType())
       .Times(0);
 
@@ -2625,6 +2658,19 @@ TEST_P(NavigationManagerTest, CommitNilPendingItem) {
   ASSERT_TRUE(navigation_manager()->GetLastCommittedItem());
   EXPECT_EQ("http://www.url.com/0",
             navigation_manager()->GetLastCommittedItem()->GetURL());
+}
+
+// Tests that NavigationManagerImpl::CommitPendingItem() for an invalid URL
+// doesn't crash.
+TEST_P(NavigationManagerTest, CommitEmptyPendingItem) {
+  [mock_wk_list_ setCurrentURL:@"http://www.url.com/1"
+                  backListURLs:nil
+               forwardListURLs:nil];
+
+  // Call CommitPendingItem() with a valid pending item.
+  auto item = std::make_unique<web::NavigationItemImpl>();
+  item->SetURL(GURL::EmptyGURL());
+  navigation_manager()->CommitPendingItem(std::move(item));
 }
 
 // Tests NavigationManagerImpl::CommitPendingItem() with a valid pending item.

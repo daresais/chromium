@@ -12,16 +12,20 @@
 #include "chrome/browser/media/router/providers/cast/activity_record.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_tracker.h"
 #include "chrome/common/media_router/media_route.h"
-#include "chrome/common/media_router/mojo/media_router.mojom-forward.h"
+#include "chrome/common/media_router/mojom/media_router.mojom-forward.h"
 #include "components/cast_channel/cast_message_handler.h"
 #include "components/mirroring/mojom/cast_message_channel.mojom.h"
 #include "components/mirroring/mojom/mirroring_service_host.mojom.h"
 #include "components/mirroring/mojom/session_observer.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace media_router {
 
 struct CastSinkExtraData;
+class CastActivityManagerBase;
 
 class MirroringActivityRecord : public ActivityRecord,
                                 public mirroring::mojom::SessionObserver,
@@ -33,10 +37,11 @@ class MirroringActivityRecord : public ActivityRecord,
                           const std::string& app_id,
                           cast_channel::CastMessageHandler* message_handler,
                           CastSessionTracker* session_tracker,
-                          DataDecoder* data_decoder,
                           int target_tab_id,
                           const CastSinkExtraData& cast_data,
                           mojom::MediaRouter* media_router,
+                          MediaSinkServiceBase* media_sink_service,
+                          CastActivityManagerBase* activity_manager,
                           OnStopCallback callback);
   ~MirroringActivityRecord() override;
 
@@ -77,7 +82,9 @@ class MirroringActivityRecord : public ActivityRecord,
   void OnInternalMessage(const cast_channel::InternalMessage& message) override;
 
  protected:
-  void OnSessionSet() override;
+  void CreateMediaController(
+      mojo::PendingReceiver<mojom::MediaController> media_controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer) override;
 
  private:
   enum class MirroringType {
@@ -89,21 +96,22 @@ class MirroringActivityRecord : public ActivityRecord,
 
   void StopMirroring();
 
-  mirroring::mojom::MirroringServiceHostPtr host_;
+  mojo::Remote<mirroring::mojom::MirroringServiceHost> host_;
 
   // Sends Cast messages from the mirroring receiver to the mirroring service.
-  mirroring::mojom::CastMessageChannelPtr channel_to_service_;
+  mojo::Remote<mirroring::mojom::CastMessageChannel> channel_to_service_;
 
-  mojo::Binding<mirroring::mojom::SessionObserver> observer_binding_{this};
+  mojo::Receiver<mirroring::mojom::SessionObserver> observer_receiver_{this};
 
   // To handle Cast messages from the mirroring service to the mirroring
   // receiver.
-  mojo::Binding<mirroring::mojom::CastMessageChannel> channel_binding_{this};
+  mojo::Receiver<mirroring::mojom::CastMessageChannel> channel_receiver_{this};
 
   const int channel_id_;
   const MirroringType mirroring_type_;
+  MediaSinkServiceBase* const media_sink_service_;
+  CastActivityManagerBase* const activity_manager_;
   OnStopCallback on_stop_;
-  base::OnceCallback<void()> on_session_set_;
   base::WeakPtrFactory<MirroringActivityRecord> weak_ptr_factory_{this};
 };
 
