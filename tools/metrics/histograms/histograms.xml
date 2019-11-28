@@ -6544,6 +6544,26 @@ uploading your change for review.
   </summary>
 </histogram>
 
+<histogram name="Arc.AppListRecommendedImp.AllImpression" units="count"
+    expires_after="2020-06-01">
+  <owner>robsc@chromium.org</owner>
+  <owner>napper@chromium.org</owner>
+  <summary>
+    Record a count of an impression of FAR result. This is a count _any_ time
+    it's shown, even for a millisecond.
+  </summary>
+</histogram>
+
+<histogram name="Arc.AppListRecommendedImp.CountedImpression" units="count"
+    expires_after="2020-06-01">
+  <owner>robsc@chromium.org</owner>
+  <owner>napper@chromium.org</owner>
+  <summary>
+    Record a count of an impression of FAR result. This is a count of heuristic
+    real impressions: a new showing after a while, a longer showing, etc.
+  </summary>
+</histogram>
+
 <histogram name="Arc.AppShortcuts.BuildMenuTime" units="ms" expires_after="M92">
   <owner>mmourgos@chromium.org</owner>
   <owner>newcomer@chromium.org</owner>
@@ -43034,6 +43054,17 @@ uploading your change for review.
   </summary>
 </histogram>
 
+<histogram name="Event.Latency.ScrollBegin.TopControlsMoved" enum="Boolean"
+    expires_after="2020-06-01">
+  <owner>sadrul@chromium.org</owner>
+  <owner>chrome-gpu-metrics@google.com</owner>
+  <summary>
+    Records whether the browser top-controls (i.e. omnibox, toolbar) moved
+    because of the scroll-begin event (i.e. the first scroll-update event of
+    that sequence).
+  </summary>
+</histogram>
+
 <histogram name="Event.Latency.ScrollBegin.Touch.AverageLag" units="pixels"
     expires_after="M85">
   <owner>eirage@chromium.org</owner>
@@ -43683,6 +43714,17 @@ uploading your change for review.
     every scrolling sequence is excluded from this metric.
 
     Team: input-dev@chromium.org.
+  </summary>
+</histogram>
+
+<histogram name="Event.Latency.ScrollUpdate.TopControlsMoved" enum="Boolean"
+    expires_after="2020-06-01">
+  <owner>sadrul@chromium.org</owner>
+  <owner>chrome-gpu-metrics@google.com</owner>
+  <summary>
+    Records whether the browser top-controls (i.e. omnibox, toolbar) moved
+    because of the scroll-update event (other than the first update event in the
+    sequence).
   </summary>
 </histogram>
 
@@ -73642,6 +73684,18 @@ uploading your change for review.
   <summary>
     Tracks the number of multiple Infobars being presented at the same time.
     This will be recorded everytime an Infobar is presented.
+  </summary>
+</histogram>
+
+<histogram base="true" name="Mobile.Messages.Confirm.Accept.Time" units="ms"
+    expires_after="2020-06-01">
+<!-- Name completed by histogram_suffixes name="Mobile.Messages.Confirm.Type" -->
+
+  <owner>sczs@chromium.org</owner>
+  <owner>thegreenfrog@chromium.org</owner>
+  <summary>
+    Records the time between the Infobar Delegate is created, and the user
+    accepts a Confirm Infobar action.
   </summary>
 </histogram>
 
@@ -177774,6 +177828,7 @@ regressions. -->
       label="Recorded for Block Popups Confirm Messages."/>
   <suffix name="ConfirmInfobarTypeRestore"
       label="Recorded for Restore Tabs Confirm Messages."/>
+  <affected-histogram name="Mobile.Messages.Confirm.Accept.Time"/>
   <affected-histogram name="Mobile.Messages.Confirm.Event"/>
 </histogram_suffixes>
 
@@ -186384,6 +186439,15 @@ regressions. -->
   <suffix name="Browser" label=""/>
   <suffix name="Renderer" label=""/>
   <affected-histogram name="Event.TimestampHasValidTimebase"/>
+</histogram_suffixes>
+
+<histogram_suffixes name="TopControlsState" separator=".">
+  <suffix name="NoTopControlsMoved" label="Top controls did not change."/>
+  <suffix name="TopControlsMoved" label="Top controls changed."/>
+  <affected-histogram
+      name="Event.Latency.ScrollBegin.Touch.TimeToScrollUpdateSwapBegin4"/>
+  <affected-histogram
+      name="Event.Latency.ScrollUpdate.Touch.TimeToScrollUpdateSwapBegin4"/>
 </histogram_suffixes>
 
 <histogram_suffixes name="TotalTimeToHttpsGoogle" separator=".">

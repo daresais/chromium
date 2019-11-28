@@ -950,7 +950,7 @@
   {
     "name": "enable-assistant-app-support",
     "owners": [ "croissant-eng" ],
-    "expiry_milestone": 80
+    "expiry_milestone": 82
   },
   {
     "name": "enable-assistant-dsp",
@@ -1608,7 +1608,7 @@
   },
   {
     "name": "enable-ntp-remote-suggestions",
-    "owners": [ "fgorski" ],
+    "owners": [ "//chrome/android/feed/OWNERS", "feed@chromium.org" ],
     "expiry_milestone": 80
   },
   {
@@ -2554,11 +2554,6 @@
     "name": "metal",
     "owners": ["ccameron", "jvanverth"],
     "expiry_milestone": 83
-  },
-  {
-    "name": "mime-handler-view-in-cross-process-frame",
-    "owners": [ "ekaramad" ],
-    "expiry_milestone": 80
   },
   {
     "name": "mirroring-service",

@@ -152,8 +152,8 @@ component("web_engine_core") {
     "browser/web_engine_devtools_controller.h",
     "browser/web_engine_memory_pressure_evaluator.cc",
     "browser/web_engine_memory_pressure_evaluator.h",
-    "browser/web_engine_net_log.cc",
-    "browser/web_engine_net_log.h",
+    "browser/web_engine_net_log_observer.cc",
+    "browser/web_engine_net_log_observer.h",
     "browser/web_engine_permission_manager.cc",
     "browser/web_engine_permission_manager.h",
     "common/web_engine_content_client.cc",
@@ -316,6 +316,7 @@ test("web_engine_integration_tests") {
     "//base/test:run_all_unittests",
     "//fuchsia/base",
     "//fuchsia/base:test_support",
+    "//third_party/fuchsia-sdk/sdk:fuchsia-sys",
     "//third_party/fuchsia-sdk/sdk:fuchsia-web",
   ]
   package_deps = [ [

@@ -7623,6 +7623,18 @@
      {}
     ]
    ],
+   "content-dpr/image-with-content-dpr-and-explicit-dimensions.html": [
+    [
+     "content-dpr/image-with-content-dpr-and-explicit-dimensions.html",
+     [
+      [
+       "/content-dpr/image-with-content-dpr-and-explicit-dimensions-ref.html",
+       "=="
+      ]
+     ],
+     {}
+    ]
+   ],
    "css/CSS2/abspos/abspos-containing-block-initial-001.xht": [
     [
      "css/CSS2/abspos/abspos-containing-block-initial-001.xht",
@@ -36409,6 +36421,18 @@
      [
       [
        "/css/css-break/line-after-unbreakable-float-after-padding-ref.html",
+       "=="
+      ]
+     ],
+     {}
+    ]
+   ],
+   "css/css-break/tall-break-inside-avoid-at-start.html": [
+    [
+     "css/css-break/tall-break-inside-avoid-at-start.html",
+     [
+      [
+       "/css/reference/ref-filled-green-100px-square.xht",
        "=="
       ]
      ],
@@ -127012,9 +127036,6 @@
    "client-hints/resources/do_not_expect_client_hints_headers.html": [
     []
    ],
-   "client-hints/resources/dpr.py": [
-    []
-   ],
    "client-hints/resources/expect-client-hints-headers-iframe.py": [
     []
    ],
@@ -127349,6 +127370,15 @@
     []
    ],
    "contacts/resources/non-main-frame-select.html": [
+    []
+   ],
+   "content-dpr/image-with-content-dpr-and-explicit-dimensions-ref.html": [
+    []
+   ],
+   "content-dpr/resources/dpr.py": [
+    []
+   ],
+   "content-dpr/resources/square.png": [
     []
    ],
    "content-security-policy/META.yml": [
@@ -173668,6 +173698,9 @@
    "tools/docker/retry.py": [
     []
    ],
+   "tools/docker/seccomp.json": [
+    []
+   ],
    "tools/docker/start.sh": [
     []
    ],
@@ -201272,12 +201305,6 @@
      {}
     ]
    ],
-   "client-hints/image-with-dpr-header.html": [
-    [
-     "client-hints/image-with-dpr-header.html",
-     {}
-    ]
-   ],
    "client-hints/sec-ch-quotes.https.html": [
     [
      "client-hints/sec-ch-quotes.https.html",
@@ -201907,13 +201934,13 @@
      }
     ]
    ],
-   "compression/decompression-corrupt-input.any.js": [
+   "compression/decompression-corrupt-input.tentative.any.js": [
     [
-     "compression/decompression-corrupt-input.any.html",
+     "compression/decompression-corrupt-input.tentative.any.html",
      {}
     ],
     [
-     "compression/decompression-corrupt-input.any.worker.html",
+     "compression/decompression-corrupt-input.tentative.any.worker.html",
      {}
     ]
    ],
@@ -202156,6 +202183,12 @@
        ]
       ]
      }
+    ]
+   ],
+   "content-dpr/image-with-dpr-header.html": [
+    [
+     "content-dpr/image-with-dpr-header.html",
+     {}
     ]
    ],
    "content-security-policy/base-uri/base-uri-allow.sub.html": [
@@ -206422,6 +206455,12 @@
      {}
     ]
    ],
+   "css/CSS2/linebox/inline-negative-margin-minmax-crash-001.html": [
+    [
+     "css/CSS2/linebox/inline-negative-margin-minmax-crash-001.html",
+     {}
+    ]
+   ],
    "css/CSS2/linebox/vertical-align-top-bottom-001.html": [
     [
      "css/CSS2/linebox/vertical-align-top-bottom-001.html",
@@ -208731,6 +208770,12 @@
    "css/css-device-adapt/idlharness.html": [
     [
      "css/css-device-adapt/idlharness.html",
+     {}
+    ]
+   ],
+   "css/css-display/animations/display-interpolation.html": [
+    [
+     "css/css-display/animations/display-interpolation.html",
      {}
     ]
    ],
@@ -260172,6 +260217,22 @@
     [
      "layout-instability/partially-clipped-visual-rect.html",
      {}
+    ]
+   ],
+   "layout-instability/pointerdown-becomes-scroll.html": [
+    [
+     "layout-instability/pointerdown-becomes-scroll.html",
+     {
+      "testdriver": true
+     }
+    ]
+   ],
+   "layout-instability/pointerdown-becomes-tap.html": [
+    [
+     "layout-instability/pointerdown-becomes-tap.html",
+     {
+      "testdriver": true
+     }
     ]
    ],
    "layout-instability/rtl-distance.html": [
@@ -343794,10 +343855,6 @@
    "dd516a97c965f4a248fa27ed8ce71dae6251e106",
    "testharness"
   ],
-  "client-hints/image-with-dpr-header.html": [
-   "6c4e60844763469bbe21990879191eac0f296230",
-   "testharness"
-  ],
   "client-hints/resources/accept-ch-lifetime-test.js": [
    "05aaec1aef8a50c9aac835fd523c48c680e998a3",
    "support"
@@ -343828,10 +343885,6 @@
   ],
   "client-hints/resources/do_not_expect_client_hints_headers.html": [
    "b3cf5df4c27224fe30a6ec3b4507aa30a8fe6a95",
-   "support"
-  ],
-  "client-hints/resources/dpr.py": [
-   "14d7d550fe28d49a63105ea966d3cf7cf59901b1",
    "support"
   ],
   "client-hints/resources/expect-client-hints-headers-iframe.py": [
@@ -344450,7 +344503,7 @@
    "11d8736cb225d6ce575677dcdb70b0a19dd4f65f",
    "testharness"
   ],
-  "compression/decompression-corrupt-input.any.js": [
+  "compression/decompression-corrupt-input.tentative.any.js": [
    "95e91b662ee47f545167cd05dc4d06b85cb74b00",
    "testharness"
   ],
@@ -344536,6 +344589,26 @@
   ],
   "contacts/resources/non-main-frame-select.html": [
    "c64ecd067c82d050f989f1cbe005fe0b33bb9e96",
+   "support"
+  ],
+  "content-dpr/image-with-content-dpr-and-explicit-dimensions-ref.html": [
+   "27ce1be8b0d9b46f667da882d1c7903136a5aed0",
+   "support"
+  ],
+  "content-dpr/image-with-content-dpr-and-explicit-dimensions.html": [
+   "783fb03a3b06278b7d3284bee80ac123b0d10109",
+   "reftest"
+  ],
+  "content-dpr/image-with-dpr-header.html": [
+   "6c4e60844763469bbe21990879191eac0f296230",
+   "testharness"
+  ],
+  "content-dpr/resources/dpr.py": [
+   "14d7d550fe28d49a63105ea966d3cf7cf59901b1",
+   "support"
+  ],
+  "content-dpr/resources/square.png": [
+   "01c9666a8de9d5535615aff830810e5df4b2156f",
    "support"
   ],
   "content-security-policy/META.yml": [
@@ -353272,6 +353345,10 @@
   ],
   "css/CSS2/linebox/inline-negative-margin-001.html": [
    "226a3a19ad17b8fb773e00174b1dcd1593e6be61",
+   "testharness"
+  ],
+  "css/CSS2/linebox/inline-negative-margin-minmax-crash-001.html": [
+   "d6480edd621592928984f2d88684976a0990e734",
    "testharness"
   ],
   "css/CSS2/linebox/leading-001-ref.xht": [
@@ -369838,6 +369915,10 @@
    "06108ac800c19c68841f2a0e8867fb05e868c1ab",
    "support"
   ],
+  "css/css-break/tall-break-inside-avoid-at-start.html": [
+   "6e9ab8bd9f56502247a6d8c2c2045b8f3af3605d",
+   "reftest"
+  ],
   "css/css-break/widows-orphans-001.html": [
    "8da27f0b6594fc7ddd90bdb160be8f80a9479038",
    "reftest"
@@ -372397,6 +372478,10 @@
   "css/css-display/OWNERS": [
    "ef891a7266b1502bd00d2a942c69ec55e9db82a9",
    "support"
+  ],
+  "css/css-display/animations/display-interpolation.html": [
+   "d0b1d9573b8c5045785945dc356a601cb0ca170d",
+   "testharness"
   ],
   "css/css-display/display-change-iframe.html": [
    "c12c413d5390aaf4ea4c71c689952bbdb62069df",
@@ -400983,7 +401068,7 @@
    "reftest"
   ],
   "css/css-text/hyphens/hyphens-overflow-001.html": [
-   "4154e5e1181b47f39b238abb40537262fe4906dc",
+   "948b728254a3a097964e3a341f8475c0c93b4340",
    "reftest"
   ],
   "css/css-text/hyphens/hyphens-shaping-001.html": [
@@ -401011,7 +401096,7 @@
    "support"
   ],
   "css/css-text/hyphens/reference/hyphens-overflow-001-ref.html": [
-   "db002ce45d84a89ba9692e8e6d3c97a5227fc64f",
+   "08d521d33960ea5d495de39ce9bb2be5fc5c29a0",
    "support"
   ],
   "css/css-text/hyphens/reference/hyphens-shaping-001-ref.html": [
@@ -444383,7 +444468,7 @@
    "support"
   ],
   "fetch/metadata/appcache.tentative.https.sub.html": [
-   "5e35472fcfdce6972191160b57fa7cce559f96a0",
+   "3dc47c696fb87ead0ef808b99b7e6e52cff01ebe",
    "testharness"
   ],
   "fetch/metadata/embed.tentative.https.sub.html": [
@@ -469386,12 +469471,20 @@
    "3b18b98dd93312c37b9e2f25918df50266a09243",
    "testharness"
   ],
+  "layout-instability/pointerdown-becomes-scroll.html": [
+   "4fe5c6b7e7c6339e805d26aee10e58b3bb0a3253",
+   "testharness"
+  ],
+  "layout-instability/pointerdown-becomes-tap.html": [
+   "e2e7a911dc043bb21cebfd4a5b625795f3523a14",
+   "testharness"
+  ],
   "layout-instability/resources/slow-image.py": [
    "ee7988c551f6429eea2b929af083ad30cbd5c73d",
    "support"
   ],
   "layout-instability/resources/util.js": [
-   "ca430d0a9e2a89e85ed087289de40234f9061bae",
+   "515914e11fadc9c1f5e0b44994c52a9374eca1c6",
    "support"
   ],
   "layout-instability/rtl-distance.html": [
@@ -504259,7 +504352,7 @@
    "support"
   ],
   "svg/META.yml": [
-   "0836892864f6a7ea61b92fef6082f89376977c09",
+   "ee0fff087c4f9a5723f53cc002e228a713e730da",
    "support"
   ],
   "svg/OWNERS": [
@@ -507159,7 +507252,7 @@
    "support"
   ],
   "tools/ci/run_tc.py": [
-   "be7dbe082a1709493b62316d15668ea10ae93607",
+   "9d351ee0dd105f9a5e6a4d54cf2e2ee14c40ff7c",
    "support"
   ],
   "tools/ci/taskcluster-run.py": [
@@ -507199,11 +507292,15 @@
    "support"
   ],
   "tools/docker/frontend.py": [
-   "c4a207345820d534df5cc092c8b46838a5b8ce1f",
+   "976156cf65a00821a11a3351301b47c1078c8416",
    "support"
   ],
   "tools/docker/retry.py": [
    "6126b781bfadd15e82b8a3a3b9494050939eab6c",
+   "support"
+  ],
+  "tools/docker/seccomp.json": [
+   "8e8274ce3280e698d2c1a0abeba05a769f4c456d",
    "support"
   ],
   "tools/docker/start.sh": [
@@ -511455,7 +511552,7 @@
    "support"
   ],
   "tools/wpt/browser.py": [
-   "e7d57d8638c231f9c3c65e932bdc0209ba3cb021",
+   "a94d5509cc8ba1bfcc4cbceafd9f511a4f9804ab",
    "support"
   ],
   "tools/wpt/commands.json": [
@@ -511467,7 +511564,7 @@
    "support"
   ],
   "tools/wpt/install.py": [
-   "8215dfe09161ad49ba3975e1eacc927c61715acf",
+   "24915f0c98d0be3a864a3a515ba0e162dc37da8c",
    "support"
   ],
   "tools/wpt/mach-emulator.manifest": [
@@ -517699,7 +517796,7 @@
    "testharness"
   ],
   "web-nfc/NDEFReadingEvent_constructor.https.html": [
-   "15ef6e466aab05e289cc93bb678fbda02ce253f7",
+   "3d734105e9ce0ed68e86e421f80847fa485779fe",
    "testharness"
   ],
   "web-nfc/NDEFRecord_constructor.https.html": [

@@ -48,7 +48,7 @@ CrostiniShelfContextMenu::CrostiniShelfContextMenu(
     ChromeLauncherController* controller,
     const ash::ShelfItem* item,
     int64_t display_id)
-    : LauncherContextMenu(controller, item, display_id) {}
+    : ShelfContextMenu(controller, item, display_id) {}
 
 CrostiniShelfContextMenu::~CrostiniShelfContextMenu() = default;
 
@@ -69,7 +69,7 @@ void CrostiniShelfContextMenu::GetMenuModel(GetMenuModelCallback callback) {
                          IDS_APP_LIST_NEW_WINDOW);
   }
 
-  if (item().id.app_id == crostini::kCrostiniTerminalId &&
+  if (item().id.app_id == crostini::GetTerminalId() &&
       crostini::IsCrostiniRunning(controller()->profile())) {
     AddContextMenuOption(menu_model.get(), ash::STOP_APP,
                          IDS_CROSTINI_SHUT_DOWN_LINUX_MENU_ITEM);
@@ -82,7 +82,7 @@ void CrostiniShelfContextMenu::GetMenuModel(GetMenuModelCallback callback) {
 
   if (controller()->IsOpen(item().id)) {
     AddContextMenuOption(menu_model.get(), ash::MENU_CLOSE,
-                         IDS_LAUNCHER_CONTEXT_MENU_CLOSE);
+                         IDS_SHELF_CONTEXT_MENU_CLOSE);
   } else {
     AddContextMenuOption(menu_model.get(), ash::MENU_OPEN_NEW,
                          IDS_APP_CONTEXT_MENU_ACTIVATE_ARC);
@@ -108,16 +108,16 @@ bool CrostiniShelfContextMenu::IsCommandIdEnabled(int command_id) const {
   if (command_id == ash::UNINSTALL)
     return IsUninstallable();
   if (command_id == ash::STOP_APP &&
-      item().id.app_id == crostini::kCrostiniTerminalId) {
+      item().id.app_id == crostini::GetTerminalId()) {
     return crostini::IsCrostiniRunning(controller()->profile());
   }
-  return LauncherContextMenu::IsCommandIdEnabled(command_id);
+  return ShelfContextMenu::IsCommandIdEnabled(command_id);
 }
 
 void CrostiniShelfContextMenu::ExecuteCommand(int command_id, int event_flags) {
   switch (command_id) {
     case ash::UNINSTALL: {
-      DCHECK_NE(item().id.app_id, crostini::kCrostiniTerminalId);
+      DCHECK_NE(item().id.app_id, crostini::GetTerminalId());
       apps::AppServiceProxy* proxy =
           apps::AppServiceProxyFactory::GetForProfile(controller()->profile());
       DCHECK(proxy);
@@ -125,7 +125,7 @@ void CrostiniShelfContextMenu::ExecuteCommand(int command_id, int event_flags) {
       return;
     }
     case ash::STOP_APP:
-      if (item().id.app_id == crostini::kCrostiniTerminalId) {
+      if (item().id.app_id == crostini::GetTerminalId()) {
         crostini::CrostiniManager::GetForProfile(controller()->profile())
             ->StopVm(crostini::kCrostiniDefaultVmName, base::DoNothing());
       }

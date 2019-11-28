@@ -3,6 +3,15 @@
 // found in the LICENSE file.
 
 cr.define('settings_personalization_options', function() {
+  /**
+   * @param {!Element} element
+   * @param {boolean} displayed
+   */
+  function assertVisible(element, displayed) {
+    assertEquals(
+        displayed, window.getComputedStyle(element)['display'] != 'none');
+  }
+
   suite('PersonalizationOptionsTests_AllBuilds', function() {
     /** @type {settings.TestPrivacyPageBrowserProxy} */
     let testBrowserProxy;
@@ -80,6 +89,14 @@ cr.define('settings_personalization_options', function() {
           testElement.$.passwordsLeakDetectionCheckbox.subLabel);
     });
 
+    test('PrivacySettingsRedesignEnabled_False', function() {
+      // Ensure that elements hidden by the updated privacy settings
+      // flag remain visible when the flag is in the default state
+      assertFalse(loadTimeData.getBoolean('privacySettingsRedesignEnabled'));
+      assertVisible(testElement.$$('#safeBrowsingToggle'), true);
+      assertVisible(testElement.$$('#safeBrowsingReportingToggle'), true);
+    });
+
     if (!cr.isChromeOS) {
       test('leakDetectionToggleSignedInNotSyncingWithFalsePref', function() {
         testElement.set(
@@ -137,6 +154,36 @@ cr.define('settings_personalization_options', function() {
     });
   });
 
+  suite('PrivacySettingsRedesignTests', function() {
+    /** @type {SettingsPrivacyPageElement} */
+    let page;
+
+    suiteSetup(function() {
+      loadTimeData.overrideValues({
+        privacySettingsRedesignEnabled: true,
+      });
+    });
+
+    setup(function() {
+      syncBrowserProxy = new TestSyncBrowserProxy();
+      settings.SyncBrowserProxyImpl.instance_ = syncBrowserProxy;
+      PolymerTest.clearBody();
+      page = document.createElement('settings-personalization-options');
+      document.body.appendChild(page);
+      Polymer.dom.flush();
+    });
+
+    teardown(function() {
+      page.remove();
+    });
+
+    test('PrivacySettingsRedesignEnabled_True', function() {
+      Polymer.dom.flush();
+      assertFalse(!!page.$$('#safeBrowsingToggle'));
+      assertFalse(!!page.$$('#safeBrowsingReportingToggle'));
+    });
+  });
+
   suite('PersonalizationOptionsTests_OfficialBuild', function() {
     /** @type {settings.TestPrivacyPageBrowserProxy} */
     let testBrowserProxy;
@@ -157,15 +204,28 @@ cr.define('settings_personalization_options', function() {
     });
 
     test('Spellcheck toggle', function() {
-      testElement.prefs = {spellcheck: {dictionaries: {value: ['en-US']}}};
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        spellcheck: {dictionaries: {value: ['en-US']}}
+      };
       Polymer.dom.flush();
       assertFalse(testElement.$.spellCheckControl.hidden);
 
-      testElement.prefs = {spellcheck: {dictionaries: {value: []}}};
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        spellcheck: {dictionaries: {value: []}}
+      };
       Polymer.dom.flush();
       assertTrue(testElement.$.spellCheckControl.hidden);
 
       testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
         browser: {enable_spellchecking: {value: false}},
         spellcheck: {
           dictionaries: {value: ['en-US']},

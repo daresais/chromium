@@ -18845,6 +18845,7 @@ Called by update_net_error_codes.py.-->
       label="DeviceLoginScreenShowAccessibilityOptionsInSystemTrayMenu"/>
   <int value="647" label="PrinterTypeDenyList"/>
   <int value="648" label="ForceLegacyDefaultReferrerPolicy"/>
+  <int value="649" label="DisabledSyncTypesList"/>
 </enum>
 
 <enum name="EnterprisePolicyInvalidations">
@@ -21438,6 +21439,7 @@ Called by update_net_error_codes.py.-->
   <int value="1417" label="WEBSTOREPRIVATE_REQUESTEXTENSION"/>
   <int value="1418" label="AUTOTESTPRIVATE_INSTALLPLUGINVM"/>
   <int value="1419" label="CRASHREPORTPRIVATE_REPORTERROR"/>
+  <int value="1420" label="AUTOTESTPRIVATE_SETMETRICSENABLED"/>
 </enum>
 
 <enum name="ExtensionIconState">
@@ -25600,6 +25602,7 @@ Called by update_net_error_codes.py.-->
   <int value="3104" label="MessageEventSharedArrayBufferSameOrigin"/>
   <int value="3105" label="MessageEventSharedArrayBufferSameAgentCluster"/>
   <int value="3106" label="MessageEventSharedArrayBufferDifferentAgentCluster"/>
+  <int value="3107" label="CacheStorageCodeCacheHint"/>
 </enum>
 
 <enum name="FeaturePolicyAllowlistType">

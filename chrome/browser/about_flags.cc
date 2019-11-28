@@ -580,22 +580,35 @@ const FeatureEntry::Choice kSchedulerConfigurationChoices[] = {
 #if defined(OS_ANDROID)
 const FeatureEntry::FeatureParam
     kInterestFeedLargerImagesFeatureVariationConstant[] = {
-        {"feed_ui_enabled", "true"}};
+        {"feed_ui_enabled", "true"},
+        {"snippets_enabled", "false"},
+        {"undoable_actions_enabled", "false"},
+        {"manage_interests_enabled", "false"},
+        {"card_menu_tooltip_eligible", "false"}};
 const FeatureEntry::FeatureParam
     kInterestFeedSnippetsFeatureVariationConstant[] = {
-        {"snippets_enabled", "true"}};
+        {"feed_ui_enabled", "false"},
+        {"snippets_enabled", "true"},
+        {"undoable_actions_enabled", "false"},
+        {"manage_interests_enabled", "false"},
+        {"card_menu_tooltip_eligible", "false"}};
 const FeatureEntry::FeatureParam
     kInterestFeedLargeImagesAndSnippetsFeatureVariationConstant[] = {
         {"feed_ui_enabled", "true"},
-        {"snippets_enabled", "true"}};
+        {"snippets_enabled", "true"},
+        {"undoable_actions_enabled", "false"},
+        {"manage_interests_enabled", "false"},
+        {"card_menu_tooltip_eligible", "false"}};
 const FeatureEntry::FeatureParam
     kInterestFeedLargerImagesWithUndoableActionsFeatureVariationConstant[] = {
         {"feed_ui_enabled", "true"},
+        {"snippets_enabled", "false"},
         {"undoable_actions_enabled", "true"},
         {"manage_interests_enabled", "true"},
         {"card_menu_tooltip_eligible", "true"}};
 const FeatureEntry::FeatureParam
     kInterestFeedSnippetsWithUndoableActionsFeatureVariationConstant[] = {
+        {"feed_ui_enabled", "false"},
         {"snippets_enabled", "true"},
         {"undoable_actions_enabled", "true"},
         {"manage_interests_enabled", "true"},
@@ -4075,14 +4088,6 @@ const FeatureEntry kFeatureEntries[] = {
      flag_descriptions::kEnableMDRoundedCornersOnDialogsDescription, kOsDesktop,
      FEATURE_VALUE_TYPE(views::features::kEnableMDRoundedCornersOnDialogs)},
 #endif  // defined(TOOLKIT_VIEWS)
-
-#if BUILDFLAG(ENABLE_EXTENSIONS) && BUILDFLAG(ENABLE_PLUGINS)
-    {"mime-handler-view-in-cross-process-frame",
-     flag_descriptions::kMimeHandlerViewInCrossProcessFrameName,
-     flag_descriptions::kMimeHandlerViewInCrossProcessFrameDescription,
-     kOsDesktop,
-     FEATURE_VALUE_TYPE(features::kMimeHandlerViewInCrossProcessFrame)},
-#endif
 
     {"strict-origin-isolation", flag_descriptions::kStrictOriginIsolationName,
      flag_descriptions::kStrictOriginIsolationDescription, kOsAll,

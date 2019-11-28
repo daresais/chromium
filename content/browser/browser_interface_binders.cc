@@ -86,6 +86,7 @@
 #include "third_party/blink/public/mojom/webauthn/virtual_authenticator.mojom.h"
 #include "third_party/blink/public/mojom/websockets/websocket_connector.mojom.h"
 #include "third_party/blink/public/mojom/webtransport/quic_transport_connector.mojom.h"
+#include "third_party/blink/public/mojom/worker/dedicated_worker_host_factory.mojom.h"
 #include "third_party/blink/public/mojom/worker/shared_worker_connector.mojom.h"
 
 #if !defined(OS_ANDROID)
@@ -104,6 +105,10 @@
 #include "services/device/public/mojom/nfc.mojom.h"
 #include "third_party/blink/public/mojom/hid/hid.mojom.h"
 #include "third_party/blink/public/mojom/input/input_host.mojom.h"
+#endif
+
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING)
+#include "media/mojo/mojom/remoting.mojom-forward.h"
 #endif
 
 namespace content {
@@ -447,6 +452,10 @@ void PopulateFrameBinders(RenderFrameHostImpl* host,
   map->Add<blink::mojom::ContactsManager>(base::BindRepeating(
       &RenderFrameHostImpl::GetContactsManager, base::Unretained(host)));
 
+  map->Add<blink::mojom::DedicatedWorkerHostFactory>(base::BindRepeating(
+      &RenderFrameHostImpl::CreateDedicatedWorkerHostFactory,
+      base::Unretained(host)));
+
   map->Add<blink::mojom::FileSystemManager>(base::BindRepeating(
       &RenderFrameHostImpl::GetFileSystemManager, base::Unretained(host)));
 
@@ -563,6 +572,12 @@ void PopulateFrameBinders(RenderFrameHostImpl* host,
   map->Add<media::mojom::ImageCapture>(
       base::BindRepeating(&ImageCaptureImpl::Create));
 
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING)
+  map->Add<media::mojom::RemoterFactory>(
+      base::BindRepeating(&RenderFrameHostImpl::BindMediaRemoterFactoryReceiver,
+                          base::Unretained(host)));
+#endif
+
   map->Add<media::mojom::VideoDecodePerfHistory>(
       base::BindRepeating(&RenderProcessHost::BindVideoDecodePerfHistory,
                           base::Unretained(host->GetProcess())));
@@ -659,6 +674,9 @@ void PopulateDedicatedWorkerBinders(DedicatedWorkerHost* host,
   // |DedicatedWorkerHost::broker_|.
   map->Add<blink::mojom::IdleManager>(base::BindRepeating(
       &DedicatedWorkerHost::CreateIdleManager, base::Unretained(host)));
+  map->Add<blink::mojom::DedicatedWorkerHostFactory>(
+      base::BindRepeating(&DedicatedWorkerHost::CreateNestedDedicatedWorker,
+                          base::Unretained(host)));
   if (base::FeatureList::IsEnabled(features::kSmsReceiver)) {
     map->Add<blink::mojom::SmsReceiver>(base::BindRepeating(
         &DedicatedWorkerHost::BindSmsReceiverReceiver, base::Unretained(host)));
