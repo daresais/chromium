@@ -22,11 +22,8 @@
 #include "components/invalidation/impl/fcm_invalidation_listener.h"
 #include "components/invalidation/impl/fcm_network_handler.h"
 #include "components/invalidation/impl/fcm_sync_network_channel.h"
-#include "components/invalidation/impl/gcm_invalidation_bridge.h"
 #include "components/invalidation/impl/invalidation_prefs.h"
 #include "components/invalidation/impl/invalidation_service_test_template.h"
-#include "components/invalidation/impl/invalidation_state_tracker.h"
-#include "components/invalidation/impl/invalidator.h"
 #include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/invalidation/public/topic_invalidation_map.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -106,11 +103,17 @@ class MockInstanceID : public InstanceID {
                     const std::map<std::string, std::string>& options,
                     std::set<Flags> flags,
                     GetTokenCallback& callback));
-  MOCK_METHOD4(ValidateToken,
+  void ValidateToken(const std::string& authorized_entity,
+                     const std::string& scope,
+                     const std::string& token,
+                     ValidateTokenCallback callback) override {
+    ValidateToken_(authorized_entity, scope, token, callback);
+  }
+  MOCK_METHOD4(ValidateToken_,
                void(const std::string& authorized_entity,
                     const std::string& scope,
                     const std::string& token,
-                    const ValidateTokenCallback& callback));
+                    ValidateTokenCallback& callback));
 
  protected:
   void DeleteTokenImpl(const std::string& authorized_entity,

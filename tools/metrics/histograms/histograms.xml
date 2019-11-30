@@ -138953,6 +138953,8 @@ should be kept until we remove incident reporting. -->
 
 <histogram name="Sharing.ClickToCallContextMenuPhoneNumberParsingDelay"
     units="microseconds" expires_after="M81">
+<!-- Name completed by histogram_suffixes name="PhoneNumberRegexVariant" -->
+
   <owner>himanshujaju@chromium.org</owner>
   <owner>knollr@chromium.org</owner>
   <owner>peter@chromium.org</owner>
@@ -148198,6 +148200,9 @@ should be kept until we use this API.  -->
 
 <histogram base="true" name="Sync.AssociationTime" units="ms"
     expires_after="2019-10-01">
+  <obsolete>
+    Deprecated in M80.
+  </obsolete>
   <owner>jkrcal@chromium.org</owner>
   <owner>mastiz@chromium.org</owner>
   <summary>Time taken during association of this data type.</summary>
@@ -148652,6 +148657,9 @@ should be kept until we use this API.  -->
 
 <histogram base="true" name="Sync.ConfigureFailure" enum="SyncConfigureResult"
     expires_after="2020-04-01">
+  <obsolete>
+    Deprecated in M80.
+  </obsolete>
   <owner>jkrcal@chromium.org</owner>
   <owner>mastiz@chromium.org</owner>
   <summary>
@@ -162804,11 +162812,27 @@ regressions. -->
 
 <histogram name="Webapp.Install.DisplayMode" enum="WebAppDisplayMode"
     expires_after="M87">
+  <obsolete>
+    Deprecated 2019-11 and replaced by Webapp.Install.DisplayMode2, which
+    correctly records manifest display modes on desktop.
+  </obsolete>
   <owner>peter@chromium.org</owner>
   <owner>yfriedman@chromium.org</owner>
   <summary>
     Records the display mode (as defined in the Web App Manifest spec) at the
     install time of a WebApp (including WebApks).
+  </summary>
+</histogram>
+
+<histogram name="Webapp.Install.DisplayMode2" enum="WebAppDisplayMode"
+    expires_after="2020-11-25">
+  <owner>ericwilligers@chromium.org</owner>
+  <owner>peter@chromium.org</owner>
+  <owner>yfriedman@chromium.org</owner>
+  <summary>
+    Records the display mode (as defined in the Web App Manifest spec) at the
+    install time of a WebApp. Fixes a bug in the data collection for desktop web
+    apps.
   </summary>
 </histogram>
 
@@ -167807,7 +167831,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.InterframeDelayInMs" units="ms"
-    expires_after="M81">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average interframe delay for a received video stream. Recorded when a
@@ -167816,7 +167840,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.InterframeDelayMaxInMs" units="ms"
-    expires_after="M81">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The maximum interframe delay for a received video stream. Recorded when a
@@ -168167,7 +168191,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.Decoded.Vp8.Qp" units="qp value"
-    expires_after="M80">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average QP (quantizer value) per frame for a received VP8 screenshare
@@ -168176,7 +168200,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.DroppedFrames.Capturer"
-    units="frames" expires_after="M80">
+    units="frames" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     Total number of frames dropped by a capturer for a sent screenshare stream.
@@ -168185,7 +168209,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.DroppedFrames.Encoder" units="frames"
-    expires_after="M80">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     Total number of frames dropped by an encoder's internal rate limiter for a
@@ -168203,7 +168227,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.DroppedFrames.Ratelimiter"
-    units="frames" expires_after="M80">
+    units="frames" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     Total number of frames dropped by a WebRTC rate limiter (in MediaOpt) for a
@@ -168221,7 +168245,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.EndToEndDelayInMs" units="ms"
-    expires_after="M81">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average end-to-end delay per frame for a received screenshare stream.
@@ -168230,7 +168254,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.EndToEndDelayMaxInMs" units="ms"
-    expires_after="M81">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The maximum end-to-end delay per frame for a received screenshare stream.
@@ -168307,7 +168331,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.InterframeDelay95PercentileInMs"
-    units="ms" expires_after="M81">
+    units="ms" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The 95th percentile of interframe delay for a received screenshare stream.
@@ -168316,7 +168340,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.InterframeDelayInMs" units="ms"
-    expires_after="M80">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average interframe delay for a received screenshare stream. Recorded
@@ -168325,7 +168349,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.InterframeDelayMaxInMs" units="ms"
-    expires_after="M81">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The maximum interframe delay for a received screenshare stream. Recorded
@@ -168334,7 +168358,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.KeyFramesReceivedInPermille"
-    units="permille" expires_after="M80">
+    units="permille" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     Permille of frames that are key frames for a received screenshare stream.
@@ -168368,7 +168392,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.MeanFreezeDurationMs" units="ms"
-    expires_after="M80">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average duration of a freeze in screenshare playback. Recorded then a
@@ -168377,7 +168401,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.MeanTimeBetweenFreezesMs" units="ms"
-    expires_after="M80">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average duration of a smooth video playback for screenshare stream.
@@ -168386,7 +168410,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.MediaBitrateReceivedInKbps"
-    units="kbps" expires_after="M80">
+    units="kbps" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The number of received media payload bits per second for a received
@@ -168417,7 +168441,7 @@ regressions. -->
 
 <histogram
     name="WebRTC.Video.Screenshare.NumberResolutionDownswitchesPerMinute"
-    units="switches/minute" expires_after="M81">
+    units="switches/minute" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average number of resolution down-switches per minute for a receive
@@ -168466,7 +168490,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.ReceivedHeightInPixels"
-    units="pixels" expires_after="M80">
+    units="pixels" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average received height per frame for a received screenshare stream.
@@ -168484,7 +168508,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.ReceivedWidthInPixels" units="pixels"
-    expires_after="M80">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     The average received width per frame for a received screenshare stream.
@@ -168512,7 +168536,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.RtxBitrateSentInKbps" units="kbps"
-    expires_after="M80">
+    expires_after="M83">
   <owner>sprang@chromium.org</owner>
   <summary>
     The number of sent bits over RTX per second for a sent screenshare stream.
@@ -168575,7 +168599,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.SentToInputFpsRatioPercent" units="%"
-    expires_after="M82">
+    expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     Ratio between Screenshare.SentFramesPerSecond and
@@ -168595,7 +168619,7 @@ regressions. -->
 </histogram>
 
 <histogram name="WebRTC.Video.Screenshare.TimeInBlockyVideoPercentage"
-    units="%" expires_after="M80">
+    units="%" expires_after="M83">
   <owner>ilnik@chromium.org</owner>
   <summary>
     Percentage of time the received screenshare stream playbacks low quality
@@ -182038,6 +182062,13 @@ regressions. -->
   <affected-histogram name="UMA.PersistentAllocator.UsedPct"/>
 </histogram_suffixes>
 
+<histogram_suffixes name="PhoneNumberRegexVariant" separator=".">
+  <suffix name="LowConfidenceModified" label="Low confidence modified"/>
+  <suffix name="Simple" label="Simple regex"/>
+  <affected-histogram
+      name="Sharing.ClickToCallContextMenuPhoneNumberParsingDelay"/>
+</histogram_suffixes>
+
 <histogram_suffixes name="PhysicalWebDebugActions" separator=".">
   <suffix name="ChromeStart" label="when Chrome first starts up"/>
   <suffix name="LaunchFromDiagnostics"
@@ -182886,9 +182917,14 @@ regressions. -->
   <suffix name="All"
       label="This metric applies to all raster work that doesn't depend on
              at-raster image decodes."/>
-<!-- TODO(crbug.com/995155): Add type to measure only work that depends on
-     hardware decoded images -->
-
+  <suffix name="TilesWithJpegHwDecodeCandidates"
+      label="This metric applies only to raster work that depends on JPEGs
+             that are candidates for hardware decode acceleration (and that
+             doesn't depend on at-raster image decodes)."/>
+  <suffix name="TilesWithWebPHwDecodeCandidates"
+      label="This metric applies only to raster work that depends on WebPs
+             that are candidates for hardware decode acceleration (and that
+             doesn't depend on at-raster image decodes)."/>
   <affected-histogram
       name="Renderer4.Browser.RasterTaskSchedulingDelayNoAtRasterDecodes"/>
   <affected-histogram

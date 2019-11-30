@@ -99,7 +99,6 @@
 <translation id="1137673463384776352"><ph name="APP" />-এ লিঙ্ক খুলুন</translation>
 <translation id="1140351953533677694">আপনার ব্লুটুথ এবং সিরিয়াল ডিভাইসগুলি অ্যাক্সেস করুন</translation>
 <translation id="114036956334641753">অডিও এবং ক্যাপশন</translation>
-<translation id="1140610710803014750">সব ডিভাইসে আপনার বুকমার্কগুলি পেতে সাইন-ইন করুন এবং সিঙ্ক চালু করুন।</translation>
 <translation id="1140746652461896221">আপনি দেখেন এমন যেকোনও পৃষ্ঠার কন্টেন্ট ব্লক করুন</translation>
 <translation id="1143142264369994168">সার্টিফিকেট স্বাক্ষরকারী</translation>
 <translation id="1145292499998999162">প্লাগ-ইন ব্লক করা আছে</translation>
@@ -204,7 +203,7 @@
 <translation id="1274997165432133392">কুকিজ এবং অন্য সাইট ডেটা</translation>
 <translation id="127668050356036882">আপনার সব উইন্ডো বন্ধ করুন</translation>
 <translation id="1280820357415527819">মোবাইল নেটওয়ার্কের জন্য সার্চ করা হচ্ছে</translation>
-<translation id="1282420830958964167">"<ph name="APP_NAME" />"-এর জন্য তোমার অভিভাবকের সেট করা সময়সীমা পেরিয়ে গেছে। তুমি আগামীকাল এটি <ph name="TIME_LIMIT" />-এর জন্য ব্যবহার করতে পারবে।</translation>
+<translation id="1282420830958964167">"<ph name="APP_NAME" />"-এর জন্য তোমার অভিভাবকের সেট করা সময়সীমা পেরিয়ে গেছে। তুমি আগামীকাল এটি <ph name="TIME_LIMIT" /> ব্যবহার করতে পারবে।</translation>
 <translation id="1285320974508926690">কখনই এই সাইটটিকে অনুবাদ করবেন না</translation>
 <translation id="1285484354230578868">আপনার Google ড্রাইভ অ্যাকাউন্টে ডেটা সেভ করুন</translation>
 <translation id="1288037062697528143">সূর্যাস্তের সময় নাইট লাইট নিজে থেকেই চালু হবে</translation>
@@ -329,7 +328,6 @@
 <translation id="1465176863081977902">অ&amp;ডিও ঠিকানা কপি করুন</translation>
 <translation id="1465827627707997754">পিৎজার টুকরা</translation>
 <translation id="1468571364034902819">এই প্রোফাইলটি ব্যবহার করা যাবে না</translation>
-<translation id="1470811252759861213">আপনার সকল কম্পিউটারে আপনার এক্সটেনশানগুলি পেতে, <ph name="SIGN_IN_LINK" />।</translation>
 <translation id="1472675084647422956">আরও দেখান</translation>
 <translation id="1475502736924165259">আপনার কাছে ফাইলে সেই শংসাপত্রগুলি আছে যা অন্য বিভাগগুলির একটিতেও মেলে না</translation>
 <translation id="1476088332184200792">আপনার ডিভাইসে কপি করুন</translation>
@@ -1044,7 +1042,6 @@
 <translation id="2489829450872380594">পরের বার, নতুন ফোন এই <ph name="DEVICE_TYPE" /> আনলক করবে। সেটিংসে গিয়ে Smart Lock বন্ধ করতে পারেন।</translation>
 <translation id="2489918096470125693">ফোল্ডার যুক্ত &amp;করুন...</translation>
 <translation id="2490481887078769936">তালিকা থেকে '<ph name="FILE_NAME" />' সরানো হয়েছে</translation>
-<translation id="2490782392574942205">আপনার সব কম্পিউটারে এক্সটেনশন পেতে, সাইন-ইন করে সিঙ্ক চালু করুন</translation>
 <translation id="249113932447298600">দুঃখিত, <ph name="DEVICE_LABEL" /> ডিভাইসটি এই মুহুর্তে সমর্থিত নয়৷</translation>
 <translation id="249303669840926644">নিবন্ধন সম্পূর্ণ করতে পারেনি</translation>
 <translation id="2495777824269688114">আরও বৈশিষ্ট্যের বিষয়ে জানুন অথবা উত্তর পান। সাহায্যের জন্য "?" বোতামটি বেছে নিন।</translation>
@@ -1754,7 +1751,6 @@
 <translation id="3527085408025491307">ফোল্ডার</translation>
 <translation id="3528033729920178817">এই পৃষ্ঠাটি আপনার লোকেশন নির্ণয় করছে৷</translation>
 <translation id="3528498924003805721">শর্টকাট লক্ষ্যগুলি</translation>
-<translation id="3530305684079447434">আপনার সব ডিভাইসে আপনার বুকমার্কগুলি পেতে, <ph name="SIGN_IN_LINK" />।</translation>
 <translation id="3532844647053365774"><ph name="HOST" /> আপনার মাইক্রোফোন ব্যবহার করতে চায়</translation>
 <translation id="353316712352074340"><ph name="WINDOW_TITLE" /> - অডিও মিউট রয়েছে</translation>
 <translation id="3538066758857505094">Linux আনইনস্টল করতে সমস্যা হচ্ছে। আবার চেষ্টা করুন।</translation>
@@ -2774,7 +2770,7 @@
 <translation id="503498442187459473"><ph name="HOST" /> আপনার ক্যামেরা ও মাইক্রোফোন ব্যবহার করতে চায়</translation>
 <translation id="5036662165765606524">কোনো সাইটকে অটোমেটিক একাধিক ফাইল ডাউনলোড করার জন্য মঞ্জুরি দেবেন না</translation>
 <translation id="5037676449506322593">সকল বেছে নিন</translation>
-<translation id="5038022729081036555">তুমি আগামীকাল এটি <ph name="TIME_LIMIT" />-এর জন্য ব্যবহার করতে পারবে।</translation>
+<translation id="5038022729081036555">তুমি আগামীকাল এটি <ph name="TIME_LIMIT" /> ব্যবহার করতে পারবে।</translation>
 <translation id="5038863510258510803">সক্ষম হচ্ছে...</translation>
 <translation id="5039804452771397117">অনুমতি দিন</translation>
 <translation id="5042282098504489593">Linux-এ <ph name="USB_DEVICE_NAME" /> যোগ করতে সেটিংস চালু করুন</translation>
@@ -3524,7 +3520,6 @@
 <translation id="6112727384379533756">একটি টিকিট যোগ করুন</translation>
 <translation id="6112931163620622315">আপনার ফোনে দেখুন</translation>
 <translation id="6112952769866305444">ব্যক্তি <ph name="PROFILE_NAME" />, <ph name="USERNAME" /> এর সম্পাদনা করুন</translation>
-<translation id="6113400363611269907">নিঃশব্দে প্রম্প্ট দেখুন</translation>
 <translation id="6113942107547980621">Smart Lock ব্যবহার করতে, আপনার ফোনের প্রাথমিক ব্যবহারকারীর প্রোফাইলে পাল্টান</translation>
 <translation id="6116338172782435947">ক্লিপবোর্ডে কপি করা টেক্সট এবং ছবি দেখতে</translation>
 <translation id="6116921718742659598">ভাষা এবং ইনপুট সেটিংস পরিবর্তন করুন</translation>

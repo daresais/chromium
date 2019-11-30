@@ -607,9 +607,8 @@ WebContentsImpl::WebContentsImpl(BrowserContext* browser_context)
       showing_context_menu_(false),
       text_autosizer_page_info_({0, 0, 1.f}),
       had_inner_webcontents_(false) {
-  frame_tree_.SetFrameRemoveListener(
-      base::Bind(&WebContentsImpl::OnFrameRemoved,
-                 base::Unretained(this)));
+  frame_tree_.SetFrameRemoveListener(base::BindRepeating(
+      &WebContentsImpl::OnFrameRemoved, base::Unretained(this)));
 #if BUILDFLAG(ENABLE_PLUGINS)
   pepper_playback_observer_.reset(new PepperPlaybackObserver(this));
 #endif
@@ -1218,14 +1217,14 @@ void WebContentsImpl::UpdateZoomIfNecessary(const std::string& scheme,
 }
 #endif  // !defined(OS_ANDROID)
 
-base::Closure WebContentsImpl::AddBindingSet(
+base::OnceClosure WebContentsImpl::AddBindingSet(
     const std::string& interface_name,
     WebContentsBindingSet* binding_set) {
   auto result =
       binding_sets_.insert(std::make_pair(interface_name, binding_set));
   DCHECK(result.second);
-  return base::Bind(&WebContentsImpl::RemoveBindingSet,
-                    weak_factory_.GetWeakPtr(), interface_name);
+  return base::BindOnce(&WebContentsImpl::RemoveBindingSet,
+                        weak_factory_.GetWeakPtr(), interface_name);
 }
 
 WebContentsBindingSet* WebContentsImpl::GetBindingSet(
@@ -4484,20 +4483,6 @@ void WebContentsImpl::DidFinishNavigation(NavigationHandle* navigation_handle) {
     display_cutout_host_impl_->DidFinishNavigation(navigation_handle);
 
   if (navigation_handle->HasCommitted()) {
-    // TODO(domfarolino, dmazzoni): Do this using WebContentsObserver. See
-    // https://crbug.com/981271.
-    BrowserAccessibilityManager* manager =
-        static_cast<RenderFrameHostImpl*>(
-            navigation_handle->GetRenderFrameHost())
-            ->browser_accessibility_manager();
-    if (manager) {
-      if (navigation_handle->IsErrorPage()) {
-        manager->NavigationFailed();
-      } else {
-        manager->NavigationSucceeded();
-      }
-    }
-
     if (navigation_handle->IsInMainFrame()) {
       last_committed_source_id_including_same_document_ =
           ukm::ConvertToSourceId(navigation_handle->GetNavigationId(),
@@ -5982,15 +5967,6 @@ void WebContentsImpl::DidStartLoading(FrameTreeNode* frame_tree_node,
   // Reset the focus state from DidStartNavigation to false if a new load starts
   // afterward, in case loading logic triggers a FocusLocationBarByDefault call.
   should_focus_location_bar_by_default_ = false;
-
-  // Notify accessibility that the user is navigating away from the
-  // current document.
-  // TODO(domfarolino, dmazzoni): Do this using WebContentsObserver. See
-  // https://crbug.com/981271.
-  BrowserAccessibilityManager* manager =
-      frame_tree_node->current_frame_host()->browser_accessibility_manager();
-  if (manager)
-    manager->UserIsNavigatingAway();
 }
 
 void WebContentsImpl::DidStopLoading() {

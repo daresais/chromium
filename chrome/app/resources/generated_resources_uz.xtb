@@ -99,7 +99,6 @@
 <translation id="1137673463384776352">Havolani <ph name="APP" /> dasturida ochish</translation>
 <translation id="1140351953533677694">Bluetooth va keyingi seriyali qurilmalaringizga ruxsat</translation>
 <translation id="114036956334641753">Audio va taglavhalar</translation>
-<translation id="1140610710803014750">Xatcho‘plarni barcha qurilmalaringizda sinxronlash uchun o‘z hisobingizga kiring va sinxronizatsiyani yoqing.</translation>
 <translation id="1140746652461896221">Kirilgan sahifadagi kontentni bloklash</translation>
 <translation id="1143142264369994168">Sertifikat imzolovchisi</translation>
 <translation id="1145292499998999162">Plagin bloklandi</translation>
@@ -330,7 +329,6 @@ xizmatlarini sizga moslashtirish maqsadlarida foydalanishi mumkin. Bu ruxsatni m
 <translation id="1465176863081977902">Audioning URL manzilini nusxalash</translation>
 <translation id="1465827627707997754">Pitsa bo‘lagi</translation>
 <translation id="1468571364034902819">Bu profilni ishlatib bo‘lmaydi</translation>
-<translation id="1470811252759861213">Hisobingizdagi kengaytmalarni barcha qurilmalaringizda o‘rnatish uchun <ph name="SIGN_IN_LINK" />.</translation>
 <translation id="1472675084647422956">Yana</translation>
 <translation id="1475502736924165259">Sizda quyidagi turkumlardan hech qaysiga to‘g‘ri kelmaydigan sertifikatlar mavjud</translation>
 <translation id="1476088332184200792">Qurilmaga nusxalash</translation>
@@ -617,7 +615,7 @@ xizmatlarini sizga moslashtirish maqsadlarida foydalanishi mumkin. Bu ruxsatni m
 <translation id="1858585891038687145">Dasturiy ta’minot ishlab chiquvchilarni identifikatsiya qilishda ushbu sertifikat ishonchli deb hisoblansin.</translation>
 <translation id="1861262398884155592">Bu jild bo‘sh</translation>
 <translation id="1863182668524159459">Hech qanday ketma-ket port topilmadi</translation>
-<translation id="1863552924692672565"><ph name="FILE_NAME" /> nomaʼlum fayl. Xavfsizlik maqsadida uni antivirus orqali tekshiring.</translation>
+<translation id="1863552924692672565"><ph name="FILE_NAME" /> nomaʼlum fayl. Xavfsizlik yuzasidan uni antivirus orqali tekshiring.</translation>
 <translation id="1864111464094315414">Kirish</translation>
 <translation id="1864400682872660285">Salqinroq</translation>
 <translation id="1864454756846565995">USB-C qurilma (orqa port)</translation>
@@ -1043,7 +1041,6 @@ Oʻz qurilmangizda Family Link ilovasini oʻrnatib, bu hisob sozlamalarini boshq
 <translation id="2489829450872380594">Keyingi safar yangi telefoningiz <ph name="DEVICE_TYPE" /> qurilmasini qulfdan chiqara oladi. Sozlamalar orqali Smart Lock funksiyasini faolsizlantirish mumkin.</translation>
 <translation id="2489918096470125693">&amp;Jild qo‘shish</translation>
 <translation id="2490481887078769936"><ph name="FILE_NAME" /> fayli roʻyxatdan olib tashlandi</translation>
-<translation id="2490782392574942205">Kengaytmalarni barcha qurilmalaringizda ishlatish uchun hisobingizga kiring va sinxronizatsiyani yoqing</translation>
 <translation id="249113932447298600">Kechirasiz, <ph name="DEVICE_LABEL" /> qurilmasi ayni vaqtda qo‘llab-quvvatlanmaydi.</translation>
 <translation id="249303669840926644">Ro‘yxatdan o‘tish amalini yakunlab bo‘lmadi</translation>
 <translation id="2495777824269688114">Boshqa funksiyalar yoki javoblar uchun “?” ustiga bosing.</translation>
@@ -1753,7 +1750,6 @@ Oʻz qurilmangizda Family Link ilovasini oʻrnatib, bu hisob sozlamalarini boshq
 <translation id="3527085408025491307">Jild</translation>
 <translation id="3528033729920178817">Bu sahifa joylashuvingizni kuzatmoqda.</translation>
 <translation id="3528498924003805721">Yorliq manzillari</translation>
-<translation id="3530305684079447434">Xatcho‘plaringizni barcha qurilmalarda ko‘rish uchun, <ph name="SIGN_IN_LINK" />.</translation>
 <translation id="3532844647053365774"><ph name="HOST" /> mikrofoningizdan foydalanmoqchi</translation>
 <translation id="353316712352074340"><ph name="WINDOW_TITLE" /> – ovozsiz qilindi</translation>
 <translation id="3538066758857505094">Linux o‘chirib tashlanmadi. Qaytadan urining.</translation>
@@ -3523,7 +3519,6 @@ Ochiq eksponenta (<ph name="PUBLIC_EXPONENT_NUM_BITS" /> bit):
 <translation id="6112727384379533756">Chipta kiritish</translation>
 <translation id="6112931163620622315">Telefoningizni tekshiring</translation>
 <translation id="6112952769866305444">Foydalanuvchini tahrirlash, <ph name="PROFILE_NAME" /> , <ph name="USERNAME" /></translation>
-<translation id="6113400363611269907">Saytlar bezovta qilmasin</translation>
 <translation id="6113942107547980621">Smart Lock himoyasini yoqish uchun telefondagi asosiy profilga oʻting</translation>
 <translation id="6116338172782435947">Klipbordga nusxalangan matn va rasmlarni ko‘rish</translation>
 <translation id="6116921718742659598">Til va kiritish usuli sozlamalarini o‘zgartirish</translation>
@@ -4386,7 +4381,7 @@ Ochiq eksponenta (<ph name="PUBLIC_EXPONENT_NUM_BITS" /> bit):
 <translation id="7401778920660465883">Bu xabarni yopish</translation>
 <translation id="740624631517654988">Qalqib chiquvchi oyna bloklandi</translation>
 <translation id="7407430846095439694">Import qilish va bog‘lash</translation>
-<translation id="7407504355934009739">Koʻp foydalanuvchilar bu saytdagi bildirishnomalarni bloklaydi</translation>
+<translation id="7407504355934009739">Aksariyat foydalanuvchilar bu saytdagi bildirishnomalarni bloklaydi</translation>
 <translation id="7409549334477097887">Eng katta</translation>
 <translation id="7409836189476010449">Flash ishga tushirilsin</translation>
 <translation id="7410344089573941623"><ph name="HOST" /> saytida kamera va mikrofondan foydalanishga ruxsat so‘ralsin</translation>
@@ -4975,7 +4970,7 @@ Kalit faylini ishonchli joyda saqlang. U kengaytmaning yangi versiyalarini yarat
 <translation id="8214489666383623925">Faylni ochish...</translation>
 <translation id="8214962590150211830">Foydalanuvchini o‘chirish</translation>
 <translation id="8217399928341212914">Bir necha fayllarni birdaniga avtomatik yuklab olishga hali ham ruxsat berilsin</translation>
-<translation id="8221491193165283816">Odatda bildirishnomalarni bloklaysiz. Bu saytdagilar chiqaverishi uchun bu yerni bosing.</translation>
+<translation id="8221491193165283816">Odatda bildirishnomalarni bloklaysiz. Bu saytga ruxsat berish uchun bu yerga bosing.</translation>
 <translation id="8225265270453771718">Ilova oynasini namoyish qilish</translation>
 <translation id="8225753906568652947">Takliflardan foydalaning</translation>
 <translation id="8226222018808695353">Taqiqlangan</translation>
@@ -5245,7 +5240,7 @@ Kalit faylini ishonchli joyda saqlang. U kengaytmaning yangi versiyalarini yarat
 <translation id="8627795981664801467">Faqat havfsiz ulanish vaqtida</translation>
 <translation id="8630903300770275248">Kuzatuvdagi foydalanuvchini import qilish</translation>
 <translation id="8631032106121706562">Gul</translation>
-<translation id="863109444997383731">Saytlarning bildirishnoma yuborish urinishlari bloklanadi. Agar sayt bildirishnoma yuborishga urinsa, manzillar qatorida bloklangan belgisi chiqadi.</translation>
+<translation id="863109444997383731">Saytlarning bildirishnoma yuborishga urinishlari bloklanadi. Agar sayt bildirishnoma yuborishga urinsa, manzillar qatorida bloklangan belgisi chiqadi.</translation>
 <translation id="8635628933471165173">Yangilanmoqda...</translation>
 <translation id="8637542770513281060">Kompyuteringizda xavfsiz modul mavjud. Undan Chrome OS platformasida ko‘plab jiddiy xavfsizlik funksiyalarini amalga oshirishda foydalaniladi. Batafsil ma’lumotni Chromebook yordam markazidan olishingiz mumkin: https://support.google.com/chromebook/?p=sm</translation>
 <translation id="8637688295594795546">Tizim yangilanishi mavjud. Yuklab olish uchun tayyorlanmoqda...</translation>

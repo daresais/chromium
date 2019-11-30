@@ -99,7 +99,6 @@
 <translation id="1137673463384776352">បើក​តំណ​នៅក្នុង <ph name="APP" /></translation>
 <translation id="1140351953533677694">ចូលប្រើឧបករណ៍ប៊្លូធូស និងសេរ៊ីរបស់អ្នក</translation>
 <translation id="114036956334641753">សំឡេង និង​អក្សររត់</translation>
-<translation id="1140610710803014750">ដើម្បី​ទទួលបាន​ចំណាំ​នៅលើ​ឧបករណ៍​ទាំងអស់​របស់អ្នក សូមចូលគណនី និងបើក​សមកាលកម្ម។</translation>
 <translation id="1140746652461896221">ទប់ស្កាត់​ខ្លឹមសារ​នៅលើទំព័រទាំងឡាយដែលអ្នកចូលមើល</translation>
 <translation id="1143142264369994168">អ្នកចុះហត្ថលេខាវិញ្ញាបនប័ត្រ</translation>
 <translation id="1145292499998999162">រារាំងកម្មវិធីជំនួយ</translation>
@@ -329,7 +328,6 @@
 <translation id="1465176863081977902">ថតចម្លងអាសយដ្ឋានសំឡេង</translation>
 <translation id="1465827627707997754">ចំណិតភីហ្សា</translation>
 <translation id="1468571364034902819">មិន​អាច​ប្រើ​កម្រង​ព័ត៌មាន​នេះ​បានទេ</translation>
-<translation id="1470811252759861213">ដើម្បីទទួលបានផ្នែកបន្ថែមរបស់អ្នកនៅលើកុំព្យូទ័ររបស់អ្នកទាំងអស់ <ph name="SIGN_IN_LINK" />។</translation>
 <translation id="1472675084647422956">បង្ហាញ​ច្រើនទៀត</translation>
 <translation id="1475502736924165259">អ្នកមានវិញ្ញាបនបត្រនៅលើឯកសារដែលមិនសមនឹងប្រភេទដ៏ទៃទៀត</translation>
 <translation id="1476088332184200792">ចម្លង​ទៅ​ឧបករណ៍​របស់អ្នក</translation>
@@ -369,7 +367,7 @@
 <translation id="1512210426710821809">មធ្យោបាយ​តែមួយគត់​ក្នុងការត្រឡប់សកម្មភាពនេះវិញ​គឺត្រូវ​ដំឡើង <ph name="IDS_SHORT_PRODUCT_OS_NAME" /> ឡើងវិញ</translation>
 <translation id="151501797353681931">បាននាំចូលពី Safari</translation>
 <translation id="1515163294334130951">បើកដំណើរការ</translation>
-<translation id="1515909359182093592"><ph name="INPUT_LABEL" />៖ ម៉ាស៊ីន</translation>
+<translation id="1515909359182093592"><ph name="INPUT_LABEL" /> - ម៉ាស៊ីន</translation>
 <translation id="1521442365706402292">គ្រប់គ្រងវិញ្ញាបនប័ត្រ</translation>
 <translation id="1521774566618522728">ដំណើរការ​ថ្ងៃនេះ</translation>
 <translation id="152234381334907219">កុំរក្សាទុក</translation>
@@ -1045,7 +1043,6 @@
 <translation id="2489829450872380594">លើកក្រោយ ទូរសព្ទថ្មី​នឹងដោះសោ <ph name="DEVICE_TYPE" /> នេះ។ អ្នក​អាច​បិទ Smart Lock នៅក្នុង​ការកំណត់។</translation>
 <translation id="2489918096470125693">បន្ថែមថតឯកសារ...</translation>
 <translation id="2490481887078769936">បានលុប '<ph name="FILE_NAME" />' ចេញពីបញ្ជី</translation>
-<translation id="2490782392574942205">សូម​ចូលគណនី ហើយ​បើក​សមកាលកម្ម ដើម្បី​ទាញយក​កម្មវិធីបន្ថែម​របស់អ្នក នៅលើ​កុំព្យូទ័រ​ទាំងអស់​របស់អ្នក</translation>
 <translation id="249113932447298600">សូមទោស <ph name="DEVICE_LABEL" /> មិនត្រូវបានគាំទ្រទេនៅពេលនេះ។</translation>
 <translation id="249303669840926644">មិនអាចបញ្ចប់ការចុះឈ្មោះទេ</translation>
 <translation id="2495777824269688114">ស្វែងយល់អំពី​មុខងារថ្មីៗ ឬទទួលចម្លើយច្រើនទៀត។ សូមជ្រើសរើស “?” ដើម្បីទទួលបានជំនួយ។</translation>
@@ -1755,7 +1752,6 @@
 <translation id="3527085408025491307">ថតឯកសារ</translation>
 <translation id="3528033729920178817">ទំព័រនេះកំពុងតាមដានទីតាំងរបស់អ្នក។</translation>
 <translation id="3528498924003805721">គោលដៅផ្លូវកាត់</translation>
-<translation id="3530305684079447434">ដើម្បីទទួលបានចំណាំរបស់អ្នកនៅលើឧបករណ៍របស់អ្នកទាំងអស់ <ph name="SIGN_IN_LINK" />។</translation>
 <translation id="3532844647053365774"><ph name="HOST" /> ចង់​ប្រើ​មីក្រូហ្វូន​របស់អ្នក</translation>
 <translation id="353316712352074340"><ph name="WINDOW_TITLE" /> - បានបិទ​​សំឡេង​</translation>
 <translation id="3538066758857505094">មានបញ្ហា​ក្នុងការ​លុប Linux ។ សូម​ព្យាយាម​ម្ដងទៀត។</translation>
@@ -3526,7 +3522,6 @@
 <translation id="6112727384379533756">បញ្ចូលសំបុត្រ</translation>
 <translation id="6112931163620622315">ពិនិត្យមើល​ទូរសព្ទ​របស់អ្នក</translation>
 <translation id="6112952769866305444">កែសម្រួលបុគ្គល <ph name="PROFILE_NAME" />, <ph name="USERNAME" /></translation>
-<translation id="6113400363611269907">បង្ហាញ​សារជំរុញ​ដោយស្ងាត់ៗ</translation>
 <translation id="6113942107547980621">ដើម្បី​ប្រើ Smart Lock សូមប្ដូរ​ទៅប្រើ​កម្រងព័ត៌មាន​អ្នក​ប្រើប្រាស់​ចម្បង​នៅលើទូរសព្ទរបស់អ្នក</translation>
 <translation id="6116338172782435947">មើល​អត្ថបទ និង​រូបភាព​ដែល​បានចម្លង​ទៅ​អង្គ​ចងចាំ</translation>
 <translation id="6116921718742659598">ប្តូរការកំណត់ភាសា និងធាតុបញ្ចូល</translation>
@@ -5254,7 +5249,7 @@
 <translation id="8637542770513281060">កុំព្យូទ័ររបស់អ្នកមានម៉ូឌុលសុវត្ថិភាព ដែលត្រូវបានប្រើដើម្បីអនុវត្តមុខងារសុវត្ថិភាពសំខាន់ៗជាច្រើននៅក្នុងប្រព័ន្ធប្រតិបត្តិការ Chrome OS ។ សូមចូលទៅកាន់មជ្ឈមណ្ឌលជំនួយ Chromebook ដើម្បីស្វែងយល់បន្ថែម៖ https://support.google.com/chromebook/?p=sm</translation>
 <translation id="8637688295594795546">ការធ្វើបច្ចុប្បន្នភាពប្រព័ន្ធមាន។ កំពុងរៀបចំការទាញយក…</translation>
 <translation id="8639047128869322042">កំពុង​ពិនិត្យមើល​កម្មវិធី​គ្រោះថ្នាក់...</translation>
-<translation id="8639391553632924850"><ph name="INPUT_LABEL" />៖ រន្ធ</translation>
+<translation id="8639391553632924850"><ph name="INPUT_LABEL" /> - រន្ធ</translation>
 <translation id="8642900771896232685">2 វិនាទី</translation>
 <translation id="8642947597466641025">ធ្វើឲ្យអត្ថបទធំជាងមុន</translation>
 <translation id="8644655801811752511">មិនអាចកំណត់​សោសុវត្ថិភាពនេះ​ឡើងវិញបានទេ។ សូមសាកល្បងកំណត់​សោសុវត្ថិភាពនេះ​ឡើងវិញភ្លាមៗ បន្ទាប់ពីដោតបញ្ចូលវាហើយ។</translation>

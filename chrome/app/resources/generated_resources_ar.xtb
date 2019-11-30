@@ -99,7 +99,6 @@
 <translation id="1137673463384776352">فتح الرابط في <ph name="APP" /></translation>
 <translation id="1140351953533677694">الوصول إلى بلوتوث والأجهزة التسلسلية</translation>
 <translation id="114036956334641753">الصوت والترجمة</translation>
-<translation id="1140610710803014750">للحصول على الإشارات المرجعية على جميع أجهزتك، يُرجى تسجيل الدخول وتفعيل المزامنة.</translation>
 <translation id="1140746652461896221">حظر المحتوى على أي صفحة تزورها</translation>
 <translation id="1143142264369994168">الموقّع على الشهادات</translation>
 <translation id="1145292499998999162">تم حظر المكوّن الإضافي</translation>
@@ -329,7 +328,6 @@
 <translation id="1465176863081977902">ن&amp;سخ عنوان الصوت</translation>
 <translation id="1465827627707997754">شريحة بيتزا</translation>
 <translation id="1468571364034902819">يتعذّر استخدام هذا الملف الشخصي</translation>
-<translation id="1470811252759861213">للحصول على الإضافات على جميع أجهزة الكمبيوتر، <ph name="SIGN_IN_LINK" />.</translation>
 <translation id="1472675084647422956">عرض المزيد</translation>
 <translation id="1475502736924165259">لديك شهادات في الملف لا تندرج تحت أي فئة من الفئات الأخرى</translation>
 <translation id="1476088332184200792">‏نسخ إلى Your Device (جهازك)</translation>
@@ -523,7 +521,7 @@
 <translation id="1733383495376208985">‏تشفير البيانات المتزامنة باستخدام <ph name="BEGIN_LINK" />عبارة مرور المزامنة<ph name="END_LINK" /> الخاصة بك. لا يتضمّن ذلك طرق الدفع والعناوين من Google Pay.</translation>
 <translation id="1734212868489994726">أزرق فاتح</translation>
 <translation id="1734824808160898225">قد لا يتمكَّن <ph name="PRODUCT_NAME" /> من الاستمرار في تحديث نفسه.</translation>
-<translation id="173628468822554835">حسنًا. بشكل تلقائي، لن تُرسِل المواقع الإلكترونية الجديدة التي تزورها إشعارات لك.</translation>
+<translation id="173628468822554835">حسنًا. حسب الإعدادات التلقائية، لن تتلقّى إشعارات من المواقع الإلكترونية الجديدة التي تزورها.</translation>
 <translation id="1736419249208073774">استكشاف</translation>
 <translation id="1737968601308870607">الإبلاغ عن خطأ</translation>
 <translation id="1741314857973421784">متابعة</translation>
@@ -1045,7 +1043,6 @@
 <translation id="2489829450872380594">‏في المرة القادمة، سيفتح هاتفك قفل جهاز <ph name="DEVICE_TYPE" /> هذا. يمكنك إيقاف Smart Lock في "الإعدادات".</translation>
 <translation id="2489918096470125693">إضافة &amp;مجلد...</translation>
 <translation id="2490481887078769936">تمت إزالة "<ph name="FILE_NAME" />" من القائمة</translation>
-<translation id="2490782392574942205">للحصول على إضافاتك على جميع أجهزة الكمبيوتر، يُرجى تسجيل الدخول وتفعيل المزامنة</translation>
 <translation id="249113932447298600">عذرًا، لا يتوفر الجهاز <ph name="DEVICE_LABEL" /> في الوقت الحالي.</translation>
 <translation id="249303669840926644">تعذر إكمال التسجيل</translation>
 <translation id="2495777824269688114">اسكتشاف المزيد من الميزات أو الحصول على إجابات. اختر "؟" للحصول على مساعدة.</translation>
@@ -1551,7 +1548,7 @@
 <translation id="321834671654278338">‏أداة إزالة نظام التشغيل Linux</translation>
 <translation id="3220586366024592812">تعطلت عملية موصل <ph name="CLOUD_PRINT_NAME" /> . هل تريد إعادة التشغيل؟</translation>
 <translation id="3222066309010235055">Prerender: <ph name="PRERENDER_CONTENTS_NAME" /></translation>
-<translation id="3223531857777746191">الزر "إعادة ضبط"</translation>
+<translation id="3223531857777746191">الزر "إعادة الضبط"</translation>
 <translation id="3225084153129302039">الصورة الرمزية التلقائية الأرجوانية</translation>
 <translation id="3225319735946384299">التوقيع بالرمز</translation>
 <translation id="3227137524299004712">الميكروفون</translation>
@@ -1755,7 +1752,6 @@
 <translation id="3527085408025491307">المجلد</translation>
 <translation id="3528033729920178817">هذه الصفحة تتتبع موقعك.</translation>
 <translation id="3528498924003805721">أهداف الاختصارات</translation>
-<translation id="3530305684079447434">للحصول على الإشارات المرجعية في جميع أجهزتك، <ph name="SIGN_IN_LINK" /> .</translation>
 <translation id="3532844647053365774">يريد <ph name="HOST" /> استخدام الميكروفون.</translation>
 <translation id="353316712352074340"><ph name="WINDOW_TITLE" /> - تم كتم الصوت</translation>
 <translation id="3538066758857505094">‏حدث خطأ أثناء إلغاء تثبيت نظام التشغيل Linux. يُرجى إعادة المحاولة.</translation>
@@ -3522,7 +3518,6 @@
 <translation id="6112727384379533756">إضافة تذكرة</translation>
 <translation id="6112931163620622315">يُرجى التحقّق من هاتفك</translation>
 <translation id="6112952769866305444">تعديل شخص، <ph name="PROFILE_NAME" />، <ph name="USERNAME" /></translation>
-<translation id="6113400363611269907">عرض رسائل الإشعارات بدون إزعاج</translation>
 <translation id="6113942107547980621">‏لاستخدام Smart Lock، يمكنك التبديل إلى الملف الشخصي للمستخدِم الأساسي على هاتفك.</translation>
 <translation id="6116338172782435947">الاطلاع على النصوص والصور التي تم نسخها إلى الحافظة</translation>
 <translation id="6116921718742659598">تغيير إعدادات اللغة والإدخال</translation>
@@ -4977,7 +4972,7 @@
 <translation id="8214489666383623925">فتح ملف...</translation>
 <translation id="8214962590150211830">إزالة هذا الشخص</translation>
 <translation id="8217399928341212914">متابعة حظر التنزيلات التلقائية لعدة ملفات</translation>
-<translation id="8221491193165283816">عادةً ما تَحظر الإشعارات. للسماح لهذا الموقع الإلكتروني بإرسال إشعارات لك، انقر هنا.</translation>
+<translation id="8221491193165283816">أنت تحظر الإشعارات عادةً. للسماح لهذا الموقع الإلكتروني بإرسال إشعارات لك، انقر هنا.</translation>
 <translation id="8225265270453771718">مشاركة نافذة التطبيق</translation>
 <translation id="8225753906568652947">استرداد قيمة العروض</translation>
 <translation id="8226222018808695353">محظور </translation>

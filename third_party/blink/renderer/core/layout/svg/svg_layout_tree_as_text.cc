@@ -338,7 +338,7 @@ static WTF::TextStream& operator<<(WTF::TextStream& ts,
   const ComputedStyle& style = shape.StyleRef();
   const SVGComputedStyle& svg_style = style.SvgStyle();
 
-  if (IsSVGRectElement(*svg_element)) {
+  if (IsA<SVGRectElement>(*svg_element)) {
     WriteNameValuePair(ts, "x",
                        length_context.ValueForLength(svg_style.X(), style,
                                                      SVGLengthMode::kWidth));
@@ -593,7 +593,7 @@ void WriteSVGResourceContainer(WTF::TextStream& ts,
     // patterns using xlink:href, we need to build the full inheritance chain,
     // aka. collectPatternProperties()
     PatternAttributes attributes;
-    ToSVGPatternElement(pattern->GetElement())
+    To<SVGPatternElement>(pattern->GetElement())
         ->CollectPatternAttributes(attributes);
 
     WriteNameValuePair(ts, "patternUnits", attributes.PatternUnits());

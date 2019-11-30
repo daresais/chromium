@@ -99,7 +99,6 @@
 <translation id="1137673463384776352">لنک کو <ph name="APP" /> میں کھولیں</translation>
 <translation id="1140351953533677694">اپنے بلوٹوتھ اور سلسلہ وار آلات تک رسائی حاصل کریں</translation>
 <translation id="114036956334641753">آڈیو اور کیپشنز</translation>
-<translation id="1140610710803014750">اپنے تمام آلات پر اپنے بُک مارکس حاصل کرنے کیلئے، سائن ان کریں اور مطابقت پذیری آن کریں۔</translation>
 <translation id="1140746652461896221">اپنے ملاحظہ کیے جانے والے کسی بھی صفحہ پر مواد مسدود کریں</translation>
 <translation id="1143142264369994168">سرٹیفکیٹ پر دستخط کنندہ</translation>
 <translation id="1145292499998999162">پلگ ان کو مسدود کر دیا گیا</translation>
@@ -330,7 +329,6 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="1465176863081977902">آڈیو پتہ کا&amp;پی کریں</translation>
 <translation id="1465827627707997754">پزّا سلائس</translation>
 <translation id="1468571364034902819">یہ پروفائل استعمال نہیں کر سکتا</translation>
-<translation id="1470811252759861213">اپنے سبھی کمپیوٹرز پر اپنے ایکسٹینشنز حاصل کرنے کیلئے، <ph name="SIGN_IN_LINK" />۔</translation>
 <translation id="1472675084647422956">مزید دکھائیں</translation>
 <translation id="1475502736924165259">آپ کے پاس فائل پر ایسے سرٹیفیکیٹس ہیں جو کسی دوسرے زمرے میں فٹ نہیں ہوتے</translation>
 <translation id="1476088332184200792">اپنے آلہ پر کاپی کریں</translation>
@@ -1046,7 +1044,6 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="2489829450872380594">‏اگلی بار ایک نئے فون سے یہ <ph name="DEVICE_TYPE" /> غیر مقفل ہوگا۔ آپ ترتیبات میں Smart Lock کو آف کر سکتے ہیں۔</translation>
 <translation id="2489918096470125693">&amp;فولڈر شامل کریں…</translation>
 <translation id="2490481887078769936">'<ph name="FILE_NAME" />' کو فہرست سے ہٹا دیا گیا</translation>
-<translation id="2490782392574942205">اپنے سبھی کمپیوٹرز پر اپنی ایکسٹینشنز حاصل کرنے کے لیے، سائن ان کریں اور مطابقت پذیری کو آن کریں</translation>
 <translation id="249113932447298600">معذرت، آلہ <ph name="DEVICE_LABEL" /> اس وقت تعاون یافتہ نہیں ہے۔</translation>
 <translation id="249303669840926644">رجسٹریشن مکمل نہیں کیا جا سکا</translation>
 <translation id="2495777824269688114">مزید خصوصیات دریافت کریں یا جوابات حاصل کریں۔ مدد کے لیے "؟" منتخب کریں۔</translation>
@@ -1756,7 +1753,6 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="3527085408025491307">فولڈر</translation>
 <translation id="3528033729920178817">یہ صفحہ آپ کے مقام کو ٹریک کر رہا ہے۔</translation>
 <translation id="3528498924003805721">اہداف کا شارٹ کٹ</translation>
-<translation id="3530305684079447434">اپنے سبھی آلات پر اپنے بُک مارکس حاصل کرنے کیلئے، <ph name="SIGN_IN_LINK" />۔</translation>
 <translation id="3532844647053365774"><ph name="HOST" /> آپ کا مائیکروفون استعمال کرنا چاہتا ہے</translation>
 <translation id="353316712352074340"><ph name="WINDOW_TITLE" /> - آڈیو خاموش ہے</translation>
 <translation id="3538066758857505094">‏Linux ان انسٹال کرنے میں خرابی پیش آ گئی ہے۔ براہ کرم دوبارہ کوشش کریں۔</translation>
@@ -2006,7 +2002,7 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="3850914401008572843"><ph name="ORIGIN" /> اس فولڈر کو نہیں کھول سکتا کیونکہ اس میں سسٹم فائلز ہیں</translation>
 <translation id="3851428669031642514">غیر محفوظ اسکرپٹس لوڈ کریں</translation>
 <translation id="3854599674806204102">ایک اختیار منتخب کریں</translation>
-<translation id="3854976556788175030">آؤٹ پٹ ٹرے بھر گئی ہے۔</translation>
+<translation id="3854976556788175030">آؤٹ پٹ ٹرے بھر گئی ہے</translation>
 <translation id="3855441664322950881">پیک ایکسٹینشن</translation>
 <translation id="3855676282923585394">بُک مارکس اور ترتیبات درآمد کریں…</translation>
 <translation id="3856800405688283469">ٹائم زون منتخب کریں</translation>
@@ -3526,7 +3522,6 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="6112727384379533756">ٹکٹ شامل کریں</translation>
 <translation id="6112931163620622315">اپنا فون چیک کریں</translation>
 <translation id="6112952769866305444">شخص، <ph name="PROFILE_NAME" />، <ph name="USERNAME" /> میں ترمیم کریں</translation>
-<translation id="6113400363611269907">پرامپٹس کو خاموشی سے دکھائیں</translation>
 <translation id="6113942107547980621">‏Smart Lock کا استعمال کرنے کے لیے اپنے فون پربنیادی صارف پروفائل پر سوئچ کریں</translation>
 <translation id="6116338172782435947">کلپ بورڈ میں کاپی کیے گئے متن اور تصاویر دیکھیں</translation>
 <translation id="6116921718742659598">زبان اور ان پٹ کی ترتیبات تبدیل کریں</translation>
@@ -4197,7 +4192,7 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="7121728544325372695">اسمارٹ ڈیشز</translation>
 <translation id="7123360114020465152">مزید تعاون یافتہ نہیں ہے</translation>
 <translation id="7127980134843952133">ڈاؤن لوڈ کی سرگزشت</translation>
-<translation id="7128151990937044829">اطلاع مسدود کرنے پر ایڈریس بار میں ایک انڈیکیٹر دکھائیں</translation>
+<translation id="7128151990937044829">اطلاع مسدود ہونے پر ایڈریس بار میں ایک انڈیکیٹر دکھائیں</translation>
 <translation id="7128239828194367697">‏اس صفحے کیلئے QR کوڈ بنائیں</translation>
 <translation id="7131040479572660648"><ph name="WEBSITE_1" />, <ph name="WEBSITE_2" /> اور <ph name="WEBSITE_3" /> پر اپنا ڈیٹا پڑھیں</translation>
 <translation id="713122686776214250">&amp;صفحہ شامل کریں…</translation>
@@ -4888,7 +4883,7 @@ myaccount.google.com/activitycontrols/search پر تبدیل کر سکتے ہي�
 <translation id="8076835018653442223">آپ کے آلے پر مقامی فائلوں تک رسائی آپ کے منتظم کی طرف سے غیر فعال کر دی گئی ہے</translation>
 <translation id="808089508890593134">Google</translation>
 <translation id="8081989000209387414">‏ADB ڈیبگنگ غیر فعال کریں؟</translation>
-<translation id="8082390128630131497">‏ADB ڈیبگنگ کو غیر فعال کرنے سے اس <ph name="DEVICE_TYPE" /> کو فیکٹری کی ترتیبات پر ری سیٹ ہو جائے گا۔ صارف کے سبھی اکاؤنٹس اور مقامی ڈیٹا کو مٹا دیا جائے گا۔</translation>
+<translation id="8082390128630131497">‏ADB ڈیبگنگ کو غیر فعال کرنے سے یہ <ph name="DEVICE_TYPE" /> فیکٹری کی ترتیبات پر ری سیٹ ہو جائے گا۔ صارف کے سبھی اکاؤنٹس اور مقامی ڈیٹا کو مٹا دیا جائے گا۔</translation>
 <translation id="8084114998886531721">محفوظ کیا گیا پاسورڈ</translation>
 <translation id="8086015605808120405"><ph name="PRINTER_NAME" /> کو کنفیگر کیا جا رہا ہے…</translation>
 <translation id="8086442853986205778"><ph name="PRINTER_NAME" /> سیٹ اپ کریں</translation>
