@@ -1175,12 +1175,7 @@ void ResourceLoader::DidFinishLoading(base::TimeTicks response_end,
 
   fetcher_->HandleLoaderFinish(
       resource_.Get(), response_end, ResourceFetcher::kDidFinishLoading,
-<<<<<<< HEAD
-      inflight_keepalive_bytes_, should_report_corb_blocking,
-      cors_preflight_timing_info, fetcher_->GetConsoleLogger());
-=======
-      inflight_keepalive_bytes_, should_report_corb_blocking);
->>>>>>> master
+      inflight_keepalive_bytes_, fetcher_->GetConsoleLogger(), should_report_corb_blocking);
 }
 
 void ResourceLoader::DidFail(const WebURLError& error,

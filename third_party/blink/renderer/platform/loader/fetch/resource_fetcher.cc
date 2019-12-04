@@ -1789,7 +1789,7 @@ void ResourceFetcher::HandleLoaderFinish(Resource* resource,
                                          LoaderFinishType type,
                                          uint32_t inflight_keepalive_bytes,
                                          DetachableConsoleLogger& console_logger,
-                                         bool should_report_corb_blocking,) {
+                                         bool should_report_corb_blocking) {
   DCHECK(resource);
 
   DCHECK_LE(inflight_keepalive_bytes, inflight_keepalive_bytes_);
