@@ -45,7 +45,7 @@
 #include "chrome/browser/notifications/notifier_state_tracker.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
-#include "chrome/browser/permissions/adaptive_notification_permission_ui_selector.h"
+#include "chrome/browser/permissions/quiet_notification_permission_ui_state.h"
 #include "chrome/browser/policy/developer_tools_policy_handler.h"
 #include "chrome/browser/policy/webusb_allow_devices_for_urls_policy_handler.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
@@ -54,6 +54,7 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/previews/previews_lite_page_redirect_decider.h"
 #include "chrome/browser/previews/previews_offline_helper.h"
+#include "chrome/browser/printing/print_preview_sticky_settings.h"
 #include "chrome/browser/profiles/chrome_version_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
@@ -80,7 +81,6 @@
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/print_preview/policy_settings.h"
-#include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/webauthn/chrome_authenticator_request_delegate.h"
 #include "chrome/common/buildflags.h"
@@ -516,6 +516,10 @@ const char kDisplayRotationAcceleratorDialogHasBeenAccepted[] =
     "settings.a11y.display_rotation_accelerator_dialog_has_been_accepted";
 #endif  // defined(OS_CHROMEOS)
 
+// Deprecated 11/2019
+const char kBlacklistedCredentialsNormalized[] =
+    "profile.blacklisted_credentials_normalized";
+
 // Register prefs used only for migration (clearing or moving to a new key).
 void RegisterProfilePrefsForMigration(
     user_prefs::PrefRegistrySyncable* registry) {
@@ -601,6 +605,8 @@ void RegisterProfilePrefsForMigration(
   registry->RegisterBooleanPref(
       kDisplayRotationAcceleratorDialogHasBeenAccepted, false);
 #endif  // defined(OS_CHROMEOS)
+
+  registry->RegisterBooleanPref(kBlacklistedCredentialsNormalized, false);
 }
 
 }  // namespace
@@ -782,7 +788,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   // User prefs. Please keep this list alphabetized.
   AccessibilityLabelsService::RegisterProfilePrefs(registry);
   AccessibilityUIMessageHandler::RegisterProfilePrefs(registry);
-  AdaptiveNotificationPermissionUiSelector::RegisterProfilePrefs(registry);
   AvailabilityProber::RegisterProfilePrefs(registry);
   autofill::prefs::RegisterProfilePrefs(registry);
   browsing_data::prefs::RegisterBrowserUserPrefs(registry);
@@ -830,6 +835,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   ProfileNetworkContextService::RegisterProfilePrefs(registry);
   ProtocolHandlerRegistry::RegisterProfilePrefs(registry);
   PushMessagingAppIdentifier::RegisterProfilePrefs(registry);
+  QuietNotificationPermissionUiState::RegisterProfilePrefs(registry);
   RegisterBrowserUserPrefs(registry);
   safe_browsing::RegisterProfilePrefs(registry);
   SafeBrowsingTriggeredPopupBlocker::RegisterProfilePrefs(registry);
@@ -870,7 +876,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   printing::PolicySettings::RegisterProfilePrefs(registry);
-  printing::StickySettings::RegisterProfilePrefs(registry);
+  printing::PrintPreviewStickySettings::RegisterProfilePrefs(registry);
 #endif
 
 #if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
@@ -1237,4 +1243,7 @@ void MigrateObsoleteProfilePrefs(Profile* profile) {
   // Added 10/2019.
   profile_prefs->ClearPref(kDisplayRotationAcceleratorDialogHasBeenAccepted);
 #endif  // defined(OS_CHROMEOS)
+
+  // Added 11/2019.
+  profile_prefs->ClearPref(kBlacklistedCredentialsNormalized);
 }

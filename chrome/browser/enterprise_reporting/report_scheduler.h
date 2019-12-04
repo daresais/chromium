@@ -11,6 +11,7 @@
 
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/enterprise_reporting/report_generator.h"
 #include "chrome/browser/enterprise_reporting/report_uploader.h"
 #include "chrome/browser/profiles/profile_manager_observer.h"
@@ -36,6 +37,8 @@ class ReportScheduler : public ProfileManagerObserver {
 
   void SetReportUploaderForTesting(std::unique_ptr<ReportUploader> uploader);
 
+  RequestTimer* GetRequestTimerForTesting() const;
+
   void OnDMTokenUpdated();
 
  private:
@@ -45,6 +48,13 @@ class ReportScheduler : public ProfileManagerObserver {
   // Handles kCloudReportingEnabled policy value change, including the first
   // policy value check during startup.
   void OnReportEnabledPrefChanged();
+
+  // Stop |request_timer_| if it is existing.
+  void StopRequestTimer();
+
+  // Register |cloud_policy_client_| with dm token and client id for desktop
+  // browser only. (Chrome OS doesn't need this step here.)
+  bool SetupBrowserPolicyClientRegistration();
 
   // Schedules the first update request.
   void Start();

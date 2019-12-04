@@ -127,10 +127,16 @@ int UnifiedMessageCenterBubble::CalculateAvailableHeight() {
 }
 
 void UnifiedMessageCenterBubble::CollapseMessageCenter() {
+  if (message_center_view_->collapsed())
+    return;
+
   message_center_view_->SetCollapsed(true /*animate*/);
 }
 
 void UnifiedMessageCenterBubble::ExpandMessageCenter() {
+  if (!message_center_view_->collapsed())
+    return;
+
   message_center_view_->SetExpanded();
   UpdatePosition();
   tray_->EnsureQuickSettingsCollapsed();
@@ -149,7 +155,7 @@ void UnifiedMessageCenterBubble::UpdatePosition() {
   gfx::Rect anchor_rect = tray_->shelf()->GetSystemTrayAnchorRect();
 
   int left_offset =
-      tray_->shelf()->alignment() == SHELF_ALIGNMENT_LEFT
+      tray_->shelf()->alignment() == ShelfAlignment::kLeft
           ? kUnifiedMenuPadding
           : -(kUnifiedMenuPadding - (base::i18n::IsRTL() ? 0 : 1));
   anchor_rect.set_x(anchor_rect.x() + left_offset);

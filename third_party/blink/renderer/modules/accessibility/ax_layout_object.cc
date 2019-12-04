@@ -162,7 +162,7 @@ ScrollableArea* AXLayoutObject::GetScrollableAreaIfScrollable() const {
 static bool IsImageOrAltText(LayoutBoxModelObject* box, Node* node) {
   if (box && box->IsImage())
     return true;
-  if (IsHTMLImageElement(node))
+  if (IsA<HTMLImageElement>(node))
     return true;
   if (IsHTMLInputElement(node) &&
       ToHTMLInputElement(node)->HasFallbackContent())
@@ -960,7 +960,7 @@ String AXLayoutObject::ImageDataUrl(const IntSize& max_size) const {
   ImageBitmapOptions* options = ImageBitmapOptions::Create();
   ImageBitmap* image_bitmap = nullptr;
   Document* document = &node->GetDocument();
-  if (auto* image = ToHTMLImageElementOrNull(node)) {
+  if (auto* image = DynamicTo<HTMLImageElement>(node)) {
     image_bitmap = ImageBitmap::Create(image, base::Optional<IntRect>(),
                                        document, options);
   } else if (auto* canvas = DynamicTo<HTMLCanvasElement>(node)) {
@@ -1365,7 +1365,15 @@ AXObject* AXLayoutObject::PreviousOnLine() const {
     return nullptr;
 
   AXObject* result = nullptr;
-  if (ShouldUseLayoutNG(*GetLayoutObject())) {
+  AXObject* previous_sibling = AccessibilityIsIncludedInTree()
+                                   ? PreviousSiblingIncludingIgnored()
+                                   : nullptr;
+  if (previous_sibling && previous_sibling->GetLayoutObject() &&
+      previous_sibling->GetLayoutObject()->IsLayoutNGListMarker()) {
+    if (!previous_sibling->Children().size())
+      return nullptr;
+    result = previous_sibling->LastChild();
+  } else if (ShouldUseLayoutNG(*GetLayoutObject())) {
     result = PreviousOnLineInlineNG(*this);
   } else {
     InlineBox* inline_box = nullptr;
@@ -1921,11 +1929,6 @@ AXObject* AXLayoutObject::RawFirstChild() const {
         top_section ? top_section->ToMutableLayoutObject() : nullptr);
   }
 
-  if (layout_object_->IsLayoutNGListMarker()) {
-    // We don't care tree structure of list marker.
-    return nullptr;
-  }
-
   LayoutObject* first_child = layout_object_->SlowFirstChild();
 
   // CSS first-letter pseudo element is handled as continuation. Returning it
@@ -2119,7 +2122,7 @@ bool AXLayoutObject::CanHaveChildren() const {
     return false;
   if (GetCSSAltText(GetNode()))
     return false;
-  if (layout_object_->IsListMarkerIncludingNGInside())
+  if (layout_object_->IsListMarker())
     return false;
   return AXNodeObject::CanHaveChildren();
 }

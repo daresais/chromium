@@ -2376,10 +2376,23 @@ void LayoutBox::SetCachedLayoutResult(const NGLayoutResult& layout_result,
   if (layout_result.PhysicalFragment().BreakToken())
     return;
 
+  ClearCachedLayoutResult();
   cached_layout_result_ = &layout_result;
 }
 
 void LayoutBox::ClearCachedLayoutResult() {
+  if (!cached_layout_result_)
+    return;
+
+  // Invalidate if inline |DisplayItemClient|s will be destroyed.
+  if (const auto* box_fragment = DynamicTo<NGPhysicalBoxFragment>(
+          &cached_layout_result_->PhysicalFragment())) {
+    if (box_fragment->HasItems()) {
+      DCHECK_EQ(this, box_fragment->GetLayoutObject());
+      ObjectPaintInvalidator(*this).SlowSetPaintingLayerNeedsRepaint();
+    }
+  }
+
   cached_layout_result_ = nullptr;
 }
 
@@ -5454,7 +5467,7 @@ bool LayoutBox::ShouldBeConsideredAsReplaced() const {
     // treated as such.
     return !IsA<HTMLFieldSetElement>(element);
   }
-  return IsHTMLImageElement(element);
+  return IsA<HTMLImageElement>(element);
 }
 
 bool LayoutBox::HasNonCompositedScrollbars() const {

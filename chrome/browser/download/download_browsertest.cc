@@ -1132,6 +1132,7 @@ class DownloadTest : public InProcessBrowserTest {
     base::FilePath destination_folder = GetDownloadDirectory(browser());
     DVLOG(1) << " " << __FUNCTION__ << "()"
              << " folder = '" << destination_folder.value() << "'";
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePermissionRestorer permission_restorer(destination_folder);
     EXPECT_TRUE(base::MakeFileUnwritable(destination_folder));
 
@@ -2608,7 +2609,8 @@ class DownloadTestWithHistogramTester : public DownloadTest {
   std::unique_ptr<URLLoaderInterceptor> url_loader_interceptor_;
 };
 
-#if defined(OS_LINUX)
+// Flaky on Linux and Windows. https://crbug.com/1028371
+#if defined(OS_LINUX) || defined(OS_WIN)
 #define MAYBE_SavePageNonHTMLViaGet DISABLED_SavePageNonHTMLViaGet
 #else
 #define MAYBE_SavePageNonHTMLViaGet SavePageNonHTMLViaGet

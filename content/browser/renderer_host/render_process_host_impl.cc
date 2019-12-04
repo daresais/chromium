@@ -115,6 +115,7 @@
 #include "content/browser/permissions/permission_service_context.h"
 #include "content/browser/permissions/permission_service_impl.h"
 #include "content/browser/push_messaging/push_messaging_manager.h"
+#include "content/browser/quota_dispatcher_host.h"
 #include "content/browser/renderer_host/agent_metrics_collector.h"
 #include "content/browser/renderer_host/clipboard_host_impl.h"
 #include "content/browser/renderer_host/code_cache_host_impl.h"
@@ -1470,7 +1471,7 @@ RenderProcessHostImpl::RenderProcessHostImpl(
           new IndexedDBDispatcherHost(
               id_,
               storage_partition_impl_->GetIndexedDBContext(),
-              ChromeBlobStorageContext::GetFor(browser_context_)),
+              ChromeBlobStorageContext::GetRemoteFor(browser_context)),
           base::OnTaskRunnerDeleter(
               storage_partition_impl_->GetIndexedDBContext()->TaskRunner())),
       channel_connected_(false),
@@ -1937,11 +1938,38 @@ void RenderProcessHostImpl::BindNativeFileSystemManager(
       std::move(receiver));
 }
 
+void RenderProcessHostImpl::BindRestrictedCookieManagerForServiceWorker(
+    const url::Origin& origin,
+    mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  GetStoragePartition()->CreateRestrictedCookieManager(
+      network::mojom::RestrictedCookieManagerRole::SCRIPT, origin,
+      origin.GetURL(), origin, true /* is_service_worker */, GetID(),
+      MSG_ROUTING_NONE, std::move(receiver));
+}
+
 void RenderProcessHostImpl::BindVideoDecodePerfHistory(
     mojo::PendingReceiver<media::mojom::VideoDecodePerfHistory> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   GetBrowserContext()->GetVideoDecodePerfHistory()->BindReceiver(
       std::move(receiver));
+}
+
+void RenderProcessHostImpl::BindQuotaDispatcherHost(
+    int render_frame_id,
+    const url::Origin& origin,
+    mojo::PendingReceiver<blink::mojom::QuotaDispatcherHost> receiver) {
+  // TODO(crbug.com/779444): Save the |origin| here and use it rather than the
+  // one provided by QuotaDispatcher.
+
+  // Bind on the IO thread.
+  base::PostTask(
+      FROM_HERE, {BrowserThread::IO},
+      base::BindOnce(
+          &QuotaDispatcherHost::BindQuotaDispatcherHostOnIOThread, GetID(),
+          render_frame_id,
+          base::RetainedRef(GetStoragePartition()->GetQuotaManager()),
+          std::move(receiver)));
 }
 
 void RenderProcessHostImpl::CreateLockManager(
@@ -2528,7 +2556,7 @@ void RenderProcessHostImpl::CreateURLLoaderFactoryForRendererProcess(
       network::mojom::CrossOriginEmbedderPolicy::kNone,
       nullptr /* preferences */, net::NetworkIsolationKey(),
       mojo::NullRemote() /* header_client */, std::move(receiver),
-      false /* is_trusted */);
+      false /* is_trusted */, network::mojom::URLLoaderFactoryOverridePtr());
 }
 
 void RenderProcessHostImpl::CreateURLLoaderFactory(
@@ -2539,11 +2567,12 @@ void RenderProcessHostImpl::CreateURLLoaderFactory(
     const net::NetworkIsolationKey& network_isolation_key,
     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
         header_client,
-    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
-  CreateURLLoaderFactoryInternal(origin, main_world_origin, embedder_policy,
-                                 preferences, network_isolation_key,
-                                 std::move(header_client), std::move(receiver),
-                                 false /* is_trusted */);
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+    network::mojom::URLLoaderFactoryOverridePtr factory_override) {
+  CreateURLLoaderFactoryInternal(
+      origin, main_world_origin, embedder_policy, preferences,
+      network_isolation_key, std::move(header_client), std::move(receiver),
+      false /* is_trusted */, std::move(factory_override));
 }
 
 void RenderProcessHostImpl::CreateTrustedURLLoaderFactory(
@@ -2553,10 +2582,12 @@ void RenderProcessHostImpl::CreateTrustedURLLoaderFactory(
     const WebPreferences* preferences,
     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
         header_client,
-    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+    network::mojom::URLLoaderFactoryOverridePtr factory_override) {
   CreateURLLoaderFactoryInternal(
       origin, main_world_origin, embedder_policy, preferences, base::nullopt,
-      std::move(header_client), std::move(receiver), true /* is_trusted */);
+      std::move(header_client), std::move(receiver), true /* is_trusted */,
+      std::move(factory_override));
 }
 
 void RenderProcessHostImpl::CreateURLLoaderFactoryInternal(
@@ -2568,7 +2599,8 @@ void RenderProcessHostImpl::CreateURLLoaderFactoryInternal(
     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
         header_client,
     mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
-    bool is_trusted) {
+    bool is_trusted,
+    network::mojom::URLLoaderFactoryOverridePtr factory_override) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // "chrome-guest://..." is never used as a main or isolated world origin.
@@ -2608,6 +2640,7 @@ void RenderProcessHostImpl::CreateURLLoaderFactoryInternal(
   } else {
     params->is_corb_enabled = true;
   }
+  params->factory_override = std::move(factory_override);
 
   GetContentClient()->browser()->OverrideURLLoaderFactoryParams(this, origin,
                                                                 params.get());
@@ -3185,7 +3218,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     cc::switches::kBrowserControlsHideThreshold,
     cc::switches::kBrowserControlsShowThreshold,
     switches::kRunAllCompositorStagesBeforeDraw,
-    switches::kUseVizHitTestSurfaceLayer,
 
 #if BUILDFLAG(ENABLE_PLUGINS)
     switches::kEnablePepperTesting,
@@ -4838,11 +4870,6 @@ void RenderProcessHostImpl::GetBrowserHistogram(
     histogram->WriteJSON(&histogram_json, base::JSON_VERBOSITY_LEVEL_FULL);
   }
   std::move(callback).Run(histogram_json);
-}
-
-void RenderProcessHostImpl::SetBrowserPluginMessageFilterSubFilterForTesting(
-    scoped_refptr<BrowserMessageFilter> message_filter) const {
-  bp_message_filter_->SetSubFilterForTesting(std::move(message_filter));
 }
 
 void RenderProcessHostImpl::BindTracedProcess(

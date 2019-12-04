@@ -106,11 +106,6 @@ AudioTrackRecorder::CodecId AudioStringToCodecId(const String& codecs) {
 
 }  // anonymous namespace
 
-MediaRecorderHandler* MediaRecorderHandler::Create(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  return MakeGarbageCollected<MediaRecorderHandler>(std::move(task_runner));
-}
-
 MediaRecorderHandler::MediaRecorderHandler(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : video_bits_per_second_(0),
@@ -193,7 +188,7 @@ bool MediaRecorderHandler::Initialize(MediaRecorder* recorder,
       VideoStringToCodecId(codecs);
   video_codec_id_ = (video_codec_id != VideoTrackRecorder::CodecId::LAST)
                         ? video_codec_id
-                        : VideoTrackRecorder::GetPreferredCodecId();
+                        : VideoTrackRecorderImpl::GetPreferredCodecId();
   DVLOG_IF(1, video_codec_id == VideoTrackRecorder::CodecId::LAST)
       << "Falling back to preferred video codec id "
       << static_cast<int>(video_codec_id_);
@@ -249,8 +244,7 @@ bool MediaRecorderHandler::Start(int timeslice) {
   }
 
   webm_muxer_.reset(
-      new media::WebmMuxer(CodecIdToMediaVideoCodec(video_codec_id_),
-                           CodecIdToMediaAudioCodec(audio_codec_id_),
+      new media::WebmMuxer(CodecIdToMediaAudioCodec(audio_codec_id_),
                            use_video_tracks, use_audio_tracks,
                            WTF::BindRepeating(&MediaRecorderHandler::WriteData,
                                               WrapWeakPersistent(this))));
@@ -268,7 +262,7 @@ bool MediaRecorderHandler::Start(int timeslice) {
         media::BindToCurrentLoop(WTF::BindRepeating(
             &MediaRecorderHandler::OnEncodedVideo, WrapWeakPersistent(this)));
 
-    video_recorders_.emplace_back(MakeGarbageCollected<VideoTrackRecorder>(
+    video_recorders_.emplace_back(MakeGarbageCollected<VideoTrackRecorderImpl>(
         video_codec_id_, video_tracks_[0], on_encoded_video_cb,
         video_bits_per_second_, task_runner_));
   }
@@ -359,7 +353,7 @@ void MediaRecorderHandler::EncodingInfo(
 
   if (configuration.video_configuration && info->supported) {
     const bool is_likely_accelerated =
-        VideoTrackRecorder::CanUseAcceleratedEncoder(
+        VideoTrackRecorderImpl::CanUseAcceleratedEncoder(
             VideoStringToCodecId(codec),
             configuration.video_configuration->width,
             configuration.video_configuration->height,
@@ -470,7 +464,9 @@ void MediaRecorderHandler::OnEncodedVideo(
   }
   if (!webm_muxer_)
     return;
-  if (!webm_muxer_->OnEncodedVideo(params, std::move(encoded_data),
+  media::WebmMuxer::VideoParameters params_with_codec = params;
+  params_with_codec.codec = CodecIdToMediaVideoCodec(video_codec_id_);
+  if (!webm_muxer_->OnEncodedVideo(params_with_codec, std::move(encoded_data),
                                    std::move(encoded_alpha), timestamp,
                                    is_key_frame)) {
     DLOG(ERROR) << "Error muxing video data";

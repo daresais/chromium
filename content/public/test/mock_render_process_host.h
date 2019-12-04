@@ -161,8 +161,8 @@ class MockRenderProcessHost : public RenderProcessHost {
       const net::NetworkIsolationKey& network_isolation_key,
       mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
           header_client,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
-      override;
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+      network::mojom::URLLoaderFactoryOverridePtr factory_override) override;
 
   bool MayReuseHost() override;
   bool IsUnused() override;
@@ -186,8 +186,17 @@ class MockRenderProcessHost : public RenderProcessHost {
       int render_frame_id,
       const url::Origin& origin,
       mojo::PendingReceiver<blink::mojom::IDBFactory> receiver) override;
+  void BindRestrictedCookieManagerForServiceWorker(
+      const url::Origin& origin,
+      mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver)
+      override {}
   void BindVideoDecodePerfHistory(
       mojo::PendingReceiver<media::mojom::VideoDecodePerfHistory> receiver)
+      override {}
+  void BindQuotaDispatcherHost(
+      int render_frame_id,
+      const url::Origin& origin,
+      mojo::PendingReceiver<blink::mojom::QuotaDispatcherHost> receiver)
       override {}
   void CreateLockManager(
       int render_frame_id,

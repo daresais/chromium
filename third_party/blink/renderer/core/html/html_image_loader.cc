@@ -45,7 +45,7 @@ void HTMLImageLoader::DispatchLoadEvent() {
     return;
 
   bool error_occurred = GetContent()->ErrorOccurred();
-  if (IsHTMLObjectElement(*GetElement()) && !error_occurred) {
+  if (IsA<HTMLObjectElement>(*GetElement()) && !error_occurred) {
     // An <object> considers a 404 to be an error and should fire onerror.
     error_occurred = (GetContent()->GetResponse().HttpStatusCode() >= 400);
   }
@@ -59,7 +59,7 @@ void HTMLImageLoader::NoImageResourceToLoad() {
   if (To<HTMLElement>(GetElement())->AltText().IsEmpty())
     return;
 
-  if (auto* image = ToHTMLImageElementOrNull(GetElement()))
+  if (auto* image = DynamicTo<HTMLImageElement>(GetElement()))
     image->EnsureCollapsedOrFallbackContent();
   else if (auto* input = ToHTMLInputElementOrNull(GetElement()))
     input->EnsureFallbackContent();
@@ -71,7 +71,7 @@ void HTMLImageLoader::ImageNotifyFinished(ImageResourceContent*) {
   ImageLoader::ImageNotifyFinished(cached_image);
 
   bool load_error = cached_image->ErrorOccurred();
-  if (auto* image = ToHTMLImageElementOrNull(*element)) {
+  if (auto* image = DynamicTo<HTMLImageElement>(*element)) {
     if (load_error)
       image->EnsureCollapsedOrFallbackContent();
     else
@@ -85,9 +85,10 @@ void HTMLImageLoader::ImageNotifyFinished(ImageResourceContent*) {
       input->EnsurePrimaryContent();
   }
 
+  auto* html_image_element = DynamicTo<HTMLObjectElement>(element);
   if ((load_error || cached_image->GetResponse().HttpStatusCode() >= 400) &&
-      IsHTMLObjectElement(*element))
-    ToHTMLObjectElement(element)->RenderFallbackContent(nullptr);
+      html_image_element)
+    html_image_element->RenderFallbackContent(nullptr);
 }
 
 }  // namespace blink

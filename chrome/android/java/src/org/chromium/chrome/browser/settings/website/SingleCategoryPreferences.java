@@ -51,8 +51,8 @@ import org.chromium.chrome.browser.settings.ExpandablePreferenceGroup;
 import org.chromium.chrome.browser.settings.LocationSettings;
 import org.chromium.chrome.browser.settings.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.settings.ManagedPreferencesUtils;
-import org.chromium.chrome.browser.settings.PreferenceUtils;
 import org.chromium.chrome.browser.settings.SearchUtils;
+import org.chromium.chrome.browser.settings.SettingsUtils;
 import org.chromium.chrome.browser.settings.website.Website.StoredDataClearedCallback;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.ui.widget.Toast;
@@ -116,6 +116,9 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     private List<WebsitePreference> mWebsites;
     // Whether tri-state ContentSetting is required.
     private boolean mRequiresTriStateSetting;
+    // Locally-saved reference to the "notifications_quiet_ui" preference to allow hiding/showing
+    // it.
+    private ChromeBaseCheckBoxPreference mNotificationsQuietUiPref;
 
     @Nullable
     private Set<String> mSelectedDomains;
@@ -128,6 +131,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
     // Keys for category-specific preferences (toggle, link, button etc.), dynamically shown.
     public static final String THIRD_PARTY_COOKIES_TOGGLE_KEY = "third_party_cookies";
     public static final String NOTIFICATIONS_VIBRATE_TOGGLE_KEY = "notifications_vibrate";
+    public static final String NOTIFICATIONS_QUIET_UI_TOGGLE_KEY = "notifications_quiet_ui";
     public static final String EXPLAIN_PROTECTED_MEDIA_KEY = "protected_content_learn_more";
     private static final String ADD_EXCEPTION_KEY = "add_exception";
 
@@ -346,7 +350,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
 
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
-        PreferenceUtils.addPreferencesFromResource(this, R.xml.website_preferences);
+        SettingsUtils.addPreferencesFromResource(this, R.xml.website_preferences);
 
         String title = getArguments().getString(EXTRA_TITLE);
         if (title != null) getActivity().setTitle(title);
@@ -476,7 +480,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                 if (type == SiteSettingsCategory.Type.COOKIES) {
                     updateThirdPartyCookiesCheckBox();
                 } else if (type == SiteSettingsCategory.Type.NOTIFICATIONS) {
-                    updateNotificationsVibrateCheckBox();
+                    updateNotificationsSecondaryControls();
                 }
                 break;
             }
@@ -519,6 +523,8 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         } else if (NOTIFICATIONS_VIBRATE_TOGGLE_KEY.equals(preference.getKey())) {
             PrefServiceBridge.getInstance().setBoolean(
                     Pref.NOTIFICATIONS_VIBRATE_ENABLED, (boolean) newValue);
+        } else if (NOTIFICATIONS_QUIET_UI_TOGGLE_KEY.equals(preference.getKey())) {
+            WebsitePreferenceBridge.setQuietNotificationsUiEnabled((boolean) newValue);
         }
         return true;
     }
@@ -606,7 +612,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         // This will remove the combo box at the top and all the sites listed below it.
         getPreferenceScreen().removeAll();
         // And this will add the filter preference back (combo box).
-        PreferenceUtils.addPreferencesFromResource(this, R.xml.website_preferences);
+        SettingsUtils.addPreferencesFromResource(this, R.xml.website_preferences);
 
         configureGlobalToggles();
 
@@ -823,6 +829,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                 (TriStateSiteSettingsPreference) screen.findPreference(TRI_STATE_TOGGLE_KEY);
         Preference thirdPartyCookies = screen.findPreference(THIRD_PARTY_COOKIES_TOGGLE_KEY);
         Preference notificationsVibrate = screen.findPreference(NOTIFICATIONS_VIBRATE_TOGGLE_KEY);
+        Preference notificationsQuietUi = screen.findPreference(NOTIFICATIONS_QUIET_UI_TOGGLE_KEY);
         Preference explainProtectedMediaKey = screen.findPreference(EXPLAIN_PROTECTED_MEDIA_KEY);
         PreferenceGroup allowedGroup = (PreferenceGroup) screen.findPreference(ALLOWED_GROUP);
         PreferenceGroup blockedGroup = (PreferenceGroup) screen.findPreference(BLOCKED_GROUP);
@@ -854,6 +861,7 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
         if (hideSecondaryToggles) {
             screen.removePreference(thirdPartyCookies);
             screen.removePreference(notificationsVibrate);
+            screen.removePreference(notificationsQuietUi);
             screen.removePreference(explainProtectedMediaKey);
             screen.removePreference(allowedGroup);
             screen.removePreference(blockedGroup);
@@ -871,13 +879,24 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
             screen.removePreference(thirdPartyCookies);
         }
 
-        // Configure/hide the notifications vibrate toggle, as needed.
-        if (mCategory.showSites(SiteSettingsCategory.Type.NOTIFICATIONS)
-                && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            notificationsVibrate.setOnPreferenceChangeListener(this);
-            updateNotificationsVibrateCheckBox();
+        // Configure/hide the notifications secondary controls, as needed.
+        if (mCategory.showSites(SiteSettingsCategory.Type.NOTIFICATIONS)) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                notificationsVibrate.setOnPreferenceChangeListener(this);
+            } else {
+                screen.removePreference(notificationsVibrate);
+            }
+
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.QUIET_NOTIFICATION_PROMPTS)) {
+                notificationsQuietUi.setOnPreferenceChangeListener(this);
+            } else {
+                screen.removePreference(notificationsQuietUi);
+            }
+
+            updateNotificationsSecondaryControls();
         } else {
             screen.removePreference(notificationsVibrate);
+            screen.removePreference(notificationsQuietUi);
         }
 
         // Only show the link that explains protected content settings when needed.
@@ -984,13 +1003,34 @@ public class SingleCategoryPreferences extends PreferenceFragmentCompat
                         Pref.BLOCK_THIRD_PARTY_COOKIES));
     }
 
-    private void updateNotificationsVibrateCheckBox() {
-        ChromeBaseCheckBoxPreference preference =
+    private void updateNotificationsSecondaryControls() {
+        Boolean categoryEnabled =
+                WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.NOTIFICATIONS);
+
+        // The notifications vibrate checkbox.
+        ChromeBaseCheckBoxPreference vibrate_pref =
                 (ChromeBaseCheckBoxPreference) getPreferenceScreen().findPreference(
                         NOTIFICATIONS_VIBRATE_TOGGLE_KEY);
-        if (preference != null) {
-            preference.setEnabled(
-                    WebsitePreferenceBridge.isCategoryEnabled(ContentSettingsType.NOTIFICATIONS));
+        if (vibrate_pref != null) vibrate_pref.setEnabled(categoryEnabled);
+
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.QUIET_NOTIFICATION_PROMPTS)) return;
+
+        // The notifications quiet ui checkbox.
+        ChromeBaseCheckBoxPreference quiet_ui_pref =
+                (ChromeBaseCheckBoxPreference) getPreferenceScreen().findPreference(
+                        NOTIFICATIONS_QUIET_UI_TOGGLE_KEY);
+
+        if (categoryEnabled) {
+            if (quiet_ui_pref == null) {
+                getPreferenceScreen().addPreference(mNotificationsQuietUiPref);
+                quiet_ui_pref = (ChromeBaseCheckBoxPreference) getPreferenceScreen().findPreference(
+                        NOTIFICATIONS_QUIET_UI_TOGGLE_KEY);
+            }
+            quiet_ui_pref.setChecked(WebsitePreferenceBridge.isQuietNotificationsUiEnabled());
+        } else if (quiet_ui_pref != null) {
+            // Save a reference to allow re-adding it to the screen.
+            mNotificationsQuietUiPref = quiet_ui_pref;
+            getPreferenceScreen().removePreference(quiet_ui_pref);
         }
     }
 

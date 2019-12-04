@@ -127,20 +127,8 @@ var PrintPreviewPolicyTest = class extends PrintPreviewTest {
   }
 };
 
-TEST_F('PrintPreviewPolicyTest', 'EnableHeaderFooterByPref', function() {
-  this.runMochaTest(policy_tests.TestNames.EnableHeaderFooterByPref);
-});
-
-TEST_F('PrintPreviewPolicyTest', 'DisableHeaderFooterByPref', function() {
-  this.runMochaTest(policy_tests.TestNames.DisableHeaderFooterByPref);
-});
-
-TEST_F('PrintPreviewPolicyTest', 'EnableHeaderFooterByPolicy', function() {
-  this.runMochaTest(policy_tests.TestNames.EnableHeaderFooterByPolicy);
-});
-
-TEST_F('PrintPreviewPolicyTest', 'DisableHeaderFooterByPolicy', function() {
-  this.runMochaTest(policy_tests.TestNames.DisableHeaderFooterByPolicy);
+TEST_F('PrintPreviewPolicyTest', 'HeaderFooterPolicy', function() {
+  this.runMochaTest(policy_tests.TestNames.HeaderFooterPolicy);
 });
 
 // eslint-disable-next-line no-var
@@ -1116,6 +1104,12 @@ TEST_F('PrintPreviewDestinationSettingsTest', 'DisabledSaveAsPdf', function() {
 TEST_F('PrintPreviewDestinationSettingsTest', 'NoDestinations', function() {
   this.runMochaTest(destination_settings_test.TestNames.NoDestinations);
 });
+
+GEN('#if defined(OS_CHROMEOS)');
+TEST_F('PrintPreviewDestinationSettingsTest', 'EulaIsDisplayed', function() {
+  this.runMochaTest(destination_settings_test.TestNames.EulaIsDisplayed);
+});
+GEN('#endif');
 
 // eslint-disable-next-line no-var
 var PrintPreviewScalingSettingsTest = class extends PrintPreviewTest {

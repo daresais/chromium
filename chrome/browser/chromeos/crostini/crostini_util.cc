@@ -29,6 +29,8 @@
 #include "chrome/browser/chromeos/virtual_machines/virtual_machines_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/crostini/crostini_app_icon.h"
+#include "chrome/browser/ui/ash/launcher/app_service_app_window_crostini_tracker.h"
+#include "chrome/browser/ui/ash/launcher/app_service_app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/crostini_app_window_shelf_controller.h"
 #include "chrome/browser/ui/ash/launcher/shelf_spinner_controller.h"
@@ -36,6 +38,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/web_applications/system_web_app_ui_utils.h"
+#include "chrome/browser/ui/webui/chromeos/crostini_upgrader/crostini_upgrader_dialog.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
@@ -81,11 +84,21 @@ void OnLaunchFailed(const std::string& app_id) {
   chrome_controller->GetShelfSpinnerController()->CloseSpinner(app_id);
 }
 
+// TODO(nverne): Real conditions (e.g. once per session max, container id is
+// default and still on old version).
+bool ShouldPromptContainerUpgrade() {
+  return false;
+}
+
 void OnCrostiniRestarted(Profile* profile,
                          const std::string& app_id,
                          Browser* browser,
                          base::OnceClosure callback,
                          crostini::CrostiniResult result) {
+  if (ShouldPromptContainerUpgrade()) {
+    chromeos::CrostiniUpgraderDialog::Show(profile, std::move(callback));
+    return;
+  }
   if (result != crostini::CrostiniResult::SUCCESS) {
     OnLaunchFailed(app_id);
     if (browser && browser->window())
@@ -151,10 +164,19 @@ void LaunchApplication(
   ChromeLauncherController* chrome_launcher_controller =
       ChromeLauncherController::instance();
   DCHECK(chrome_launcher_controller);
-  CrostiniAppWindowShelfController* shelf_controller =
-      chrome_launcher_controller->crostini_app_window_shelf_controller();
-  DCHECK(shelf_controller);
-  shelf_controller->OnAppLaunchRequested(app_id, display_id);
+
+  if (base::FeatureList::IsEnabled(features::kAppServiceInstanceRegistry)) {
+    AppServiceAppWindowLauncherController* app_service_controller =
+        chrome_launcher_controller->app_service_app_window_controller();
+    DCHECK(app_service_controller);
+    app_service_controller->app_service_crostini_tracker()
+        ->OnAppLaunchRequested(app_id, display_id);
+  } else {
+    CrostiniAppWindowShelfController* shelf_controller =
+        chrome_launcher_controller->crostini_app_window_shelf_controller();
+    DCHECK(shelf_controller);
+    shelf_controller->OnAppLaunchRequested(app_id, display_id);
+  }
 
   // Share any paths not in crostini.  The user will see the spinner while this
   // is happening.
@@ -281,6 +303,10 @@ ContainerId::ContainerId(std::string vm_name,
 bool operator<(const ContainerId& lhs, const ContainerId& rhs) noexcept {
   const auto result = lhs.vm_name.compare(rhs.vm_name);
   return result < 0 || (result == 0 && lhs.container_name < rhs.container_name);
+}
+
+bool operator==(const ContainerId& lhs, const ContainerId& rhs) noexcept {
+  return lhs.vm_name == rhs.vm_name && lhs.container_name == rhs.container_name;
 }
 
 std::ostream& operator<<(std::ostream& ostream,

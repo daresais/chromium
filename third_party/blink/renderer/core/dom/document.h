@@ -60,7 +60,6 @@
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
-#include "third_party/blink/renderer/core/frame/dom_timer_coordinator.h"
 #include "third_party/blink/renderer/core/frame/hosts_using_features.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element.h"
 #include "third_party/blink/renderer/core/html/parser/parser_synchronization_policy.h"
@@ -237,7 +236,7 @@ enum ShadowCascadeOrder {
   kShadowCascadeV1
 };
 
-enum class SecureContextState { kUnknown, kNonSecure, kSecure };
+enum class SecureContextState { kNonSecure, kSecure };
 
 using DocumentClassFlags = unsigned char;
 
@@ -1355,8 +1354,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   void PlatformColorsChanged();
 
-  DOMTimerCoordinator* Timers() final;
-
   HostsUsingFeatures::Value& HostsUsingFeaturesValue() {
     return hosts_using_features_value_;
   }
@@ -1530,6 +1527,7 @@ class CORE_EXPORT Document : public ContainerNode,
   LazyLoadImageObserver& EnsureLazyLoadImageObserver();
 
   WindowAgent& GetWindowAgent();
+  WindowAgentFactory* GetWindowAgentFactory() { return window_agent_factory_; }
 
   void CountPotentialFeaturePolicyViolation(
       mojom::FeaturePolicyFeature) const override;
@@ -2051,8 +2049,6 @@ class CORE_EXPORT Document : public ContainerNode,
   TaskRunnerTimer<Document> did_associate_form_controls_timer_;
 
   HeapHashSet<Member<SVGUseElement>> use_elements_needing_update_;
-
-  DOMTimerCoordinator timers_;
 
   bool has_viewport_units_;
 

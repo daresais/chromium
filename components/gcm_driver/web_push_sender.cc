@@ -223,6 +223,8 @@ void WebPushSender::OnMessageSent(
 
   if (!network::cors::IsOkStatus(response_code)) {
     DLOG(ERROR) << "HTTP Error: " << response_code;
+    if (response_code == net::HTTP_FORBIDDEN)
+      LogSendWebPushMessageForbiddenBody(response_body.get());
     InvokeWebPushCallback(std::move(callback),
                           SendWebPushMessageResult::kServerError);
     return;

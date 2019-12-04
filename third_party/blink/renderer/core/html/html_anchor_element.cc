@@ -140,14 +140,11 @@ static void AppendServerMapMousePosition(StringBuilder& url, Event* event) {
   DCHECK(event->target());
   Node* target = event->target()->ToNode();
   DCHECK(target);
-  if (!IsHTMLImageElement(*target))
+  auto* image_element = DynamicTo<HTMLImageElement>(target);
+  if (!image_element || !image_element->IsServerMap())
     return;
 
-  HTMLImageElement& image_element = ToHTMLImageElement(*target);
-  if (!image_element.IsServerMap())
-    return;
-
-  LayoutObject* layout_object = image_element.GetLayoutObject();
+  LayoutObject* layout_object = image_element->GetLayoutObject();
   if (!layout_object || !layout_object->IsBox())
     return;
 
@@ -462,8 +459,10 @@ bool IsEnterKeyKeydownEvent(Event& event) {
 Event* GetClickEventOrNull(Event& event) {
   // HTMLElement embedded in anchor tag dispatches a DOMActivate event when
   // clicked on. The original click event is set as underlying event.
-  bool use_underlying_event =
-      event.type() == event_type_names::kDOMActivate && event.UnderlyingEvent();
+  bool use_underlying_event = event.type() == event_type_names::kDOMActivate &&
+                              event.UnderlyingEvent() &&
+                              !event.UnderlyingEvent()->DefaultHandled() &&
+                              event.UnderlyingEvent()->target();
   Event* process_event =
       use_underlying_event ? event.UnderlyingEvent() : &event;
   if ((process_event->type() != event_type_names::kClick &&

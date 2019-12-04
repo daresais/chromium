@@ -22,7 +22,6 @@
 #include "chrome/common/cache_stats_recorder.mojom.h"
 #include "chrome/common/media_router/mojom/media_router.mojom.h"
 #include "chrome/common/net_benchmarking.mojom.h"
-#include "chrome/common/offline_page_auto_fetcher.mojom.h"
 #include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/contextual_search/content/common/mojom/contextual_search_js_api_service.mojom.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy.mojom.h"
@@ -40,6 +39,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/add_supervision/add_supervision.mojom.h"
 #include "chrome/browser/ui/webui/chromeos/crostini_installer/crostini_installer.mojom.h"
+#include "chrome/browser/ui/webui/chromeos/crostini_upgrader/crostini_upgrader.mojom.h"
 #include "chrome/browser/ui/webui/chromeos/machine_learning/machine_learning_internals_page_handler.mojom.h"
 #include "chromeos/services/cellular_setup/public/mojom/cellular_setup.mojom.h"
 #include "chromeos/services/ime/public/mojom/input_engine.mojom.h"
@@ -127,11 +127,11 @@ const service_manager::Manifest& GetChromeContentBrowserOverlayManifest() {
             service_manager::Manifest::InterfaceList<
                 autofill::mojom::AutofillDriver,
                 autofill::mojom::PasswordManagerDriver,
-                chrome::mojom::OfflinePageAutoFetcher,
 #if defined(OS_CHROMEOS)
                 chromeos_camera::mojom::CameraAppHelper,
                 chromeos::cellular_setup::mojom::CellularSetup,
                 chromeos::crostini_installer::mojom::PageHandlerFactory,
+                chromeos::crostini_upgrader::mojom::PageHandlerFactory,
                 chromeos::ime::mojom::InputEngineManager,
                 chromeos::machine_learning::mojom::PageHandler,
                 chromeos::media_perception::mojom::MediaPerception,
@@ -140,14 +140,12 @@ const service_manager::Manifest& GetChromeContentBrowserOverlayManifest() {
                 chromeos::network_config::mojom::CrosNetworkConfig,
                 cros::mojom::CameraAppDeviceProvider,
 #endif
-                contextual_search::mojom::ContextualSearchJsApiService,
 #if BUILDFLAG(ENABLE_EXTENSIONS)
                 extensions::KeepAlive,
 #endif
                 media::mojom::MediaEngagementScoreDetailsProvider,
                 media_router::mojom::MediaRouter,
                 page_load_metrics::mojom::PageLoadMetrics,
-                translate::mojom::ContentTranslateDriver,
 
                 // WebUI-only interfaces go below this line. These should be
                 // brokered through a dedicated interface, but they're here

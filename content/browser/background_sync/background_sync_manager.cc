@@ -402,32 +402,16 @@ void BackgroundSyncManager::Register(
   DCHECK(options.min_interval >= 0 ||
          options.min_interval == kMinIntervalForOneShotSync);
 
-  if (GetBackgroundSyncType(options) == BackgroundSyncType::ONE_SHOT) {
-    auto id = op_scheduler_.CreateId();
-    op_scheduler_.ScheduleOperation(
-        id, CacheStorageSchedulerMode::kExclusive,
-        CacheStorageSchedulerOp::kBackgroundSync,
-        CacheStorageSchedulerPriority::kNormal,
-        base::BindOnce(
-            &BackgroundSyncManager::RegisterCheckIfHasMainFrame,
-            weak_ptr_factory_.GetWeakPtr(), sw_registration_id,
-            std::move(options),
-            op_scheduler_.WrapCallbackToRunNext(id, std::move(callback))));
-  } else {
-    // Periodic Background Sync events already have a pre-defined cadence which
-    // the user agent decides. Don't block registration if there's no top level
-    // frame at the time of registration.
-    auto id = op_scheduler_.CreateId();
-    op_scheduler_.ScheduleOperation(
-        id, CacheStorageSchedulerMode::kExclusive,
-        CacheStorageSchedulerOp::kBackgroundSync,
-        CacheStorageSchedulerPriority::kNormal,
-        base::BindOnce(
-            &BackgroundSyncManager::RegisterImpl,
-            weak_ptr_factory_.GetWeakPtr(), sw_registration_id,
-            std::move(options),
-            op_scheduler_.WrapCallbackToRunNext(id, std::move(callback))));
-  }
+  auto id = op_scheduler_.CreateId();
+  op_scheduler_.ScheduleOperation(
+      id, CacheStorageSchedulerMode::kExclusive,
+      CacheStorageSchedulerOp::kBackgroundSync,
+      CacheStorageSchedulerPriority::kNormal,
+      base::BindOnce(
+          &BackgroundSyncManager::RegisterCheckIfHasMainFrame,
+          weak_ptr_factory_.GetWeakPtr(), sw_registration_id,
+          std::move(options),
+          op_scheduler_.WrapCallbackToRunNext(id, std::move(callback))));
 }
 
 void BackgroundSyncManager::UnregisterPeriodicSync(
@@ -766,7 +750,7 @@ void BackgroundSyncManager::RegisterCheckIfHasMainFrame(
     return;
   }
 
-  HasMainFrameProviderHost(
+  HasMainFrameWindowClient(
       url::Origin::Create(sw_registration->scope().GetOrigin()),
       base::BindOnce(&BackgroundSyncManager::RegisterDidCheckIfMainFrame,
                      weak_ptr_factory_.GetWeakPtr(), sw_registration_id,
@@ -1415,9 +1399,9 @@ void BackgroundSyncManager::DispatchPeriodicSyncEvent(
   }
 }
 
-void BackgroundSyncManager::HasMainFrameProviderHost(const url::Origin& origin,
+void BackgroundSyncManager::HasMainFrameWindowClient(const url::Origin& origin,
                                                      BoolCallback callback) {
-  service_worker_context_->HasMainFrameProviderHost(origin.GetURL(),
+  service_worker_context_->HasMainFrameWindowClient(origin.GetURL(),
                                                     std::move(callback));
 }
 
@@ -2035,7 +2019,7 @@ void BackgroundSyncManager::FireReadyEventsDidFindRegistration(
   const bool last_chance =
       registration->num_attempts() == registration->max_attempts() - 1;
 
-  HasMainFrameProviderHost(
+  HasMainFrameWindowClient(
       url::Origin::Create(service_worker_registration->scope().GetOrigin()),
       base::BindOnce(&BackgroundSyncMetrics::RecordEventStarted, sync_type));
 
@@ -2095,7 +2079,7 @@ void BackgroundSyncManager::EventComplete(
   // from here.
   url::Origin origin =
       url::Origin::Create(service_worker_registration->scope().GetOrigin());
-  HasMainFrameProviderHost(
+  HasMainFrameWindowClient(
       origin,
       base::BindOnce(&BackgroundSyncMetrics::RecordEventResult,
                      registration_info->sync_type,

@@ -154,7 +154,6 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
 
   settings.initial_debug_state.SetRecordRenderingStats(
       command_line->HasSwitch(cc::switches::kEnableGpuBenchmarking));
-  settings.build_hit_test_data = features::IsVizHitTestingSurfaceLayerEnabled();
 
   settings.use_zero_copy = IsUIZeroCopyEnabled();
 
@@ -449,12 +448,8 @@ void Compositor::SetDisplayColorSpace(const gfx::ColorSpace& color_space,
   }
 }
 
-void Compositor::SetDisplayTransformHint(gfx::OverlayTransform transform) {
-  if (display_transform_ == transform)
-    return;
-
-  display_transform_ = transform;
-  context_factory_private_->SetDisplayTransformHint(this, display_transform_);
+void Compositor::SetDisplayTransformHint(gfx::OverlayTransform hint) {
+  host_->set_display_transform_hint(hint);
 }
 
 void Compositor::SetBackgroundColor(SkColor color) {

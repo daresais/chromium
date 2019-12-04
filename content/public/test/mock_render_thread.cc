@@ -225,6 +225,10 @@ blink::WebString MockRenderThread::GetUserAgent() {
   return blink::WebString();
 }
 
+bool MockRenderThread::IsUseZoomForDSF() {
+  return zoom_for_dsf_;
+}
+
 const blink::UserAgentMetadata& MockRenderThread::GetUserAgentMetadata() {
   return kUserAgentMetadata;
 }
@@ -239,6 +243,10 @@ void MockRenderThread::ReleaseCachedFonts() {
 
 void MockRenderThread::SetFieldTrialGroup(const std::string& trial_name,
                                           const std::string& group_name) {}
+
+void MockRenderThread::SetUseZoomForDSFEnabled(bool zoom_for_dsf) {
+  zoom_for_dsf_ = zoom_for_dsf;
+}
 
 int32_t MockRenderThread::GetNextRoutingID() {
   return next_routing_id_++;
@@ -339,8 +347,8 @@ void MockRenderThread::OnCreateWindow(
       mojom::DocumentScopedInterfaceBundle::New();
   frame_routing_id_to_initial_interface_provider_receivers_.emplace(
       reply->main_frame_route_id,
-      mojo::MakeRequest(
-          &reply->main_frame_interface_bundle->interface_provider));
+      reply->main_frame_interface_bundle->interface_provider
+          .InitWithNewPipeAndPassReceiver());
   mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>
       browser_interface_broker;
   frame_routing_id_to_initial_browser_broker_receivers_.emplace(

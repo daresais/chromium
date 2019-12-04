@@ -18,6 +18,10 @@
 // Adds |fakeIdentity| to the fake identity service.
 + (void)addFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
 
+// Removes |fakeIdentity| from the fake chrome identity service, to simulate
+// identity removal from the device.
++ (void)forgetFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
+
 // Returns the gaia ID of the signed-in account.
 + (NSString*)primaryAccountGaiaID;
 
@@ -26,6 +30,9 @@
 
 // Returns a matcher for an identity picker cell for |email|.
 + (id<GREYMatcher>)identityCellMatcherForEmail:(NSString*)email;
+
+// Removes |fakeIdentity| from the fake identity service.
++ (void)removeFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
 
 @end
 

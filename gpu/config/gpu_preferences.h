@@ -186,9 +186,6 @@ struct GPU_EXPORT GpuPreferences {
   // ===================================
   // Settings from //gpu/config/gpu_switches.h
 
-  // Disables workarounds for various GPU driver bugs.
-  bool disable_gpu_driver_bug_workarounds = false;
-
   // Ignores GPU blacklist.
   bool ignore_gpu_blacklist = false;
 
@@ -232,6 +229,9 @@ struct GPU_EXPORT GpuPreferences {
 
   // Enable the WebGPU command buffer.
   bool enable_webgpu = false;
+
+  // Enable measuring blocked time on GPU Main thread
+  bool enable_gpu_blocked_time_metric = false;
 
 #if defined(USE_OZONE)
   // Determines message pump type for the GPU thread.

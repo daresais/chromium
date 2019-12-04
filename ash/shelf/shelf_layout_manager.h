@@ -245,6 +245,8 @@ class ASH_EXPORT ShelfLayoutManager : public AppListControllerObserver,
   // coordinates.
   int CalculateHotseatYInShelf(HotseatState hotseat_target_state) const;
 
+  gfx::Rect GetNavigationBounds() const;
+
   bool updating_bounds() const { return updating_bounds_; }
   ShelfAutoHideState auto_hide_state() const { return state_.auto_hide_state; }
   HotseatState hotseat_state() const {
@@ -264,12 +266,12 @@ class ASH_EXPORT ShelfLayoutManager : public AppListControllerObserver,
   template <typename T>
   T SelectValueForShelfAlignment(T bottom, T left, T right) const {
     switch (shelf_->alignment()) {
-      case SHELF_ALIGNMENT_BOTTOM:
-      case SHELF_ALIGNMENT_BOTTOM_LOCKED:
+      case ShelfAlignment::kBottom:
+      case ShelfAlignment::kBottomLocked:
         return bottom;
-      case SHELF_ALIGNMENT_LEFT:
+      case ShelfAlignment::kLeft:
         return left;
-      case SHELF_ALIGNMENT_RIGHT:
+      case ShelfAlignment::kRight:
         return right;
     }
     NOTREACHED();
@@ -640,13 +642,13 @@ class ASH_EXPORT ShelfLayoutManager : public AppListControllerObserver,
 
   // The current shelf background. Should not be assigned to directly, use
   // MaybeUpdateShelfBackground() instead.
-  ShelfBackgroundType shelf_background_type_ = SHELF_BACKGROUND_DEFAULT;
+  ShelfBackgroundType shelf_background_type_ = ShelfBackgroundType::kDefaultBg;
 
   // Shelf will become transparent if launcher is opened. Stores the shelf
   // background type before open the launcher when start to drag the launcher
   // from shelf.
   ShelfBackgroundType shelf_background_type_before_drag_ =
-      SHELF_BACKGROUND_DEFAULT;
+      ShelfBackgroundType::kDefaultBg;
 
   ScopedSessionObserver scoped_session_observer_{this};
   ScopedObserver<WallpaperController, WallpaperControllerObserver>

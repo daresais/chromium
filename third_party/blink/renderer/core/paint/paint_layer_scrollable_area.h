@@ -318,6 +318,9 @@ class CORE_EXPORT PaintLayerScrollableArea final
   }
   IntSize ScrollOffsetInt() const override;
   ScrollOffset GetScrollOffset() const override;
+  // Commits a final scroll offset for the frame, if it might have changed.
+  // If it did change, enqueues a scroll event.
+  void EnqueueScrollEventIfNeeded();
   IntSize MinimumScrollOffsetInt() const override;
   IntSize MaximumScrollOffsetInt() const override;
   IntRect VisibleContentRect(
@@ -552,7 +555,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   void DidScrollWithScrollbar(ScrollbarPart,
                               ScrollbarOrientation,
                               WebInputEvent::Type) override;
-  CompositorElementId GetCompositorElementId() const override;
+  CompositorElementId GetScrollElementId() const override;
 
   bool VisualViewportSuppliesScrollbars() const override;
 
@@ -570,6 +573,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   const cc::SnapContainerData* GetSnapContainerData() const override;
   void SetSnapContainerData(base::Optional<cc::SnapContainerData>) override;
+  bool SetTargetSnapAreaElementIds(cc::TargetSnapAreaElementIds) override;
 
   base::Optional<FloatPoint> GetSnapPositionAndSetTarget(
       const cc::SnapSelectionStrategy& strategy) override;
@@ -699,6 +703,11 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   // This is the offset from the beginning of content flow.
   ScrollOffset scroll_offset_;
+
+  // The last scroll offset that was committed during the main document
+  // lifecycle.
+  bool has_last_committed_scroll_offset_;
+  ScrollOffset last_committed_scroll_offset_;
 
   // LayoutObject to hold our custom scroll corner.
   LayoutCustomScrollbarPart* scroll_corner_;

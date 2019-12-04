@@ -53,8 +53,6 @@
 #include "components/discardable_memory/client/client_discardable_shared_memory_manager.h"
 #include "components/metrics/public/mojom/single_sample_metrics.mojom.h"
 #include "components/metrics/single_sample_metrics.h"
-#include "components/viz/client/hit_test_data_provider.h"
-#include "components/viz/client/hit_test_data_provider_draw_quad.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/switches.h"
@@ -113,9 +111,6 @@
 #include "media/media_buildflags.h"
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
-#include "mojo/public/cpp/bindings/pending_receiver.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
-#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "net/base/net_errors.h"
@@ -1149,15 +1144,17 @@ media::GpuVideoAcceleratorFactories* RenderThreadImpl::GetGpuFactories() {
   mojo::PendingRemote<media::mojom::InterfaceFactory> interface_factory;
   BindHostReceiver(interface_factory.InitWithNewPipeAndPassReceiver());
 
-  media::mojom::VideoEncodeAcceleratorProviderPtr vea_provider;
-  gpu_->CreateVideoEncodeAcceleratorProvider(mojo::MakeRequest(&vea_provider));
+  mojo::PendingRemote<media::mojom::VideoEncodeAcceleratorProvider>
+      vea_provider;
+  gpu_->CreateVideoEncodeAcceleratorProvider(
+      vea_provider.InitWithNewPipeAndPassReceiver());
 
   gpu_factories_.push_back(GpuVideoAcceleratorFactoriesImpl::Create(
       std::move(gpu_channel_host), base::ThreadTaskRunnerHandle::Get(),
       GetMediaThreadTaskRunner(), std::move(media_context_provider),
       enable_video_gpu_memory_buffers, enable_media_stream_gpu_memory_buffers,
       enable_video_accelerator, std::move(interface_factory),
-      vea_provider.PassInterface()));
+      std::move(vea_provider)));
   gpu_factories_.back()->SetRenderingColorSpace(rendering_color_space_);
   return gpu_factories_.back().get();
 }
@@ -1290,6 +1287,10 @@ blink::WebString RenderThreadImpl::GetUserAgent() {
 
 const blink::UserAgentMetadata& RenderThreadImpl::GetUserAgentMetadata() {
   return user_agent_metadata_;
+}
+
+bool RenderThreadImpl::IsUseZoomForDSF() {
+  return IsUseZoomForDSFEnabled();
 }
 
 void RenderThreadImpl::OnAssociatedInterfaceRequest(
@@ -1682,12 +1683,6 @@ void RenderThreadImpl::RequestNewLayerTreeFrameSink(
     // not have that if we're running web tests in single threaded mode.
     // Set it to be our thread's task runner instead.
     params.compositor_task_runner = main_thread_compositor_task_runner_;
-  }
-  if (!features::IsVizHitTestingSurfaceLayerEnabled()) {
-    params.hit_test_data_provider =
-        std::make_unique<viz::HitTestDataProviderDrawQuad>(
-            true /* should_ask_for_child_region */,
-            true /* root_accepts_events */);
   }
 
   // The renderer runs animations and layout for animate_only BeginFrames.

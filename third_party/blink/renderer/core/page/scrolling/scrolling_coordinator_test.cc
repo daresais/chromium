@@ -760,8 +760,7 @@ TEST_P(ScrollingCoordinatorTest, touchActionOnScrollingElement) {
 }
 
 TEST_P(ScrollingCoordinatorTest, IframeWindowTouchHandler) {
-  LoadHTML(
-      R"(<iframe style="width: 275px; height: 250px;"></iframe>)");
+  LoadHTML(R"(<iframe style="width: 275px; height: 250px;"></iframe>)");
   auto* child_frame =
       To<WebLocalFrameImpl>(GetWebView()->MainFrameImpl()->FirstChild());
   frame_test_helpers::LoadHTMLString(child_frame, R"HTML(
@@ -899,8 +898,8 @@ TEST_P(ScrollingCoordinatorTest, PluginBecomesLayoutInline) {
   // This test passes if it doesn't crash. We're trying to make sure
   // ScrollingCoordinator can deal with LayoutInline plugins when generating
   // NonFastScrollableRegions.
-  HTMLObjectElement* plugin =
-      ToHTMLObjectElement(GetFrame()->GetDocument()->getElementById("plugin"));
+  auto* plugin = To<HTMLObjectElement>(
+      GetFrame()->GetDocument()->getElementById("plugin"));
   ASSERT_TRUE(plugin->GetLayoutObject()->IsLayoutInline());
   ForceFullCompositingUpdate();
 }
@@ -933,9 +932,9 @@ TEST_P(ScrollingCoordinatorTest, NonFastScrollableRegionsForPlugins) {
     <object id="plugin" type="application/x-webkit-test-plugin"></object>
   )HTML");
 
-  HTMLObjectElement* plugin =
-      ToHTMLObjectElement(GetFrame()->GetDocument()->getElementById("plugin"));
-  HTMLObjectElement* plugin_fixed = ToHTMLObjectElement(
+  auto* plugin = To<HTMLObjectElement>(
+      GetFrame()->GetDocument()->getElementById("plugin"));
+  auto* plugin_fixed = To<HTMLObjectElement>(
       GetFrame()->GetDocument()->getElementById("pluginfixed"));
   // NonFastScrollableRegions are generated for plugins that require wheel
   // events.
@@ -1501,7 +1500,7 @@ TEST_P(ScrollingCoordinatorTest, ScrollOffsetClobberedBeforeCompositingUpdate) {
   gfx::ScrollOffset compositor_delta(0, 100.f);
   cc::ScrollAndScaleSet scroll_and_scale_set;
   scroll_and_scale_set.scrolls.push_back(
-      {scroller->GetCompositorElementId(), compositor_delta});
+      {scroller->GetScrollElementId(), compositor_delta, base::nullopt});
   cc_layer->layer_tree_host()->ApplyScrollAndScale(&scroll_and_scale_set);
   EXPECT_EQ(compositor_delta.y(), scroller->GetScrollOffset().Height());
   EXPECT_EQ(compositor_delta, cc_layer->CurrentScrollOffset());

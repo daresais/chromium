@@ -83,6 +83,7 @@ Polymer({
   behaviors: [
     FindShortcutBehavior,
     Polymer.IronScrollTargetBehavior,
+    WebUIListenerBehavior,
   ],
 
   properties: {
@@ -110,6 +111,9 @@ Polymer({
       // 'otherDevicesInitialized'.
       value: loadTimeData.getBoolean('isUserSignedIn'),
     },
+
+    /** @private */
+    pendingDelete_: Boolean,
 
     toolbarShadow_: {
       type: Boolean,
@@ -168,6 +172,13 @@ Polymer({
   attached: function() {
     this.boundOnKeyDown_ = e => this.onKeyDown_(e);
     document.addEventListener('keydown', this.boundOnKeyDown_);
+    this.addWebUIListener(
+        'sign-in-state-changed',
+        signedIn => this.onSignInStateChanged_(signedIn));
+    this.addWebUIListener(
+        'has-other-forms-changed',
+        hasOtherForms => this.onHasOtherFormsChanged_(hasOtherForms));
+    history.BrowserService.getInstance().historyLoaded();
   },
 
   /** @override */
@@ -293,7 +304,7 @@ Polymer({
 
   /** @private */
   onDeleteCommand_: function() {
-    if (this.$.toolbar.count == 0) {
+    if (this.$.toolbar.count == 0 || this.pendingDelete_) {
       return;
     }
     this.deleteSelected();
@@ -317,18 +328,21 @@ Polymer({
   },
 
   /**
-   * Called when browsing data is cleared.
+   * Update sign in state of synced device manager after user logs in or out.
+   * @param {boolean} isUserSignedIn
+   * @private
    */
-  historyDeleted: function() {
-    this.$.history.historyDeleted();
+  onSignInStateChanged_: function(isUserSignedIn) {
+    this.isUserSignedIn_ = isUserSignedIn;
   },
 
   /**
    * Update sign in state of synced device manager after user logs in or out.
-   * @param {boolean} isUserSignedIn
+   * @param {boolean} hasOtherForms
+   * @private
    */
-  updateSignInState: function(isUserSignedIn) {
-    this.isUserSignedIn_ = isUserSignedIn;
+  onHasOtherFormsChanged_: function(hasOtherForms) {
+    this.set('footerInfo.otherFormsOfHistory', hasOtherForms);
   },
 
   /**

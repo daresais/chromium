@@ -256,7 +256,7 @@ void SetupOnUIThread(
 
   // Create a RendererPreferenceWatcher to observe updates in the preferences.
   mojo::PendingRemote<blink::mojom::RendererPreferenceWatcher> watcher_remote;
-  params->preference_watcher_request =
+  params->preference_watcher_receiver =
       watcher_remote.InitWithNewPipeAndPassReceiver();
   GetContentClient()->browser()->RegisterRendererPreferenceWatcher(
       process_manager->browser_context(), std::move(watcher_remote));
@@ -850,14 +850,16 @@ void EmbeddedWorkerInstance::SendStartWorker(
           base::CreateSequencedTaskRunner({BrowserThread::UI}),
           params->script_url,
           scoped_refptr<ServiceWorkerContextWrapper>(context_->wrapper()),
-          mojo::MakeRequest(&params->content_settings_proxy));
+          params->content_settings_proxy.InitWithNewPipeAndPassReceiver());
 
   const bool is_script_streaming = !params->installed_scripts_info.is_null();
   inflight_start_task_->set_start_worker_sent_time(base::TimeTicks::Now());
 
   // The host must be alive as long as |params->provider_info| is alive.
   owner_version_->provider_host()->CompleteStartWorkerPreparation(
-      process_id(), MakeRequest(&params->provider_info->interface_provider),
+      process_id(),
+      params->provider_info->interface_provider
+          .InitWithNewPipeAndPassReceiver(),
       params->provider_info->browser_interface_broker
           .InitWithNewPipeAndPassReceiver());
 
@@ -1052,13 +1054,14 @@ EmbeddedWorkerInstance::CreateFactoryBundleOnUI(
                                      .InitWithNewPipeAndPassReceiver();
   mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
       default_header_client;
+  network::mojom::URLLoaderFactoryOverridePtr factory_override;
   bool bypass_redirect_checks = false;
 
   // See if the default factory needs to be tweaked by the embedder.
   GetContentClient()->browser()->WillCreateURLLoaderFactory(
       rph->GetBrowserContext(), nullptr /* frame_host */, rph->GetID(),
       factory_type, origin, &default_factory_receiver, &default_header_client,
-      &bypass_redirect_checks);
+      &bypass_redirect_checks, &factory_override);
   devtools_instrumentation::WillCreateURLLoaderFactoryForServiceWorker(
       rph, routing_id, &default_factory_receiver);
 
@@ -1067,14 +1070,16 @@ EmbeddedWorkerInstance::CreateFactoryBundleOnUI(
     rph->CreateURLLoaderFactory(
         origin, origin, network::mojom::CrossOriginEmbedderPolicy::kNone,
         nullptr /* preferences */, net::NetworkIsolationKey(origin, origin),
-        std::move(default_header_client), std::move(default_factory_receiver));
+        std::move(default_header_client), std::move(default_factory_receiver),
+        std::move(factory_override));
   } else {
     mojo::PendingRemote<network::mojom::URLLoaderFactory> original_factory;
     rph->CreateURLLoaderFactory(
         origin, origin, network::mojom::CrossOriginEmbedderPolicy::kNone,
         nullptr /* preferences */, net::NetworkIsolationKey(origin, origin),
         std::move(default_header_client),
-        original_factory.InitWithNewPipeAndPassReceiver());
+        original_factory.InitWithNewPipeAndPassReceiver(),
+        std::move(factory_override));
     GetNetworkFactoryCallbackForTest().Run(std::move(default_factory_receiver),
                                            rph->GetID(),
                                            std::move(original_factory));

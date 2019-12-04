@@ -268,6 +268,7 @@
     },
     {
       name: "CacheStorageCodeCacheHint",
+      origin_trial_feature_name: "CacheStorageCodeCacheHint",
       status: "experimental",
     },
     {
@@ -338,10 +339,14 @@
     },
     {
       name: "ContactsManagerExtraProperties",
+      origin_trial_feature_name: "ContactsManagerExtraProperties",
+      origin_trial_os: ["android"],
       status: {"Android": "experimental", "default": "test"},
     },
     {
       name: "ContentIndex",
+      origin_trial_feature_name: "ContentIndex",
+      origin_trial_os: ["android"],
       status: "experimental",
     },
     {
@@ -547,6 +552,10 @@
     {
       name: "DisableHardwareNoiseSuppression",
       origin_trial_feature_name: "DisableHardwareNoiseSuppression",
+      status: "experimental",
+    },
+    {
+      name: "DisallowDocumentAccess",
       status: "experimental",
     },
     {
@@ -940,6 +949,10 @@
       status: "stable",
     },
     {
+      name: "MediaCapabilitiesSpatialAudio",
+      status: "test",
+    },
+    {
       name: "MediaCapture",
       status: {"Android": "stable"},
     },
@@ -1093,6 +1106,7 @@
     },
     {
       name: "NewSystemColors",
+      status: "stable",
     },
     {
       name: "NoIdleEncodingForWebTests",
@@ -1687,6 +1701,11 @@
     },
     {
       name: "VideoFullscreenOrientationLock",
+    },
+    {
+      // See https://crbug.com/1012063
+      name: "VideoRequestAnimationFrame",
+      status: "experimental",
     },
     {
       name: "VideoRotateToFullscreen",

@@ -70,12 +70,23 @@ inline bool IsVisibleToPaint(const NGFragmentItem& item,
          style.Visibility() == EVisibility::kVisible;
 }
 
+inline bool IsVisibleToHitTest(const HitTestRequest& request,
+                               const ComputedStyle& style) {
+  return request.IgnorePointerEventsNone() ||
+         style.PointerEvents() != EPointerEvents::kNone;
+}
+
+inline bool IsVisibleToHitTest(const NGFragmentItem& item,
+                               const HitTestRequest& request) {
+  const ComputedStyle& style = item.Style();
+  return IsVisibleToPaint(item, style) && IsVisibleToHitTest(request, style);
+}
+
 bool FragmentVisibleToHitTestRequest(const NGPhysicalFragment& fragment,
                                      const HitTestRequest& request) {
   const ComputedStyle& style = fragment.Style();
   return IsVisibleToPaint(fragment, style) &&
-         (request.IgnorePointerEventsNone() ||
-          style.PointerEvents() != EPointerEvents::kNone);
+         IsVisibleToHitTest(request, style);
 }
 
 // Hit tests inline ancestor elements of |fragment| who do not have their own
@@ -364,7 +375,13 @@ void NGBoxFragmentPainter::PaintObject(
       if (UNLIKELY(descendants_)) {
         // Use the descendants cursor for this painter if it is given.
         // Self-painting inline box paints only parts of the container block.
-        PaintInlineItems(paint_info.ForDescendants(), paint_offset,
+        // Adjust |paint_offset| because it is the offset of the inline box, but
+        // |descendants_| has offsets to the contaiing block.
+        DCHECK(box_item_ && box_item_->HasSelfPaintingLayer());
+        const PhysicalOffset paint_offset_to_inline_formatting_context =
+            paint_offset - box_item_->Offset();
+        PaintInlineItems(paint_info.ForDescendants(),
+                         paint_offset_to_inline_formatting_context,
                          descendants_);
       } else if (items_) {
         // Paint |NGFragmentItems| for this block if we have one.
@@ -868,8 +885,6 @@ void NGBoxFragmentPainter::PaintColumnRules(
         center = (current_column.X() + previous_column.Right()) / 2;
         box_side = BoxSide::kRight;
       }
-      // The last column may be shorter than the previous ones, but otherwise
-      // they should be the same.
       LayoutUnit rule_length = previous_column.Height();
       DCHECK_GE(rule_length, current_column.Height());
       rule.offset.top = previous_column.offset.top;
@@ -888,8 +903,6 @@ void NGBoxFragmentPainter::PaintColumnRules(
         center = (current_column.Y() + previous_column.Bottom()) / 2;
         box_side = BoxSide::kBottom;
       }
-      // The last column may be shorter than the previous ones, but otherwise
-      // they should be the same.
       LayoutUnit rule_length = previous_column.Width();
       DCHECK_GE(rule_length, current_column.Width());
       rule.offset.left = previous_column.offset.left;
@@ -1549,6 +1562,45 @@ bool NGBoxFragmentPainter::HitTestTextFragment(
   return false;
 }
 
+bool NGBoxFragmentPainter::HitTestTextItem(
+    HitTestResult& result,
+    const NGFragmentItem& text_item,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& physical_offset,
+    HitTestAction action) {
+  DCHECK(text_item.IsText());
+
+  if (action != kHitTestForeground)
+    return false;
+
+  PhysicalRect border_rect(physical_offset, text_item.Size());
+
+  // TODO(layout-dev): Clip to line-top/bottom.
+  PhysicalRect rect(PixelSnappedIntRect(border_rect));
+  if (UNLIKELY(result.GetHitTestRequest().GetType() &
+               HitTestRequest::kHitTestVisualOverflow)) {
+    rect = text_item.SelfInkOverflow();
+    rect.Move(border_rect.offset);
+  }
+
+  if (IsVisibleToHitTest(text_item, result.GetHitTestRequest()) &&
+      hit_test_location.Intersects(rect)) {
+    Node* node = text_item.NodeForHitTest();
+    if (!result.InnerNode() && node) {
+      PhysicalOffset point =
+          hit_test_location.Point() - physical_offset + text_item.Offset();
+      result.SetNodeAndPosition(node, point);
+    }
+
+    if (result.AddNodeToListBasedTestResult(node, hit_test_location, rect) ==
+        kStopHitTesting) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Replicates logic in legacy InlineFlowBox::NodeAtPoint().
 bool NGBoxFragmentPainter::HitTestLineBoxFragment(
     HitTestResult& result,
@@ -1632,8 +1684,11 @@ bool NGBoxFragmentPainter::HitTestChildBoxFragment(
       return NGBoxFragmentPainter(*paint_fragment)
           .NodeAtPoint(result, hit_test_location, physical_offset, action);
     }
+    const NGFragmentItem* item = cursor.CurrentItem();
+    DCHECK(item);
+    DCHECK_EQ(item->BoxFragment(), &fragment);
     NGInlineCursor descendants = cursor.CursorForDescendants();
-    return NGBoxFragmentPainter(fragment, &descendants)
+    return NGBoxFragmentPainter(*item, fragment, &descendants)
         .NodeAtPoint(result, hit_test_location, physical_offset, action);
   }
 
@@ -1765,7 +1820,9 @@ bool NGBoxFragmentPainter::HitTestItemsChildren(
 
     const PhysicalOffset child_offset = item->Offset() + accumulated_offset;
     if (item->IsText()) {
-      // TODO(kojii): Implement for a text item.
+      if (HitTestTextItem(result, *item, hit_test_location, child_offset,
+                          action))
+        return true;
     } else if (item->Type() == NGFragmentItem::kLine) {
       const NGPhysicalLineBoxFragment* child_fragment = item->LineBoxFragment();
       DCHECK(child_fragment);

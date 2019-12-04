@@ -689,8 +689,8 @@ void V4L2VideoDecodeAccelerator::ImportBufferForPictureTask(
     DCHECK(!iter->output_frame);
 
     auto layout = VideoFrameLayout::Create(
-        Fourcc::FromV4L2PixFmt(output_format_fourcc_).ToVideoPixelFormat(),
-        coded_size_);
+        Fourcc::FromV4L2PixFmt(egl_image_format_fourcc_).ToVideoPixelFormat(),
+        egl_image_size_);
     if (!layout) {
       VLOGF(1) << "Cannot create layout!";
       NOTIFY_ERROR(INVALID_ARGUMENT);

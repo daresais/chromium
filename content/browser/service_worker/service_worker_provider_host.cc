@@ -7,51 +7,26 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_helpers.h"
-#include "base/debug/alias.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
-#include "base/time/time.h"
-#include "content/browser/bad_message.h"
+#include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/interface_provider_filtering.h"
-#include "content/browser/loader/navigation_loader_interceptor.h"
-#include "content/browser/renderer_interface_binders.h"
-#include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_consts.h"
 #include "content/browser/service_worker/service_worker_container_host.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
-#include "content/browser/service_worker/service_worker_context_wrapper.h"
-#include "content/browser/service_worker/service_worker_controllee_request_handler.h"
-#include "content/browser/service_worker/service_worker_registration_object_host.h"
-#include "content/browser/service_worker/service_worker_type_converters.h"
 #include "content/browser/service_worker/service_worker_version.h"
-#include "content/browser/url_loader_factory_getter.h"
-#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webtransport/quic_transport_connector_impl.h"
-#include "content/common/service_worker/service_worker_utils.h"
-#include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/origin_util.h"
-#include "media/mojo/services/video_decode_perf_history.h"
 #include "mojo/public/cpp/bindings/message.h"
-#include "net/base/url_util.h"
-#include "services/network/public/cpp/resource_request_body.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_client.mojom.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -61,31 +36,6 @@ namespace {
 int NextProviderId() {
   static int g_next_provider_id = 0;
   return g_next_provider_id++;
-}
-
-void GetInterfaceImpl(const std::string& interface_name,
-                      mojo::ScopedMessagePipeHandle interface_pipe,
-                      const url::Origin& origin,
-                      int process_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  auto* process = RenderProcessHost::FromID(process_id);
-  if (!process)
-    return;
-
-  // RestrictedCookieManager creation is different between frames and service
-  // workers, so it's handled here.
-  if (interface_name == network::mojom::RestrictedCookieManager::Name_) {
-    mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver(
-        std::move(interface_pipe));
-    process->GetStoragePartition()->CreateRestrictedCookieManager(
-        network::mojom::RestrictedCookieManagerRole::SCRIPT, origin,
-        origin.GetURL(), origin, true /* is_service_worker */, process_id,
-        MSG_ROUTING_NONE, std::move(receiver));
-    return;
-  }
-
-  BindWorkerInterface(interface_name, std::move(interface_pipe), process,
-                      origin);
 }
 
 void CreateQuicTransportConnectorImpl(
@@ -192,15 +142,15 @@ ServiceWorkerProviderHost::ServiceWorkerProviderHost(
     base::WeakPtr<ServiceWorkerContextCore> context)
     : provider_id_(NextProviderId()),
       running_hosted_version_(std::move(running_hosted_version)),
-      context_(context),
-      interface_provider_binding_(this),
       container_host_(std::make_unique<content::ServiceWorkerContainerHost>(
           type,
           is_parent_frame_secure,
           frame_tree_node_id,
           std::move(host_receiver),
           std::move(container_remote),
-          this,
+          type == blink::mojom::ServiceWorkerProviderType::kForServiceWorker
+              ? this
+              : nullptr,
           context)) {
   DCHECK_NE(blink::mojom::ServiceWorkerProviderType::kUnknown, type);
   if (type == blink::mojom::ServiceWorkerProviderType::kForServiceWorker) {
@@ -231,11 +181,6 @@ ServiceWorkerVersion* ServiceWorkerProviderHost::running_hosted_version()
   return running_hosted_version_.get();
 }
 
-blink::mojom::ServiceWorkerProviderType
-ServiceWorkerProviderHost::provider_type() const {
-  return container_host_->type();
-}
-
 bool ServiceWorkerProviderHost::IsProviderForServiceWorker() const {
   return container_host_->IsContainerForServiceWorker();
 }
@@ -246,13 +191,12 @@ void ServiceWorkerProviderHost::CompleteStartWorkerPreparation(
         interface_provider_receiver,
     mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
         broker_receiver) {
-  DCHECK(context_);
   DCHECK_EQ(ChildProcessHost::kInvalidUniqueID, worker_process_id_);
   DCHECK_NE(ChildProcessHost::kInvalidUniqueID, process_id);
   DCHECK(IsProviderForServiceWorker());
   SetWorkerProcessId(process_id);
 
-  interface_provider_binding_.Bind(FilterRendererExposedInterfaces(
+  interface_provider_receiver_.Bind(FilterRendererExposedInterfaces(
       blink::mojom::kNavigation_ServiceWorkerSpec, process_id,
       std::move(interface_provider_receiver)));
 
@@ -264,11 +208,6 @@ void ServiceWorkerProviderHost::GetInterface(
     mojo::ScopedMessagePipeHandle interface_pipe) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsProviderForServiceWorker());
-  RunOrPostTaskOnThread(FROM_HERE, BrowserThread::UI,
-                        base::BindOnce(&GetInterfaceImpl, interface_name,
-                                       std::move(interface_pipe),
-                                       running_hosted_version_->script_origin(),
-                                       worker_process_id_));
 }
 
 void ServiceWorkerProviderHost::CreateQuicTransportConnector(

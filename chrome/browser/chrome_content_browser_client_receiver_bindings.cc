@@ -13,8 +13,10 @@
 #include "chrome/browser/cache_stats_recorder.h"
 #include "chrome/browser/chrome_browser_interface_binders.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
+#include "chrome/browser/content_settings/content_settings_manager_impl.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/net_benchmarking.h"
 #include "chrome/browser/predictors/loading_predictor.h"
 #include "chrome/browser/predictors/loading_predictor_factory.h"
@@ -201,8 +203,7 @@ void ChromeContentBrowserClient::BindInterfaceRequestFromFrame(
     content::RenderFrameHost* render_frame_host,
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
-  if (!frame_interfaces_ && !frame_interfaces_parameterized_ &&
-      !worker_interfaces_parameterized_) {
+  if (!frame_interfaces_ && !frame_interfaces_parameterized_) {
     InitWebContextInterfaces();
   }
 
@@ -241,20 +242,6 @@ bool ChromeContentBrowserClient::BindAssociatedReceiverFromFrame(
   return false;
 }
 
-void ChromeContentBrowserClient::BindInterfaceRequestFromWorker(
-    content::RenderProcessHost* render_process_host,
-    const url::Origin& origin,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle interface_pipe) {
-  if (!frame_interfaces_ && !frame_interfaces_parameterized_ &&
-      !worker_interfaces_parameterized_) {
-    InitWebContextInterfaces();
-  }
-
-  worker_interfaces_parameterized_->BindInterface(
-      interface_name, std::move(interface_pipe), render_process_host, origin);
-}
-
 void ChromeContentBrowserClient::BindGpuHostReceiver(
     mojo::GenericPendingReceiver receiver) {
   if (auto r = receiver.As<metrics::mojom::CallStackProfileCollector>())
@@ -264,6 +251,13 @@ void ChromeContentBrowserClient::BindGpuHostReceiver(
 void ChromeContentBrowserClient::BindHostReceiverForRenderer(
     content::RenderProcessHost* render_process_host,
     mojo::GenericPendingReceiver receiver) {
+  if (auto host_receiver =
+          receiver.As<chrome::mojom::ContentSettingsManager>()) {
+    chrome::ContentSettingsManagerImpl::Create(render_process_host,
+                                               std::move(host_receiver));
+    return;
+  }
+
   if (auto host_receiver =
           receiver.As<network_hints::mojom::NetworkHintsHandler>()) {
     predictors::NetworkHintsHandlerImpl::Create(render_process_host->GetID(),
@@ -287,6 +281,13 @@ void ChromeContentBrowserClient::BindHostReceiverForRenderer(
   }
 #endif  // BUILDFLAG(HAS_SPELLCHECK_PANEL)
 #endif  // BUILDFLAG(ENABLE_SPELLCHECK)
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+  if (auto host_receiver = receiver.As<chrome::mojom::MetricsService>()) {
+    ChromeMetricsServiceAccessor::BindMetricsServiceReceiver(
+        std::move(host_receiver));
+  }
+#endif  // BUILDFLAG(ENABLE_PLUGINS)
 }
 
 void ChromeContentBrowserClient::BindHostReceiverForRendererOnIOThread(

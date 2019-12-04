@@ -249,9 +249,9 @@ void FCMNetworkHandler::OnMessage(const std::string& app_id,
 }
 
 void FCMNetworkHandler::OnMessagesDeleted(const std::string& app_id) {
-  // TODO(melandory): consider notifyint the client that messages were
-  // deleted. So the client can act on it, e.g. in case of sync request
-  // GetUpdates from the server.
+  // TODO(crbug.com/1023813): Record UMA. Then, if this actually happens in
+  // practice, consider notifying the client that messages were deleted, so it
+  // can act on it, e.g. in case of sync, trigger a GetUpdates.
 }
 
 void FCMNetworkHandler::OnSendError(
@@ -275,13 +275,15 @@ void FCMNetworkHandler::SetTokenValidationTimerForTesting(
 }
 
 void FCMNetworkHandler::RequestDetailedStatus(
-    base::Callback<void(const base::DictionaryValue&)> callback) {
+    const base::RepeatingCallback<void(const base::DictionaryValue&)>&
+        callback) {
   callback.Run(diagnostic_info_.CollectDebugData());
 }
 
-FCMNetworkHandlerDiagnostic::FCMNetworkHandlerDiagnostic() {}
+FCMNetworkHandler::FCMNetworkHandlerDiagnostic::FCMNetworkHandlerDiagnostic() {}
 
-base::DictionaryValue FCMNetworkHandlerDiagnostic::CollectDebugData() const {
+base::DictionaryValue
+FCMNetworkHandler::FCMNetworkHandlerDiagnostic::CollectDebugData() const {
   base::DictionaryValue status;
   status.SetString("NetworkHandler.Registration-result-code",
                    RegistrationResultToString(registration_result));
@@ -307,7 +309,8 @@ base::DictionaryValue FCMNetworkHandlerDiagnostic::CollectDebugData() const {
   return status;
 }
 
-std::string FCMNetworkHandlerDiagnostic::RegistrationResultToString(
+std::string
+FCMNetworkHandler::FCMNetworkHandlerDiagnostic::RegistrationResultToString(
     const instance_id::InstanceID::Result result) const {
   switch (registration_result) {
     case instance_id::InstanceID::SUCCESS:

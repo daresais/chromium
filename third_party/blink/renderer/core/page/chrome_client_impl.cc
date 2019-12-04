@@ -161,10 +161,6 @@ ChromeClientImpl::~ChromeClientImpl() {
   DCHECK(file_chooser_queue_.IsEmpty());
 }
 
-ChromeClientImpl* ChromeClientImpl::Create(WebViewImpl* web_view) {
-  return MakeGarbageCollected<ChromeClientImpl>(web_view);
-}
-
 void ChromeClientImpl::Trace(Visitor* visitor) {
   visitor->Trace(popup_opening_observers_);
   visitor->Trace(external_date_time_chooser_);
@@ -550,7 +546,7 @@ void ChromeClientImpl::ShowMouseOverURL(const HitTestResult& result) {
         !result.AbsoluteLinkURL().GetString().IsEmpty()) {
       url = result.AbsoluteLinkURL();
     } else if (result.InnerNode() &&
-               (IsHTMLObjectElement(*result.InnerNode()) ||
+               (IsA<HTMLObjectElement>(*result.InnerNode()) ||
                 IsHTMLEmbedElement(*result.InnerNode()))) {
       LayoutObject* object = result.InnerNode()->GetLayoutObject();
       if (object && object->IsLayoutEmbeddedContent()) {

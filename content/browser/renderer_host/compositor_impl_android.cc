@@ -38,7 +38,6 @@
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
-#include "components/viz/client/hit_test_data_provider_draw_quad.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/quads/compositor_frame.h"
@@ -420,7 +419,6 @@ void CompositorImpl::CreateLayerTreeHost() {
 
   cc::LayerTreeSettings settings;
   settings.use_zero_copy = true;
-  settings.build_hit_test_data = features::IsVizHitTestingSurfaceLayerEnabled();
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   settings.initial_debug_state.SetRecordRenderingStats(
@@ -448,6 +446,10 @@ void CompositorImpl::CreateLayerTreeHost() {
   DCHECK(!host_->IsVisible());
   host_->SetViewportRectAndScale(gfx::Rect(size_), root_window_->GetDipScale(),
                                  GenerateLocalSurfaceId());
+  const auto& display_props =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(root_window_);
+  host_->set_display_transform_hint(
+      RotationToDisplayTransform(display_props.rotation()));
 
   if (needs_animate_)
     host_->SetNeedsAnimate();
@@ -772,10 +774,9 @@ void CompositorImpl::OnDisplayMetricsChanged(const display::Display& display,
                                    GenerateLocalSurfaceId());
   }
 
-  if ((changed_metrics &
-       display::DisplayObserver::DisplayMetric::DISPLAY_METRIC_ROTATION) &&
-      display_private_) {
-    display_private_->SetDisplayTransformHint(
+  if (changed_metrics &
+      display::DisplayObserver::DisplayMetric::DISPLAY_METRIC_ROTATION) {
+    host_->set_display_transform_hint(
         RotationToDisplayTransform(display.rotation()));
   }
 }
@@ -864,12 +865,6 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
                                          ->GetGpuMemoryBufferManager();
   params.pipes.compositor_frame_sink_associated_remote = std::move(sink_remote);
   params.pipes.client_receiver = std::move(client_receiver);
-  if (!features::IsVizHitTestingSurfaceLayerEnabled()) {
-    params.hit_test_data_provider =
-        std::make_unique<viz::HitTestDataProviderDrawQuad>(
-            false /* should_ask_for_child_region */,
-            true /* root_accepts_events */);
-  }
   params.client_name = kBrowser;
   auto layer_tree_frame_sink =
       std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
@@ -882,8 +877,6 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
   display_private_->SetVSyncPaused(vsync_paused_);
   display_private_->SetSupportedRefreshRates(
       root_window_->GetSupportedRefreshRates());
-  display_private_->SetDisplayTransformHint(
-      RotationToDisplayTransform(display_props.rotation()));
 }
 
 viz::LocalSurfaceIdAllocation CompositorImpl::GenerateLocalSurfaceId() {

@@ -24,11 +24,11 @@
 #include "third_party/blink/public/mojom/service_worker/service_worker_provider_type.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 
+namespace content {
+
 namespace service_worker_object_host_unittest {
 class ServiceWorkerObjectHostTest;
 }
-
-namespace content {
 
 class ServiceWorkerContextCore;
 class ServiceWorkerObjectHost;
@@ -48,7 +48,7 @@ struct ServiceWorkerRegistrationInfo;
 // in the browser process, associated with the execution context where the
 // container lives.
 //
-// ServiceWorkerObjectHost is tentatively owned by ServiceWorkerProviderHost,
+// ServiceWorkerContainerHost is tentatively owned by ServiceWorkerProviderHost,
 // and has the same lifetime with that.
 // TODO(https://crbug.com/931087): Make an execution context host (i.e.,
 // RenderFrameHostImpl, DedicatedWorkerHost etc) own this.
@@ -62,6 +62,8 @@ class CONTENT_EXPORT ServiceWorkerContainerHost final
   using ExecutionReadyCallback = base::OnceClosure;
   using WebContentsGetter = base::RepeatingCallback<WebContents*()>;
 
+  // |service_worker_host| must be non-null for service worker execution
+  // contexts, and null for service worker clients.
   // TODO(https://crbug.com/931087): Rename ServiceWorkerProviderType to
   // ServiceWorkerContainerType.
   ServiceWorkerContainerHost(
@@ -72,7 +74,7 @@ class CONTENT_EXPORT ServiceWorkerContainerHost final
           host_receiver,
       mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
           container_remote,
-      ServiceWorkerProviderHost* provider_host,
+      ServiceWorkerProviderHost* service_worker_host,
       base::WeakPtr<ServiceWorkerContextCore> context);
   ~ServiceWorkerContainerHost() override;
 
@@ -343,9 +345,6 @@ class CONTENT_EXPORT ServiceWorkerContainerHost final
   // https://html.spec.whatwg.org/multipage/webappapis.html#concept-environment-execution-ready-flag
   bool is_execution_ready() const;
 
-  // TODO(https://crbug.com/931087): Remove this getter and |provider_host_|.
-  ServiceWorkerProviderHost* provider_host() { return provider_host_; }
-
   // For service worker clients. The flow is kInitial -> kResponseCommitted ->
   // kExecutionReady.
   //
@@ -403,6 +402,9 @@ class CONTENT_EXPORT ServiceWorkerContainerHost final
   // registration.
   ServiceWorkerRegistration* controller_registration() const;
 
+  // For service worker execution contexts.
+  ServiceWorkerProviderHost* service_worker_host();
+
   // BackForwardCache:
   // For service worker clients that are windows.
   bool IsInBackForwardCache() const;
@@ -424,6 +426,10 @@ class CONTENT_EXPORT ServiceWorkerContainerHost final
   mojo::AssociatedReceiver<blink::mojom::ServiceWorkerContainerHost>&
   receiver() {
     return receiver_;
+  }
+
+  base::WeakPtr<ServiceWorkerContainerHost> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
   }
 
  private:
@@ -649,9 +655,8 @@ class CONTENT_EXPORT ServiceWorkerContainerHost final
   // is hosting.
   mojo::AssociatedRemote<blink::mojom::ServiceWorkerContainer> container_;
 
-  // This provider host owns |this|.
-  // TODO(https://crbug.com/931087): Remove dependencies on |provider_host_|.
-  ServiceWorkerProviderHost* provider_host_ = nullptr;
+  // For service worker execution contexts. This provider host owns |this|.
+  ServiceWorkerProviderHost* service_worker_host_ = nullptr;
 
   base::WeakPtr<ServiceWorkerContextCore> context_;
 

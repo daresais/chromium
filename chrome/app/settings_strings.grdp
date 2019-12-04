@@ -1229,48 +1229,6 @@
     <message name="IDS_SETTINGS_BLUETOOTH_PRIMARY_USER_CONTROLLED" desc="Settings > Bluetooth > Text to show when Bluetooth configuration is controlled by the primary user.">
       Bluetooth configuration is controlled by <ph name="USER_EMAIL">$1<ex>joe@gmail.com</ex></ph>.
     </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_COMPUTER" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable computer device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Computer
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_PHONE" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable phone device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Phone
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_MODEM" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable modem device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Modem
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_AUDIO" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable audio device device including its type. These devices are typically speakers and headphones.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Audio device
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_CAR_AUDIO" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable car audio device including its type. These devices are typically a car's audio system.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Car Audio device
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_VIDEO" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable video device including its type. These devices are typically a monitor or some other type of video display.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Video device
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_PERIPHERAL" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable peripheral device including its type. This type is used for a generic external peripheral device.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Peripheral
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_JOYSTICK" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable joystick device including its type. A joystick is a move-able stick mounted on based that is used to provide input.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Joystick
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_GAMEPAD" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable gamepad device including its type. A gamepad is a two-handed control device where the fingers and thumbs are used to provide input.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Gamepad
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_KEYBOARD" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable keyboard device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Keyboard
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_MOUSE" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable mouse device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Mouse
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_TABLET" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable tablet device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Tablet
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_KEYBOARD_MOUSE_COMBO" desc="Settings > Bluetooth: a11y accessibility description for a Bluetooth connectable keyboard and mouse combo device including its type.">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Keyboard and mouse combination
-    </message>
-    <message name="IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_UNKNOWN" desc="Settings > Bluetooth: a11y accessibility description for a device type that is not one of the known/supported device types for Chrome OS">
-      <ph name="DEVICE_NAME">$1<ex>Device XYZ</ex></ph>, Unknown device type
-    </message>
   </if>
 
   <if expr="use_nss_certs">
@@ -1559,6 +1517,15 @@
     <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTERS" desc="In CUPS printing settings subpage, title for the nearby printers list.">
       Add printers to your profile
     </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTERS_COUNT_MANY" desc="In CUPS printing settings subpage, this message will be read aloud to the user to inform them on the number of printers showing on the screen that are available to save.">
+      There are <ph name="PRINTER_COUNT">$1<ex>3</ex></ph> printers available to save.
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTER_COUNT_ONE" desc="In CUPS printing settings subpage, this message will be read aloud to the user to inform them there is only 1 printer available to save.">
+      There is 1 printer available to save.
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTER_COUNT_NONE" desc="In CUPS printing settings subpage, this message will be read aloud to the user to inform them there are no printers available to save.">
+      There are no printers available to save.
+    </message>
     <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_EDIT" desc="Text for the drop down menu which allows the user to edit the printer details.">
       Edit
     </message>
@@ -1582,6 +1549,15 @@
     </message>
     <message name="IDS_SETTINGS_PRINTING_CUPS_SAVED_PRINTERS_TITLE" desc="Text for the title of the user's saved printers list.">
       Your saved printers
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_SAVED_PRINTERS_COUNT_MANY" desc="In CUPS printing settings subpage, this message will be read aloud to the user to inform them on the number of printers previously saved by the user.">
+      You have <ph name="PRINTER_COUNT">$1<ex>3</ex></ph> saved printers.
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_SAVED_PRINTERS_COUNT_ONE" desc="In CUPS printing settings subpage, this message will be read aloud to the user to inform them there is only 1 printer previously saved.">
+      You have 1 saved printer.
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTERS_SAVED_PRINTERS_COUNT_NONE" desc="In CUPS printing settings subpage, this message will be read aloud to the user to inform them they have no printers previously saved.">
+      You have no saved printers.
     </message>
     <message name="IDS_SETTINGS_PRINTING_CUPS_SHOW_MORE" desc="Text for the button to show more printers when there are more printers than currently displayed to the user.">
       Show more
@@ -2723,7 +2699,7 @@
       Weak
     </message>
     <message name="IDS_ONC_TETHER_SIGNAL_STRENGTH_OKAY" desc="Settings > Internet > Label used to describe the signal strength of a device's cellular connection when the signal is okay. The strength value is 2 on a scale from 1 (min) to 5 (max).">
-      Weak
+      Okay
     </message>
     <message name="IDS_ONC_TETHER_SIGNAL_STRENGTH_GOOD" desc="Settings > Internet > Label used to describe the signal strength of a device's cellular connection when the signal is good. The strength value is 3 on a scale from 1 (min) to 5 (max).">
       Fine
@@ -2996,6 +2972,9 @@
   <!-- Privacy Page -->
   <message name="IDS_SETTINGS_PRIVACY" desc="Name of the settings page which allows users to modify privacy and security settings.">
     Privacy and security
+  </message>
+  <message name="IDS_SETTINGS_PRIVACY_MORE" desc="Label on the expansion button to show more privacy settings.">
+    More
   </message>
   <message name="IDS_SETTINGS_LINKDOCTOR_PREF" desc="The documentation string of the 'Use Link Doctor' preference to help with navigation errors.">
     Show suggestions for similar pages when a page can't be found

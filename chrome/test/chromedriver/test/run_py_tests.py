@@ -78,8 +78,6 @@ _NEGATIVE_FILTER = [
     'ChromeDriverTest.testAlertOnNewWindow',
     # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2532
     'ChromeDriverPageLoadTimeoutTest.testRefreshWithPageLoadTimeout',
-    # https://bugs.chromium.org/p/chromium/issues/detail?id=1011225
-    'ChromeDriverTest.testActionsMultiTouchPoint',
 ]
 
 
@@ -964,6 +962,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
               {type: event.type});
         });
         ''')
+    time.sleep(1)
 
     actions = ({"actions": [{
       "type":"pointer",
@@ -981,13 +980,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
       "id": "pointer2"}]})
     self._driver.PerformActions(actions)
     time.sleep(1)
-    for _ in range(5):
-      events = self._driver.ExecuteScript('return window.events')
-      if len(events) == 4:
-        break
-      # Wait 100 more ms for the event handler to be executed.
-      time.sleep(0.1)
-
+    events = self._driver.ExecuteScript('return window.events')
     self.assertEquals(4, len(events))
     self.assertEquals("touchstart", events[0]['type'])
     self.assertEquals("touchstart", events[1]['type'])
@@ -997,6 +990,8 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertEquals(50, events[0]['y'])
     self.assertEquals(60, events[1]['x'])
     self.assertEquals(60, events[1]['y'])
+
+    self._driver.ReleaseActions()
 
   def testActionsMulti(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))

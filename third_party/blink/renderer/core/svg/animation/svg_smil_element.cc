@@ -691,34 +691,28 @@ void SVGSMILElement::AddInstanceTimeAndUpdate(BeginOrEnd begin_or_end,
   InstanceListChanged();
 }
 
-SMILTime SVGSMILElement::FindInstanceTime(BeginOrEnd begin_or_end,
-                                          SMILTime minimum_time,
-                                          bool equals_minimum_ok) const {
+SMILTime SVGSMILElement::NextAfter(BeginOrEnd begin_or_end,
+                                   SMILTime time) const {
   const Vector<SMILTimeWithOrigin>& list =
       begin_or_end == kBegin ? begin_times_ : end_times_;
-
-  if (list.IsEmpty())
+  if (list.IsEmpty()) {
     return begin_or_end == kBegin ? SMILTime::Unresolved()
                                   : SMILTime::Indefinite();
-
-  // If an equal value is not accepted, return the next bigger item in the list,
-  // if any.
-  auto predicate = [equals_minimum_ok](const SMILTimeWithOrigin& instance_time,
-                                       const SMILTime& time) {
-    return equals_minimum_ok ? instance_time.Time() < time
-                             : instance_time.Time() <= time;
-  };
-  auto* item =
-      std::lower_bound(list.begin(), list.end(), minimum_time, predicate);
-  if (item == list.end())
+  }
+  // Find the value in |list| that is strictly greater than |time|.
+  auto* next_item = std::lower_bound(
+      list.begin(), list.end(), time,
+      [](const SMILTimeWithOrigin& instance_time, const SMILTime& time) {
+        return instance_time.Time() <= time;
+      });
+  if (next_item == list.end())
     return SMILTime::Unresolved();
-
-  // The special value "indefinite" does not yield an instance time in the begin
-  // list.
-  if (item->Time().IsIndefinite() && begin_or_end == kBegin)
+  SMILTime next = next_item->Time();
+  // The special value "indefinite" does not yield an instance time in the
+  // begin list.
+  if (begin_or_end == kBegin && next.IsIndefinite())
     return SMILTime::Unresolved();
-
-  return item->Time();
+  return next;
 }
 
 SMILTime SVGSMILElement::RepeatingDuration() const {
@@ -738,7 +732,7 @@ SMILTime SVGSMILElement::RepeatingDuration() const {
 }
 
 SMILTime SVGSMILElement::ResolveActiveEnd(SMILTime resolved_begin) const {
-  SMILTime resolved_end = FindInstanceTime(kEnd, resolved_begin, false);
+  SMILTime resolved_end = NextAfter(kEnd, resolved_begin);
   if (resolved_end.IsUnresolved()) {
     // If we have no pending end conditions, don't generate a new interval.
     if (!end_times_.IsEmpty() && !has_end_event_conditions_)
@@ -774,21 +768,29 @@ SMILInterval SVGSMILElement::ResolveInterval(SMILTime begin_after,
   // http://www.w3.org/TR/SMIL3/smil-timing.html#q90.
   const size_t kMaxIterations = std::max(begin_times_.size() * 4, 1000000u);
   size_t current_iteration = 0;
-  while (true) {
-    SMILTime temp_begin = FindInstanceTime(kBegin, begin_after, true);
-    if (temp_begin.IsUnresolved())
+  for (auto* search_start = begin_times_.begin();
+       search_start != begin_times_.end(); ++search_start) {
+    // Find the (next) instance time in the 'begin' list that is greater or
+    // equal to |begin_after|.
+    auto* begin_item = std::lower_bound(
+        search_start, begin_times_.end(), begin_after,
+        [](const SMILTimeWithOrigin& instance_time, const SMILTime& time) {
+          return instance_time.Time() < time;
+        });
+    // If there are no more 'begin' instance times, or we encountered the
+    // special value "indefinite" (which doesn't yield an instance time in the
+    // 'begin' list), we're done.
+    if (begin_item == begin_times_.end() || begin_item->Time().IsIndefinite())
       break;
-    SMILTime temp_end = ResolveActiveEnd(temp_begin);
+    SMILTime temp_end = ResolveActiveEnd(begin_item->Time());
     if (temp_end.IsUnresolved())
       break;
     // Don't allow the interval to end in the past.
-    if (temp_end > end_after) {
-      DCHECK(!temp_begin.IsIndefinite());
-      return SMILInterval(temp_begin, temp_end);
-    }
-    // Ensure forward progress.
-    if (begin_after == temp_end)
-      temp_end = begin_after + SMILTime::Epsilon();
+    if (temp_end > end_after)
+      return SMILInterval(begin_item->Time(), temp_end);
+    // Ensure forward progress by only considering the part of the 'begin' list
+    // after |begin_item| for the next iteration.
+    search_start = begin_item;
     begin_after = temp_end;
     // Debugging signal for crbug.com/1021630.
     CHECK_LT(current_iteration++, kMaxIterations);
@@ -821,29 +823,40 @@ SMILTime SVGSMILElement::ComputeNextIntervalTime(
       next_interval_time = interval_.end;
     }
   }
-  return std::min(next_interval_time,
-                  FindInstanceTime(kBegin, presentation_time, false));
+  return std::min(next_interval_time, NextAfter(kBegin, presentation_time));
 }
 
 void SVGSMILElement::InstanceListChanged() {
   DCHECK(instance_lists_have_changed_);
-  // Update the interval to the time just before the current presentation
-  // time. This means that the next animation update will take of updating the
-  // active state and send events as needed.
-  SMILTime previous_presentation_time =
-      time_container_ ? time_container_->CurrentDocumentTime() : SMILTime();
-  previous_presentation_time = previous_presentation_time - SMILTime::Epsilon();
-  DCHECK(!previous_presentation_time.IsUnresolved());
+  SMILTime current_presentation_time =
+      time_container_ ? time_container_->LatestUpdatePresentationTime()
+                      : SMILTime();
+  DCHECK(!current_presentation_time.IsUnresolved());
   const bool was_active = GetActiveState() == kActive;
-  UpdateInterval(previous_presentation_time);
-  if (was_active && interval_.BeginsAfter(previous_presentation_time)) {
-    active_state_ = DetermineActiveState(previous_presentation_time);
+  UpdateInterval(current_presentation_time);
+  // Check active state and reschedule using the time just before the current
+  // presentation time. This means that the next animation update will take
+  // care of updating the active state and send events as needed.
+  SMILTime previous_presentation_time =
+      current_presentation_time - SMILTime::Epsilon();
+  if (was_active) {
+    const SMILInterval& active_interval =
+        GetActiveInterval(previous_presentation_time);
+    active_state_ =
+        DetermineActiveState(active_interval, previous_presentation_time);
     if (GetActiveState() != kActive)
       EndedActiveInterval();
   }
   if (time_container_) {
-    time_container_->Reschedule(
-        this, ComputeNextIntervalTime(previous_presentation_time));
+    SMILTime next_interval_time;
+    // If we switched interval and the previous interval did not end yet, we
+    // need to consider it when computing the next interval time.
+    if (previous_interval_.IsResolved() &&
+        previous_interval_.EndsAfter(previous_presentation_time))
+      next_interval_time = previous_interval_.end;
+    else
+      next_interval_time = ComputeNextIntervalTime(previous_presentation_time);
+    time_container_->Reschedule(this, next_interval_time);
   }
 }
 
@@ -882,7 +895,7 @@ bool SVGSMILElement::HandleIntervalRestart(SMILTime presentation_time) {
   if (!interval_.IsResolved() || interval_.EndsBefore(presentation_time))
     return true;
   if (restart == kRestartAlways) {
-    SMILTime next_begin = FindInstanceTime(kBegin, interval_.begin, false);
+    SMILTime next_begin = NextAfter(kBegin, interval_.begin);
     if (interval_.EndsAfter(next_begin)) {
       SetNewIntervalEnd(next_begin);
       return interval_.EndsBefore(presentation_time);
@@ -920,13 +933,15 @@ void SVGSMILElement::UpdateInterval(SMILTime presentation_time) {
 
 void SVGSMILElement::AddedToTimeContainer() {
   DCHECK(time_container_);
-  // Update the interval to the time just before the current presentation
-  // time. This means that the next animation update will take of updating the
-  // active state and send events as needed.
+  SMILTime current_presentation_time =
+      time_container_->LatestUpdatePresentationTime();
+  UpdateInterval(current_presentation_time);
+  // Check active state and reschedule using the time just before the current
+  // presentation time. This means that the next animation update will take
+  // care of updating the active state and send events as needed.
   SMILTime previous_presentation_time =
-      time_container_->CurrentDocumentTime() - SMILTime::Epsilon();
-  UpdateInterval(previous_presentation_time);
-  active_state_ = DetermineActiveState(previous_presentation_time);
+      current_presentation_time - SMILTime::Epsilon();
+  active_state_ = DetermineActiveState(interval_, previous_presentation_time);
   time_container_->Reschedule(
       this, ComputeNextIntervalTime(previous_presentation_time));
 
@@ -1005,7 +1020,7 @@ SMILTime SVGSMILElement::NextProgressTime(SMILTime presentation_time) const {
     // If duration is indefinite the value does not actually change over time.
     // Same is true for <set>.
     SMILTime simple_duration = SimpleDuration();
-    if (simple_duration.IsIndefinite() || IsSVGSetElement(*this)) {
+    if (simple_duration.IsIndefinite() || IsA<SVGSetElement>(*this)) {
       SMILTime repeating_duration_end = interval_.begin + RepeatingDuration();
       // We are supposed to do freeze semantics when repeating ends, even if the
       // element is still active.
@@ -1023,8 +1038,9 @@ SMILTime SVGSMILElement::NextProgressTime(SMILTime presentation_time) const {
 }
 
 SVGSMILElement::ActiveState SVGSMILElement::DetermineActiveState(
+    const SMILInterval& interval,
     SMILTime elapsed) const {
-  if (interval_.Contains(elapsed))
+  if (interval.Contains(elapsed))
     return kActive;
   if (is_waiting_for_first_interval_)
     return kInactive;
@@ -1042,7 +1058,7 @@ bool SVGSMILElement::IsContributing(SMILTime elapsed) const {
 
 void SVGSMILElement::UpdateActiveState(SMILTime elapsed) {
   const bool was_active = GetActiveState() == kActive;
-  active_state_ = DetermineActiveState(elapsed);
+  active_state_ = DetermineActiveState(interval_, elapsed);
   const bool is_active = GetActiveState() == kActive;
   const bool interval_restart =
       interval_has_changed_ && previous_interval_.end == interval_.begin;

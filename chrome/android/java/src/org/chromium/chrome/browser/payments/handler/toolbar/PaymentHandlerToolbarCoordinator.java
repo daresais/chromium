@@ -12,6 +12,8 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
+import java.net.URI;
+
 /**
  * PaymentHandlerToolbar coordinator, which owns the component overall, i.e., creates other objects
  * in the component and connects them. It decouples the implementation of this component from other
@@ -25,17 +27,25 @@ public class PaymentHandlerToolbarCoordinator {
     /**
      * Observer for the error of the payment handler toolbar.
      */
-    public interface ErrorObserver {
-        /**
-         * Called when the UI gets an error
-         */
-        void onError();
+    public interface PaymentHandlerToolbarObserver {
+        /** Called when the UI gets an error. */
+        void onToolbarError();
+
+        /** Called when the close button is clicked. */
+        void onToolbarCloseButtonClicked();
     }
 
-    /** Constructs the payment-handler toolbar component coordinator. */
-    public PaymentHandlerToolbarCoordinator(
-            Context context, WebContents webContents, ErrorObserver errorObserver) {
-        mToolbarView = new PaymentHandlerToolbarView(context);
+    /**
+     * Constructs the payment-handler toolbar component coordinator.
+     * @param context The main activity.
+     * @param webContents The {@link WebContents} of the payment handler app.
+     * @param url The url of the payment handler app, i.e., that of
+     *         "PaymentRequestEvent.openWindow(url)".
+     * @param observer The observer of this toolbar.
+     */
+    public PaymentHandlerToolbarCoordinator(Context context, WebContents webContents, URI url,
+            PaymentHandlerToolbarObserver observer) {
+        mToolbarView = new PaymentHandlerToolbarView(context, observer);
         PropertyModel model = new PropertyModel.Builder(PaymentHandlerToolbarProperties.ALL_KEYS)
                                       .with(PaymentHandlerToolbarProperties.PROGRESS_VISIBLE, true)
                                       .with(PaymentHandlerToolbarProperties.LOAD_PROGRESS, 0)
@@ -43,7 +53,7 @@ public class PaymentHandlerToolbarCoordinator {
                                               ConnectionSecurityLevel.NONE)
                                       .build();
         PaymentHandlerToolbarMediator mediator =
-                new PaymentHandlerToolbarMediator(model, webContents, errorObserver);
+                new PaymentHandlerToolbarMediator(model, webContents, url, observer);
         webContents.addObserver(mediator);
         PropertyModelChangeProcessor changeProcessor = PropertyModelChangeProcessor.create(
                 model, mToolbarView, PaymentHandlerToolbarViewBinder::bind);

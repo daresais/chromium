@@ -78,7 +78,6 @@
     'chromium.android.fyi': {
       'Android WebView P FYI (rel)': 'android_release_bot_minimal_symbols_arm64_webview_google',
       'Android WebView P OOR-CORS FYI (rel)': 'android_release_bot_minimal_symbols_arm64_webview_google',
-      'Memory Infra Tester': 'android_release_thumb_bot',
       'android-marshmallow-x86-fyi-rel': 'android_release_bot_minimal_symbols_x86_resource_whitelisting',
       'android-pie-x86-fyi-rel': 'android_release_bot_minimal_symbols_x86',
       'android-bfcache-debug': 'android_debug_static_bot',
@@ -666,13 +665,15 @@
     },
 
     'tryserver.chromium.android': {
+      'android-asan': 'android_clang_asan_release_trybot',
+      'android-bfcache-debug': 'android_debug_static_bot',
       'android-opus-kitkat-arm-rel': 'android_release_trybot',
       # TODO(crbug/597596): Switch this back to debug_trybot when cronet's
       # shared library loading is fixed.
       'android-cronet-arm-dbg': 'android_cronet_debug_static_bot_arm_no_neon',
       'android-kitkat-arm-rel': 'android_release_trybot_fastbuild',
       'android-marshmallow-arm64-coverage-rel': 'gpu_tests_android_release_trybot_arm64_resource_whitelisting_fastbuild_java_coverage',
-      'android-marshmallow-arm64-rel': 'gpu_tests_android_release_trybot_arm64_resource_whitelisting_fastbuild',
+      'android-marshmallow-arm64-rel': 'gpu_tests_android_release_trybot_arm64_resource_whitelisting_fastbuild_java_coverage',
       'android-marshmallow-x86-fyi-rel': 'android_release_trybot_x86_resource_whitelisting',
       'android-oreo-arm64-cts-networkservice-dbg': 'android_debug_trybot_arm64',
       'android-pie-arm64-rel': 'android_release_trybot_arm64_webview_google',
@@ -810,6 +811,7 @@
       'linux-annotator-rel': 'release_trybot',
       'linux-blink-heap-concurrent-marking-tsan-rel': 'release_trybot_tsan',
       'linux-blink-heap-verification-try': 'release_trybot_enable_blink_heap_verification',
+      'linux-bfcache-debug': 'debug_bot',
       'linux-clang-tidy-dbg': 'debug_trybot',
       'linux-clang-tidy-rel': 'release_trybot',
       'linux-dcheck-off-rel': 'release_trybot_dcheck_off',
@@ -1018,6 +1020,10 @@
       'android', 'clang', 'asan', 'release_bot', 'strip_debug_info', 'minimal_symbols',
     ],
 
+    'android_clang_asan_release_trybot': [
+      'android', 'clang', 'asan', 'release_trybot', 'strip_debug_info', 'minimal_symbols',
+    ],
+
     'android_clang_tot_asan': [
       'android_without_codecs', 'clang_tot', 'asan', 'shared', 'debug', 'minimal_symbols',
       'strip_debug_info',
@@ -1171,10 +1177,6 @@
     'android_release_bot_minimal_symbols_x86_resource_whitelisting': [
       'android', 'release_bot', 'minimal_symbols', 'x86',
       'resource_whitelisting',
-    ],
-
-    'android_release_thumb_bot': [
-      'android', 'release_bot', 'arm_thumb',
     ],
 
     'android_release_trybot': [
@@ -1654,12 +1656,6 @@
       'android_fastbuild',
     ],
 
-    'gpu_tests_android_release_trybot_arm64_resource_whitelisting_fastbuild': [
-      'gpu_tests', 'android', 'release_trybot', 'arm64', 'static_angle',
-      'resource_whitelisting', 'android_fastbuild', 'webview_google',
-      'android_no_proguard',
-    ],
-
     'gpu_tests_android_release_trybot_arm64_resource_whitelisting_fastbuild_java_coverage': [
       'gpu_tests', 'android', 'release_trybot', 'arm64', 'static_angle',
       'resource_whitelisting', 'android_fastbuild', 'webview_google',
@@ -2116,10 +2112,6 @@
     'arm_no_neon': {
       'mixins': ['arm'],
       'gn_args': 'arm_use_neon=false',
-    },
-
-    'arm_thumb': {
-      'gn_args': 'arm_use_thumb=true',
     },
 
     'asan': {

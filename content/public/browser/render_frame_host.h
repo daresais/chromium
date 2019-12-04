@@ -26,9 +26,9 @@
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/frame/sandbox_flags.h"
 #include "third_party/blink/public/common/scheduler/web_scheduler_tracked_feature.h"
-#include "third_party/blink/public/common/sudden_termination_disabler_type.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
+#include "third_party/blink/public/mojom/frame/sudden_termination_disabler_type.mojom.h"
 #include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom-forward.h"
 #include "ui/accessibility/ax_tree_id.h"
 #include "ui/gfx/geometry/rect.h"
@@ -52,6 +52,10 @@ class Value;
 namespace features {
 CONTENT_EXPORT extern const base::Feature kCrashReporting;
 }  // namespace features
+
+namespace net {
+class NetworkIsolationKey;
+}
 
 namespace service_manager {
 class InterfaceProvider;
@@ -182,6 +186,11 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
 
   // Returns the last committed origin of the frame.
   virtual const url::Origin& GetLastCommittedOrigin() = 0;
+
+  // Returns the network isolation key used for subresources from the currently
+  // committed navigation. It's set on commit and does not change until the next
+  // navigation is committed.
+  virtual const net::NetworkIsolationKey& GetNetworkIsolationKey() = 0;
 
   // Returns the associated widget's native view.
   virtual gfx::NativeView GetNativeView() = 0;
@@ -333,7 +342,7 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Check whether the specific Blink feature is currently preventing fast
   // shutdown of the frame.
   virtual bool GetSuddenTerminationDisablerState(
-      blink::SuddenTerminationDisablerType disabler_type) = 0;
+      blink::mojom::SuddenTerminationDisablerType disabler_type) = 0;
 
   // Returns true if the given |threshold_value| is below the threshold value
   // specified in the policy for |feature| for this RenderFrameHost. See
@@ -441,6 +450,9 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Reloads the frame if it is live. It initiates a reload but doesn't wait for
   // it to finish.
   virtual void Reload() = 0;
+
+  // Returns true if this frame has fired DOMContentLoaded.
+  virtual bool IsDOMContentLoaded() = 0;
 
  private:
   // This interface should only be implemented inside content.

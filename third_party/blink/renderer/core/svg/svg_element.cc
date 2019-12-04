@@ -122,7 +122,7 @@ bool SVGElement::IsOutermostSVGSVGElement() const {
 
   // We act like an outermost SVG element, if we're a direct child of a
   // <foreignObject> element.
-  if (IsSVGForeignObjectElement(*parentNode()))
+  if (IsA<SVGForeignObjectElement>(*parentNode()))
     return true;
 
   // If we're living in a shadow tree, we're a <svg> element that got created as
@@ -535,8 +535,8 @@ SVGElement* SVGElement::viewportElement() const {
   // work otherwhise.
   ContainerNode* n = ParentOrShadowHostNode();
   while (n) {
-    if (IsA<SVGSVGElement>(*n) || IsSVGImageElement(*n) ||
-        IsSVGSymbolElement(*n))
+    if (IsA<SVGSVGElement>(*n) || IsA<SVGImageElement>(*n) ||
+        IsA<SVGSymbolElement>(*n))
       return To<SVGElement>(n);
 
     n = n->ParentOrShadowHostNode();

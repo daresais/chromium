@@ -31,8 +31,9 @@ import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.settings.ChromeSwitchPreference;
-import org.chromium.chrome.browser.settings.PreferenceUtils;
+import org.chromium.chrome.browser.settings.SettingsUtils;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.chrome.browser.sync.TrustedVaultClient;
 import org.chromium.chrome.browser.sync.ui.PassphraseCreationDialogFragment;
 import org.chromium.chrome.browser.sync.ui.PassphraseDialogFragment;
 import org.chromium.chrome.browser.sync.ui.PassphraseTypeDialogFragment;
@@ -106,7 +107,7 @@ public class ManageSyncPreferences extends PreferenceFragmentCompat
         getActivity().setTitle(R.string.manage_sync_title);
         setHasOptionsMenu(true);
 
-        PreferenceUtils.addPreferencesFromResource(this, R.xml.manage_sync_preferences);
+        SettingsUtils.addPreferencesFromResource(this, R.xml.manage_sync_preferences);
 
         mSyncEverything = (ChromeSwitchPreference) findPreference(PREF_SYNC_EVERYTHING);
         mSyncEverything.setOnPreferenceChangeListener(this);
@@ -397,8 +398,12 @@ public class ManageSyncPreferences extends PreferenceFragmentCompat
     private void onSyncEncryptionClicked() {
         if (!mProfileSyncService.isEngineInitialized()) return;
 
+        // TODO(crbug.com/1019687): The two below should probably operate independently of the
+        // preferred datatypes.
         if (mProfileSyncService.isPassphraseRequiredForPreferredDataTypes()) {
             displayPassphraseDialog();
+        } else if (mProfileSyncService.isTrustedVaultKeyRequiredForPreferredDataTypes()) {
+            TrustedVaultClient.displayKeyRetrievalDialog();
         } else {
             displayPassphraseTypeDialog();
         }

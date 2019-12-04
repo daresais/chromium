@@ -1881,6 +1881,9 @@ const gchar* GetName(AtkObject* atk_object) {
   if (!obj)
     return nullptr;
 
+  if (!obj->IsNameExposed())
+    return nullptr;
+
   ax::mojom::NameFrom name_from = obj->GetData().GetNameFrom();
   if (obj->GetStringAttribute(ax::mojom::StringAttribute::kName).empty() &&
       name_from != ax::mojom::NameFrom::kAttributeExplicitlyEmpty)
@@ -2158,7 +2161,7 @@ int AXPlatformNodeAuraLinux::GetGTypeInterfaceMask() {
 
   // Value Interface
   AtkRole role = GetAtkRole();
-  if (IsRangeValueSupported(GetData())) {
+  if (GetData().IsRangeValueSupported()) {
     interface_mask |= 1 << ATK_VALUE_INTERFACE;
   }
 
@@ -2567,9 +2570,14 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
     case ax::mojom::Role::kListItem:
       return ATK_ROLE_LIST_ITEM;
     case ax::mojom::Role::kListMarker:
-      // TODO(Accessibility) Having a separate accessible object for the marker
-      // is inconsistent with other implementations. http://crbug.com/873144.
-      return kStaticRole;
+      if (!GetChildCount()) {
+        // There's only a name attribute when using Legacy layout. With Legacy
+        // layout, list markers have no child and are considered as StaticText.
+        // We consider a list marker as a group in LayoutNG since it has
+        // a text child node.
+        return kStaticRole;
+      }
+      return ATK_ROLE_PANEL;
     case ax::mojom::Role::kLog:
       return ATK_ROLE_LOG;
     case ax::mojom::Role::kMain:
@@ -3512,7 +3520,7 @@ void AXPlatformNodeAuraLinux::OnValueChanged() {
   if (IsPlainTextField() && !GetDelegate()->IsWebContent())
     UpdateHypertext();
 
-  if (!IsRangeValueSupported(GetData()))
+  if (!GetData().IsRangeValueSupported())
     return;
 
   float float_val;
@@ -3556,7 +3564,7 @@ void AXPlatformNodeAuraLinux::OnDocumentTitleChanged() {
 void AXPlatformNodeAuraLinux::OnSubtreeCreated() {
   // We might not have a parent, in that case we don't need to send the event.
   // We also don't want to notify if this is an ignored node
-  if (!GetParent() || ui::IsIgnored(GetData()))
+  if (!GetParent() || GetData().IsIgnored())
     return;
   g_signal_emit_by_name(GetParent(), "children-changed::add",
                         GetIndexInParent(), GetOrCreateAtkObject());
@@ -3565,7 +3573,7 @@ void AXPlatformNodeAuraLinux::OnSubtreeCreated() {
 void AXPlatformNodeAuraLinux::OnSubtreeWillBeDeleted() {
   // There is a chance there won't be a parent as we're in the deletion process.
   // We also don't want to notify if this is an ignored node
-  if (!GetParent() || ui::IsIgnored(GetData()))
+  if (!GetParent() || GetData().IsIgnored())
     return;
 
   g_signal_emit_by_name(GetParent(), "children-changed::remove",
@@ -4119,6 +4127,16 @@ base::string16 AXPlatformNodeAuraLinux::GetHypertext() const {
   if (IsPlainTextField())
     return GetString16Attribute(ax::mojom::StringAttribute::kValue);
   return hypertext_.hypertext;
+}
+
+bool AXPlatformNodeAuraLinux::IsNameExposed() {
+  const AXNodeData& data = GetData();
+  switch (data.role) {
+    case ax::mojom::Role::kListMarker:
+      return !GetChildCount();
+    default:
+      return true;
+  }
 }
 
 int AXPlatformNodeAuraLinux::GetCaretOffset() {

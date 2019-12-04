@@ -169,15 +169,15 @@ std::unique_ptr<JSONObject> ObjectForSkRRect(const SkRRect& rrect) {
   return rrect_item;
 }
 
-String FillTypeName(SkPath::FillType type) {
+String FillTypeName(SkPathFillType type) {
   switch (type) {
-    case SkPath::kWinding_FillType:
+    case SkPathFillType::kWinding:
       return "Winding";
-    case SkPath::kEvenOdd_FillType:
+    case SkPathFillType::kEvenOdd:
       return "EvenOdd";
-    case SkPath::kInverseWinding_FillType:
+    case SkPathFillType::kInverseWinding:
       return "InverseWinding";
-    case SkPath::kInverseEvenOdd_FillType:
+    case SkPathFillType::kInverseEvenOdd:
       return "InverseEvenOdd";
     default:
       NOTREACHED();
@@ -229,8 +229,8 @@ std::unique_ptr<JSONObject> ObjectForSkPath(const SkPath& path) {
   SkPath::Iter iter(path, false);
   SkPoint points[4];
   auto path_points_array = std::make_unique<JSONArray>();
-  for (SkPath::Verb verb = iter.next(points, false); verb != SkPath::kDone_Verb;
-       verb = iter.next(points, false)) {
+  for (SkPath::Verb verb = iter.next(points); verb != SkPath::kDone_Verb;
+       verb = iter.next(points)) {
     VerbParams verb_params = SegmentParams(verb);
     auto path_point_item = std::make_unique<JSONObject>();
     path_point_item->SetString("verb", verb_params.name);

@@ -17,7 +17,9 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
+#include "mojo/public/cpp/bindings/shared_remote.h"
 #include "storage/browser/blob/blob_data_handle.h"
+#include "third_party/blink/public/mojom/blob/blob.mojom.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 
 namespace content {
@@ -30,12 +32,14 @@ class CONTENT_EXPORT IndexedDBBlobInfo {
 
   IndexedDBBlobInfo();
   // These two are used for Blobs.
-  IndexedDBBlobInfo(std::unique_ptr<storage::BlobDataHandle> blob_handle,
+  IndexedDBBlobInfo(mojo::PendingRemote<blink::mojom::Blob> blob_remote,
+                    const std::string& uuid,
                     const base::string16& type,
                     int64_t size);
   IndexedDBBlobInfo(const base::string16& type, int64_t size, int64_t key);
   // These two are used for Files.
-  IndexedDBBlobInfo(std::unique_ptr<storage::BlobDataHandle> blob_handle,
+  IndexedDBBlobInfo(mojo::PendingRemote<blink::mojom::Blob> blob_remote,
+                    const std::string& uuid,
                     const base::FilePath& file_path,
                     const base::string16& file_name,
                     const base::string16& type);
@@ -48,9 +52,13 @@ class CONTENT_EXPORT IndexedDBBlobInfo {
   IndexedDBBlobInfo& operator=(const IndexedDBBlobInfo& other);
 
   bool is_file() const { return is_file_; }
-  const storage::BlobDataHandle* blob_handle() const {
-    return blob_handle_.has_value() ? &blob_handle_.value() : nullptr;
+  bool is_remote_valid() const { return blob_remote_.is_bound(); }
+  const std::string& uuid() const {
+    DCHECK(is_remote_valid());
+    return uuid_;
   }
+  void Clone(mojo::PendingReceiver<blink::mojom::Blob> receiver) const;
+  mojo::SharedRemote<blink::mojom::Blob> remote() const { return blob_remote_; }
   const base::string16& type() const { return type_; }
   int64_t size() const { return size_; }
   const base::string16& file_name() const { return file_name_; }
@@ -73,13 +81,21 @@ class CONTENT_EXPORT IndexedDBBlobInfo {
 
  private:
   bool is_file_;
-  base::Optional<storage::BlobDataHandle>
-      blob_handle_;           // Always for Blob; sometimes for File.
-  base::string16 type_;       // Mime type.
-  int64_t size_;              // -1 if unknown for File.
-  base::string16 file_name_;  // Only for File.
-  base::FilePath file_path_;  // Only for File.
-  base::Time last_modified_;  // Only for File; valid only if size is.
+
+  // Always for Blob; sometimes for File.
+  mojo::SharedRemote<blink::mojom::Blob> blob_remote_;
+  // If blob_remote_ is true, this is the blob's uuid.
+  std::string uuid_;
+  // Mime type.
+  base::string16 type_;
+  // -1 if unknown for File.
+  int64_t size_;
+  // Only for File.
+  base::string16 file_name_;
+  // Only for File.
+  base::FilePath file_path_;
+  // Only for File; valid only if size is.
+  base::Time last_modified_;
 
   // Valid only when this comes out of the database.
   int64_t key_;

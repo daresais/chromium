@@ -49,6 +49,7 @@
 #include "third_party/re2/src/re2/re2.h"
 #include "url/origin.h"
 #include "url/url_constants.h"
+#include "components/safe_browsing/features.h"
 
 using autofill::PasswordForm;
 
@@ -825,9 +826,9 @@ bool LoginDatabase::Init() {
     }
   }
 
-  // TODO(bdea): Create a more generic experiment for creation of compromise
-  // credentials because the current experiment is leak detection specific.
-  if (base::FeatureList::IsEnabled(password_manager::features::kLeakHistory)) {
+  if (base::FeatureList::IsEnabled(password_manager::features::kLeakHistory) ||
+      base::FeatureList::IsEnabled(
+          safe_browsing::kPasswordProtectionShowDomainsForSavedPasswords)) {
     if (!compromised_credentials_table_.CreateTableIfNecessary()) {
       LogDatabaseInitError(INIT_COMPROMISED_CREDENTIALS_ERROR);
       LOG(ERROR) << "Unable to create the compromised credentials table.";

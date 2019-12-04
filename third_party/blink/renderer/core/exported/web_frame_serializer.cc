@@ -64,6 +64,7 @@
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
@@ -78,7 +79,6 @@
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_concatenate.h"
-
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -229,7 +229,7 @@ bool MHTMLFrameSerializerDelegate::ShouldIgnoreAttribute(
   // images, as only the value of src is pulled into the archive. Discarding
   // srcset prevents the problem. Long term we should make sure to MHTML plays
   // nicely with srcset.
-  if (IsHTMLImageElement(element) &&
+  if (IsA<HTMLImageElement>(element) &&
       (attribute.LocalName() == html_names::kSrcsetAttr ||
        attribute.LocalName() == html_names::kSizesAttr)) {
     return true;
@@ -298,7 +298,7 @@ Vector<Attribute> MHTMLFrameSerializerDelegate::GetCustomAttributes(
     const Element& element) {
   Vector<Attribute> attributes;
 
-  if (auto* image = ToHTMLImageElementOrNull(element)) {
+  if (auto* image = DynamicTo<HTMLImageElement>(element)) {
     GetCustomAttributesForImageElement(*image, &attributes);
   }
 
@@ -370,8 +370,8 @@ std::pair<Node*, Element*> MHTMLFrameSerializerDelegate::GetAuxiliaryDOMTree(
 
   // Put the shadow DOM content inside a template element. A special attribute
   // is set to tell the mode of the shadow DOM.
-  Element* template_element =
-      Element::Create(html_names::kTemplateTag, &(element.GetDocument()));
+  auto* template_element = MakeGarbageCollected<Element>(
+      html_names::kTemplateTag, &(element.GetDocument()));
   template_element->setAttribute(
       QualifiedName(g_null_atom, kShadowModeAttributeName, g_null_atom),
       AtomicString(shadow_mode));

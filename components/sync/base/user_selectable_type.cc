@@ -34,7 +34,6 @@ constexpr char kExtensionsTypeName[] = "extensions";
 constexpr char kAppsTypeName[] = "apps";
 constexpr char kReadingListTypeName[] = "readingList";
 constexpr char kTabsTypeName[] = "tabs";
-constexpr char kWifiConfigurationsTypeName[] = "wifiConfigurations";
 
 UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
   // UserSelectableTypeInfo::type_name is used in js code and shouldn't be
@@ -72,9 +71,11 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
     case UserSelectableType::kApps: {
       ModelTypeSet model_types = {APPS, APP_SETTINGS, WEB_APPS};
 #if defined(OS_CHROMEOS)
+      // App list must sync if either Chrome apps or ARC apps are synced.
+      model_types.Put(APP_LIST);
       // SplitSettingsSync moves ARC apps under a separate OS setting.
       if (!chromeos::features::IsSplitSettingsSyncEnabled())
-        model_types.PutAll({APP_LIST, ARC_PACKAGE});
+        model_types.Put(ARC_PACKAGE);
 #endif
       return {kAppsTypeName, APPS, model_types};
     }
@@ -85,10 +86,6 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
               PROXY_TABS,
               {PROXY_TABS, SESSIONS, FAVICON_IMAGES, FAVICON_TRACKING,
                SEND_TAB_TO_SELF}};
-    case UserSelectableType::kWifiConfigurations:
-      return {kWifiConfigurationsTypeName,
-              WIFI_CONFIGURATIONS,
-              {WIFI_CONFIGURATIONS}};
   }
   NOTREACHED();
   return {nullptr, UNSPECIFIED};
@@ -100,13 +97,16 @@ UserSelectableTypeInfo GetUserSelectableOsTypeInfo(UserSelectableOsType type) {
   // changed without updating js part.
   switch (type) {
     case UserSelectableOsType::kOsApps:
-      return {"osApps", APP_LIST, {APP_LIST, ARC_PACKAGE}};
+      // App list must sync if either Chrome apps or ARC apps are synced.
+      return {"osApps", ARC_PACKAGE, {ARC_PACKAGE, APP_LIST}};
     case UserSelectableOsType::kOsPreferences:
       return {"osPreferences",
               OS_PREFERENCES,
               {OS_PREFERENCES, OS_PRIORITY_PREFERENCES}};
     case UserSelectableOsType::kPrinters:
       return {"printers", PRINTERS, {PRINTERS}};
+    case UserSelectableOsType::kWifiConfigurations:
+      return {"wifiConfigurations", WIFI_CONFIGURATIONS, {WIFI_CONFIGURATIONS}};
   }
 }
 #endif
@@ -148,11 +148,19 @@ UserSelectableType GetUserSelectableTypeFromString(const std::string& type) {
   if (type == kTabsTypeName) {
     return UserSelectableType::kTabs;
   }
-  if (type == kWifiConfigurationsTypeName) {
-    return UserSelectableType::kWifiConfigurations;
-  }
   NOTREACHED();
   return UserSelectableType::kLastType;
+}
+
+std::string UserSelectableTypeSetToString(UserSelectableTypeSet types) {
+  std::string result;
+  for (UserSelectableType type : types) {
+    if (!result.empty()) {
+      result += ", ";
+    }
+    result += GetUserSelectableTypeName(type);
+  }
+  return result;
 }
 
 ModelTypeSet UserSelectableTypeToAllModelTypes(UserSelectableType type) {

@@ -9,6 +9,7 @@
 #include "base/run_loop.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/ui/views/sharing/sharing_browsertest.h"
 #include "chrome/browser/ui/views/sharing/sharing_dialog_view.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/profile_sync_service.h"
@@ -36,6 +38,7 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/events/base_event_utils.h"
+#include "ui/views/layout/grid_layout.h"
 #include "url/gurl.h"
 
 namespace {
@@ -81,7 +84,7 @@ class ClickToCallBrowserTest : public SharingBrowserTest {
   base::test::ScopedFeatureList feature_list_;
 
   std::string HistogramName(const char* suffix) {
-    return base::StrCat({"Sharing.ClickToCallPhoneNumber", suffix});
+    return base::StrCat({"Sharing.ClickToCall", suffix});
   }
 
  private:
@@ -232,43 +235,59 @@ IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest, ContextMenu_TelLink_Histograms) {
   // Trigger a context menu for a link with 8 digits and 9 characters.
   std::unique_ptr<TestRenderViewContextMenu> menu = InitContextMenu(
       GURL("tel:1234-5678"), kLinkText, kTextWithoutPhoneNumber);
+  // RegexVariantResult is logged on a thread pool.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
 
-  base::HistogramTester::CountsMap expected_counts;
-  expected_counts[HistogramName("Digits")] = 1;
-  expected_counts[HistogramName("Digits.RightClickLink.Showing")] = 1;
-  expected_counts[HistogramName("Length")] = 1;
-  expected_counts[HistogramName("Length.RightClickLink.Showing")] = 1;
+  base::HistogramTester::CountsMap expected_counts = {
+      {HistogramName("DevicesToShow"), 1},
+      {HistogramName("DevicesToShow.ContextMenu"), 1},
+      {HistogramName("PhoneNumberDigits"), 1},
+      {HistogramName("PhoneNumberDigits.RightClickLink.Showing"), 1},
+      {HistogramName("PhoneNumberLength"), 1},
+      {HistogramName("PhoneNumberLength.RightClickLink.Showing"), 1},
+  };
   EXPECT_THAT(histograms.GetTotalCountsForPrefix(HistogramName("")),
               testing::ContainerEq(expected_counts));
 
-  histograms.ExpectUniqueSample(HistogramName("Digits"),
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberDigits"),
                                 /*sample=*/8, /*count=*/1);
-  histograms.ExpectUniqueSample(HistogramName("Digits.RightClickLink.Showing"),
-                                /*sample=*/8, /*count=*/1);
-  histograms.ExpectUniqueSample(HistogramName("Length"),
+  histograms.ExpectUniqueSample(
+      HistogramName("PhoneNumberDigits.RightClickLink.Showing"),
+      /*sample=*/8, /*count=*/1);
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberLength"),
                                 /*sample=*/9, /*count=*/1);
-  histograms.ExpectUniqueSample(HistogramName("Length.RightClickLink.Showing"),
-                                /*sample=*/9, /*count=*/1);
+  histograms.ExpectUniqueSample(
+      HistogramName("PhoneNumberLength.RightClickLink.Showing"),
+      /*sample=*/9, /*count=*/1);
 
   // Send the number to the device in the context menu.
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_SINGLE_DEVICE,
                        0);
+  // RegexVariantResult is logged on a thread pool.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
 
-  expected_counts[HistogramName("Digits")] = 2;
-  expected_counts[HistogramName("Digits.RightClickLink.Sending")] = 1;
-  expected_counts[HistogramName("Length")] = 2;
-  expected_counts[HistogramName("Length.RightClickLink.Sending")] = 1;
+  expected_counts.insert({
+      {HistogramName("SelectedDeviceIndex"), 1},
+      {HistogramName("SelectedDeviceIndex.ContextMenu"), 1},
+      {HistogramName("PhoneNumberDigits.RightClickLink.Sending"), 1},
+      {HistogramName("PhoneNumberLength.RightClickLink.Sending"), 1},
+  });
+  expected_counts[HistogramName("PhoneNumberDigits")] = 2;
+  expected_counts[HistogramName("PhoneNumberLength")] = 2;
+
   EXPECT_THAT(histograms.GetTotalCountsForPrefix(HistogramName("")),
               testing::ContainerEq(expected_counts));
 
-  histograms.ExpectUniqueSample(HistogramName("Digits"),
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberDigits"),
                                 /*sample=*/8, /*count=*/2);
-  histograms.ExpectUniqueSample(HistogramName("Digits.RightClickLink.Sending"),
-                                /*sample=*/8, /*count=*/1);
-  histograms.ExpectUniqueSample(HistogramName("Length"),
+  histograms.ExpectUniqueSample(
+      HistogramName("PhoneNumberDigits.RightClickLink.Sending"),
+      /*sample=*/8, /*count=*/1);
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberLength"),
                                 /*sample=*/9, /*count=*/2);
-  histograms.ExpectUniqueSample(HistogramName("Length.RightClickLink.Sending"),
-                                /*sample=*/9, /*count=*/1);
+  histograms.ExpectUniqueSample(
+      HistogramName("PhoneNumberLength.RightClickLink.Sending"),
+      /*sample=*/9, /*count=*/1);
 }
 
 IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest,
@@ -280,47 +299,84 @@ IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest,
   // Trigger a context menu for a selection with 8 digits and 9 characters.
   std::unique_ptr<TestRenderViewContextMenu> menu =
       InitContextMenu(GURL(kNonTelUrl), kLinkText, "1234-5678");
+  // RegexVariantResult is logged on a thread pool.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
 
-  base::HistogramTester::CountsMap expected_counts;
-  expected_counts[HistogramName("Digits")] = 1;
-  expected_counts[HistogramName("Digits.RightClickSelection.Showing")] = 1;
-  expected_counts[HistogramName("Length")] = 1;
-  expected_counts[HistogramName("Length.RightClickSelection.Showing")] = 1;
+  base::HistogramTester::CountsMap expected_counts = {
+      {HistogramName("DevicesToShow"), 1},
+      {HistogramName("DevicesToShow.ContextMenu"), 1},
+      {HistogramName("PhoneNumberDigits"), 1},
+      {HistogramName("PhoneNumberDigits.RightClickSelection.Showing"), 1},
+      {HistogramName("PhoneNumberLength"), 1},
+      {HistogramName("PhoneNumberLength.RightClickSelection.Showing"), 1},
+      {HistogramName(
+           "PhoneNumberRegexVariantResult.LowConfidenceModified.Showing"),
+       1},
+      {HistogramName("ContextMenuPhoneNumberParsingDelay"), 2},
+      {HistogramName("ContextMenuPhoneNumberParsingDelay.Simple"), 1},
+      {HistogramName(
+           "ContextMenuPhoneNumberParsingDelay.LowConfidenceModified"),
+       1},
+  };
   EXPECT_THAT(histograms.GetTotalCountsForPrefix(HistogramName("")),
               testing::ContainerEq(expected_counts));
 
-  histograms.ExpectUniqueSample(HistogramName("Digits"),
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberDigits"),
                                 /*sample=*/8, /*count=*/1);
   histograms.ExpectUniqueSample(
-      HistogramName("Digits.RightClickSelection.Showing"),
+      HistogramName("PhoneNumberDigits.RightClickSelection.Showing"),
       /*sample=*/8, /*count=*/1);
-  histograms.ExpectUniqueSample(HistogramName("Length"),
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberLength"),
                                 /*sample=*/9, /*count=*/1);
   histograms.ExpectUniqueSample(
-      HistogramName("Length.RightClickSelection.Showing"),
+      HistogramName("PhoneNumberLength.RightClickSelection.Showing"),
       /*sample=*/9, /*count=*/1);
+  histograms.ExpectUniqueSample(
+      HistogramName(
+          "PhoneNumberRegexVariantResult.LowConfidenceModified.Showing"),
+      /*sample=*/PhoneNumberRegexVariantResult::kBothMatch, /*count=*/1);
 
   // Send the number to the device in the context menu.
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_SINGLE_DEVICE,
                        0);
+  // RegexVariantResult is logged on a thread pool.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
 
-  expected_counts[HistogramName("Digits")] = 2;
-  expected_counts[HistogramName("Digits.RightClickSelection.Sending")] = 1;
-  expected_counts[HistogramName("Length")] = 2;
-  expected_counts[HistogramName("Length.RightClickSelection.Sending")] = 1;
+  expected_counts.insert({
+      {HistogramName("SelectedDeviceIndex"), 1},
+      {HistogramName("SelectedDeviceIndex.ContextMenu"), 1},
+      {HistogramName("PhoneNumberDigits.RightClickSelection.Sending"), 1},
+      {HistogramName("PhoneNumberLength"), 2},
+      {HistogramName("PhoneNumberLength.RightClickSelection.Sending"), 1},
+      {HistogramName(
+           "PhoneNumberRegexVariantResult.LowConfidenceModified.Sending"),
+       1},
+  });
+  expected_counts[HistogramName("PhoneNumberDigits")] = 2;
+  expected_counts[HistogramName("PhoneNumberLength")] = 2;
+
   EXPECT_THAT(histograms.GetTotalCountsForPrefix(HistogramName("")),
               testing::ContainerEq(expected_counts));
 
-  histograms.ExpectUniqueSample(HistogramName("Digits"),
-                                /*sample=*/8, /*count=*/2);
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberDigits"),
+                                /*sample=*/8,
+                                /*count=*/2);
   histograms.ExpectUniqueSample(
-      HistogramName("Digits.RightClickSelection.Sending"),
-      /*sample=*/8, /*count=*/1);
-  histograms.ExpectUniqueSample(HistogramName("Length"),
-                                /*sample=*/9, /*count=*/2);
+      HistogramName("PhoneNumberDigits.RightClickSelection.Sending"),
+      /*sample=*/8,
+      /*count=*/1);
+  histograms.ExpectUniqueSample(HistogramName("PhoneNumberLength"),
+                                /*sample=*/9,
+                                /*count=*/2);
   histograms.ExpectUniqueSample(
-      HistogramName("Length.RightClickSelection.Sending"),
-      /*sample=*/9, /*count=*/1);
+      HistogramName("PhoneNumberLength.RightClickSelection.Sending"),
+      /*sample=*/9,
+      /*count=*/1);
+  histograms.ExpectUniqueSample(
+      HistogramName(
+          "PhoneNumberRegexVariantResult.LowConfidenceModified.Sending"),
+      /*sample=*/PhoneNumberRegexVariantResult::kBothMatch,
+      /*count=*/1);
 }
 
 IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest, ContextMenu_UKM) {
@@ -444,6 +500,69 @@ IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest, LeftClick_ChooseDevice) {
   CheckLastSharingMessageSent("0123456789");
 }
 #endif
+
+IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest, OpenNewTabAndShowBubble) {
+  Init(sync_pb::SharingSpecificFields::CLICK_TO_CALL,
+       sync_pb::SharingSpecificFields::UNKNOWN);
+
+  // Open tab to different origin.
+  sessions_helper::OpenTab(
+      /*browser_index=*/0,
+      embedded_test_server()->GetURL("mock2.http", GetTestPageURL()));
+
+  // Expect dialog to be shown in context of active WebContents.
+  base::RunLoop run_loop;
+  ClickToCallUiController::GetOrCreateFromWebContents(
+      GetBrowser(0)->tab_strip_model()->GetWebContentsAt(1))
+      ->set_on_dialog_shown_closure_for_testing(run_loop.QuitClosure());
+
+  // Navigate initial tab to a tel link.
+  NavigateParams params(GetBrowser(0), GURL(kTelUrl), ui::PAGE_TRANSITION_LINK);
+  params.source_contents = web_contents();
+  params.initiator_origin = url::Origin::Create(GURL("mock.http"));
+  params.disposition = WindowOpenDisposition::CURRENT_TAB;
+  ui_test_utils::NavigateToURL(&params);
+
+  // Wait until the bubble is visible.
+  run_loop.Run();
+  views::BubbleDialogDelegateView* bubble =
+      GetPageActionIconView(PageActionIconType::kClickToCall)->GetBubble();
+  ASSERT_NE(nullptr, bubble);
+
+#if defined(OS_CHROMEOS)
+  // Ensure that the dialog shows the origin in column id 1.
+  EXPECT_NE(nullptr, static_cast<views::GridLayout*>(bubble->GetLayoutManager())
+                         ->GetColumnSet(1));
+#else
+  // Ensure that the dialog shows the origin in the footnote.
+  EXPECT_NE(nullptr, bubble->GetFootnoteViewForTesting());
+#endif  // defined(OS_CHROMEOS)
+}
+
+IN_PROC_BROWSER_TEST_F(ClickToCallBrowserTest, NavigateDifferentOrigin) {
+  Init(sync_pb::SharingSpecificFields::CLICK_TO_CALL,
+       sync_pb::SharingSpecificFields::UNKNOWN);
+
+  base::RunLoop run_loop;
+  PageActionIconView* click_to_call_icon =
+      GetPageActionIconView(PageActionIconType::kClickToCall);
+  ClickToCallUiController::GetOrCreateFromWebContents(web_contents())
+      ->set_on_dialog_shown_closure_for_testing(run_loop.QuitClosure());
+
+  // Click on the tel link to trigger the bubble view.
+  web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
+      base::ASCIIToUTF16("document.querySelector('a').click();"),
+      base::NullCallback());
+  // Wait until the bubble is visible.
+  run_loop.Run();
+  EXPECT_NE(nullptr, click_to_call_icon->GetBubble());
+
+  // Navigate to a different origin.
+  sessions_helper::NavigateTab(/*browser_index=*/0, GURL("https://google.com"));
+
+  // Ensure that the bubble is now closed.
+  EXPECT_EQ(nullptr, click_to_call_icon->GetBubble());
+}
 
 class ClickToCallPolicyTest
     : public policy::PolicyTest,

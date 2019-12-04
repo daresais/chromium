@@ -964,7 +964,7 @@ void WebLocalFrameImpl::ReloadImage(const WebNode& web_node) {
   hit_test_result.SetInnerNode(node);
   hit_test_result.SetToShadowHostIfInRestrictedShadowRoot();
   node = hit_test_result.InnerNodeOrImageMapImage();
-  if (auto* image_element = ToHTMLImageElementOrNull(*node))
+  if (auto* image_element = DynamicTo<HTMLImageElement>(*node))
     image_element->ForceReload();
 }
 
@@ -1880,9 +1880,11 @@ LocalFrame* WebLocalFrameImpl::CreateChildFrame(
   if (!webframe_child)
     return nullptr;
 
-  webframe_child->InitializeCoreFrame(*GetFrame()->GetPage(), owner_element,
-                                      name,
-                                      &GetFrame()->window_agent_factory());
+  webframe_child->InitializeCoreFrame(
+      *GetFrame()->GetPage(), owner_element, name,
+      owner_element->DisallowDocumentAccess()
+          ? nullptr
+          : &GetFrame()->window_agent_factory());
 
   DCHECK(webframe_child->Parent());
   return webframe_child->GetFrame();
@@ -2154,7 +2156,7 @@ void WebLocalFrameImpl::RenderFallbackContent() const {
   // TODO(ekaramad): If the owner renders its own content, then the current
   // ContentFrame() should detach (see https://crbug.com/850223).
   auto* owner = frame_->DeprecatedLocalOwner();
-  DCHECK(IsHTMLObjectElement(owner));
+  DCHECK(IsA<HTMLObjectElement>(owner));
   owner->RenderFallbackContent(frame_);
 }
 
@@ -2396,7 +2398,7 @@ void WebLocalFrameImpl::CopyImageAt(const WebPoint& pos_in_viewport) {
 void WebLocalFrameImpl::SaveImageAt(const WebPoint& pos_in_viewport) {
   Node* node = HitTestResultForVisualViewportPos(pos_in_viewport)
                    .InnerNodeOrImageMapImage();
-  if (!node || !(IsA<HTMLCanvasElement>(*node) || IsHTMLImageElement(*node)))
+  if (!node || !(IsA<HTMLCanvasElement>(*node) || IsA<HTMLImageElement>(*node)))
     return;
 
   String url = To<Element>(*node).ImageSourceURL();

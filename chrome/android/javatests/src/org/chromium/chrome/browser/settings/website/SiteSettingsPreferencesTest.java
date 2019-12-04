@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.settings.website;
 
+import android.os.Build;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 import android.support.v7.preference.Preference;
@@ -31,10 +32,11 @@ import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.settings.ChromeBaseCheckBoxPreference;
 import org.chromium.chrome.browser.settings.ChromeSwitchPreference;
 import org.chromium.chrome.browser.settings.LocationSettings;
-import org.chromium.chrome.browser.settings.Preferences;
+import org.chromium.chrome.browser.settings.SettingsActivity;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
+import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentSwitches;
@@ -74,12 +76,12 @@ public class SiteSettingsPreferencesTest {
 
     private void setAllowLocation(final boolean enabled) {
         LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
-        final Preferences preferenceActivity = SiteSettingsTestUtils.startSiteSettingsCategory(
+        final SettingsActivity settingsActivity = SiteSettingsTestUtils.startSiteSettingsCategory(
                 SiteSettingsCategory.Type.DEVICE_LOCATION);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SingleCategoryPreferences websitePreferences =
-                    (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+                    (SingleCategoryPreferences) settingsActivity.getMainFragment();
             ChromeSwitchPreference location =
                     (ChromeSwitchPreference) websitePreferences.findPreference(
                             SingleCategoryPreferences.BINARY_TOGGLE_KEY);
@@ -87,7 +89,7 @@ public class SiteSettingsPreferencesTest {
             websitePreferences.onPreferenceChange(location, enabled);
             Assert.assertEquals("Location should be " + (enabled ? "allowed" : "blocked"), enabled,
                     LocationSettings.getInstance().areAllLocationSettingsEnabled());
-            preferenceActivity.finish();
+            settingsActivity.finish();
         });
     }
 
@@ -145,12 +147,12 @@ public class SiteSettingsPreferencesTest {
         Assert.assertTrue(mActivityTestRule.getInfoBars().isEmpty());
     }
 
-    private void setCookiesEnabled(final Preferences preferenceActivity, final boolean enabled) {
+    private void setCookiesEnabled(final SettingsActivity settingsActivity, final boolean enabled) {
         TestThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
                 final SingleCategoryPreferences websitePreferences =
-                        (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+                        (SingleCategoryPreferences) settingsActivity.getMainFragment();
                 final ChromeSwitchPreference cookies =
                         (ChromeSwitchPreference) websitePreferences.findPreference(
                                 SingleCategoryPreferences.BINARY_TOGGLE_KEY);
@@ -174,11 +176,11 @@ public class SiteSettingsPreferencesTest {
         });
     }
 
-    private void setThirdPartyCookiesEnabled(final Preferences preferenceActivity,
-            final boolean enabled) {
+    private void setThirdPartyCookiesEnabled(
+            final SettingsActivity settingsActivity, final boolean enabled) {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             final SingleCategoryPreferences websitePreferences =
-                    (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+                    (SingleCategoryPreferences) settingsActivity.getMainFragment();
             final ChromeBaseCheckBoxPreference thirdPartyCookies =
                     (ChromeBaseCheckBoxPreference) websitePreferences.findPreference(
                             SingleCategoryPreferences.THIRD_PARTY_COOKIES_TOGGLE_KEY);
@@ -193,17 +195,33 @@ public class SiteSettingsPreferencesTest {
 
     private void setGlobalToggleForCategory(
             final @SiteSettingsCategory.Type int type, final boolean enabled) {
-        final Preferences preferenceActivity =
+        final SettingsActivity settingsActivity =
                 SiteSettingsTestUtils.startSiteSettingsCategory(type);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SingleCategoryPreferences preferences =
-                    (SingleCategoryPreferences) preferenceActivity.getMainFragment();
+                    (SingleCategoryPreferences) settingsActivity.getMainFragment();
             ChromeSwitchPreference toggle = (ChromeSwitchPreference) preferences.findPreference(
                     SingleCategoryPreferences.BINARY_TOGGLE_KEY);
             preferences.onPreferenceChange(toggle, enabled);
         });
-        preferenceActivity.finish();
+        settingsActivity.finish();
+    }
+
+    private void setGlobalTriStateToggleForCategory(
+            final @SiteSettingsCategory.Type int type, final int newValue) {
+        final SettingsActivity settingsActivity =
+                SiteSettingsTestUtils.startSiteSettingsCategory(type);
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            SingleCategoryPreferences preferences =
+                    (SingleCategoryPreferences) settingsActivity.getMainFragment();
+            TriStateSiteSettingsPreference triStateToggle =
+                    (TriStateSiteSettingsPreference) preferences.findPreference(
+                            SingleCategoryPreferences.TRI_STATE_TOGGLE_KEY);
+            preferences.onPreferenceChange(triStateToggle, newValue);
+        });
+        settingsActivity.finish();
     }
 
     private void setEnablePopups(final boolean enabled) {
@@ -232,12 +250,12 @@ public class SiteSettingsPreferencesTest {
      */
     private void checkPreferencesForCategory(
             final @SiteSettingsCategory.Type int type, String[] expectedKeys) {
-        final Preferences preferenceActivity =
+        final SettingsActivity settingsActivity =
                 SiteSettingsTestUtils.startSiteSettingsCategory(type);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             PreferenceFragmentCompat preferenceFragment =
-                    (PreferenceFragmentCompat) preferenceActivity.getMainFragment();
+                    (PreferenceFragmentCompat) settingsActivity.getMainFragment();
             PreferenceScreen preferenceScreen = preferenceFragment.getPreferenceScreen();
             int preferenceCount = preferenceScreen.getPreferenceCount();
 
@@ -254,7 +272,7 @@ public class SiteSettingsPreferencesTest {
                     actualKeys.toString() + " should match " + Arrays.toString(expectedKeys),
                     Arrays.equals(actualKeys.toArray(), expectedKeys));
         });
-        preferenceActivity.finish();
+        settingsActivity.finish();
     }
 
     /**
@@ -264,13 +282,13 @@ public class SiteSettingsPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     public void testThirdPartyCookieToggleGetsDisabled() {
-        Preferences preferenceActivity =
+        SettingsActivity settingsActivity =
                 SiteSettingsTestUtils.startSiteSettingsCategory(SiteSettingsCategory.Type.COOKIES);
-        setCookiesEnabled(preferenceActivity, true);
-        setThirdPartyCookiesEnabled(preferenceActivity, false);
-        setThirdPartyCookiesEnabled(preferenceActivity, true);
-        setCookiesEnabled(preferenceActivity, false);
-        preferenceActivity.finish();
+        setCookiesEnabled(settingsActivity, true);
+        setThirdPartyCookiesEnabled(settingsActivity, false);
+        setThirdPartyCookiesEnabled(settingsActivity, true);
+        setCookiesEnabled(settingsActivity, false);
+        settingsActivity.finish();
     }
 
     /**
@@ -280,10 +298,10 @@ public class SiteSettingsPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     public void testCookiesNotBlocked() throws Exception {
-        Preferences preferenceActivity =
+        SettingsActivity settingsActivity =
                 SiteSettingsTestUtils.startSiteSettingsCategory(SiteSettingsCategory.Type.COOKIES);
-        setCookiesEnabled(preferenceActivity, true);
-        preferenceActivity.finish();
+        setCookiesEnabled(settingsActivity, true);
+        settingsActivity.finish();
 
         final String url = mTestServer.getURL("/chrome/test/data/android/cookie.html");
 
@@ -307,10 +325,10 @@ public class SiteSettingsPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     public void testCookiesBlocked() throws Exception {
-        Preferences preferenceActivity =
+        SettingsActivity settingsActivity =
                 SiteSettingsTestUtils.startSiteSettingsCategory(SiteSettingsCategory.Type.COOKIES);
-        setCookiesEnabled(preferenceActivity, false);
-        preferenceActivity.finish();
+        setCookiesEnabled(settingsActivity, false);
+        settingsActivity.finish();
 
         final String url = mTestServer.getURL("/chrome/test/data/android/cookie.html");
 
@@ -373,14 +391,14 @@ public class SiteSettingsPreferencesTest {
 
     private void resetSite(WebsiteAddress address) {
         Website website = new Website(address, address);
-        final Preferences preferenceActivity =
+        final SettingsActivity settingsActivity =
                 SiteSettingsTestUtils.startSingleWebsitePreferences(website);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SingleWebsitePreferences websitePreferences =
-                    (SingleWebsitePreferences) preferenceActivity.getMainFragment();
+                    (SingleWebsitePreferences) settingsActivity.getMainFragment();
             websitePreferences.resetSite();
         });
-        preferenceActivity.finish();
+        settingsActivity.finish();
     }
 
     /**
@@ -422,8 +440,8 @@ public class SiteSettingsPreferencesTest {
     @SmallTest
     @Feature({"Preferences"})
     public void testSiteSettingsMenu() {
-        final Preferences preferenceActivity = SiteSettingsTestUtils.startSiteSettingsMenu("");
-        preferenceActivity.finish();
+        final SettingsActivity settingsActivity = SiteSettingsTestUtils.startSiteSettingsMenu("");
+        settingsActivity.finish();
     }
 
     /**
@@ -432,6 +450,7 @@ public class SiteSettingsPreferencesTest {
     @Test
     @SmallTest
     @Feature({"Preferences"})
+    @EnableFeatures("QuietNotificationPrompts")
     public void testOnlyExpectedPreferencesShown() {
         // If you add a category in the SiteSettings UI, please add a test for it below.
         Assert.assertEquals(19, SiteSettingsCategory.Type.NUM_ENTRIES);
@@ -442,6 +461,20 @@ public class SiteSettingsPreferencesTest {
         String[] binaryToggleWithAllowed = new String[] {"binary_toggle", "allowed_group"};
         String[] cookie = new String[] {"binary_toggle", "third_party_cookies", "add_exception"};
         String[] protectedMedia = new String[] {"tri_state_toggle", "protected_content_learn_more"};
+        String[] notifications_enabled;
+        String[] notifications_disabled;
+        // The "notifications_vibrate" option has been removed in Android O but is present in
+        // earlier versions.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            notifications_enabled = new String[] {"binary_toggle", "notifications_quiet_ui",
+                    "notifications_vibrate", "allowed_group"};
+            notifications_disabled =
+                    new String[] {"binary_toggle", "notifications_vibrate", "allowed_group"};
+        } else {
+            notifications_enabled =
+                    new String[] {"binary_toggle", "notifications_quiet_ui", "allowed_group"};
+            notifications_disabled = binaryToggleWithAllowed;
+        }
 
         HashMap<Integer, Pair<String[], String[]>> testCases =
                 new HashMap<Integer, Pair<String[], String[]>>();
@@ -461,10 +494,8 @@ public class SiteSettingsPreferencesTest {
         testCases.put(SiteSettingsCategory.Type.MICROPHONE, new Pair<>(binaryToggle, binaryToggle));
         testCases.put(SiteSettingsCategory.Type.NFC, new Pair<>(binaryToggle, binaryToggle));
         testCases.put(SiteSettingsCategory.Type.NOTIFICATIONS,
-                new Pair<>(binaryToggleWithAllowed, binaryToggleWithAllowed));
+                new Pair<>(notifications_disabled, notifications_enabled));
         testCases.put(SiteSettingsCategory.Type.POPUPS, new Pair<>(binaryToggle, binaryToggle));
-        testCases.put(SiteSettingsCategory.Type.PROTECTED_MEDIA,
-                new Pair<>(protectedMedia, protectedMedia));
         testCases.put(SiteSettingsCategory.Type.SENSORS, new Pair<>(binaryToggle, binaryToggle));
         testCases.put(SiteSettingsCategory.Type.SOUND,
                 new Pair<>(binaryToggleWithException, binaryToggleWithException));
@@ -475,12 +506,24 @@ public class SiteSettingsPreferencesTest {
 
         for (@SiteSettingsCategory.Type int key = 0; key < SiteSettingsCategory.Type.NUM_ENTRIES;
                 ++key) {
+            // Protected media has a tri-state global toggle so it needs to be handled slightly
+            // differently.
+            if (key == SiteSettingsCategory.Type.PROTECTED_MEDIA) {
+                setGlobalTriStateToggleForCategory(key, ContentSettingValues.ALLOW);
+                checkPreferencesForCategory(key, protectedMedia);
+                setGlobalTriStateToggleForCategory(key, ContentSettingValues.ASK);
+                checkPreferencesForCategory(key, protectedMedia);
+                setGlobalTriStateToggleForCategory(key, ContentSettingValues.BLOCK);
+                checkPreferencesForCategory(key, protectedMedia);
+                continue;
+            }
+
             Pair<String[], String[]> values = testCases.get(key);
 
             if (key == SiteSettingsCategory.Type.ALL_SITES
                     || key == SiteSettingsCategory.Type.USE_STORAGE) {
                 checkPreferencesForCategory(key, values.first);
-                return;
+                continue;
             }
 
             // Disable the category and check for the right preferences.

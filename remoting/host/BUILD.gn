@@ -236,6 +236,11 @@ static_library("common") {
     "ipc_video_frame_capturer.h",
     "it2me_desktop_environment.cc",
     "it2me_desktop_environment.h",
+    "keyboard_layout_monitor.cc",
+    "keyboard_layout_monitor.h",
+    "keyboard_layout_monitor_linux.cc",
+    "keyboard_layout_monitor_mac.cc",
+    "keyboard_layout_monitor_win.cc",
     "me2me_desktop_environment.cc",
     "me2me_desktop_environment.h",
     "mouse_cursor_monitor_proxy.cc",
@@ -690,7 +695,7 @@ if (enable_remoting_host) {
     script = "//remoting/tools/build/remoting_localize.py"
     args = [
              "--locale_dir",
-             rebase_path(webapp_locale_dir, root_build_dir),
+             rebase_path(resources_locale_dir, root_build_dir),
              "--variables",
              rebase_path(branding_path, root_build_dir),
              "--template",

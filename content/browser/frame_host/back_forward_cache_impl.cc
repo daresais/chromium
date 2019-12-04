@@ -82,8 +82,7 @@ void SetPageFrozenImpl(
 bool IsServiceWorkerSupported() {
   static constexpr base::FeatureParam<bool> service_worker_supported(
       &features::kBackForwardCache, "service_worker_supported", false);
-  return service_worker_supported.Get() &&
-         base::FeatureList::IsEnabled(features::kServiceWorkerOnUI);
+  return service_worker_supported.Get();
 }
 
 bool IsGeolocationSupported() {
@@ -274,6 +273,8 @@ BackForwardCacheCanStoreDocumentResult BackForwardCacheImpl::CanStoreDocument(
 
   CanStoreRenderFrameHost(&result, rfh);
 
+  DVLOG(1) << "CanStoreDocument: " << rfh->GetLastCommittedURL() << " : "
+           << result.ToString();
   return result;
 }
 
@@ -282,7 +283,7 @@ BackForwardCacheCanStoreDocumentResult BackForwardCacheImpl::CanStoreDocument(
 void BackForwardCacheImpl::CanStoreRenderFrameHost(
     BackForwardCacheCanStoreDocumentResult* result,
     RenderFrameHostImpl* rfh) {
-  if (!rfh->dom_content_loaded())
+  if (!rfh->IsDOMContentLoaded())
     result->No(BackForwardCacheMetrics::NotRestoredReason::kLoading);
 
   // If the rfh has ever granted media access, prevent it from entering cache.

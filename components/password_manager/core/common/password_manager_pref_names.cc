@@ -8,9 +8,6 @@
 namespace password_manager {
 namespace prefs {
 
-const char kBlacklistedCredentialsNormalized[] =
-    "profile.blacklisted_credentials_normalized";
-
 const char kCredentialsEnableAutosignin[] = "credentials_enable_autosignin";
 const char kCredentialsEnableService[] = "credentials_enable_service";
 
@@ -43,6 +40,8 @@ const char kSignInPasswordPromoRevive[] =
 
 const char kAccountStorageOptedInAccounts[] =
     "profile.password_account_storage_opted_in_accounts";
+
+const char kIsAccountStoreDefault[] = "profile.is_account_store_default";
 
 const char kSyncPasswordHash[] = "profile.sync_password_hash";
 

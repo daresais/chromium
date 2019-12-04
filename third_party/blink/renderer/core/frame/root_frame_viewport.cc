@@ -558,8 +558,8 @@ bool RootFrameViewport::ScrollAnimatorEnabled() const {
   return LayoutViewport().ScrollAnimatorEnabled();
 }
 
-CompositorElementId RootFrameViewport::GetCompositorElementId() const {
-  return LayoutViewport().GetCompositorElementId();
+CompositorElementId RootFrameViewport::GetScrollElementId() const {
+  return LayoutViewport().GetScrollElementId();
 }
 
 CompositorElementId RootFrameViewport::GetScrollbarElementId(
@@ -612,6 +612,11 @@ const cc::SnapContainerData* RootFrameViewport::GetSnapContainerData() const {
 void RootFrameViewport::SetSnapContainerData(
     base::Optional<cc::SnapContainerData> data) {
   LayoutViewport().SetSnapContainerData(data);
+}
+
+bool RootFrameViewport::SetTargetSnapAreaElementIds(
+    cc::TargetSnapAreaElementIds snap_target_ids) {
+  return LayoutViewport().SetTargetSnapAreaElementIds(snap_target_ids);
 }
 
 base::Optional<FloatPoint> RootFrameViewport::GetSnapPositionAndSetTarget(

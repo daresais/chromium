@@ -9,9 +9,9 @@ specific bindings, such as ECMAScript bindings.
 """
 
 import copy
-import string
 
 from .codegen_accumulator import CodeGenAccumulator
+from .codegen_format import format_template
 from .mako_renderer import MakoRenderer
 
 
@@ -42,7 +42,7 @@ class CodeNode(object):
     - Graph structure
     CodeNode can be nested and |outer| points to the nesting CodeNode.  Also
     CodeNode can make a sequence and |prev| points to the previous CodeNode.
-    See also |SequenceNode|.
+    See also |ListNode|.
 
     - Template rendering
     CodeNode has template text and template variable bindings.  Either of
@@ -64,39 +64,7 @@ class CodeNode(object):
             # SymbolDefinitionNodes at SymbolScopeNode.
             self.undefined_code_symbols = []
 
-    class _LooseFormatter(string.Formatter):
-        def __init__(self):
-            string.Formatter.__init__(self)
-            self._loose_formatter_indexing_count_ = 0
-
-        def get_value(self, key, args, kwargs):
-            if isinstance(key, (int, long)):
-                return args[key]
-            assert isinstance(key, str)
-            if not key:
-                # Before Python 3.1, when a positional argument specifier is
-                # omitted, |format_string="{}"| produces |key=""|.
-                index = self._loose_formatter_indexing_count_
-                self._loose_formatter_indexing_count_ += 1
-                return args[index]
-            if key in kwargs:
-                return kwargs[key]
-            else:
-                return "{" + key + "}"
-
     _gensym_seq_id = 0
-
-    @classmethod
-    def format_template(cls, format_string, *args, **kwargs):
-        """
-        Formats a string like the built-in |format| allowing unbound keys.
-
-            format_template("${template_var} {format_var}", format_var=42)
-        will produce
-            "${template_var} 42"
-        without raising an exception that |template_var| is unbound.
-        """
-        return cls._LooseFormatter().format(format_string, *args, **kwargs)
 
     @classmethod
     def gensym(cls):
@@ -119,7 +87,7 @@ class CodeNode(object):
 
         Good example:
             sym = CodeNode.gensym()
-            template_text = CodeNode.format_template(
+            template_text = format_template(
                 "abc ${{{node_a}}} xyz", node_a=sym)
             a = CodeNodeA(template_text='123')
             b = CodeNodeB(template_text=template_text, {sym: a})
@@ -229,22 +197,23 @@ class CodeNode(object):
         self._prev = prev
 
     @property
-    def upstream(self):
+    def upstream_of_scope(self):
         """
-        Returns the upstream CodeNode in terms of code flow.
-
-        The upstream CodeNode is defined as:
-        1. the previous CodeNode, or
-        2. the outer CodeNode, or
-        3. None (as this is a top-level node)
+        Returns the upstream CodeNode in the same or outer scope.  Only the set
+        of recursively-collected |upstream_of_scope|s can bring symbol
+        definitions effective to this node.
         """
-        if self.prev is not None:
-            prev = self.prev
-            while isinstance(prev, SymbolScopeNode) and prev:
-                prev = prev[-1]
-            return prev
-        else:
+        if self.prev is None:
             return self.outer
+
+        node = self.prev
+        while isinstance(node, SequenceNode):
+            if isinstance(node, SymbolScopeNode):
+                return node.upstream_of_scope
+            if not node:
+                break
+            node = node[-1]
+        return node
 
     @property
     def template_vars(self):
@@ -327,8 +296,8 @@ class CodeNode(object):
         """
         Returns True if |symbol_node| is defined at this point or upstream.
         """
-        if self.upstream:
-            return self.upstream.is_code_symbol_defined(symbol_node)
+        if self.outer:
+            return self.upstream_of_scope.is_code_symbol_defined(symbol_node)
         return False
 
     def is_code_symbol_registered(self, symbol_node):
@@ -369,7 +338,7 @@ class LiteralNode(CodeNode):
 
     def __init__(self, literal_text):
         literal_text_gensym = CodeNode.gensym()
-        template_text = CodeNode.format_template(
+        template_text = format_template(
             "${{{literal_text}}}", literal_text=literal_text_gensym)
         template_vars = {literal_text_gensym: literal_text}
 
@@ -390,9 +359,9 @@ class TextNode(CodeNode):
         CodeNode.__init__(self, template_text=template_text)
 
 
-class SequenceNode(CodeNode):
+class ListNode(CodeNode):
     """
-    Represents a sequence of nodes.
+    Represents a list of nodes.
 
     append, extend, insert, and remove work just like built-in list's methods
     except that addition and removal of None have no effect.
@@ -404,7 +373,7 @@ class SequenceNode(CodeNode):
 
         element_nodes_gensym = CodeNode.gensym()
         element_nodes = []
-        template_text = CodeNode.format_template(
+        template_text = format_template(
             """\
 % for node in {element_nodes}:
 ${node}\\
@@ -490,9 +459,35 @@ ${node}\\
         node.reset_prev(None)
 
 
+class SequenceNode(ListNode):
+    """
+    Represents a sequence of generated code without introducing any new scope,
+    and provides the points where SymbolDefinitionNodes can be inserted.
+    """
+
+    def __init__(self, code_nodes=None, separator="\n", separator_last=""):
+        ListNode.__init__(
+            self,
+            code_nodes=code_nodes,
+            separator=separator,
+            separator_last=separator_last)
+
+    def _render(self, renderer, last_render_state):
+        duplicates = []
+        for element_node in self:
+            if (isinstance(element_node, SymbolDefinitionNode)
+                    and element_node.is_duplicated()):
+                duplicates.append(element_node)
+        for element_node in duplicates:
+            self.remove(element_node)
+
+        return super(SequenceNode, self)._render(
+            renderer=renderer, last_render_state=last_render_state)
+
+
 class SymbolScopeNode(SequenceNode):
     """
-    Represents a sequence of nodes.
+    Represents a scope of generated code.
 
     If SymbolNodes are rendered inside this node, this node will attempt to
     insert corresponding SymbolDefinitionNodes appropriately.
@@ -508,14 +503,6 @@ class SymbolScopeNode(SequenceNode):
         self._registered_code_symbols = set()
 
     def _render(self, renderer, last_render_state):
-        duplicates = []
-        for element_node in self:
-            if (isinstance(element_node, SymbolDefinitionNode)
-                    and element_node.is_duplicated()):
-                duplicates.append(element_node)
-        for element_node in duplicates:
-            self.remove(element_node)
-
         for symbol_node in last_render_state.undefined_code_symbols:
             if (self.is_code_symbol_registered(symbol_node)
                     and not self.is_code_symbol_defined(symbol_node)):
@@ -557,7 +544,7 @@ class SymbolScopeNode(SequenceNode):
 
         def insert_right_before_first_use(symbol_scope_node):
             for index, node in enumerate(symbol_scope_node):
-                if isinstance(node, SymbolScopeNode):
+                if isinstance(node, SequenceNode):
                     did_insert = insert_right_before_first_use(node)
                     if did_insert:
                         return True
@@ -666,7 +653,7 @@ class SymbolNode(CodeNode):
         return node
 
 
-class SymbolDefinitionNode(SymbolScopeNode):
+class SymbolDefinitionNode(SequenceNode):
     """
     Represents a definition of a code symbol.
 
@@ -677,7 +664,7 @@ class SymbolDefinitionNode(SymbolScopeNode):
     def __init__(self, symbol_node, code_nodes=None):
         assert isinstance(symbol_node, SymbolNode)
 
-        SymbolScopeNode.__init__(self, code_nodes)
+        SequenceNode.__init__(self, code_nodes)
 
         self._symbol_node = symbol_node
 
@@ -695,8 +682,7 @@ class SymbolDefinitionNode(SymbolScopeNode):
                      self).is_code_symbol_defined(symbol_node)
 
     def is_duplicated(self):
-        return (self.upstream is not None
-                and self.upstream.is_code_symbol_defined(self._symbol_node))
+        return self.upstream_of_scope.is_code_symbol_defined(self._symbol_node)
 
 
 class ConditionalNode(CodeNode):
@@ -743,7 +729,7 @@ class ConditionalExitNode(ConditionalNode):
             "conditional": CodeNode.gensym(),
             "body": CodeNode.gensym(),
         }
-        template_text = CodeNode.format_template(
+        template_text = format_template(
             """\
 if (${{{conditional}}}) {{
   ${{{body}}}
@@ -851,7 +837,7 @@ class FunctionDefinitionNode(CodeNode):
 
         maybe_colon = " : " if member_initializer_list else ""
 
-        template_text = CodeNode.format_template(
+        template_text = format_template(
             """\
 ${{{comment}}}
 ${{{return_type}}} ${{{name}}}(${{{arg_decls}}})\
@@ -865,11 +851,11 @@ ${{{return_type}}} ${{{name}}}(${{{arg_decls}}})\
             gensyms["name"]:
             name,
             gensyms["arg_decls"]:
-            SequenceNode(arg_decls, separator=", "),
+            ListNode(arg_decls, separator=", "),
             gensyms["return_type"]:
             return_type,
             gensyms["member_initializer_list"]:
-            SequenceNode(member_initializer_list, separator=", "),
+            ListNode(member_initializer_list, separator=", "),
             gensyms["body"]:
             body,
             gensyms["comment"]:

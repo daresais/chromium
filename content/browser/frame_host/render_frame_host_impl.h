@@ -48,6 +48,7 @@
 #include "content/common/frame_delete_intention.h"
 #include "content/common/frame_replication_state.h"
 #include "content/common/input/input_handler.mojom.h"
+#include "content/common/input/input_injector.mojom-forward.h"
 #include "content/common/navigation_params.mojom.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -58,12 +59,14 @@
 #include "content/public/common/previews_state.h"
 #include "content/public/common/transferrable_url_loader.mojom.h"
 #include "media/mojo/mojom/interface_factory.mojom-forward.h"
+#include "media/mojo/mojom/media_metrics_provider.mojom-forward.h"
 #include "media/mojo/services/media_metrics_provider.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "net/base/network_isolation_key.h"
@@ -79,7 +82,6 @@
 #include "third_party/blink/public/common/frame/blocked_navigation_types.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/frame/user_activation_update_type.h"
-#include "third_party/blink/public/common/sudden_termination_disabler_type.h"
 #include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "third_party/blink/public/mojom/commit_result/commit_result.mojom.h"
@@ -263,6 +265,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   bool IsCrossProcessSubframe() override;
   const GURL& GetLastCommittedURL() override;
   const url::Origin& GetLastCommittedOrigin() override;
+  const net::NetworkIsolationKey& GetNetworkIsolationKey() override;
   gfx::NativeView GetNativeView() override;
   void AddMessageToConsole(blink::mojom::ConsoleMessageLevel level,
                            const std::string& message) override;
@@ -303,7 +306,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void DisableBeforeUnloadHangMonitorForTesting() override;
   bool IsBeforeUnloadHangMonitorDisabledForTesting() override;
   bool GetSuddenTerminationDisablerState(
-      blink::SuddenTerminationDisablerType disabler_type) override;
+      blink::mojom::SuddenTerminationDisablerType disabler_type) override;
   bool IsFeatureEnabled(blink::mojom::FeaturePolicyFeature feature) override;
   bool IsFeatureEnabled(blink::mojom::FeaturePolicyFeature feature,
                         blink::PolicyValue threshold_value) override;
@@ -330,6 +333,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
                                   BrowserControlsState current,
                                   bool animate) override;
   void Reload() override;
+  bool IsDOMContentLoaded() override;
 
   void SendAccessibilityEventsToManager(
       const AXEventNotificationDetails& details);
@@ -520,9 +524,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // FrameTreeNode. The proper way to check whether a frame is loading is to
   // call FrameTreeNode::IsLoading.
   bool is_loading() const { return is_loading_; }
-
-  // Returns true if this frame has fired DOMContentLoaded.
-  bool dom_content_loaded() const { return dom_content_loaded_; }
 
   // Returns true if this is a top-level frame, or if this frame's RenderFrame
   // is in a different process from its parent frame. Local roots are
@@ -898,9 +899,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
     return frame_host_associated_receiver_;
   }
 
-  mojo::Binding<service_manager::mojom::InterfaceProvider>&
-  document_scoped_interface_provider_binding_for_testing() {
-    return document_scoped_interface_provider_binding_;
+  mojo::Receiver<service_manager::mojom::InterfaceProvider>&
+  document_scoped_interface_provider_receiver_for_testing() {
+    return document_scoped_interface_provider_receiver_;
   }
   void SetKeepAliveTimeoutForTesting(base::TimeDelta timeout);
 
@@ -968,8 +969,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
     return back_forward_cache_disabled_reasons_;
   }
 
-  void AddServiceWorkerContainerHost(ServiceWorkerContainerHost* host);
-  void RemoveServiceWorkerContainerHost(ServiceWorkerContainerHost* host);
+  void AddServiceWorkerContainerHost(
+      const std::string& uuid,
+      base::WeakPtr<ServiceWorkerContainerHost> host);
+  void RemoveServiceWorkerContainerHost(const std::string& uuid);
 
   // Called to taint |this| so the pages which have requested MediaStream
   // (audio/video/etc capture stream) access would not enter BackForwardCache.
@@ -1157,8 +1160,14 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void BindCacheStorage(
       mojo::PendingReceiver<blink::mojom::CacheStorage> receiver);
 
+  void BindInputInjectorReceiver(
+      mojo::PendingReceiver<mojom::InputInjector> receiver);
+
   void BindSmsReceiverReceiver(
       mojo::PendingReceiver<blink::mojom::SmsReceiver> receiver);
+
+  void BindRestrictedCookieManager(
+      mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver);
 
   // Creates connections to WebUSB interfaces bound to this frame.
   void CreateWebUsbService(
@@ -1170,10 +1179,19 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void BindMediaInterfaceFactoryReceiver(
       mojo::PendingReceiver<media::mojom::InterfaceFactory> receiver);
 
+  void BindMediaMetricsProviderReceiver(
+      mojo::PendingReceiver<media::mojom::MediaMetricsProvider> receiver);
+
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
   void BindMediaRemoterFactoryReceiver(
       mojo::PendingReceiver<media::mojom::RemoterFactory> receiver);
 #endif
+
+  void CreateAudioInputStreamFactory(
+      mojo::PendingReceiver<mojom::RendererAudioInputStreamFactory> receiver);
+
+  void CreateAudioOutputStreamFactory(
+      mojo::PendingReceiver<mojom::RendererAudioOutputStreamFactory> receiver);
 
   // https://mikewest.github.io/corpp/#initialize-embedder-policy-for-global
   network::mojom::CrossOriginEmbedderPolicy cross_origin_embedder_policy()
@@ -1194,12 +1212,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   bool has_committed_any_navigation() const {
     return has_committed_any_navigation_;
-  }
-
-  // Returns the network isolation key used for subresources from the currently
-  // committed navigation. It is reset on each document commit.
-  const net::NetworkIsolationKey& network_isolation_key() const {
-    return network_isolation_key_;
   }
 
   std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
@@ -1259,6 +1271,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
       blink::WebInsecureRequestPolicy policy) override;
   void EnforceInsecureNavigationsSet(const std::vector<uint32_t>& set) override;
   void DidChangeActiveSchedulerTrackedFeatures(uint64_t features_mask) override;
+  void SuddenTerminationDisablerChanged(
+      bool present,
+      blink::mojom::SuddenTerminationDisablerType disabler_type) override;
 
  protected:
   friend class RenderFrameHostFactory;
@@ -1446,9 +1461,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
       ax::mojom::Event event_to_fire);
   void OnAccessibilitySnapshotResponse(int callback_id,
                                        const AXContentTreeUpdate& snapshot);
-  void OnSuddenTerminationDisablerChanged(
-      bool present,
-      blink::SuddenTerminationDisablerType disabler_type);
   void OnDidFinishDocumentLoad();
   void OnDidStopLoading();
   void OnDidChangeLoadProgress(double load_progress);
@@ -1674,11 +1686,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // Deletes the Web Bluetooth Service owned by the frame.
   void DeleteWebBluetoothService(
       WebBluetoothServiceImpl* web_bluetooth_service);
-
-  void CreateAudioInputStreamFactory(
-      mojo::PendingReceiver<mojom::RendererAudioInputStreamFactory> receiver);
-  void CreateAudioOutputStreamFactory(
-      mojo::PendingReceiver<mojom::RendererAudioOutputStreamFactory> receiver);
 
   // Callback for connection error on the media::mojom::InterfaceFactory client.
   void OnMediaInterfaceFactoryConnectionError();
@@ -2267,9 +2274,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
   ContentBrowserClient::NonNetworkURLLoaderFactoryMap
       non_network_url_loader_factories_;
 
-  // Bitfield for renderer-side state that blocks fast shutdown of the frame.
-  blink::SuddenTerminationDisablerType
-      sudden_termination_disabler_types_enabled_ = 0;
+  // Renderer-side states that blocks fast shutdown of the frame.
+  bool has_before_unload_handler_ = false;
+  bool has_unload_handler_ = false;
 
   base::Optional<RenderFrameAudioOutputStreamFactory>
       audio_service_audio_output_stream_factory_;
@@ -2365,8 +2372,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // wrong document in the RenderFrame. The benefit of the approach taken is
   // that it does not necessitate using channel-associated InterfaceProvider
   // interfaces.
-  mojo::Binding<service_manager::mojom::InterfaceProvider>
-      document_scoped_interface_provider_binding_;
+  mojo::Receiver<service_manager::mojom::InterfaceProvider>
+      document_scoped_interface_provider_receiver_{this};
 
   // BrowserInterfaceBroker implementation through which this
   // RenderFrameHostImpl exposes document-scoped Mojo services to the currently
@@ -2378,9 +2385,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // Logs interface requests that arrive after the frame has already committed a
   // non-same-document navigation, and has already unbound
-  // |document_scoped_interface_provider_binding_| from the interface connection
-  // that had been used to service RenderFrame::GetRemoteInterface for the
-  // previously active document in the frame.
+  // |document_scoped_interface_provider_receiver_| from the interface
+  // connection that had been used to service RenderFrame::GetRemoteInterface
+  // for the previously active document in the frame.
   std::unique_ptr<DroppedInterfaceRequestLogger>
       dropped_interface_request_logger_;
 
@@ -2530,11 +2537,14 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // Keep the list of ServiceWorkerContainerHosts so that they can observe when
   // the frame goes in/out of BackForwardCache.
+  // These pointers must be dereferenced on the
+  // |ServiceWorkerContext::GetCoreThreadId()| thread only.
   // TODO(yuzus): Make this a single pointer. A frame should only have a single
   // container host, but probably during a navigation the old container host is
   // still alive when the new container host is created and added to this
   // vector, and the old container host is destroyed shortly after navigation.
-  std::vector<ServiceWorkerContainerHost*> service_worker_container_hosts_;
+  std::map<std::string, base::WeakPtr<ServiceWorkerContainerHost>>
+      service_worker_container_hosts_;
 
   // The reason why the last attempted navigation in the frame didn't use a new
   // BrowsingInstance.

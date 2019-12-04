@@ -11,6 +11,7 @@ if (is_android) {
 
 proto_library("proto") {
   sources = [
+    "generic_ui.proto",
     "service.proto",
   ]
 }
@@ -141,6 +142,8 @@ jumbo_static_library("browser") {
     "user_action.h",
     "user_data.cc",
     "user_data.h",
+    "user_data_util.cc",
+    "user_data_util.h",
     "viewport_mode.h",
     "web/element_finder.cc",
     "web/element_finder.h",
@@ -214,6 +217,7 @@ source_set("unit_tests") {
     "selector_unittest.cc",
     "string_conversions_util_unittest.cc",
     "trigger_context_unittest.cc",
+    "user_data_util_unittest.cc",
     "web/mock_web_controller.cc",
     "web/mock_web_controller.h",
   ]
@@ -236,6 +240,7 @@ if (is_android) {
   proto_java_library("proto_java") {
     proto_path = "//components/autofill_assistant/browser/"
     sources = [
+      "$proto_path/generic_ui.proto",
       "$proto_path/service.proto",
     ]
   }

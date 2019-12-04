@@ -7,6 +7,7 @@
 #include <memory>
 #include <tuple>
 
+#include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
@@ -17,12 +18,14 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace {
 
 using ShowVirtualKeyboard =
     password_manager::PasswordManagerDriver::ShowVirtualKeyboard;
-using password_manager::CredentialPair;
+using password_manager::UiCredential;
 using ::testing::_;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
@@ -30,7 +33,8 @@ using ::testing::ReturnRefOfCopy;
 using ::testing::WithArg;
 using IsOriginSecure = TouchToFillView::IsOriginSecure;
 
-using IsPublicSuffixMatch = CredentialPair::IsPublicSuffixMatch;
+using IsPublicSuffixMatch = UiCredential::IsPublicSuffixMatch;
+using IsAffiliationBasedMatch = UiCredential::IsAffiliationBasedMatch;
 
 constexpr char kExampleCom[] = "https://example.com/";
 
@@ -45,10 +49,22 @@ struct MockTouchToFillView : TouchToFillView {
   MOCK_METHOD3(Show,
                void(const GURL&,
                     IsOriginSecure,
-                    base::span<const CredentialPair>));
-  MOCK_METHOD1(OnCredentialSelected, void(const CredentialPair&));
+                    base::span<const UiCredential>));
+  MOCK_METHOD1(OnCredentialSelected, void(const UiCredential&));
   MOCK_METHOD0(OnDismiss, void());
 };
+
+UiCredential MakeUiCredential(
+    base::StringPiece username,
+    base::StringPiece password,
+    base::StringPiece origin = kExampleCom,
+    IsPublicSuffixMatch is_public_suffix_match = IsPublicSuffixMatch(false),
+    IsAffiliationBasedMatch is_affiliation_based_match =
+        IsAffiliationBasedMatch(false)) {
+  return UiCredential(base::UTF8ToUTF16(username), base::UTF8ToUTF16(password),
+                      url::Origin::Create(GURL(origin)), is_public_suffix_match,
+                      is_affiliation_based_match);
+}
 
 }  // namespace
 
@@ -85,9 +101,7 @@ class TouchToFillControllerTest : public testing::Test {
 };
 
 TEST_F(TouchToFillControllerTest, Show_And_Fill) {
-  CredentialPair credentials[] = {
-      {base::ASCIIToUTF16("alice"), base::ASCIIToUTF16("p4ssw0rd"),
-       GURL(kExampleCom), IsPublicSuffixMatch(false)}};
+  UiCredential credentials[] = {MakeUiCredential("alice", "p4ssw0rd")};
 
   EXPECT_CALL(view(), Show(Eq(GURL(kExampleCom)), IsOriginSecure(true),
                            ElementsAreArray(credentials)));
@@ -114,9 +128,7 @@ TEST_F(TouchToFillControllerTest, Show_Insecure_Origin) {
   EXPECT_CALL(driver(), GetLastCommittedURL())
       .WillOnce(ReturnRefOfCopy(GURL("http://example.com")));
 
-  CredentialPair credentials[] = {
-      {base::ASCIIToUTF16("alice"), base::ASCIIToUTF16("p4ssw0rd"),
-       GURL(kExampleCom), IsPublicSuffixMatch(false)}};
+  UiCredential credentials[] = {MakeUiCredential("alice", "p4ssw0rd")};
 
   EXPECT_CALL(view(),
               Show(Eq(GURL("http://example.com")), IsOriginSecure(false),
@@ -126,11 +138,12 @@ TEST_F(TouchToFillControllerTest, Show_Insecure_Origin) {
 
 TEST_F(TouchToFillControllerTest, Show_And_Fill_Android_Credential) {
   // Test multiple credentials with one of them being an Android credential.
-  CredentialPair credentials[] = {
-      {base::ASCIIToUTF16("alice"), base::ASCIIToUTF16("p4ssw0rd"),
-       GURL(kExampleCom), IsPublicSuffixMatch(false)},
-      {base::ASCIIToUTF16("bob"), base::ASCIIToUTF16("s3cr3t"),
-       GURL("android://hash@com.example.my"), IsPublicSuffixMatch(false)}};
+  UiCredential credentials[] = {
+      MakeUiCredential("alice", "p4ssw0rd"),
+      MakeUiCredential("bob", "s3cr3t", base::StringPiece(),
+                       IsPublicSuffixMatch(false),
+                       IsAffiliationBasedMatch(true)),
+  };
 
   EXPECT_CALL(view(), Show(Eq(GURL(kExampleCom)), IsOriginSecure(true),
                            ElementsAreArray(credentials)));
@@ -154,9 +167,7 @@ TEST_F(TouchToFillControllerTest, Show_And_Fill_Android_Credential) {
 }
 
 TEST_F(TouchToFillControllerTest, Dismiss) {
-  CredentialPair credentials[] = {
-      {base::ASCIIToUTF16("alice"), base::ASCIIToUTF16("p4ssw0rd"),
-       GURL(kExampleCom), IsPublicSuffixMatch(false)}};
+  UiCredential credentials[] = {MakeUiCredential("alice", "p4ssw0rd")};
 
   EXPECT_CALL(view(), Show(Eq(GURL(kExampleCom)), IsOriginSecure(true),
                            ElementsAreArray(credentials)));

@@ -30,6 +30,7 @@
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
+#include "chrome/browser/ui/signin_view_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -56,10 +57,6 @@
 
 #if defined(OS_ANDROID)
 #error This file should only be included on desktop.
-#endif
-
-#if !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/signin_view_controller.h"
 #endif
 
 class BackgroundContents;
@@ -333,12 +330,9 @@ class Browser : public TabStripModelObserver,
   web_app::AppBrowserController* app_controller() {
     return app_controller_.get();
   }
-
-#if !defined(OS_CHROMEOS)
   SigninViewController* signin_view_controller() {
     return &signin_view_controller_;
   }
-#endif
 
   // Will lazy create the bubble manager.
   ChromeBubbleManager* GetBubbleManager();
@@ -520,13 +514,13 @@ class Browser : public TabStripModelObserver,
       TabStripModel* tab_strip_model,
       const TabStripModelChange& change,
       const TabStripSelectionChange& selection) override;
-  void OnTabGroupVisualDataChanged(
-      TabStripModel* tab_strip_model,
-      TabGroupId group,
-      const TabGroupVisualData* visual_data) override;
+  void OnTabGroupVisualsChanged(TabGroupId group,
+                                const TabGroupVisualData* visual_data) override;
   void TabPinnedStateChanged(TabStripModel* tab_strip_model,
                              content::WebContents* contents,
                              int index) override;
+  void TabGroupedStateChanged(base::Optional<TabGroupId> group,
+                              int index) override;
   void TabStripEmpty() override;
 
   // Overridden from content::WebContentsDelegate:
@@ -861,9 +855,6 @@ class Browser : public TabStripModelObserver,
   void OnTabReplacedAt(content::WebContents* old_contents,
                        content::WebContents* new_contents,
                        int index);
-  void OnTabGroupChanged(int index,
-                         base::Optional<TabGroupId> old_group,
-                         base::Optional<TabGroupId> new_group);
 
   // Handle changes to kDevToolsAvailability preference.
   void OnDevToolsAvailabilityChanged();
@@ -1139,9 +1130,8 @@ class Browser : public TabStripModelObserver,
   // True if the browser window has been shown at least once.
   bool window_has_shown_;
 
-#if !defined(OS_CHROMEOS)
+  // Controls both signin and sync consent.
   SigninViewController signin_view_controller_;
-#endif
 
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
 

@@ -270,7 +270,6 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
       const gfx::Point& viewport_point,
       const gfx::Vector2dF& scroll_delta,
       base::TimeDelta delayed_by = base::TimeDelta()) override;
-  void ApplyScroll(ScrollNode* scroll_node, ScrollState* scroll_state);
   InputHandlerScrollResult ScrollBy(ScrollState* scroll_state) override;
   void RequestUpdateForSynchronousInputHandler() override;
   void SetSynchronousInputHandlerRootScrollOffset(
@@ -798,10 +797,6 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
     return paint_worklet_tracker_;
   }
 
-  bool did_lock_scrolling_layer_for_testing() const {
-    return did_lock_scrolling_layer_;
-  }
-
   bool can_use_msaa() const { return can_use_msaa_; }
 
  protected:
@@ -907,7 +902,8 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   bool IsInitialScrollHitTestReliable(
       LayerImpl* layer,
       LayerImpl* first_scrolling_layer_or_drawn_scrollbar);
-  void DistributeScrollDelta(ScrollState* scroll_state);
+  void LatchToScroller(ScrollState* scroll_state, ScrollNode* starting_node);
+  void ScrollLatchedScroller(ScrollState* scroll_state);
 
   bool AnimatePageScale(base::TimeTicks monotonic_time);
   bool AnimateScrollbars(base::TimeTicks monotonic_time);
@@ -1072,7 +1068,6 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   std::unique_ptr<LayerTreeImpl> recycle_tree_;
 
   InputHandlerClient* input_handler_client_ = nullptr;
-  bool did_lock_scrolling_layer_ = false;
   bool touch_scrolling_ = false;
   bool wheel_scrolling_ = false;
   bool middle_click_autoscrolling_ = false;

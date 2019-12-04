@@ -31,12 +31,19 @@
 // Adds |fakeIdentity| to the fake identity service.
 - (void)addFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
 
+// Removes |fakeIdentity| from the fake chrome identity service, to simulate
+// identity removal from the device.
+- (void)forgetFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
+
 // Induces a GREYAssert if |fakeIdentity| is not signed in to the active
 // profile.
 - (void)checkSignedInWithFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
 
 // Induces a GREYAssert if an identity is signed in.
 - (void)checkSignedOut;
+
+// Removes |fakeIdentity| from the fake identity service.
+- (void)removeFakeIdentity:(FakeChromeIdentity*)fakeIdentity;
 
 @end
 

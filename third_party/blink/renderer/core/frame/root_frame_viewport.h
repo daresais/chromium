@@ -104,7 +104,7 @@ class CORE_EXPORT RootFrameViewport final
   ScrollResult UserScroll(ScrollGranularity,
                           const FloatSize&,
                           ScrollableArea::ScrollCallback on_finish) override;
-  CompositorElementId GetCompositorElementId() const override;
+  CompositorElementId GetScrollElementId() const override;
   CompositorElementId GetScrollbarElementId(
       ScrollbarOrientation orientation) override;
   bool ScrollAnimatorEnabled() const override;
@@ -124,6 +124,7 @@ class CORE_EXPORT RootFrameViewport final
   ScrollbarTheme& GetPageScrollbarTheme() const override;
   const cc::SnapContainerData* GetSnapContainerData() const override;
   void SetSnapContainerData(base::Optional<cc::SnapContainerData>) override;
+  bool SetTargetSnapAreaElementIds(cc::TargetSnapAreaElementIds) override;
   base::Optional<FloatPoint> GetSnapPositionAndSetTarget(
       const cc::SnapSelectionStrategy& strategy) override;
 

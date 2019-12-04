@@ -12,21 +12,22 @@
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/safe_browsing_private/safe_browsing_private_event_router.h"
-#include "chrome/browser/policy/browser_dm_token_storage.h"
-#include "chrome/browser/policy/chrome_browser_cloud_management_controller.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_browsing/dm_token_utils.h"
 #include "chrome/browser/safe_browsing/download_protection/check_client_download_request.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/policy/core/browser/url_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/proto/webprotect.pb.h"
 #include "components/url_matcher/url_matcher.h"
 #include "content/public/browser/web_contents.h"
 #include "crypto/sha2.h"
@@ -44,12 +45,6 @@ const base::Feature kDeepScanningOfUploadsUI{
     "SafeBrowsingDeepScanningOfUploadsUI", base::FEATURE_DISABLED_BY_DEFAULT};
 
 namespace {
-
-policy::DMToken* GetDMTokenForTestingStorage() {
-  static policy::DMToken dm_token_storage =
-      policy::DMToken::CreateEmptyTokenForTesting();
-  return &dm_token_storage;
-}
 
 // Global pointer of factory function (RepeatingCallback) used to create
 // instances of DeepScanningDialogDelegate in tests.  !is_null() only in tests.
@@ -157,6 +152,14 @@ bool DlpTriggeredRulesOK(
     }
   }
   return true;
+}
+
+std::string GetFileMimeType(base::FilePath path) {
+  // TODO(crbug.com/1013252): Obtain a more accurate MimeType by parsing the
+  // file content.
+  std::string mime_type;
+  net::GetMimeTypeFromFile(path, &mime_type);
+  return mime_type;
 }
 
 // File types supported for DLP scanning.
@@ -311,7 +314,7 @@ bool DeepScanningDialogDelegate::IsEnabled(Profile* profile,
     return false;
 
   // If there's no valid DM token, the upload will fail.
-  if (!GetDMToken().is_valid())
+  if (!GetDMToken(profile).is_valid())
     return false;
 
   // See if content compliance checks are needed.
@@ -409,12 +412,6 @@ void DeepScanningDialogDelegate::SetFactoryForTesting(Factory factory) {
   *GetFactoryStorage() = factory;
 }
 
-// static
-void DeepScanningDialogDelegate::SetDMTokenForTesting(
-    const policy::DMToken& dm_token) {
-  *GetDMTokenForTestingStorage() = dm_token;
-}
-
 DeepScanningDialogDelegate::DeepScanningDialogDelegate(
     content::WebContents* web_contents,
     Data data,
@@ -458,6 +455,40 @@ void DeepScanningDialogDelegate::StringRequestCallback(
   MaybeCompleteScanRequest();
 }
 
+void DeepScanningDialogDelegate::CompleteFileRequestCallback(
+    size_t index,
+    base::FilePath path,
+    BinaryUploadService::Result result,
+    DeepScanningClientResponse response,
+    std::string mime_type) {
+  MaybeReportDeepScanningVerdict(
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext()),
+      web_contents_->GetLastCommittedURL(), path.AsUTF8Unsafe(),
+      base::HexEncode(file_info_[index].sha256.data(),
+                      file_info_[index].sha256.size()),
+      mime_type, extensions::SafeBrowsingPrivateEventRouter::kTriggerFileUpload,
+      file_info_[index].size, result, response);
+
+  bool dlp_ok = DlpTriggeredRulesOK(response.dlp_scan_verdict());
+  bool malware_ok = true;
+  if (response.has_malware_scan_verdict()) {
+    malware_ok = response.malware_scan_verdict().status() ==
+                     MalwareDeepScanningVerdict::SUCCESS &&
+                 response.malware_scan_verdict().verdict() !=
+                     MalwareDeepScanningVerdict::UWS &&
+                 response.malware_scan_verdict().verdict() !=
+                     MalwareDeepScanningVerdict::MALWARE;
+  }
+
+  bool file_complies = (result == BinaryUploadService::Result::SUCCESS ||
+                        result == BinaryUploadService::Result::UNAUTHORIZED) &&
+                       dlp_ok && malware_ok;
+  result_.paths_results[index] = file_complies;
+
+  ++file_result_count_;
+  MaybeCompleteScanRequest();
+}
+
 void DeepScanningDialogDelegate::FileRequestCallback(
     base::FilePath path,
     BinaryUploadService::Result result,
@@ -473,49 +504,13 @@ void DeepScanningDialogDelegate::FileRequestCallback(
                           file_info_[index].size, result, response);
   }
 
-  // TODO(crbug.com/1013252): Obtain a more accurate MimeType by parsing the
-  // file content.
-  std::string mime_type;
-  net::GetMimeTypeFromFile(path, &mime_type);
-
-  MaybeReportDeepScanningVerdict(
-      Profile::FromBrowserContext(web_contents_->GetBrowserContext()),
-      web_contents_->GetLastCommittedURL(), path.AsUTF8Unsafe(),
-      file_info_[index].sha256, mime_type,
-      extensions::SafeBrowsingPrivateEventRouter::kTriggerFileUpload,
-      file_info_[index].size, result, response);
-
-  bool dlp_ok = DlpTriggeredRulesOK(response.dlp_scan_verdict());
-  bool malware_ok = response.malware_scan_verdict().verdict() !=
-                        MalwareDeepScanningVerdict::UWS &&
-                    response.malware_scan_verdict().verdict() !=
-                        MalwareDeepScanningVerdict::MALWARE;
-  bool file_complies =
-      (result == BinaryUploadService::Result::SUCCESS) && dlp_ok && malware_ok;
-
-  result_.paths_results[index] = file_complies;
-
-  ++file_result_count_;
-  MaybeCompleteScanRequest();
-}
-
-// static
-policy::DMToken DeepScanningDialogDelegate::GetDMToken() {
-  policy::DMToken dm_token = *GetDMTokenForTestingStorage();
-
-#if !defined(OS_CHROMEOS)
-  // This is not compiled on chromeos because
-  // ChromeBrowserCloudManagementController does not exist.  Also,
-  // policy::BrowserDMTokenStorage::Get()->RetrieveDMToken() does not return a
-  // valid token either.  Once these are fixed the #if !defined can be removed.
-
-  if (dm_token.is_empty() &&
-      policy::ChromeBrowserCloudManagementController::IsEnabled()) {
-    dm_token = policy::BrowserDMTokenStorage::Get()->RetrieveDMToken();
-  }
-#endif
-
-  return dm_token;
+  base::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::ThreadPool(), base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+      base::BindOnce(&GetFileMimeType, path),
+      base::BindOnce(&DeepScanningDialogDelegate::CompleteFileRequestCallback,
+                     weak_ptr_factory_.GetWeakPtr(), index, path, result,
+                     response));
 }
 
 bool DeepScanningDialogDelegate::UploadData() {
@@ -578,7 +573,9 @@ void DeepScanningDialogDelegate::PrepareRequest(
     request->set_request_malware_scan(std::move(malware_request));
   }
 
-  request->set_dm_token(GetDMToken().value());
+  request->set_dm_token(GetDMToken(Profile::FromBrowserContext(
+                                       web_contents_->GetBrowserContext()))
+                            .value());
 }
 
 void DeepScanningDialogDelegate::FillAllResultsWith(bool status) {

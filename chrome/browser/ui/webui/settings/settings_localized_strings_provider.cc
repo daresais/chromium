@@ -103,6 +103,7 @@
 #include "chromeos/strings/grit/chromeos_strings.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
+#include "device/bluetooth/strings/grit/bluetooth_strings.h"
 #include "ui/chromeos/devicetype_utils.h"
 #include "ui/chromeos/events/keyboard_layout_util.h"
 #include "ui/display/display_features.h"
@@ -808,33 +809,33 @@ void AddBluetoothStrings(content::WebUIDataSource* html_source) {
       {"bluetoothPrimaryUserControlled",
        IDS_SETTINGS_BLUETOOTH_PRIMARY_USER_CONTROLLED},
       {"bluetoothDeviceType_computer",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_COMPUTER},
-      {"bluetoothDeviceType_chone",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_PHONE},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_COMPUTER},
+      {"bluetoothDeviceType_phone",
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_PHONE},
       {"bluetoothDeviceType_modem",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_MODEM},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_MODEM},
       {"bluetoothDeviceType_audio",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_AUDIO},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_AUDIO},
       {"bluetoothDeviceType_carAudio",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_CAR_AUDIO},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_CAR_AUDIO},
       {"bluetoothDeviceType_video",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_VIDEO},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_VIDEO},
       {"bluetoothDeviceType_peripheral",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_PERIPHERAL},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_PERIPHERAL},
       {"bluetoothDeviceType_joystick",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_JOYSTICK},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_JOYSTICK},
       {"bluetoothDeviceType_gamepad",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_GAMEPAD},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_GAMEPAD},
       {"bluetoothDeviceType_keyboard",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_KEYBOARD},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_KEYBOARD},
       {"bluetoothDeviceType_mouse",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_MOUSE},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_MOUSE},
       {"bluetoothDeviceType_tablet",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_TABLET},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_TABLET},
       {"bluetoothDeviceType_keyboardMouseCombo",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_KEYBOARD_MOUSE_COMBO},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_KEYBOARD_MOUSE_COMBO},
       {"bluetoothDeviceType_unknown",
-       IDS_SETTINGS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_UNKNOWN},
+       IDS_BLUETOOTH_ACCESSIBILITY_DEVICE_TYPE_UNKNOWN},
   };
   AddLocalizedStringsBulk(html_source, kLocalizedStrings);
   chromeos::bluetooth_dialog::AddLocalizedStrings(html_source);
@@ -2402,6 +2403,12 @@ void AddPrintingStrings(content::WebUIDataSource* html_source) {
     {"printerModel", IDS_SETTINGS_PRINTING_CUPS_PRINTER_DETAILS_MODEL},
     {"printerQueue", IDS_SETTINGS_PRINTING_CUPS_PRINTER_DETAILS_QUEUE},
     {"savedPrintersTitle", IDS_SETTINGS_PRINTING_CUPS_SAVED_PRINTERS_TITLE},
+    {"savedPrintersCountMany",
+     IDS_SETTINGS_PRINTING_CUPS_PRINTERS_SAVED_PRINTERS_COUNT_MANY},
+    {"savedPrintersCountOne",
+     IDS_SETTINGS_PRINTING_CUPS_PRINTERS_SAVED_PRINTERS_COUNT_ONE},
+    {"savedPrintersCountNone",
+     IDS_SETTINGS_PRINTING_CUPS_PRINTERS_SAVED_PRINTERS_COUNT_NONE},
     {"showMorePrinters", IDS_SETTINGS_PRINTING_CUPS_SHOW_MORE},
     {"addPrintersNearbyTitle",
      IDS_SETTINGS_PRINTING_CUPS_ADD_PRINTERS_NEARBY_TITLE},
@@ -2411,6 +2418,12 @@ void AddPrintingStrings(content::WebUIDataSource* html_source) {
      IDS_SETTINGS_PRINTING_CUPS_SELECT_MANUFACTURER_AND_MODEL_TITLE},
     {"nearbyPrintersListTitle",
      IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTERS},
+    {"nearbyPrintersCountMany",
+     IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTERS_COUNT_MANY},
+    {"nearbyPrintersCountOne",
+     IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTER_COUNT_ONE},
+    {"nearbyPrintersCountNone",
+     IDS_SETTINGS_PRINTING_CUPS_PRINTERS_AVAILABLE_PRINTER_COUNT_NONE},
     {"nearbyPrintersListDescription",
      IDS_SETTINGS_PRINTING_CUPS_PRINTERS_ADD_DETECTED_OR_NEW_PRINTER},
     {"manufacturerAndModelAdditionalInformation",
@@ -2518,6 +2531,7 @@ void AddPrivacyStrings(content::WebUIDataSource* html_source,
                        Profile* profile) {
   static constexpr webui::LocalizedString kLocalizedStrings[] = {
       {"privacyPageTitle", IDS_SETTINGS_PRIVACY},
+      {"privacyPageMore", IDS_SETTINGS_PRIVACY_MORE},
       {"signinAllowedTitle", IDS_SETTINGS_SIGNIN_ALLOWED},
       {"signinAllowedDescription", IDS_SETTINGS_SIGNIN_ALLOWED_DESC},
       {"doNotTrack", IDS_SETTINGS_ENABLE_DO_NOT_TRACK},
@@ -3135,6 +3149,10 @@ void AddSiteSettingsStrings(content::WebUIDataSource* html_source,
       base::FeatureList::IsEnabled(
           content_settings ::
               kImprovedCookieControlsForThirdPartyCookieBlocking));
+
+  html_source->AddBoolean(
+      "enableStoragePressureUI",
+      base::FeatureList::IsEnabled(features::kStoragePressureUI));
 }
 
 #if defined(OS_CHROMEOS)

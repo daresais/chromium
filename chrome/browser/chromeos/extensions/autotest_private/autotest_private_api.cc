@@ -129,7 +129,6 @@
 #include "extensions/common/permissions/permissions_data.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/receiver.h"
-#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/filename_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
@@ -621,6 +620,13 @@ int GetMouseEventFlags(api::autotest_private::MouseButton button) {
       NOTREACHED();
   }
   return ui::EF_NONE;
+}
+
+void EnableMouseEventsIfNecessary(aura::Window* root_window) {
+  aura::client::CursorClient* cursor_client =
+      aura::client::GetCursorClient(root_window);
+  if (!cursor_client->IsMouseEventsEnabled())
+    cursor_client->EnableMouseEvents();
 }
 
 }  // namespace
@@ -1306,6 +1312,7 @@ AutotestPrivateGetHistogramFunction::GetHistogram(const std::string& name) {
   std::unique_ptr<base::HistogramSamples> samples =
       histogram->SnapshotSamples();
   api::autotest_private::Histogram result;
+  result.sum = samples->sum();
 
   for (std::unique_ptr<base::SampleCountIterator> it = samples->Iterator();
        !it->Done(); it->Next()) {
@@ -2042,13 +2049,13 @@ AutotestPrivateBootstrapMachineLearningServiceFunction::Run() {
       ->LoadBuiltinModel(
           chromeos::machine_learning::mojom::BuiltinModelSpec::New(
               chromeos::machine_learning::mojom::BuiltinModelId::TEST_MODEL),
-          mojo::MakeRequest(&model_),
+          model_.BindNewPipeAndPassReceiver(),
           base::BindOnce(
               &AutotestPrivateBootstrapMachineLearningServiceFunction::
                   ModelLoaded,
               this));
-  model_.set_connection_error_handler(base::BindOnce(
-      &AutotestPrivateBootstrapMachineLearningServiceFunction::ConnectionError,
+  model_.set_disconnect_handler(base::BindOnce(
+      &AutotestPrivateBootstrapMachineLearningServiceFunction::OnMojoDisconnect,
       this));
   return RespondLater();
 }
@@ -2063,7 +2070,8 @@ void AutotestPrivateBootstrapMachineLearningServiceFunction::ModelLoaded(
   }
 }
 
-void AutotestPrivateBootstrapMachineLearningServiceFunction::ConnectionError() {
+void AutotestPrivateBootstrapMachineLearningServiceFunction::
+    OnMojoDisconnect() {
   Respond(Error("ML Service connection error"));
 }
 
@@ -2728,21 +2736,22 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
       ash::GetShelfAlignmentPref(profile->GetPrefs(), display_id);
   api::autotest_private::ShelfAlignmentType alignment_type;
   switch (alignment) {
-    case ash::ShelfAlignment::SHELF_ALIGNMENT_BOTTOM:
+    case ash::ShelfAlignment::kBottom:
       alignment_type = api::autotest_private::ShelfAlignmentType::
           SHELF_ALIGNMENT_TYPE_BOTTOM;
       break;
-    case ash::ShelfAlignment::SHELF_ALIGNMENT_LEFT:
+    case ash::ShelfAlignment::kLeft:
       alignment_type =
           api::autotest_private::ShelfAlignmentType::SHELF_ALIGNMENT_TYPE_LEFT;
       break;
-    case ash::ShelfAlignment::SHELF_ALIGNMENT_RIGHT:
+    case ash::ShelfAlignment::kRight:
       alignment_type =
           api::autotest_private::ShelfAlignmentType::SHELF_ALIGNMENT_TYPE_RIGHT;
       break;
-    case ash::ShelfAlignment::SHELF_ALIGNMENT_BOTTOM_LOCKED:
-      // SHELF_ALIGNMENT_BOTTOM_LOCKED not supported by shelf_prefs.cc
-      return RespondNow(Error("SHELF_ALIGNMENT_BOTTOM_LOCKED not supported"));
+    case ash::ShelfAlignment::kBottomLocked:
+      // ShelfAlignment::kBottomLocked not supported by
+      // shelf_prefs.cc
+      return RespondNow(Error("ShelfAlignment::kBottomLocked not supported"));
   }
   return RespondNow(OneArgument(std::make_unique<base::Value>(
       api::autotest_private::ToString(alignment_type))));
@@ -2769,13 +2778,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
   ash::ShelfAlignment alignment;
   switch (params->alignment) {
     case api::autotest_private::ShelfAlignmentType::SHELF_ALIGNMENT_TYPE_BOTTOM:
-      alignment = ash::ShelfAlignment::SHELF_ALIGNMENT_BOTTOM;
+      alignment = ash::ShelfAlignment::kBottom;
       break;
     case api::autotest_private::ShelfAlignmentType::SHELF_ALIGNMENT_TYPE_LEFT:
-      alignment = ash::ShelfAlignment::SHELF_ALIGNMENT_LEFT;
+      alignment = ash::ShelfAlignment::kLeft;
       break;
     case api::autotest_private::ShelfAlignmentType::SHELF_ALIGNMENT_TYPE_RIGHT:
-      alignment = ash::ShelfAlignment::SHELF_ALIGNMENT_RIGHT;
+      alignment = ash::ShelfAlignment::kRight;
       break;
     case api::autotest_private::ShelfAlignmentType::SHELF_ALIGNMENT_TYPE_NONE:
       return RespondNow(
@@ -3574,6 +3583,8 @@ ExtensionFunction::ResponseAction AutotestPrivateMouseClickFunction::Run() {
   if (!root_window)
     return RespondNow(Error("Failed to find the root window"));
 
+  EnableMouseEventsIfNecessary(root_window);
+
   gfx::PointF location_in_host(env->last_mouse_location().x(),
                                env->last_mouse_location().y());
   wm::ConvertPointFromScreen(root_window, &location_in_host);
@@ -3617,6 +3628,8 @@ ExtensionFunction::ResponseAction AutotestPrivateMousePressFunction::Run() {
   if (!root_window)
     return RespondNow(Error("Failed to find the root window"));
 
+  EnableMouseEventsIfNecessary(root_window);
+
   gfx::PointF location_in_host(env->last_mouse_location().x(),
                                env->last_mouse_location().y());
   wm::ConvertPointFromScreen(root_window, &location_in_host);
@@ -3658,6 +3671,8 @@ ExtensionFunction::ResponseAction AutotestPrivateMouseReleaseFunction::Run() {
   if (!root_window)
     return RespondNow(Error("Failed to find the root window"));
 
+  EnableMouseEventsIfNecessary(root_window);
+
   gfx::PointF location_in_host(env->last_mouse_location().x(),
                                env->last_mouse_location().y());
   wm::ConvertPointFromScreen(root_window, &location_in_host);
@@ -3689,6 +3704,8 @@ ExtensionFunction::ResponseAction AutotestPrivateMouseMoveFunction::Run() {
   auto* root_window = ash::Shell::GetRootWindowForDisplayId(display_id);
   if (!root_window)
     return RespondNow(Error("Failed to find the root window"));
+
+  EnableMouseEventsIfNecessary(root_window);
 
   auto* host = root_window->GetHost();
   const gfx::PointF location_in_root(params->location.x, params->location.y);

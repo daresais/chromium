@@ -1280,8 +1280,8 @@ const char kInvertNotificationShown[] = "invert_notification_version_2_shown";
 // A pref holding the list of printer types to be disabled.
 const char kPrinterTypeDenyList[] = "printing.printer_type_deny_list";
 
-// The default value for the 'Headers and footers' checkbox, in Print Preview.
-// Takes priority over kPrintPreviewStickySettings if set.
+// The allowed/default value for the 'Headers and footers' checkbox, in Print
+// Preview.
 const char kPrintHeaderFooter[] = "printing.print_header_footer";
 
 // Boolean controlling whether printing is enabled.
@@ -1477,6 +1477,27 @@ const char kHasSeenWelcomePage[] = "browser.has_seen_welcome_page";
 // finch group pinged to keep track of them for the experiment.
 const char kNaviOnboardGroup[] = "browser.navi_onboard_group";
 #endif  // defined(OS_WIN)
+
+// Boolean indicating whether the quiet UX is enabled for notification
+// permission requests.
+const char kEnableQuietNotificationPermissionUi[] =
+    "profile.content_settings.enable_quiet_permission_ui.notifications";
+
+// Boolean indicating whether to show a promo for the quiet notification
+// permission UI.
+const char kQuietNotificationPermissionShouldShowPromo[] =
+    "profile.content_settings.quiet_permission_ui_promo.should_show."
+    "notifications";
+
+// Boolean indicating whether the promo was shown for the quiet notification
+// permission UI.
+const char kQuietNotificationPermissionPromoWasShown[] =
+    "profile.content_settings.quiet_permission_ui_promo.was_shown."
+    "notifications";
+
+// List containing a history of past permission actions.
+const char kNotificationPermissionActions[] =
+    "profile.content_settings.permission_actions.notifications";
 
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation

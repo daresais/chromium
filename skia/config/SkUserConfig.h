@@ -215,19 +215,11 @@ SK_API void SkDebugf_FileLine(const char* file,
 #define SK_IGNORE_LINEONLY_AA_CONVEX_PATH_OPTS
 #endif
 
-#ifndef SK_SUPPORT_LEGACY_PATH_FILLTYPE_ENUM
-#define SK_SUPPORT_LEGACY_PATH_FILLTYPE_ENUM
-#endif
-
 // Max. verb count for paths rendered by the edge-AA tessellating path renderer.
 #define GR_AA_TESSELLATOR_MAX_VERB_COUNT 100
 
 #ifndef SK_SUPPORT_LEGACY_AAA_CHOICE
 #define SK_SUPPORT_LEGACY_AAA_CHOICE
-#endif
-
-#ifndef SK_SUPPORT_LEGACY_CPU_EMOJI
-#define SK_SUPPORT_LEGACY_CPU_EMOJI
 #endif
 
 // We're turning this off indefinitely,

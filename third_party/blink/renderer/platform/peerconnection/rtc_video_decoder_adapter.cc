@@ -156,7 +156,8 @@ std::unique_ptr<RTCVideoDecoderAdapter> RTCVideoDecoderAdapter::Create(
       media::kNoTransformation, kDefaultSize, gfx::Rect(kDefaultSize),
       kDefaultSize, media::EmptyExtraData(),
       media::EncryptionScheme::kUnencrypted);
-  if (!gpu_factories->IsDecoderConfigSupported(kImplementation, config))
+  if (gpu_factories->IsDecoderConfigSupported(kImplementation, config) ==
+      media::GpuVideoAcceleratorFactories::Supported::kFalse)
     return nullptr;
 
   // Synchronously verify that the decoder can be initialized.
@@ -385,7 +386,7 @@ void RTCVideoDecoderAdapter::InitializeOnMediaThread(
   // Encryption is not supported.
   media::CdmContext* cdm_context = nullptr;
 
-  media::VideoDecoder::OutputCB output_cb = ConvertToBaseCallback(
+  media::VideoDecoder::OutputCB output_cb = ConvertToBaseRepeatingCallback(
       CrossThreadBindRepeating(&RTCVideoDecoderAdapter::OnOutput, weak_this_));
   video_decoder_->Initialize(config, low_delay, cdm_context,
                              ConvertToBaseOnceCallback(std::move(init_cb)),

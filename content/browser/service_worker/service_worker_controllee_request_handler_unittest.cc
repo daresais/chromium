@@ -57,7 +57,7 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
               TRAFFIC_ANNOTATION_FOR_TESTS)),
           handler_(std::make_unique<ServiceWorkerControlleeRequestHandler>(
               test->context()->AsWeakPtr(),
-              test->provider_host_,
+              test->container_host_,
               type,
               /*skip_service_worker=*/false)) {}
 
@@ -121,6 +121,7 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
     provider_host_ = CreateProviderHostForWindow(
         helper_->mock_render_process_id(), is_parent_frame_secure,
         helper_->context()->AsWeakPtr(), &remote_endpoints_.back());
+    container_host_ = provider_host_->container_host()->GetWeakPtr();
   }
 
   void TearDown() override {
@@ -137,6 +138,7 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
   scoped_refptr<ServiceWorkerRegistration> registration_;
   scoped_refptr<ServiceWorkerVersion> version_;
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
+  base::WeakPtr<ServiceWorkerContainerHost> container_host_;
   net::URLRequestContext url_request_context_;
   net::TestDelegate url_request_delegate_;
   GURL scope_;
@@ -352,9 +354,8 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, InstallingRegistration) {
   // claim().
   EXPECT_FALSE(test_resources.loader());
   EXPECT_FALSE(version_->HasControllee());
-  EXPECT_FALSE(provider_host_->container_host()->controller());
-  EXPECT_EQ(registration_.get(),
-            provider_host_->container_host()->MatchRegistration());
+  EXPECT_FALSE(container_host_->controller());
+  EXPECT_EQ(registration_.get(), container_host_->MatchRegistration());
 }
 
 // Test to not regress crbug/414118.
@@ -380,7 +381,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DeletedProviderHost) {
   // Shouldn't crash if the ProviderHost is deleted prior to completion of
   // the database lookup.
   context()->RemoveProviderHost(provider_host_->provider_id());
-  EXPECT_FALSE(provider_host_.get());
+  EXPECT_FALSE(container_host_.get());
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(test_resources.loader());
 }
@@ -403,7 +404,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, SkipServiceWorker) {
       this, GURL("https://host/scope/doc"), ResourceType::kMainFrame);
   test_resources.SetHandler(
       std::make_unique<ServiceWorkerControlleeRequestHandler>(
-          context()->AsWeakPtr(), provider_host_, ResourceType::kMainFrame,
+          context()->AsWeakPtr(), container_host_, ResourceType::kMainFrame,
           /*skip_service_worker=*/true));
 
   // Conduct a main resource load.
@@ -417,8 +418,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, SkipServiceWorker) {
   EXPECT_FALSE(version_->HasControllee());
 
   // The host should still have the correct URL.
-  EXPECT_EQ(GURL("https://host/scope/doc"),
-            provider_host_->container_host()->url());
+  EXPECT_EQ(GURL("https://host/scope/doc"), container_host_->url());
 }
 
 // Tests interception after the context core has been destroyed and the provider
@@ -443,7 +443,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, NullContext) {
       this, GURL("https://host/scope/doc"), ResourceType::kMainFrame);
   test_resources.SetHandler(
       std::make_unique<ServiceWorkerControlleeRequestHandler>(
-          context()->AsWeakPtr(), provider_host_, ResourceType::kMainFrame,
+          context()->AsWeakPtr(), container_host_, ResourceType::kMainFrame,
           /*skip_service_worker=*/false));
 
   // Destroy the context and make a new one.
@@ -462,8 +462,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, NullContext) {
   EXPECT_FALSE(version_->HasControllee());
 
   // The host should still have the correct URL.
-  EXPECT_EQ(GURL("https://host/scope/doc"),
-            provider_host_->container_host()->url());
+  EXPECT_EQ(GURL("https://host/scope/doc"), container_host_->url());
 }
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)

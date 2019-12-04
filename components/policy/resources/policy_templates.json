@@ -1796,11 +1796,12 @@
       'owners': ['jamiewalch@chromium.org', 'rkjnsn@chromium.org'],
       'type': 'string',
       'schema': { 'type': 'string' },
-      'supported_on': ['chrome.*:22-', 'chrome_os:41-'],
+      'supported_on': ['chrome.*:22-75', 'chrome_os:41-75'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': False,
       },
+      'deprecated': True,
       'example_value': 'chromoting-host',
       'id': 156,
       'caption': '''Configure the TalkGadget prefix for remote access hosts''',
@@ -7072,7 +7073,7 @@
 
       If this setting is disabled, users cannot print to <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> from the <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> print dialog.
 
-      In order to keep <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> destinations discoverable, this policy must be set to true and 'cloud' must not be included in the 'PrinterTypeDenyList' policy.''',
+      In order to keep <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> destinations discoverable, this policy must be set to true and <ph name="POLICY_ENUM_PRINTERTYPEDENYLIST_CLOUD">cloud</ph> must not be included in the <ph name="POLICY_PRINTERTYPEDENYLIST">PrinterTypeDenyList</ph> policy.''',
     },
     {
       'name': 'EnterpriseWebStoreURL',
@@ -16413,9 +16414,9 @@
       'tags': ['admin-sharing', 'google-sharing'],
       'features': {
         'dynamic_refresh': True,
-        'per_profile': True,
+        'per_profile': False,
       },
-      'supported_on': ['chrome.*:72-'],
+      'supported_on': ['chrome.*:72-', 'chrome_os:81-'],
       'future': True,
       'caption': '''Enables <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> cloud reporting''',
       'example_value': True,
@@ -16425,9 +16426,8 @@
       When this policy is set to True, the data is collected and uploaded to Google Admin console.
       To control what data is uploaded, please use policies in the group Chrome Reporting Extension.
 
-      This policy is only effective when the machine is enrolled with <ph name="MACHINE_LEVEL_USER_CLOUD_POLICY_ENROLLMENT_TOKEN_POLICY_NAME">MachineLevelUserCloudPolicyEnrollmentToken</ph>.
-
-      This policy force installs <ph name="CHROME_REPORTING_EXTENSION_NAME">Chrome Reporting Extension</ph> for the reporting and overrides any extension policies related to that extension.'''
+      For <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>, this policy is only effective when the machine is enrolled with <ph name="CLOUD_MANAGEMENT_ENROLLMENT_TOKEN">CloudManagementEnrollmentToken</ph>.
+      For <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph>, this policy is always effective.'''
     },
     {
       'name': 'EnterpriseHardwarePlatformAPIEnabled',
@@ -18283,7 +18283,7 @@
         'per_profile': False,
       },
       'id': 585,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''Allows Chrome to report unsafe events to Google''',
       'tags': [],
@@ -18328,7 +18328,7 @@
         'per_profile': False,
       },
       'id': 586,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''Prevent user to transfer large files''',
       'tags': [],
@@ -18379,7 +18379,7 @@
         'per_profile': False,
       },
       'id': 587,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''Delay delivery of files until scanning verdicts are known''',
       'tags': [],
@@ -18430,7 +18430,7 @@
         'per_profile': False,
       },
       'id': 588,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''Allow users to upload or download password protected files''',
       'tags': [],
@@ -18481,7 +18481,7 @@
         'per_profile': False,
       },
       'id': 589,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''Send files for sensitive data protection rule violation inspection''',
       'tags': [],
@@ -18510,7 +18510,7 @@
         'per_profile': False,
       },
       'id': 590,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''URL patterns to check downloaded content against sensitive data protection rules''',
       'tags': [],
@@ -18535,7 +18535,7 @@
         'per_profile': False,
       },
       'id': 591,
-      'supported_on': ['chrome.*:78-'],
+      'supported_on': ['chrome.*:78-', 'chrome_os:81-'],
       'future': True,
       'caption': '''URL patterns to not check uploaded content against sensitive data protection rules''',
       'tags': [],
@@ -19156,7 +19156,7 @@
 
       Placing all printer types on the deny list effectively disables printing, as there would be no available destinations to send a document for printing.
 
-      Including 'cloud' on the deny list has the same effect as setting the 'CloudPrintSubmitEnabled' policy to false. In order to keep <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> destinations discoverable, the 'CloudPrintSubmitEnabled' policy must be set to true and 'cloud' must not be on the deny list.
+      Including <ph name="POLICY_ENUM_PRINTERTYPEDENYLIST_CLOUD">cloud</ph> on the deny list has the same effect as setting the <ph name="POLICY_CLOUDPRINTSUBMITENABLED">CloudPrintSubmitEnabled</ph> policy to false. In order to keep <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> destinations discoverable, the <ph name="POLICY_CLOUDPRINTSUBMITENABLED">CloudPrintSubmitEnabled</ph> policy must be set to true and <ph name="POLICY_ENUM_PRINTERTYPEDENYLIST_CLOUD">cloud</ph> must not be on the deny list.
 
       If the policy is not set, or is set to an empty list, all printer types will be available for discovery.
 
@@ -19218,6 +19218,26 @@
       Note that, ambient authentication is always allowed on regular profiles.
 
       If the policy is left not set, then the Incognito and Guest sessions will not be able to ambiently authenticate in the future releases of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>, as they will be disallowed.'''
+    },
+    {
+      'name': 'PaymentMethodQueryEnabled',
+      'owners': ['file://components/payments/core/OWNERS'],
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:80-', 'chrome_os:80-', 'android:80-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 651,
+      'caption': '''Allow websites to query for available payment methods.''',
+      'tags': [],
+      'desc': '''Allows you to set whether websites are allowed to check if the user has payment methods saved.
+
+      If this policy is set to disabled, websites that use PaymentRequest.canMakePayment or PaymentRequest.hasEnrolledInstrument API will be informed that no payment methods are available.
+
+      If the setting is enabled or not set then websites are allowed to check if the user has payment methods saved.'''
     },
   ],
 
@@ -20043,6 +20063,6 @@ The recommended way to configure policy on Windows is via GPO, although provisio
   ],
   'placeholders': [],
   'deleted_policy_ids': [412, 546, 562, 569],
-  'highest_id_currently_used': 650,
+  'highest_id_currently_used': 651,
   'highest_atomic_group_id_currently_used': 38
 }

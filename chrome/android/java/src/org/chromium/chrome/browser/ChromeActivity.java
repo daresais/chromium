@@ -33,7 +33,6 @@ import android.view.accessibility.AccessibilityManager.AccessibilityStateChangeL
 import android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener;
 
 import androidx.annotation.CallSuper;
-import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
@@ -88,6 +87,7 @@ import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorNotificationBridgeUiFactory;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.firstrun.ForcedSigninProcessor;
+import org.chromium.chrome.browser.flags.ActivityType;
 import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.gsa.ContextReporter;
@@ -191,8 +191,6 @@ import org.chromium.ui.widget.Toast;
 import org.chromium.webapk.lib.client.WebApkNavigationClient;
 import org.chromium.webapk.lib.client.WebApkValidator;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -214,18 +212,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
      * No control container to inflate during initialization.
      */
     public static final int NO_CONTROL_CONTAINER = -1;
-
-    /**
-     * The different types of activities extending ChromeActivity.
-     */
-    @IntDef({ActivityType.BASE, ActivityType.TABBED, ActivityType.CUSTOM_TAB, ActivityType.WEBAPP})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface ActivityType {
-        int BASE = 0;
-        int TABBED = 1;
-        int CUSTOM_TAB = 2;
-        int WEBAPP = 3;
-    }
 
     /**
      * No toolbar layout to inflate during initialization.
@@ -434,7 +420,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                     this, getStatusBarColorController().getStatusBarScrimDelegate(), coordinator);
 
             initializeBottomSheetController();
-            mShareDelegate = new ShareDelegateImpl(mBottomSheetController);
+            mShareDelegate = new ShareDelegateImpl(mBottomSheetController, getActivityTabProvider(),
+                    new ShareDelegateImpl.ShareSheetDelegate());
             mShareDelegateSupplier.set(mShareDelegate);
 
             Intent intent = getIntent();
@@ -871,13 +858,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     }
 
     @Override
-    public int getBaseStatusBarColor() {
+    public int getBaseStatusBarColor(boolean activityHasTab) {
         return StatusBarColorController.UNDEFINED_STATUS_BAR_COLOR;
-    }
-
-    @Override
-    public boolean isStatusBarDefaultThemeColor() {
-        return false;
     }
 
     private void createContextReporterIfNeeded() {
@@ -923,6 +905,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         }
 
         FeatureUtilities.setCustomTabVisible(isCustomTab());
+        FeatureUtilities.setActivityType(getActivityType());
         FeatureUtilities.setIsInMultiWindowMode(
                 MultiWindowUtils.getInstance().isInMultiWindowMode(this));
 
@@ -941,6 +924,9 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
+
+        // Can be in finishing state. No need to attempt PIP.
+        if (isActivityFinishingOrDestroyed()) return;
 
         if (mPictureInPictureController == null) {
             mPictureInPictureController = new PictureInPictureController();
@@ -1014,15 +1000,15 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     /**
      * @return The type for this activity.
      */
-    public @ActivityType int getActivityType() {
-        return ActivityType.BASE;
-    }
+    @ActivityType
+    public abstract int getActivityType();
 
     /**
      * @return Whether the given activity contains a CustomTab.
      */
     public boolean isCustomTab() {
-        return getActivityType() == ActivityType.CUSTOM_TAB;
+        return getActivityType() == ActivityType.CUSTOM_TAB
+                || getActivityType() == ActivityType.TRUSTED_WEB_ACTIVITY;
     }
 
     /**
@@ -1747,7 +1733,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
      */
     private void setTabContentManager(TabContentManager tabContentManager) {
         mTabContentManager = tabContentManager;
-        TabContentManagerHandler.create(tabContentManager, getTabModelSelector());
+        TabContentManagerHandler.create(
+                tabContentManager, getFullscreenManager(), getTabModelSelector());
     }
 
     /**

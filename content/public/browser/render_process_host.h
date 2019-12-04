@@ -29,6 +29,7 @@
 #include "net/base/network_isolation_key.h"
 #include "services/network/public/mojom/cross_origin_embedder_policy.mojom-forward.h"
 #include "services/network/public/mojom/network_context.mojom-forward.h"
+#include "services/network/public/mojom/restricted_cookie_manager.mojom-forward.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "third_party/blink/public/mojom/appcache/appcache.mojom.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom-forward.h"
@@ -39,6 +40,7 @@
 #include "third_party/blink/public/mojom/notifications/notification_service.mojom-forward.h"
 #include "third_party/blink/public/mojom/payments/payment_app.mojom-forward.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-forward.h"
+#include "third_party/blink/public/mojom/quota/quota_dispatcher_host.mojom-forward.h"
 #include "third_party/blink/public/mojom/websockets/websocket_connector.mojom-forward.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -448,6 +450,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // creating the factory. All resource requests through this factory will
   // propagate the key to the network stack so that resources with different
   // keys do not share network resources like the http cache.
+  //
+  // |factory_override|, when non-null, replaces the lower level network
+  // URLLoaderFactory used by security features (e.g., CORS) in the network
+  // service.
   virtual void CreateURLLoaderFactory(
       const url::Origin& origin,
       const url::Origin& main_world_origin,
@@ -456,7 +462,8 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
       const net::NetworkIsolationKey& network_isolation_key,
       mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
           header_client,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) = 0;
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+      network::mojom::URLLoaderFactoryOverridePtr factory_override) = 0;
 
   // Whether this process is locked out from ever being reused for sites other
   // than the ones it currently has.
@@ -511,8 +518,16 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
       int render_frame_id,
       const url::Origin& origin,
       mojo::PendingReceiver<blink::mojom::IDBFactory> receiver) = 0;
+  virtual void BindRestrictedCookieManagerForServiceWorker(
+      const url::Origin& origin,
+      mojo::PendingReceiver<network::mojom::RestrictedCookieManager>
+          receiver) = 0;
   virtual void BindVideoDecodePerfHistory(
       mojo::PendingReceiver<media::mojom::VideoDecodePerfHistory> receiver) = 0;
+  virtual void BindQuotaDispatcherHost(
+      int render_frame_id,
+      const url::Origin& origin,
+      mojo::PendingReceiver<blink::mojom::QuotaDispatcherHost> receiver) = 0;
   virtual void CreateLockManager(
       int render_frame_id,
       const url::Origin& origin,

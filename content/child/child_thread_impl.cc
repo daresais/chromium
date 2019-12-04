@@ -570,24 +570,6 @@ void ChildThreadImpl::Init(const Options& options) {
     child_process_pipe = options.mojo_invitation->ExtractMessagePipe(0);
   }
 
-  mojo::PendingRemote<IPC::mojom::ChannelBootstrap> legacy_ipc_bootstrap;
-  mojo::ScopedMessagePipeHandle legacy_ipc_channel_handle =
-      legacy_ipc_bootstrap.InitWithNewPipeAndPassReceiver().PassPipe();
-  channel_->Init(IPC::ChannelMojo::CreateClientFactory(
-                     std::move(legacy_ipc_channel_handle),
-                     ChildProcess::current()->io_task_runner(),
-                     ipc_task_runner_ ? ipc_task_runner_
-                                      : base::ThreadTaskRunnerHandle::Get()),
-                 /*create_pipe_now=*/true);
-
-  ChildThreadImpl::GetIOTaskRunner()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&IOThreadState::BindChildProcessReceiverAndLegacyIpc,
-                     io_thread_state_,
-                     mojo::PendingReceiver<mojom::ChildProcess>(
-                         std::move(child_process_pipe)),
-                     std::move(legacy_ipc_bootstrap)));
-
   sync_message_filter_ = channel_->CreateSyncMessageFilter();
   thread_safe_sender_ =
       new ThreadSafeSender(main_thread_runner_, sync_message_filter_.get());
@@ -633,6 +615,25 @@ void ChildThreadImpl::Init(const Options& options) {
   for (auto* startup_filter : options.startup_filters) {
     channel_->AddFilter(startup_filter);
   }
+
+  DCHECK(child_process_pipe.is_valid());
+  mojo::PendingRemote<IPC::mojom::ChannelBootstrap> legacy_ipc_bootstrap;
+  mojo::ScopedMessagePipeHandle legacy_ipc_channel_handle =
+      legacy_ipc_bootstrap.InitWithNewPipeAndPassReceiver().PassPipe();
+  channel_->Init(IPC::ChannelMojo::CreateClientFactory(
+                     std::move(legacy_ipc_channel_handle),
+                     ChildProcess::current()->io_task_runner(),
+                     ipc_task_runner_ ? ipc_task_runner_
+                                      : base::ThreadTaskRunnerHandle::Get()),
+                 /*create_pipe_now=*/true);
+
+  ChildThreadImpl::GetIOTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&IOThreadState::BindChildProcessReceiverAndLegacyIpc,
+                     io_thread_state_,
+                     mojo::PendingReceiver<mojom::ChildProcess>(
+                         std::move(child_process_pipe)),
+                     std::move(legacy_ipc_bootstrap)));
 
   int connection_timeout = kConnectionTimeoutS;
   std::string connection_override =

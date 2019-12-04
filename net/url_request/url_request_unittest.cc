@@ -814,7 +814,7 @@ TEST_F(URLRequestTest, RecordsSameOriginReferrerHistogram) {
   std::unique_ptr<URLRequest> req(
       context.CreateRequest(GURL("http://google.com/"), DEFAULT_PRIORITY, &d,
                             TRAFFIC_ANNOTATION_FOR_TESTS));
-  req->set_initiator(url::Origin::Create(GURL("http://google.com")));
+  req->SetReferrer("http://google.com");
   req->set_referrer_policy(URLRequest::NEVER_CLEAR_REFERRER);
 
   base::HistogramTester histograms;
@@ -834,7 +834,7 @@ TEST_F(URLRequestTest, RecordsCrossOriginReferrerHistogram) {
   std::unique_ptr<URLRequest> req(
       context.CreateRequest(GURL("http://google.com/"), DEFAULT_PRIORITY, &d,
                             TRAFFIC_ANNOTATION_FOR_TESTS));
-  req->set_initiator(url::Origin::Create(GURL("http://origin.com")));
+  req->SetReferrer("http://origin.com");
 
   // Set a different policy just to make sure we aren't always logging the same
   // policy.
@@ -862,7 +862,7 @@ TEST_F(URLRequestTest, RecordsReferrerHistogramAgainOnRedirect) {
   std::unique_ptr<URLRequest> req(
       context.CreateRequest(GURL("http://google.com/"), DEFAULT_PRIORITY, &d,
                             TRAFFIC_ANNOTATION_FOR_TESTS));
-  req->set_initiator(url::Origin::Create(GURL("http://google.com")));
+  req->SetReferrer("http://google.com");
 
   req->set_referrer_policy(
       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE);
@@ -6199,113 +6199,52 @@ TEST_F(URLRequestTestHTTP, EmptyReferrerAfterValidReferrer) {
   EXPECT_EQ(std::string("None"), d.data_received());
 }
 
-TEST_F(URLRequestTestHTTP, CapRefererDisabled) {
+TEST_F(URLRequestTestHTTP, CapRefererHeaderLength) {
   ASSERT_TRUE(http_test_server()->Start());
 
-  // Create a string, and pad it out to ~10k with a very exciting path.
-  std::string long_referer_header = "http://foo.com/";
-  long_referer_header.resize(10000, 'a');
-
-  // If the feature isn't enabled, a long `referer` will remain long.
-  TestDelegate d;
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(features::kCapRefererHeaderLength);
-  std::unique_ptr<URLRequest> req(default_context().CreateRequest(
-      http_test_server()->GetURL("/echoheader?Referer"), DEFAULT_PRIORITY, &d,
-      TRAFFIC_ANNOTATION_FOR_TESTS));
-  req->SetReferrer(long_referer_header);
-  req->Start();
-  d.RunUntilComplete();
-
-  EXPECT_EQ(long_referer_header, d.data_received());
-}
-
-TEST_F(URLRequestTestHTTP, CapRefererHeaderLengthEnabled) {
-  ASSERT_TRUE(http_test_server()->Start());
-
-  // Create a string, and pad it out to ~10k with a very exciting path.
-  std::string long_referer_header = "http://foo.com/";
-  long_referer_header.resize(10000, 'a');
-
-  // If the feature is enabled without params, a `referer` longer than 4096
-  // bytes will be shortened.
+  // Verify that referrers over 4k are stripped to an origin, and referrers at
+  // or under 4k are unmodified.
   {
-    TestDelegate d;
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeature(features::kCapRefererHeaderLength);
+    std::string original_header = "http://example.com/";
+    original_header.resize(4097, 'a');
 
+    TestDelegate d;
     std::unique_ptr<URLRequest> req(default_context().CreateRequest(
         http_test_server()->GetURL("/echoheader?Referer"), DEFAULT_PRIORITY, &d,
         TRAFFIC_ANNOTATION_FOR_TESTS));
-    req->SetReferrer(long_referer_header);
+    req->SetReferrer(original_header);
     req->Start();
     d.RunUntilComplete();
 
-    EXPECT_EQ("http://foo.com/", d.data_received());
+    EXPECT_EQ("http://example.com/", d.data_received());
   }
-
-  // If the feature is enabled with params, they will govern the shortening
-  // behavior as expected. The following three tests verify behavior for a
-  // param larger than the referrer length, exactly the same as the string
-  // length, and shorter than the string length.
   {
+    std::string original_header = "http://example.com/";
+    original_header.resize(4096, 'a');
+
     TestDelegate d;
-    std::map<std::string, std::string> params;
-    params["MaxRefererHeaderLength"] =
-        base::NumberToString(long_referer_header.length() + 1);
-
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeatureWithParameters(
-        features::kCapRefererHeaderLength, params);
-
     std::unique_ptr<URLRequest> req(default_context().CreateRequest(
         http_test_server()->GetURL("/echoheader?Referer"), DEFAULT_PRIORITY, &d,
         TRAFFIC_ANNOTATION_FOR_TESTS));
-    req->SetReferrer(long_referer_header);
+    req->SetReferrer(original_header);
     req->Start();
     d.RunUntilComplete();
 
-    EXPECT_EQ(long_referer_header, d.data_received());
+    EXPECT_EQ(original_header, d.data_received());
   }
-
   {
+    std::string original_header = "http://example.com/";
+    original_header.resize(4095, 'a');
+
     TestDelegate d;
-    std::map<std::string, std::string> params;
-    params["MaxRefererHeaderLength"] =
-        base::NumberToString(long_referer_header.length());
-
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeatureWithParameters(
-        features::kCapRefererHeaderLength, params);
-
     std::unique_ptr<URLRequest> req(default_context().CreateRequest(
         http_test_server()->GetURL("/echoheader?Referer"), DEFAULT_PRIORITY, &d,
         TRAFFIC_ANNOTATION_FOR_TESTS));
-    req->SetReferrer(long_referer_header);
+    req->SetReferrer(original_header);
     req->Start();
     d.RunUntilComplete();
 
-    EXPECT_EQ(long_referer_header, d.data_received());
-  }
-
-  {
-    TestDelegate d;
-    std::map<std::string, std::string> params;
-    params["MaxRefererHeaderLength"] =
-        base::NumberToString(long_referer_header.length() - 1);
-
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeatureWithParameters(
-        features::kCapRefererHeaderLength, params);
-
-    std::unique_ptr<URLRequest> req(default_context().CreateRequest(
-        http_test_server()->GetURL("/echoheader?Referer"), DEFAULT_PRIORITY, &d,
-        TRAFFIC_ANNOTATION_FOR_TESTS));
-    req->SetReferrer(long_referer_header);
-    req->Start();
-    d.RunUntilComplete();
-
-    EXPECT_EQ("http://foo.com/", d.data_received());
+    EXPECT_EQ(original_header, d.data_received());
   }
 }
 
@@ -8244,7 +8183,6 @@ class URLRequestTestReferrerPolicy : public URLRequestTest {
     TestDelegate d;
     std::unique_ptr<URLRequest> req(default_context().CreateRequest(
         origin_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
-    req->set_initiator(url::Origin::Create(origin_url));
     req->set_referrer_policy(policy);
     req->SetReferrer(referrer.spec());
     req->Start();
@@ -8264,9 +8202,6 @@ class URLRequestTestReferrerPolicy : public URLRequestTest {
   }
 
   EmbeddedTestServer* origin_server() const { return origin_server_.get(); }
-  EmbeddedTestServer* destination_server() const {
-    return destination_server_.get();
-  }
 
  private:
   std::unique_ptr<EmbeddedTestServer> origin_server_;
@@ -8512,88 +8447,6 @@ TEST_F(URLRequestTestReferrerPolicy, HTTPSToHTTP) {
   VerifyReferrerAfterRedirect(
       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
       referrer.GetOrigin(), GURL());
-
-  VerifyReferrerAfterRedirect(URLRequest::NO_REFERRER, GURL(), GURL());
-}
-
-TEST_F(URLRequestTestReferrerPolicy,
-       HTTPSToHTTPSSameOriginRequestCrossOrginReferrer) {
-  InstantiateSameOriginServers(net::EmbeddedTestServer::TYPE_HTTPS);
-  // The request is same-origin, however its referrer is cross-origin.
-  GURL referrer("https://foo.test/some/path.html");
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
-      referrer, referrer);
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
-      referrer, referrer);
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN, referrer, referrer);
-
-  VerifyReferrerAfterRedirect(URLRequest::NEVER_CLEAR_REFERRER, referrer,
-                              referrer);
-
-  // The original referrer set on the request is expected to obey the referrer
-  // policy and already be stripped to the origin; thus this test case just
-  // checks that this policy doesn't cause the referrer to change when following
-  // a redirect.
-  VerifyReferrerAfterRedirect(URLRequest::ORIGIN, referrer.GetOrigin(),
-                              referrer.GetOrigin());
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN, referrer,
-      referrer);
-
-  // The original referrer set on the request is expected to obey the referrer
-  // policy and already be stripped to the origin, though it should be
-  // subsequently cleared during the downgrading redirect.
-  VerifyReferrerAfterRedirect(
-      URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
-      referrer.GetOrigin(), referrer.GetOrigin());
-  VerifyReferrerAfterRedirect(URLRequest::NO_REFERRER, GURL(), GURL());
-}
-
-TEST_F(URLRequestTestReferrerPolicy,
-       HTTPSToHTTPSCrossOriginRequestCrossOrginReferrer) {
-  InstantiateCrossOriginServers(net::EmbeddedTestServer::TYPE_HTTPS,
-                                net::EmbeddedTestServer::TYPE_HTTPS);
-  // The request is cross-origin, and so is its referrer.
-  GURL referrer = destination_server()->GetURL("/path/to/file.html");
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
-      referrer, referrer);
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
-      referrer, referrer.GetOrigin());
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN, referrer,
-      referrer.GetOrigin());
-
-  VerifyReferrerAfterRedirect(URLRequest::NEVER_CLEAR_REFERRER, referrer,
-                              referrer);
-
-  // The original referrer set on the request is expected to obey the referrer
-  // policy and already be stripped to the origin; thus this test case just
-  // checks that this policy doesn't cause the referrer to change when following
-  // a redirect.
-  VerifyReferrerAfterRedirect(URLRequest::ORIGIN, referrer.GetOrigin(),
-                              referrer.GetOrigin());
-
-  VerifyReferrerAfterRedirect(
-      URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN, referrer, GURL());
-
-  // The original referrer set on the request is expected to obey the referrer
-  // policy and already be stripped to the origin, though it should be
-  // subsequently cleared during the downgrading redirect.
-  VerifyReferrerAfterRedirect(
-      URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
-      referrer.GetOrigin(), referrer.GetOrigin());
 
   VerifyReferrerAfterRedirect(URLRequest::NO_REFERRER, GURL(), GURL());
 }

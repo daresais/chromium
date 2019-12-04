@@ -725,17 +725,17 @@ void ShelfLayoutManager::ProcessMouseWheelEventFromShelf(
 
 ShelfBackgroundType ShelfLayoutManager::GetShelfBackgroundType() const {
   if (state_.pre_lock_screen_animation_active)
-    return SHELF_BACKGROUND_DEFAULT;
+    return ShelfBackgroundType::kDefaultBg;
 
   // Handle all other non active screen states, including OOBE and pre-login.
   if (state_.session_state == session_manager::SessionState::OOBE)
-    return SHELF_BACKGROUND_OOBE;
+    return ShelfBackgroundType::kOobe;
   if (state_.session_state != session_manager::SessionState::ACTIVE) {
     if (Shell::Get()->wallpaper_controller()->HasShownAnyWallpaper() &&
         !Shell::Get()->wallpaper_controller()->IsWallpaperBlurred()) {
-      return SHELF_BACKGROUND_LOGIN_NONBLURRED_WALLPAPER;
+      return ShelfBackgroundType::kLoginNonBlurredWallpaper;
     }
-    return SHELF_BACKGROUND_LOGIN;
+    return ShelfBackgroundType::kLogin;
   }
 
   const bool in_split_view_mode =
@@ -760,34 +760,34 @@ ShelfBackgroundType ShelfLayoutManager::GetShelfBackgroundType() const {
               ->app_list_controller()
               ->home_launcher_transition_state() ==
           AppListControllerImpl::HomeLauncherTransitionState::kMostlyHidden) {
-        return SHELF_BACKGROUND_IN_APP;
+        return ShelfBackgroundType::kInApp;
       }
-      return SHELF_BACKGROUND_HOME_LAUNCHER;
+      return ShelfBackgroundType::kHomeLauncher;
     } else if (Shell::Get()
                    ->app_list_controller()
                    ->home_launcher_transition_state() !=
                AppListControllerImpl::HomeLauncherTransitionState::kFinished) {
-      return SHELF_BACKGROUND_HOME_LAUNCHER;
+      return ShelfBackgroundType::kHomeLauncher;
     } else if (maximized) {
       // If the home launcher is not shown but it is maximized, show the
       // in-app shelf.
-      return SHELF_BACKGROUND_IN_APP;
+      return ShelfBackgroundType::kInApp;
     }
   } else if (app_list_is_visible) {
-    return maximized ? SHELF_BACKGROUND_MAXIMIZED_WITH_APP_LIST
-                     : SHELF_BACKGROUND_APP_LIST;
+    return maximized ? ShelfBackgroundType::kMaximizedWithAppList
+                     : ShelfBackgroundType::kAppList;
   }
 
   if (maximized) {
-    return SHELF_BACKGROUND_MAXIMIZED;
+    return ShelfBackgroundType::kMaximized;
   }
 
   if (Shell::Get()->overview_controller() &&
       Shell::Get()->overview_controller()->InOverviewSession()) {
-    return SHELF_BACKGROUND_OVERVIEW;
+    return ShelfBackgroundType::kOverview;
   }
 
-  return SHELF_BACKGROUND_DEFAULT;
+  return ShelfBackgroundType::kDefaultBg;
 }
 
 void ShelfLayoutManager::MaybeUpdateShelfBackground(AnimationChangeType type) {
@@ -806,12 +806,12 @@ bool ShelfLayoutManager::ShouldBlurShelfBackground() {
     return false;
 
   if (chromeos::switches::ShouldShowShelfHotseat()) {
-    return shelf_background_type_ == SHELF_BACKGROUND_DEFAULT &&
+    return shelf_background_type_ == ShelfBackgroundType::kDefaultBg &&
            state_.session_state == session_manager::SessionState::ACTIVE;
   }
 
-  return (shelf_background_type_ == SHELF_BACKGROUND_HOME_LAUNCHER ||
-          shelf_background_type_ == SHELF_BACKGROUND_DEFAULT) &&
+  return (shelf_background_type_ == ShelfBackgroundType::kHomeLauncher ||
+          shelf_background_type_ == ShelfBackgroundType::kDefaultBg) &&
          state_.session_state == session_manager::SessionState::ACTIVE;
 }
 
@@ -1031,6 +1031,13 @@ void ShelfLayoutManager::OnDeskSwitchAnimationFinished() {
   DCHECK_GE(suspend_visibility_update_, 0);
   if (!suspend_visibility_update_)
     UpdateVisibilityState();
+}
+
+gfx::Rect ShelfLayoutManager::GetNavigationBounds() const {
+  gfx::Vector2d nav_offset = target_bounds_.shelf_bounds.OffsetFromOrigin();
+  gfx::Rect nav_bounds = target_bounds_.nav_bounds_in_shelf;
+  nav_bounds.Offset(nav_offset);
+  return nav_bounds;
 }
 
 int ShelfLayoutManager::CalculateHotseatYInShelf(
@@ -1451,10 +1458,8 @@ void ShelfLayoutManager::UpdateBoundsAndOpacity(
     status_bounds.Offset(target_bounds_.shelf_bounds.OffsetFromOrigin());
     status_widget->SetBounds(status_bounds);
 
-    gfx::Vector2d nav_offset = target_bounds_.shelf_bounds.OffsetFromOrigin();
-    gfx::Rect nav_bounds = target_bounds_.nav_bounds_in_shelf;
-    nav_bounds.Offset(nav_offset);
-    nav_widget->SetBounds(nav_bounds);
+    // Let the navigation widget handle its own layout changes.
+    nav_widget->UpdateLayout();
 
     gfx::Vector2d hotseat_offset =
         target_bounds_.shelf_bounds.OffsetFromOrigin();
@@ -1474,7 +1479,7 @@ void ShelfLayoutManager::UpdateBoundsAndOpacity(
       bool in_overview =
           Shell::Get()->overview_controller()->InOverviewSession();
       if (!in_overview && !state_.IsScreenLocked() &&
-          (shelf_->alignment() != SHELF_ALIGNMENT_BOTTOM_LOCKED ||
+          (shelf_->alignment() != ShelfAlignment::kBottomLocked ||
            display_.work_area() == display_.bounds())) {
         gfx::Insets insets;
         // If user session is blocked (login to new user session or add user to
@@ -1939,9 +1944,9 @@ ShelfAutoHideState ShelfLayoutManager::CalculateAutoHideState(
     // when the mouse is over the bubble gap.
     ShelfAlignment alignment = shelf_->alignment();
     shelf_region.Inset(
-        alignment == SHELF_ALIGNMENT_RIGHT ? -kNotificationBubbleGapHeight : 0,
+        alignment == ShelfAlignment::kRight ? -kNotificationBubbleGapHeight : 0,
         shelf_->IsHorizontalAlignment() ? -kNotificationBubbleGapHeight : 0,
-        alignment == SHELF_ALIGNMENT_LEFT ? -kNotificationBubbleGapHeight : 0,
+        alignment == ShelfAlignment::kLeft ? -kNotificationBubbleGapHeight : 0,
         0);
   }
 
@@ -2022,7 +2027,7 @@ float ShelfLayoutManager::ComputeTargetOpacity(const State& state) const {
   float opacity_when_visible = kDefaultShelfOpacity;
   if (dimmed_for_inactivity_) {
     opacity_when_visible =
-        (GetShelfBackgroundType() == SHELF_BACKGROUND_MAXIMIZED)
+        (GetShelfBackgroundType() == ShelfBackgroundType::kMaximized)
             ? kMaximizedShelfDimOpacity
             : kFloatingShelfDimOpacity;
   }
@@ -2513,13 +2518,13 @@ float ShelfLayoutManager::GetAppListBackgroundOpacityOnShelfOpacity() {
 
 bool ShelfLayoutManager::IsSwipingCorrectDirection() {
   switch (shelf_->alignment()) {
-    case SHELF_ALIGNMENT_BOTTOM:
-    case SHELF_ALIGNMENT_BOTTOM_LOCKED:
-    case SHELF_ALIGNMENT_RIGHT:
+    case ShelfAlignment::kBottom:
+    case ShelfAlignment::kBottomLocked:
+    case ShelfAlignment::kRight:
       if (drag_auto_hide_state_ == SHELF_AUTO_HIDE_SHOWN)
         return drag_amount_ > 0;
       return drag_amount_ < 0;
-    case SHELF_ALIGNMENT_LEFT:
+    case ShelfAlignment::kLeft:
       if (drag_auto_hide_state_ == SHELF_AUTO_HIDE_SHOWN)
         return drag_amount_ < 0;
       return drag_amount_ > 0;

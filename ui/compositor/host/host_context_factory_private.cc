@@ -8,7 +8,6 @@
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/mojo_embedder/async_layer_tree_frame_sink.h"
-#include "components/viz/client/hit_test_data_provider_draw_quad.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
 #include "components/viz/host/host_display_client.h"
@@ -144,8 +143,6 @@ void HostContextFactoryPrivate::ConfigureCompositor(
   compositor_data.display_private->Resize(compositor->size());
   compositor_data.display_private->SetOutputIsSecure(
       compositor_data.output_is_secure);
-  compositor_data.display_private->SetDisplayTransformHint(
-      compositor->display_transform());
 
   // Create LayerTreeFrameSink with the browser end of CompositorFrameSink.
   cc::mojo_embedder::AsyncLayerTreeFrameSink::InitParams params;
@@ -154,12 +151,6 @@ void HostContextFactoryPrivate::ConfigureCompositor(
       compositor->context_factory()->GetGpuMemoryBufferManager();
   params.pipes.compositor_frame_sink_associated_remote = std::move(sink_remote);
   params.pipes.client_receiver = std::move(client_receiver);
-  if (!features::IsVizHitTestingSurfaceLayerEnabled()) {
-    params.hit_test_data_provider =
-        std::make_unique<viz::HitTestDataProviderDrawQuad>(
-            false /* should_ask_for_child_region */,
-            true /* root_accepts_events */);
-  }
   params.client_name = kBrowser;
   compositor->SetLayerTreeFrameSink(
       std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
@@ -314,17 +305,6 @@ void HostContextFactoryPrivate::AddVSyncParameterObserver(
     iter->second.display_private->AddVSyncParameterObserver(
         std::move(observer));
   }
-}
-
-void HostContextFactoryPrivate::SetDisplayTransformHint(
-    Compositor* compositor,
-    gfx::OverlayTransform transform) {
-  auto iter = compositor_data_map_.find(compositor);
-  if (iter == compositor_data_map_.end())
-    return;
-
-  if (iter->second.display_private)
-    iter->second.display_private->SetDisplayTransformHint(transform);
 }
 
 HostContextFactoryPrivate::CompositorData::CompositorData() = default;

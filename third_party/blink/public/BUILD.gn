@@ -144,9 +144,7 @@ source_set("blink_headers") {
     "platform/modules/service_worker/web_service_worker_provider_client.h",
     "platform/modules/service_worker/web_service_worker_registration_object_info.h",
     "platform/modules/video_capture/web_video_capture_impl_manager.h",
-    "platform/modules/webrtc/track_observer.h",
     "platform/modules/webrtc/webrtc_logging.h",
-    "platform/modules/webrtc/webrtc_source.h",
     "platform/platform.h",
     "platform/pointer_id.h",
     "platform/pointer_properties.h",
@@ -199,7 +197,6 @@ source_set("blink_headers") {
     "platform/web_double_size.h",
     "platform/web_drag_data.h",
     "platform/web_drag_operation.h",
-    "platform/web_editing_command_type.h",
     "platform/web_effective_connection_type.h",
     "platform/web_encrypted_media_client.h",
     "platform/web_encrypted_media_key_information.h",
@@ -489,7 +486,6 @@ source_set("blink_headers") {
   ]
 }
 
-assert(external_devtools_frontend)
 devtools_frontend_path = "//third_party/devtools-frontend/src"
 
 group("blink_devtools_frontend_resources") {

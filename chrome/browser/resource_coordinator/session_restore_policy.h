@@ -15,7 +15,6 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/browser/resource_coordinator/site_characteristics_data_reader.h"
 #include "chrome/browser/resource_coordinator/tab_manager_features.h"
 
 namespace content {
@@ -152,7 +151,7 @@ class SessionRestorePolicy {
     bool UsedInBg() const;
 
     // Indicates whether or not the tab communicates with the user even when it
-    // is in the background (notifications, tab title changes, favicons, etc).
+    // is in the background (tab title changes, favicons, etc).
     // It is initialized to nullopt and set asynchronously to the proper value.
     base::Optional<bool> used_in_bg;
 

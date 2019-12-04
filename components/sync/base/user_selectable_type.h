@@ -24,7 +24,6 @@ enum class UserSelectableType {
   kExtensions,
   kApps,
   kReadingList,
-  kWifiConfigurations,
   kTabs,
   kLastType = kTabs
 };
@@ -35,6 +34,7 @@ using UserSelectableTypeSet = EnumSet<UserSelectableType,
 
 const char* GetUserSelectableTypeName(UserSelectableType type);
 UserSelectableType GetUserSelectableTypeFromString(const std::string& type);
+std::string UserSelectableTypeSetToString(UserSelectableTypeSet types);
 ModelTypeSet UserSelectableTypeToAllModelTypes(UserSelectableType type);
 
 ModelType UserSelectableTypeToCanonicalModelType(UserSelectableType type);
@@ -52,7 +52,8 @@ enum class UserSelectableOsType {
 
   kOsPreferences,
   kPrinters,
-  kLastType = kPrinters
+  kWifiConfigurations,
+  kLastType = kWifiConfigurations
 };
 
 using UserSelectableOsTypeSet = EnumSet<UserSelectableOsType,

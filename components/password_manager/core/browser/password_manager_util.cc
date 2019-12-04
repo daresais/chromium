@@ -11,6 +11,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
@@ -21,7 +22,6 @@
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
-#include "components/password_manager/core/browser/blacklisted_credentials_cleaner.h"
 #include "components/password_manager/core/browser/credentials_cleaner.h"
 #include "components/password_manager/core/browser/credentials_cleaner_runner.h"
 #include "components/password_manager/core/browser/http_credentials_cleaner.h"
@@ -196,10 +196,6 @@ void RemoveUselessCredentials(
   }
 #endif  // !defined(OS_IOS)
 
-  cleaning_tasks_runner->MaybeAddCleaningTask(
-      std::make_unique<password_manager::BlacklistedCredentialsCleaner>(store,
-                                                                        prefs));
-
   if (cleaning_tasks_runner->HasPendingTasks()) {
     // The runner will delete itself once the clearing tasks are done, thus we
     // are releasing ownership here.
@@ -355,9 +351,21 @@ autofill::PasswordForm MakeNormalizedBlacklistedForm(
 bool IsOptedInForAccountStorage(const PrefService* pref_service,
                                 const syncer::SyncService* sync_service) {
   DCHECK(pref_service);
-  DCHECK(sync_service);
+
+  if (!base::FeatureList::IsEnabled(
+          password_manager::features::kEnablePasswordsAccountStorage)) {
+    return false;
+  }
+
+  // |sync_service| is null in incognito mode, or if --disable-sync was
+  // specified on the command-line.
+  if (!sync_service)
+    return false;
 
   CoreAccountId account_id = sync_service->GetAuthenticatedAccountId();
+  if (account_id.empty())
+    return false;
+
   const base::DictionaryValue* dict = pref_service->GetDictionary(
       password_manager::prefs::kAccountStorageOptedInAccounts);
   if (!dict)
@@ -370,7 +378,16 @@ bool IsOptedInForAccountStorage(const PrefService* pref_service,
 bool ShouldShowAccountStorageOptIn(const PrefService* pref_service,
                                    const syncer::SyncService* sync_service) {
   DCHECK(pref_service);
-  DCHECK(sync_service);
+
+  if (!base::FeatureList::IsEnabled(
+          password_manager::features::kEnablePasswordsAccountStorage)) {
+    return false;
+  }
+
+  // |sync_service| is null in incognito mode, or if --disable-sync was
+  // specified on the command-line.
+  if (!sync_service)
+    return false;
 
   // Only show the opt-in if:
   // - Sync transport is enabled (i.e. user is signed in, Sync is not disabled
@@ -388,8 +405,15 @@ void SetAccountStorageOptIn(PrefService* pref_service,
                             bool opt_in) {
   DCHECK(pref_service);
   DCHECK(sync_service);
+  DCHECK(base::FeatureList::IsEnabled(
+      password_manager::features::kEnablePasswordsAccountStorage));
 
   CoreAccountId account_id = sync_service->GetAuthenticatedAccountId();
+  if (account_id.empty()) {
+    // Maybe the account went away since the opt-in UI was shown. This should be
+    // rare, but is ultimately harmless - just do nothing here.
+    return;
+  }
   DictionaryPrefUpdate update(
       pref_service, password_manager::prefs::kAccountStorageOptedInAccounts);
   update->SetBoolean(GetAccountHash(account_id), opt_in);

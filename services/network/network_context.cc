@@ -486,7 +486,7 @@ void NetworkContext::CreateURLLoaderFactory(
     scoped_refptr<ResourceSchedulerClient> resource_scheduler_client) {
   url_loader_factories_.emplace(std::make_unique<cors::CorsURLLoaderFactory>(
       this, std::move(params), std::move(resource_scheduler_client),
-      std::move(receiver), &cors_origin_access_list_, nullptr));
+      std::move(receiver), &cors_origin_access_list_));
 }
 
 void NetworkContext::ActivateDohProbes() {
@@ -1800,8 +1800,7 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
 
 #if defined(OS_CHROMEOS)
   if (params_->dhcp_wpad_url_client) {
-    builder.SetDhcpWpadUrlClient(network::mojom::DhcpWpadUrlClientPtr(
-        std::move(params_->dhcp_wpad_url_client)));
+    builder.SetDhcpWpadUrlClient(std::move(params_->dhcp_wpad_url_client));
   }
 #endif  // defined(OS_CHROMEOS)
 

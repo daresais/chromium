@@ -610,9 +610,9 @@ void Internals::advanceImageAnimation(Element* image,
   DCHECK(image);
 
   ImageResourceContent* resource = nullptr;
-  if (auto* html_image = ToHTMLImageElementOrNull(*image)) {
+  if (auto* html_image = DynamicTo<HTMLImageElement>(*image)) {
     resource = html_image->CachedImage();
-  } else if (auto* svg_image = ToSVGImageElementOrNull(*image)) {
+  } else if (auto* svg_image = DynamicTo<SVGImageElement>(*image)) {
     resource = svg_image->CachedImage();
   } else {
     exception_state.ThrowDOMException(
@@ -2065,15 +2065,24 @@ unsigned Internals::numberOfScrollableAreas(Document* document) {
 
   unsigned count = 0;
   LocalFrame* frame = document->GetFrame();
-  if (frame->View()->ScrollableAreas())
-    count += frame->View()->ScrollableAreas()->size();
+  if (frame->View()->ScrollableAreas()) {
+    for (const auto& scrollable_area : *frame->View()->ScrollableAreas()) {
+      if (scrollable_area->ScrollsOverflow())
+        count++;
+    }
+  }
 
   for (Frame* child = frame->Tree().FirstChild(); child;
        child = child->Tree().NextSibling()) {
     auto* child_local_frame = DynamicTo<LocalFrame>(child);
     if (child_local_frame && child_local_frame->View() &&
-        child_local_frame->View()->ScrollableAreas())
-      count += child_local_frame->View()->ScrollableAreas()->size();
+        child_local_frame->View()->ScrollableAreas()) {
+      for (const auto& scrollable_area :
+           *child_local_frame->View()->ScrollableAreas()) {
+        if (scrollable_area->ScrollsOverflow())
+          count++;
+      }
+    }
   }
 
   return count;
@@ -2881,13 +2890,14 @@ String Internals::getImageSourceURL(Element* element) {
 
 void Internals::forceImageReload(Element* element,
                                  ExceptionState& exception_state) {
-  if (!element || !IsHTMLImageElement(*element)) {
+  auto* html_image_element = DynamicTo<HTMLImageElement>(element);
+  if (!html_image_element) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
         "The element should be HTMLImageElement.");
   }
 
-  ToHTMLImageElement(*element).ForceReload();
+  html_image_element->ForceReload();
 }
 
 String Internals::selectMenuListText(HTMLSelectElement* select) {

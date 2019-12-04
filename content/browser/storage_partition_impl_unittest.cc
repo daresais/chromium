@@ -18,11 +18,11 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/services/storage/dom_storage/async_dom_storage_database.h"
 #include "components/services/storage/dom_storage/dom_storage_database.h"
+#include "components/services/storage/dom_storage/local_storage_database.pb.h"
 #include "components/services/storage/public/cpp/constants.h"
 #include "content/browser/code_cache/generated_code_cache.h"
 #include "content/browser/code_cache/generated_code_cache_context.h"
 #include "content/browser/dom_storage/local_storage_context_mojo.h"
-#include "content/browser/dom_storage/local_storage_database.pb.h"
 #include "content/browser/gpu/shader_cache_factory.h"
 #include "content/browser/storage_partition_impl.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -254,7 +254,7 @@ class RemoveLocalStorageTester {
   }
 
   static void PopulateDatabase(const storage::DomStorageDatabase& db) {
-    LocalStorageOriginMetaData data;
+    storage::LocalStorageOriginMetaData data;
     std::map<std::vector<uint8_t>, std::vector<uint8_t>> entries;
 
     base::Time now = base::Time::Now();
@@ -621,12 +621,12 @@ void ClearQuotaData(content::StoragePartition* partition,
 
 void ClearQuotaDataWithOriginMatcher(
     content::StoragePartition* partition,
-    const StoragePartition::OriginMatcherFunction& origin_matcher,
+    StoragePartition::OriginMatcherFunction origin_matcher,
     const base::Time delete_begin,
     base::RunLoop* loop_to_quit) {
   partition->ClearData(kAllQuotaRemoveMask,
                        StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
-                       origin_matcher, nullptr, false, delete_begin,
+                       std::move(origin_matcher), nullptr, false, delete_begin,
                        base::Time::Max(), loop_to_quit->QuitClosure());
 }
 
@@ -678,12 +678,12 @@ void ClearStuff(uint32_t remove_mask,
                 content::StoragePartition* partition,
                 const base::Time delete_begin,
                 const base::Time delete_end,
-                const StoragePartition::OriginMatcherFunction& origin_matcher,
+                StoragePartition::OriginMatcherFunction origin_matcher,
                 base::RunLoop* run_loop) {
   partition->ClearData(remove_mask,
                        StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
-                       origin_matcher, nullptr, false, delete_begin, delete_end,
-                       run_loop->QuitClosure());
+                       std::move(origin_matcher), nullptr, false, delete_begin,
+                       delete_end, run_loop->QuitClosure());
 }
 
 void ClearData(content::StoragePartition* partition, base::RunLoop* run_loop) {

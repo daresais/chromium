@@ -33,6 +33,7 @@
 #include "chrome/browser/printing/print_error_dialog.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
+#include "chrome/browser/printing/print_preview_sticky_settings.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/profiles/profile.h"
@@ -46,7 +47,6 @@
 #include "chrome/browser/ui/webui/print_preview/policy_settings.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/print_preview/printer_handler.h"
-#include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
@@ -241,12 +241,15 @@ const char kAppState[] = "serializedAppStateStr";
 // Name of a dictionary field holding the default destination selection rules.
 const char kDefaultDestinationSelectionRules[] =
     "serializedDefaultDestinationSelectionRulesStr";
-// Name of a dictionary pref holding the default value for the header/footer
-// checkbox. If set, takes priority over sticky settings.
+// Name of a dictionary field holding policy values for printing settings.
+const char kPolicies[] = "policies";
+// Name of a dictionary field holding policy allowed mode value for the setting.
+const char kAllowedMode[] = "allowedMode";
+// Name of a dictionary field holding policy default mode value for the setting.
+const char kDefaultMode[] = "defaultMode";
+// Name of a dictionary pref holding the policy value for the header/footer
+// checkbox.
 const char kHeaderFooter[] = "headerFooter";
-// Name of a dictionary field telling us whether the kPrintHeaderFooter pref is
-// managed by an enterprise policy.
-const char kIsHeaderFooterManaged[] = "isHeaderFooterManaged";
 // Name of a dictionary field indicating whether the 'Save to PDF' destination
 // is disabled.
 const char kPdfPrinterDisabled[] = "pdfPrinterDisabled";
@@ -333,10 +336,9 @@ void ReportPrintSettingsStats(const base::Value& print_settings,
     ReportPrintSettingHistogram(duplex_mode_opt.value() ? DUPLEX : SIMPLEX);
 
   base::Optional<int> color_mode_opt = print_settings.FindIntKey(kSettingColor);
-  if (color_mode_opt.has_value()) {
-    base::Optional<bool> is_color =
-        IsColorModelSelected(color_mode_opt.value());
-    ReportPrintSettingHistogram(is_color.value() ? COLOR : BLACK_AND_WHITE);
+  if (color_mode_opt) {
+    ReportPrintSettingHistogram(
+        IsColorModelSelected(color_mode_opt.value()) ? COLOR : BLACK_AND_WHITE);
   }
 
   if (preview_settings.FindIntKey(kSettingMarginsType).value_or(0) != 0)
@@ -421,11 +423,23 @@ UserActionBuckets DetermineUserAction(const base::Value& settings) {
   return PRINT_TO_PRINTER;
 }
 
-base::LazyInstance<StickySettings>::DestructorAtExit g_sticky_settings =
-    LAZY_INSTANCE_INITIALIZER;
+base::Value GetPolicies(const PrefService& prefs) {
+  base::Value policies(base::Value::Type::DICTIONARY);
 
-StickySettings* GetStickySettings() {
-  return g_sticky_settings.Pointer();
+  base::Value header_footer_policy(base::Value::Type::DICTIONARY);
+  if (prefs.HasPrefPath(prefs::kPrintHeaderFooter)) {
+    if (prefs.IsManagedPreference(prefs::kPrintHeaderFooter)) {
+      header_footer_policy.SetBoolKey(
+          kAllowedMode, prefs.GetBoolean(prefs::kPrintHeaderFooter));
+    } else {
+      header_footer_policy.SetBoolKey(
+          kDefaultMode, prefs.GetBoolean(prefs::kPrintHeaderFooter));
+    }
+  }
+  if (!header_footer_policy.DictEmpty())
+    policies.SetKey(kHeaderFooter, std::move(header_footer_policy));
+
+  return policies;
 }
 
 }  // namespace
@@ -871,7 +885,8 @@ void PrintPreviewHandler::HandleCancelPendingPrintRequest(
 
 void PrintPreviewHandler::HandleSaveAppState(const base::ListValue* args) {
   std::string data_to_save;
-  StickySettings* sticky_settings = GetStickySettings();
+  PrintPreviewStickySettings* sticky_settings =
+      PrintPreviewStickySettings::GetInstance();
   if (args->GetString(0, &data_to_save) && !data_to_save.empty())
     sticky_settings->StoreAppState(data_to_save);
   sticky_settings->SaveInPrefs(GetPrefs());
@@ -1060,7 +1075,8 @@ void PrintPreviewHandler::SendInitialSettings(
   initial_settings.SetBoolKey(kSettingShouldPrintSelectionOnly,
                               print_preview_ui()->print_selection_only());
   PrefService* prefs = GetPrefs();
-  StickySettings* sticky_settings = GetStickySettings();
+  PrintPreviewStickySettings* sticky_settings =
+      PrintPreviewStickySettings::GetInstance();
   sticky_settings->RestoreFromPrefs(prefs);
   if (sticky_settings->printer_app_state()) {
     initial_settings.SetStringKey(kAppState,
@@ -1069,20 +1085,15 @@ void PrintPreviewHandler::SendInitialSettings(
     initial_settings.SetKey(kAppState, base::Value());
   }
 
-  if (prefs->HasPrefPath(prefs::kPrintHeaderFooter)) {
-    // Don't override sticky settings, unless kPrintHeaderFooter is actually
-    // customized.
-    initial_settings.SetBoolKey(kHeaderFooter,
-                                prefs->GetBoolean(prefs::kPrintHeaderFooter));
-  }
+  base::Value policies = GetPolicies(*prefs);
+  if (!policies.DictEmpty())
+    initial_settings.SetKey(kPolicies, std::move(policies));
+
   if (IsCloudPrintEnabled() &&
       !base::FeatureList::IsEnabled(features::kCloudPrinterHandler)) {
     initial_settings.SetStringKey(
         kCloudPrintURL, GURL(cloud_devices::GetCloudPrintURL()).spec());
   }
-  initial_settings.SetBoolKey(
-      kIsHeaderFooterManaged,
-      prefs->IsManagedPreference(prefs::kPrintHeaderFooter));
 
   initial_settings.SetBoolKey(
       kPdfPrinterDisabled,
@@ -1343,7 +1354,7 @@ PrinterHandler* PrintPreviewHandler::GetPrinterHandler(
     if (!pdf_printer_handler_) {
       pdf_printer_handler_ = PrinterHandler::CreateForPdfPrinter(
           Profile::FromWebUI(web_ui()), preview_web_contents(),
-          GetStickySettings());
+          PrintPreviewStickySettings::GetInstance());
     }
     return pdf_printer_handler_.get();
   }

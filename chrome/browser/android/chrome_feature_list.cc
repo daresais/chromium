@@ -142,6 +142,7 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &kEphemeralTab,
     &kEphemeralTabUsingBottomSheet,
     &kExploreSites,
+    &kFocusOmniboxInIncognitoTabIntents,
     &kHandleMediaIntents,
     &kHomepageLocation,
     &kHorizontalTabSwitcherAndroid,
@@ -229,6 +230,7 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &safe_browsing::kCaptureSafetyNetId,
     &security_state::features::kMarkHttpAsFeature,
     &signin::kMiceFeature,
+    &switches::kSyncErrorInfoBarAndroid,
     &switches::kSyncManualStartAndroid,
     &switches::kSyncUseSessionsUnregisterDelay,
     &subresource_filter::kSafeBrowsingSubresourceFilter,
@@ -265,6 +267,9 @@ const base::Feature kAndroidPayIntegrationV1{"AndroidPayIntegrationV1",
 
 const base::Feature kAllowNewIncognitoTabIntents{
     "AllowNewIncognitoTabIntents", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kFocusOmniboxInIncognitoTabIntents{
+    "FocusOmniboxInIncognitoTabIntents", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kAllowRemoteContextForNotifications{
     "AllowRemoteContextForNotifications", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -493,7 +498,7 @@ const base::Feature kPhotoPickerVideoSupport{"PhotoPickerVideoSupport",
                                              base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kPhotoPickerZoom{"PhotoPickerZoom",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kReachedCodeProfiler{"ReachedCodeProfiler",
                                          base::FEATURE_DISABLED_BY_DEFAULT};

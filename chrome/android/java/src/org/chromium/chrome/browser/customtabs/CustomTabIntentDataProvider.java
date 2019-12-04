@@ -31,6 +31,7 @@ import androidx.browser.customtabs.CustomTabColorSchemeParams;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsSessionToken;
 import androidx.browser.customtabs.TrustedWebUtils;
+import androidx.browser.trusted.TrustedWebActivityDisplayMode;
 import androidx.browser.trusted.TrustedWebActivityIntentBuilder;
 import androidx.browser.trusted.sharing.ShareData;
 import androidx.browser.trusted.sharing.ShareTarget;
@@ -224,8 +225,11 @@ public class CustomTabIntentDataProvider extends BrowserServicesIntentDataProvid
     @Nullable
     private final List<String> mTrustedWebActivityAdditionalOrigins;
     @Nullable
+    private final TrustedWebActivityDisplayMode mTrustedWebActivityDisplayMode;
+    @Nullable
     private String mUrlToLoad;
 
+    private boolean mHasCustomToolbarColor;
     private int mToolbarColor;
     private int mBottomBarColor;
     private boolean mEnableUrlBarHiding;
@@ -345,6 +349,7 @@ public class CustomTabIntentDataProvider extends BrowserServicesIntentDataProvid
                 intent, TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, false);
         mTrustedWebActivityAdditionalOrigins = IntentUtils.safeGetStringArrayListExtra(intent,
                 TrustedWebActivityIntentBuilder.EXTRA_ADDITIONAL_TRUSTED_ORIGINS);
+        mTrustedWebActivityDisplayMode = resolveTwaDisplayMode();
         mTitleVisibilityState = IntentUtils.safeGetIntExtra(
                 intent, CustomTabsIntent.EXTRA_TITLE_VISIBILITY_STATE, CustomTabsIntent.NO_TITLE);
         mShowShareItem = IntentUtils.safeGetBooleanExtra(intent,
@@ -527,7 +532,8 @@ public class CustomTabIntentDataProvider extends BrowserServicesIntentDataProvid
             mToolbarColor = defaultColor;
             return; // Don't allow toolbar color customization for incognito tabs.
         }
-        int color = schemeParams.toolbarColor != null ? schemeParams.toolbarColor : defaultColor;
+        mHasCustomToolbarColor = (schemeParams.toolbarColor != null);
+        int color = mHasCustomToolbarColor ? schemeParams.toolbarColor : defaultColor;
         mToolbarColor = ColorUtils.getOpaqueColor(color);
     }
 
@@ -576,6 +582,20 @@ public class CustomTabIntentDataProvider extends BrowserServicesIntentDataProvid
         }
 
         return url;
+    }
+
+    @Nullable
+    private TrustedWebActivityDisplayMode resolveTwaDisplayMode() {
+        Bundle bundle = IntentUtils.safeGetBundleExtra(mIntent,
+                TrustedWebActivityIntentBuilder.EXTRA_DISPLAY_MODE);
+        if (bundle == null) {
+            return null;
+        }
+        try {
+            return TrustedWebActivityDisplayMode.fromBundle(bundle);
+        } catch (Throwable e) {
+            return null;
+        }
     }
 
     @Override
@@ -642,6 +662,11 @@ public class CustomTabIntentDataProvider extends BrowserServicesIntentDataProvid
     @Override
     public int getToolbarColor() {
         return mToolbarColor;
+    }
+
+    @Override
+    public boolean hasCustomToolbarColor() {
+        return mHasCustomToolbarColor;
     }
 
     @Override
@@ -781,6 +806,12 @@ public class CustomTabIntentDataProvider extends BrowserServicesIntentDataProvid
     @Override
     public boolean isTrustedWebActivity() {
         return mIsTrustedWebActivity;
+    }
+
+    @Nullable
+    @Override
+    public TrustedWebActivityDisplayMode getTwaDisplayMode() {
+        return mTrustedWebActivityDisplayMode;
     }
 
     @Override

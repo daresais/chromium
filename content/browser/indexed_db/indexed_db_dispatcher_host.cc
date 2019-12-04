@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/guid.h"
 #include "base/process/process.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
@@ -22,10 +23,13 @@
 #include "content/browser/indexed_db/indexed_db_database_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_factory_impl.h"
 #include "content/browser/indexed_db/indexed_db_pending_connection.h"
+#include "content/browser/indexed_db/indexed_db_tracing.h"
 #include "content/browser/indexed_db/transaction_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
+#include "net/base/net_errors.h"
+#include "storage/browser/blob/blob_impl.h"
 #include "storage/browser/database/database_util.h"
 #include "storage/browser/file_system/file_stream_reader.h"
 #include "url/origin.h"
@@ -194,9 +198,8 @@ class IndexedDBDataItemReader : public storage::mojom::BlobDataItemReader {
 IndexedDBDispatcherHost::IndexedDBDispatcherHost(
     int ipc_process_id,
     scoped_refptr<IndexedDBContextImpl> indexed_db_context,
-    scoped_refptr<ChromeBlobStorageContext> blob_storage_context)
+    mojo::PendingRemote<storage::mojom::BlobStorageContext> remote)
     : indexed_db_context_(std::move(indexed_db_context)),
-      blob_storage_context_(blob_storage_context),
       file_task_runner_(
           base::CreateTaskRunner({base::ThreadPool(), base::MayBlock(),
                                   base::TaskPriority::USER_VISIBLE})),
@@ -204,14 +207,9 @@ IndexedDBDispatcherHost::IndexedDBDispatcherHost(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DETACH_FROM_SEQUENCE(sequence_checker_);
   DCHECK(indexed_db_context_);
-  DCHECK(blob_storage_context);
-
-  // Create both endpoints and send them separately to avoid race conditions.
-  mojo::PendingRemote<storage::mojom::BlobStorageContext> remote;
-  auto receiver = remote.InitWithNewPipeAndPassReceiver();
+  DCHECK(remote.is_valid());
 
   // Bind the BlobStorageContext remote on the idb sequence.
-  // Bind the receiver on the IO thread.
   IDBTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(
@@ -223,20 +221,6 @@ IndexedDBDispatcherHost::IndexedDBDispatcherHost(
           // As |this| is destroyed on the idb task runner, it is safe to
           // pass it directly.
           base::Unretained(this), std::move(remote)));
-
-  // Subtle note: this needs to be posted to the IO thread from the UI thread so
-  // as not to race with other tasks being posted from the UI thread to the IO
-  // thread to initialize ChromeBlogStorageContext.  If this is posted from the
-  // idb task runner, it may end up running first due to priority inheritance.
-  base::PostTask(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(
-          [](scoped_refptr<ChromeBlobStorageContext> blob_storage_context,
-             mojo::PendingReceiver<storage::mojom::BlobStorageContext>
-                 receiver) {
-            blob_storage_context->BindMojoContext(std::move(receiver));
-          },
-          base::RetainedRef(blob_storage_context), std::move(receiver)));
 }
 
 IndexedDBDispatcherHost::~IndexedDBDispatcherHost() {
@@ -444,6 +428,48 @@ void IndexedDBDispatcherHost::BindFileReader(
 void IndexedDBDispatcherHost::RemoveBoundReaders(const base::FilePath& path) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   file_reader_map_.erase(path);
+}
+
+void IndexedDBDispatcherHost::CreateAllBlobs(
+    const std::vector<IndexedDBBlobInfo>& blob_infos,
+    std::vector<blink::mojom::IDBBlobInfoPtr>* output_infos) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  IDB_TRACE("IndexedDBDispatcherHost::CreateAllBlobs");
+
+  DCHECK_EQ(blob_infos.size(), output_infos->size());
+  if (blob_infos.empty())
+    return;
+
+  // First, handle all the "file path" value blobs on this sequence.
+  for (size_t i = 0; i < blob_infos.size(); ++i) {
+    auto& blob_info = blob_infos[i];
+    auto& output_info = (*output_infos)[i];
+
+    auto receiver = output_info->blob.InitWithNewPipeAndPassReceiver();
+    if (blob_info.is_remote_valid()) {
+      output_info->uuid = blob_info.uuid();
+      blob_info.Clone(std::move(receiver));
+      continue;
+    }
+
+    auto element = storage::mojom::BlobDataItem::New();
+    // TODO(enne): do we have to handle unknown size here??
+    element->size = blob_info.size();
+    element->side_data_size = 0;
+    element->content_type = base::UTF16ToUTF8(blob_info.type());
+    element->type = storage::mojom::BlobDataItemType::kIndexedDB;
+
+    BindFileReader(blob_info.file_path(), blob_info.last_modified(),
+                   blob_info.release_callback(),
+                   element->reader.InitWithNewPipeAndPassReceiver());
+
+    // Write results to output_info.
+    output_info->uuid = base::GenerateGUID();
+
+    mojo_blob_storage_context()->RegisterFromDataItem(
+        std::move(receiver), output_info->uuid, std::move(element));
+  }
 }
 
 void IndexedDBDispatcherHost::InvalidateWeakPtrsAndClearBindings() {

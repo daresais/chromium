@@ -15,6 +15,7 @@ import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.trusted.TrustedWebActivityDisplayMode;
 import androidx.browser.trusted.sharing.ShareData;
 import androidx.browser.trusted.sharing.ShareTarget;
 
@@ -137,6 +138,13 @@ public class BrowserServicesIntentDataProvider {
      */
     public int getToolbarColor() {
         return Color.WHITE;
+    }
+
+    /**
+     * @return Whether the intent specifies a custom toolbar color.
+     */
+    public boolean hasCustomToolbarColor() {
+        return false;
     }
 
     /**
@@ -310,6 +318,14 @@ public class BrowserServicesIntentDataProvider {
      */
     public boolean isDynamicModuleEnabled() {
         return false;
+    }
+
+    /**
+     * Returns {@link TrustedWebActivityDisplayMode} supplied in the intent.
+     */
+    @Nullable
+    public TrustedWebActivityDisplayMode getTwaDisplayMode() {
+        return null;
     }
 
     /**

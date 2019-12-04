@@ -17,7 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string16.h"
-#include "content/browser/blob_storage/chrome_blob_storage_context.h"
+#include "content/browser/indexed_db/indexed_db_blob_info.h"
 #include "content/browser/indexed_db/indexed_db_execution_context_connection_tracker.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
@@ -53,7 +53,8 @@ class CONTENT_EXPORT IndexedDBDispatcherHost
   IndexedDBDispatcherHost(
       int ipc_process_id,
       scoped_refptr<IndexedDBContextImpl> indexed_db_context,
-      scoped_refptr<ChromeBlobStorageContext> blob_storage_context);
+      mojo::PendingRemote<storage::mojom::BlobStorageContext>
+          blob_storage_context);
 
   void AddReceiver(
       int render_process_id,
@@ -77,9 +78,6 @@ class CONTENT_EXPORT IndexedDBDispatcherHost
 
   // A shortcut for accessing our context.
   IndexedDBContextImpl* context() const { return indexed_db_context_.get(); }
-  scoped_refptr<ChromeBlobStorageContext> blob_storage_context() const {
-    return blob_storage_context_;
-  }
   mojo::Remote<storage::mojom::BlobStorageContext>&
   mojo_blob_storage_context() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -106,6 +104,11 @@ class CONTENT_EXPORT IndexedDBDispatcherHost
       mojo::PendingReceiver<storage::mojom::BlobDataItemReader> receiver);
   // Removes all readers for this file path.
   void RemoveBoundReaders(const base::FilePath& path);
+
+  // Create blobs from |blob_infos| and store the uuid/receiver results in
+  // |output_infos|.  |output_infos| must be the same length as |blob_infos|.
+  void CreateAllBlobs(const std::vector<IndexedDBBlobInfo>& blob_infos,
+                      std::vector<blink::mojom::IDBBlobInfoPtr>* output_infos);
 
   // Called by UI thread. Used to kill outstanding bindings and weak pointers
   // in callbacks.
@@ -150,7 +153,6 @@ class CONTENT_EXPORT IndexedDBDispatcherHost
   base::SequencedTaskRunner* IDBTaskRunner() const;
 
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
-  scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
   mojo::Remote<storage::mojom::BlobStorageContext> mojo_blob_storage_context_;
 
   // Shared task runner used to read blob files on.

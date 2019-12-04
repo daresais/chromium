@@ -21,6 +21,7 @@
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
@@ -28,21 +29,23 @@ using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
-using password_manager::CredentialPair;
+using password_manager::UiCredential;
 
 namespace {
 
-CredentialPair ConvertJavaCredential(JNIEnv* env,
-                                     const JavaParamRef<jobject>& credential) {
-  return CredentialPair(
+UiCredential ConvertJavaCredential(JNIEnv* env,
+                                   const JavaParamRef<jobject>& credential) {
+  return UiCredential(
       ConvertJavaStringToUTF16(env,
                                Java_Credential_getUsername(env, credential)),
       ConvertJavaStringToUTF16(env,
                                Java_Credential_getPassword(env, credential)),
-      GURL(ConvertJavaStringToUTF8(
-          env, Java_Credential_getOriginUrl(env, credential))),
-      CredentialPair::IsPublicSuffixMatch(
-          Java_Credential_isPublicSuffixMatch(env, credential)));
+      url::Origin::Create(GURL(ConvertJavaStringToUTF8(
+          env, Java_Credential_getOriginUrl(env, credential)))),
+      UiCredential::IsPublicSuffixMatch(
+          Java_Credential_isPublicSuffixMatch(env, credential)),
+      UiCredential::IsAffiliationBasedMatch(
+          Java_Credential_isAffiliationBasedMatch(env, credential)));
 }
 
 void OnFaviconFetched(
@@ -70,7 +73,7 @@ TouchToFillViewImpl::~TouchToFillViewImpl() {
 void TouchToFillViewImpl::Show(
     const GURL& url,
     IsOriginSecure is_origin_secure,
-    base::span<const password_manager::CredentialPair> credentials) {
+    base::span<const password_manager::UiCredential> credentials) {
   // Serialize the |credentials| span into a Java array and instruct the bridge
   // to show it together with |url| to the user.
   JNIEnv* env = AttachCurrentThread();
@@ -80,11 +83,12 @@ void TouchToFillViewImpl::Show(
     const auto& credential = credentials[i];
     Java_TouchToFillBridge_insertCredential(
         env, credential_array, i,
-        ConvertUTF16ToJavaString(env, credential.username),
-        ConvertUTF16ToJavaString(env, credential.password),
+        ConvertUTF16ToJavaString(env, credential.username()),
+        ConvertUTF16ToJavaString(env, credential.password()),
         ConvertUTF16ToJavaString(env, GetDisplayUsername(credential)),
-        ConvertUTF8ToJavaString(env, credential.origin_url.spec()),
-        credential.is_public_suffix_match.value());
+        ConvertUTF8ToJavaString(env, credential.origin().Serialize()),
+        credential.is_public_suffix_match().value(),
+        credential.is_affiliation_based_match().value());
   }
 
   Java_TouchToFillBridge_showCredentials(
@@ -92,8 +96,7 @@ void TouchToFillViewImpl::Show(
       is_origin_secure.value(), credential_array);
 }
 
-void TouchToFillViewImpl::OnCredentialSelected(
-    const CredentialPair& credential) {
+void TouchToFillViewImpl::OnCredentialSelected(const UiCredential& credential) {
   controller_->OnCredentialSelected(credential);
 }
 

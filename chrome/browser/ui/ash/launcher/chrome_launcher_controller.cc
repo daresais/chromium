@@ -258,10 +258,23 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
   }
 
   if (base::FeatureList::IsEnabled(features::kAppServiceInstanceRegistry)) {
-    browser_status_monitor_ = std::make_unique<BrowserStatusMonitor>(this);
-    browser_status_monitor_->Initialize();
-    app_window_controllers_.push_back(
-        std::make_unique<AppServiceAppWindowLauncherController>(this));
+    if (SessionControllerClientImpl::IsMultiProfileAvailable()) {
+      // If running in separated destkop mode, we create the multi profile
+      // version of status monitor.
+      browser_status_monitor_ =
+          std::make_unique<MultiProfileBrowserStatusMonitor>(this);
+      browser_status_monitor_->Initialize();
+    } else {
+      // Create our v1/v2 application / browser monitors which will inform the
+      // launcher of status changes.
+      browser_status_monitor_ = std::make_unique<BrowserStatusMonitor>(this);
+      browser_status_monitor_->Initialize();
+    }
+    std::unique_ptr<AppServiceAppWindowLauncherController>
+        app_service_controller =
+            std::make_unique<AppServiceAppWindowLauncherController>(this);
+    app_service_app_window_controller_ = app_service_controller.get();
+    app_window_controllers_.emplace_back(std::move(app_service_controller));
     return;
   }
 
@@ -856,14 +869,16 @@ AppIconLoader* ChromeLauncherController::GetAppIconLoaderForApp(
   return nullptr;
 }
 
-bool ChromeLauncherController::CanDoShowAppInfoFlow() {
-  return CanShowAppInfoDialog();
+bool ChromeLauncherController::CanDoShowAppInfoFlow(
+    Profile* profile,
+    const std::string& extension_id) {
+  return CanShowAppInfoDialog(profile, extension_id);
 }
 
 void ChromeLauncherController::DoShowAppInfoFlow(
     Profile* profile,
     const std::string& extension_id) {
-  DCHECK(CanDoShowAppInfoFlow());
+  DCHECK(CanPlatformShowAppInfoDialog());
 
   const extensions::Extension* extension = GetExtension(profile, extension_id);
   if (!extension)

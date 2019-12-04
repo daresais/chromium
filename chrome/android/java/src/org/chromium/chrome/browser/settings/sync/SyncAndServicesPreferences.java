@@ -50,14 +50,15 @@ import org.chromium.chrome.browser.settings.ChromeBasePreference;
 import org.chromium.chrome.browser.settings.ChromeSwitchPreference;
 import org.chromium.chrome.browser.settings.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.settings.ManagedPreferencesUtils;
-import org.chromium.chrome.browser.settings.PreferenceUtils;
-import org.chromium.chrome.browser.settings.Preferences;
+import org.chromium.chrome.browser.settings.SettingsActivity;
+import org.chromium.chrome.browser.settings.SettingsUtils;
 import org.chromium.chrome.browser.settings.password.PasswordUIView;
 import org.chromium.chrome.browser.settings.privacy.PrivacyPreferencesManager;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.UnifiedConsentServiceBridge;
 import org.chromium.chrome.browser.sync.GoogleServiceAuthError;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.chrome.browser.sync.TrustedVaultClient;
 import org.chromium.chrome.browser.sync.ui.PassphraseDialogFragment;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.components.signin.AccountManagerFacade;
@@ -76,7 +77,8 @@ import java.lang.annotation.RetentionPolicy;
  */
 public class SyncAndServicesPreferences extends PreferenceFragmentCompat
         implements PassphraseDialogFragment.Listener, Preference.OnPreferenceChangeListener,
-                   ProfileSyncService.SyncStateChangedListener, Preferences.OnBackPressedListener {
+                   ProfileSyncService.SyncStateChangedListener,
+                   SettingsActivity.OnBackPressedListener {
     private static final String IS_FROM_SIGNIN_SCREEN =
             "SyncAndServicesPreferences.isFromSigninScreen";
 
@@ -118,8 +120,10 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
         int ANDROID_SYNC_DISABLED = 0;
         int AUTH_ERROR = 1;
         int PASSPHRASE_REQUIRED = 2;
-        int CLIENT_OUT_OF_DATE = 3;
-        int SYNC_SETUP_INCOMPLETE = 4;
+        int TRUSTED_VAULT_KEY_REQUIRED_FOR_EVERYTHING = 3;
+        int TRUSTED_VAULT_KEY_REQUIRED_FOR_PASSWORDS = 4;
+        int CLIENT_OUT_OF_DATE = 5;
+        int SYNC_SETUP_INCOMPLETE = 6;
         int OTHER_ERRORS = 128;
     }
 
@@ -181,7 +185,7 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
             RecordUserAction.record("Signin_Signin_ShowAdvancedSyncSettings");
         }
 
-        PreferenceUtils.addPreferencesFromResource(this, R.xml.sync_and_services_preferences);
+        SettingsUtils.addPreferencesFromResource(this, R.xml.sync_and_services_preferences);
 
         mSigninPreference = (SignInPreference) findPreference(PREF_SIGNIN);
         mSigninPreference.setPersonalizedPromoEnabled(false);
@@ -280,7 +284,7 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
-            if (!mIsFromSigninScreen) return false; // Let Preferences activity handle it.
+            if (!mIsFromSigninScreen) return false; // Let Settings activity handle it.
             showCancelSyncDialog();
             return true;
         } else if (item.getItemId() == R.id.menu_id_targeted_help) {
@@ -474,6 +478,13 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
             return SyncError.PASSPHRASE_REQUIRED;
         }
 
+        if (mProfileSyncService.isEngineInitialized()
+                && mProfileSyncService.isTrustedVaultKeyRequiredForPreferredDataTypes()) {
+            return mProfileSyncService.isEncryptEverythingEnabled()
+                    ? SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_EVERYTHING
+                    : SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_PASSWORDS;
+        }
+
         if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID)
                 && wasSigninFlowInterrupted()) {
             return SyncError.SYNC_SETUP_INCOMPLETE;
@@ -491,6 +502,10 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
             case SyncError.SYNC_SETUP_INCOMPLETE:
                 assert ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID);
                 return getString(R.string.sync_settings_not_confirmed_title);
+            case SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_EVERYTHING:
+                return getString(R.string.sync_error_card_title);
+            case SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_PASSWORDS:
+                return getString(R.string.sync_passwords_error_card_title);
             default:
                 return getString(R.string.sync_error_card_title);
         }
@@ -513,6 +528,9 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
                 return getString(R.string.hint_other_sync_errors);
             case SyncError.PASSPHRASE_REQUIRED:
                 return getString(R.string.hint_passphrase_required);
+            case SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_EVERYTHING:
+            case SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_PASSWORDS:
+                return getString(R.string.hint_sync_retrieve_keys);
             case SyncError.SYNC_SETUP_INCOMPLETE:
                 assert ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_MANUAL_START_ANDROID);
                 return getString(R.string.hint_sync_settings_not_confirmed_description);
@@ -558,6 +576,12 @@ public class SyncAndServicesPreferences extends PreferenceFragmentCompat
 
         if (mCurrentSyncError == SyncError.PASSPHRASE_REQUIRED) {
             displayPassphraseDialog();
+            return;
+        }
+
+        if (mCurrentSyncError == SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_EVERYTHING
+                || mCurrentSyncError == SyncError.TRUSTED_VAULT_KEY_REQUIRED_FOR_PASSWORDS) {
+            TrustedVaultClient.displayKeyRetrievalDialog();
             return;
         }
     }

@@ -119,6 +119,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
@@ -2533,7 +2534,7 @@ Element* Node::EnclosingLinkEventParentOrSelf() const {
     // For imagemaps, the enclosing link node is the associated area element not
     // the image itself.  So we don't let images be the enclosingLinkNode, even
     // though isLink sometimes returns true for them.
-    if (node->IsLink() && !IsHTMLImageElement(*node)) {
+    if (node->IsLink() && !IsA<HTMLImageElement>(*node)) {
       // Casting to Element is safe because only HTMLAnchorElement,
       // HTMLImageElement and SVGAElement can return true for isLink().
       return To<Element>(const_cast<Node*>(node));
@@ -2745,8 +2746,8 @@ void Node::RegisterMutationObserver(
   }
 
   if (!registration) {
-    registration = MutationObserverRegistration::Create(observer, this, options,
-                                                        attribute_filter);
+    registration = MakeGarbageCollected<MutationObserverRegistration>(
+        observer, this, options, attribute_filter);
     EnsureRareData().EnsureMutationObserverData().AddRegistration(registration);
   }
 
@@ -3222,7 +3223,7 @@ bool Node::IsEffectiveRootScroller() const {
 }
 
 WebPluginContainerImpl* Node::GetWebPluginContainer() const {
-  if (!IsHTMLObjectElement(this) && !IsHTMLEmbedElement(this)) {
+  if (!IsA<HTMLObjectElement>(this) && !IsHTMLEmbedElement(this)) {
     return nullptr;
   }
 

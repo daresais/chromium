@@ -1701,6 +1701,9 @@
     'syncfs': {
       'filepath': 'sync_file_system',
     },
+    'system_web_apps': {
+      'filepath': 'chrome/.*system_web_app'
+    },
     'tab_alert_indicators': {
       'filepath': 'content/browser/media/audio_stream_monitor'\
         '|chrome/browser/ui/tabs/tab_utils'\
@@ -2096,6 +2099,7 @@
                             'kbabbitt@microsoft.com',
                             'nektar@chromium.org'],
     'blink_animation': ['alexis.menard@intel.com',
+                        'yigu@chromium.org',
                         'blink-reviews-animation@chromium.org'],
     'blink_app_banner': ['mlamouri+watch-blink@chromium.org'],
     'blink_audio': ['hongchan@chromium.org',
@@ -2607,7 +2611,7 @@
     'runtime_enabled_features': ['jmedley+watch@chromium.org'],
     'safe_browsing': ['drubery+watch@chromium.org',
                       'timvolodine@chromium.org',
-                      'vakh+watch@chromium.org',
+                      'vakh+safe_browsing_watch@chromium.org',
                       'xinghuilu+watch@chromium.org'],
     'safety_tips': ['jdeblasio+watch@chromium.org'],
     'sampling_profiler': ['wittman+watch@chromium.org'],
@@ -2671,6 +2675,7 @@
     'sync': ['sync-reviews@chromium.org'],
     'syncfs': ['kinuko+fileapi@chromium.org',
                'nhiroki@chromium.org'],
+    'system_web_apps': [ 'ortuno@chromium.org' ],
     'tab_alert_indicators': ['miu+watch@chromium.org'],
     'tab_capture': ['miu+watch@chromium.org',
                     'pthatcher+watch@chromium.org'],

@@ -37,6 +37,10 @@
   [SigninEarlGreyUtilsAppInterface addFakeIdentity:fakeIdentity];
 }
 
+- (void)forgetFakeIdentity:(FakeChromeIdentity*)fakeIdentity {
+  [SigninEarlGreyUtilsAppInterface forgetFakeIdentity:fakeIdentity];
+}
+
 - (void)checkSignedInWithFakeIdentity:(FakeChromeIdentity*)fakeIdentity {
   BOOL fakeIdentityIsNonNil = fakeIdentity != nil;
   EG_TEST_HELPER_ASSERT_TRUE(fakeIdentityIsNonNil, @"Need to give an identity");
@@ -73,6 +77,10 @@
 
   EG_TEST_HELPER_ASSERT_TRUE([SigninEarlGreyUtilsAppInterface isSignedOut],
                              @"Unexpected signed in user");
+}
+
+- (void)removeFakeIdentity:(FakeChromeIdentity*)fakeIdentity {
+  [SigninEarlGreyUtilsAppInterface removeFakeIdentity:fakeIdentity];
 }
 
 @end

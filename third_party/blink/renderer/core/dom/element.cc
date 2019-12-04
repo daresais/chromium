@@ -296,7 +296,7 @@ bool DefinitelyNewFormattingContext(const Node& node,
     // Replaced elements are considered to create a new formatting context, in
     // the sense that they can't possibly have children that participate in the
     // same formatting context as their parent.
-    if (IsHTMLObjectElement(element)) {
+    if (IsA<HTMLObjectElement>(element)) {
       // OBJECT elements are special, though. If they use fallback content, they
       // act as regular elements, and we can't claim that they establish a
       // formatting context, just based on element type, since children may very
@@ -304,8 +304,9 @@ bool DefinitelyNewFormattingContext(const Node& node,
       // OBJECT.
       if (!element->ChildrenCanHaveStyle())
         return true;
-    } else if (IsHTMLImageElement(element) || element->IsFormControlElement() ||
-               element->IsMediaElement() || element->IsFrameOwnerElement()) {
+    } else if (IsA<HTMLImageElement>(element) ||
+               element->IsFormControlElement() || element->IsMediaElement() ||
+               element->IsFrameOwnerElement()) {
       return true;
     }
   }
@@ -498,10 +499,6 @@ void EnqueueAutofocus(Element& element) {
 }
 
 }  // namespace
-
-Element* Element::Create(const QualifiedName& tag_name, Document* document) {
-  return MakeGarbageCollected<Element>(tag_name, document, kCreateElement);
-}
 
 Element::Element(const QualifiedName& tag_name,
                  Document* document,
@@ -3012,7 +3009,7 @@ scoped_refptr<ComputedStyle> Element::StyleForLayoutObject(
 
   style->UpdateIsStackingContext(this == GetDocument().documentElement(),
                                  IsInTopLayer(),
-                                 IsSVGForeignObjectElement(*this));
+                                 IsA<SVGForeignObjectElement>(*this));
 
   return style;
 }
@@ -5056,7 +5053,7 @@ const ComputedStyle* Element::EnsureComputedStyle(
       scoped_refptr<ComputedStyle> new_style = nullptr;
       // TODO(crbug.com/953707): Avoid setting inline style during
       // HTMLImageElement::CustomStyleForLayoutObject.
-      if (HasCustomStyleCallbacks() && !IsHTMLImageElement(*this))
+      if (HasCustomStyleCallbacks() && !IsA<HTMLImageElement>(*this))
         new_style = CustomStyleForLayoutObject();
       else
         new_style = OriginalStyleForLayoutObject();
@@ -5105,7 +5102,7 @@ bool Element::ShouldStoreComputedStyle(const ComputedStyle& style) const {
   if (auto* svg_element = DynamicTo<SVGElement>(this)) {
     if (!svg_element->HasSVGParent())
       return false;
-    if (IsSVGStopElement(*this))
+    if (IsA<SVGStopElement>(*this))
       return true;
   }
   return style.Display() == EDisplay::kContents;
@@ -5444,7 +5441,7 @@ KURL Element::HrefURL() const {
   if (IsA<HTMLAnchorElement>(*this) || IsA<HTMLAreaElement>(*this) ||
       IsA<HTMLLinkElement>(*this))
     return GetURLAttribute(html_names::kHrefAttr);
-  if (auto* svg_a = ToSVGAElementOrNull(*this))
+  if (auto* svg_a = DynamicTo<SVGAElement>(*this))
     return svg_a->LegacyHrefURL(GetDocument());
   return KURL();
 }

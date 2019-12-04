@@ -5,6 +5,7 @@
 import("//build/android/resource_sizes.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
+import("//build/config/chrome_build.gni")  # For branding_file_path.
 import("//build/config/python.gni")
 import("//build/util/process_version.gni")
 import("//build/util/version.gni")
@@ -21,7 +22,6 @@ import("//chrome/android/monochrome_android_manifest_jinja_variables.gni")
 import("//chrome/browser/share/android/java_sources.gni")
 import("//chrome/chrome_paks.gni")
 import("//chrome/common/features.gni")
-import("//chrome/process_version_rc_template.gni")  # For branding_file_path.
 import("//device/vr/buildflags/buildflags.gni")
 import("//testing/test.gni")
 import("//third_party/icu/config.gni")
@@ -331,6 +331,7 @@ android_library("chrome_java") {
     "//third_party/android_deps:com_android_support_support_v13_java",
     "//third_party/android_deps:com_android_support_viewpager_java",
     "//third_party/android_deps:com_google_dagger_dagger_java",
+    "//third_party/android_deps:com_google_guava_listenablefuture_java",
     "//third_party/android_deps:com_google_protobuf_protobuf_lite_java",
     "//third_party/android_deps:javax_inject_javax_inject_java",
     "//third_party/android_media:android_media_java",
@@ -531,6 +532,7 @@ java_cpp_enum("chrome_android_java_enums_srcjar") {
     "//chrome/browser/android/digital_asset_links/digital_asset_links_handler.h",
     "//chrome/browser/android/explore_sites/explore_sites_bridge.h",
     "//chrome/browser/android/explore_sites/explore_sites_feature.h",
+    "//chrome/browser/android/feature_utilities.h",
     "//chrome/browser/android/feedback/connectivity_checker.cc",
     "//chrome/browser/android/policy/policy_auditor.cc",
     "//chrome/browser/android/shortcut_info.h",
@@ -1369,7 +1371,7 @@ if (current_toolchain == default_toolchain) {
       disable_compression = _is_bundle_module
       renaming_sources = []
       renaming_destinations = []
-      foreach(_locale, locales - android_chrome_omitted_locales) {
+      foreach(_locale, android_non_bundle_locales) {
         renaming_sources +=
             [ "$target_gen_dir/${_variant}_paks/locales/$_locale.pak" ]
         renaming_destinations += [ "locales/$_locale.pak" ]
@@ -2672,6 +2674,7 @@ generate_jni("chrome_jni_headers") {
     "java/src/org/chromium/chrome/browser/password_manager/PasswordCheckupLauncher.java",
     "java/src/org/chromium/chrome/browser/password_manager/PasswordGenerationDialogBridge.java",
     "java/src/org/chromium/chrome/browser/password_manager/PasswordGenerationPopupBridge.java",
+    "java/src/org/chromium/chrome/browser/password_manager/PasswordManagerLauncher.java",
     "java/src/org/chromium/chrome/browser/payments/CanMakePaymentQuery.java",
     "java/src/org/chromium/chrome/browser/payments/JourneyLogger.java",
     "java/src/org/chromium/chrome/browser/payments/PaymentManifestWebDataService.java",
@@ -2679,6 +2682,7 @@ generate_jni("chrome_jni_headers") {
     "java/src/org/chromium/chrome/browser/payments/SslValidityChecker.java",
     "java/src/org/chromium/chrome/browser/permissions/PermissionDialogController.java",
     "java/src/org/chromium/chrome/browser/permissions/PermissionDialogDelegate.java",
+    "java/src/org/chromium/chrome/browser/permissions/PermissionSettingsBridge.java",
     "java/src/org/chromium/chrome/browser/permissions/PermissionUmaUtil.java",
     "java/src/org/chromium/chrome/browser/photo_picker/DecoderService.java",
     "java/src/org/chromium/chrome/browser/policy/PolicyAuditor.java",

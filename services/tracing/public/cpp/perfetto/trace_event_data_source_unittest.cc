@@ -315,8 +315,7 @@ class TraceEventDataSourceTest : public testing::Test {
                         uint64_t id = 0,
                         int64_t absolute_timestamp = 0,
                         int32_t tid_override = 0,
-                        int32_t pid_override = 0,
-                        int64_t duration = 0) {
+                        int32_t pid_override = 0) {
     EXPECT_TRUE(packet->has_track_event());
 
     if (absolute_timestamp > 0) {
@@ -338,18 +337,49 @@ class TraceEventDataSourceTest : public testing::Test {
     }
 
     if (category_iid > 0) {
-      EXPECT_EQ(packet->track_event().category_iids_size(), 1);
+      ASSERT_EQ(packet->track_event().category_iids_size(), 1);
       EXPECT_EQ(packet->track_event().category_iids(0), category_iid);
     } else {
       EXPECT_EQ(packet->track_event().category_iids_size(), 0);
     }
 
-    EXPECT_TRUE(packet->track_event().has_legacy_event());
+    if (name_iid > 0) {
+      EXPECT_EQ(packet->track_event().name_iid(), name_iid);
+    }
 
+    TrackEvent::Type track_event_type;
+    switch (phase) {
+      case TRACE_EVENT_PHASE_BEGIN:
+        track_event_type = TrackEvent::TYPE_SLICE_BEGIN;
+        break;
+      case TRACE_EVENT_PHASE_END:
+        track_event_type = TrackEvent::TYPE_SLICE_END;
+        break;
+      case TRACE_EVENT_PHASE_INSTANT:
+        track_event_type = TrackEvent::TYPE_INSTANT;
+        break;
+      default:
+        track_event_type = TrackEvent::TYPE_UNSPECIFIED;
+        break;
+    }
+
+    if (track_event_type != TrackEvent::TYPE_UNSPECIFIED) {
+      EXPECT_EQ(packet->track_event().type(), track_event_type);
+    }
+
+    // We don't emit the legacy event if we don't need it.
+    if (track_event_type != TrackEvent::TYPE_UNSPECIFIED && !flags &&
+        !tid_override && !pid_override) {
+      EXPECT_FALSE(packet->track_event().has_legacy_event());
+      return;
+    }
+
+    EXPECT_TRUE(packet->track_event().has_legacy_event());
     const auto& legacy_event = packet->track_event().legacy_event();
-    EXPECT_EQ(legacy_event.name_iid(), name_iid);
-    EXPECT_EQ(legacy_event.phase(), phase);
-    EXPECT_EQ(legacy_event.duration_us(), duration);
+
+    if (track_event_type == TrackEvent::TYPE_UNSPECIFIED) {
+      EXPECT_EQ(legacy_event.phase(), phase);
+    }
 
     if (phase == TRACE_EVENT_PHASE_INSTANT) {
       switch (flags & TRACE_EVENT_FLAG_SCOPE_MASK) {
@@ -1379,11 +1409,9 @@ TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOnEnd) {
   ExpectThreadDescriptor(td_packet);
 
   auto* e_packet = producer_client()->GetFinalizedPacket(1);
-  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/1u,
+  ExpectTraceEvent(e_packet, /*category_iid=*/0u, /*name_iid=*/0u,
                    TRACE_EVENT_PHASE_END);
 
-  ExpectEventCategories(e_packet, {{1u, "browser"}});
-  ExpectEventNames(e_packet, {{1u, kTraceEventEndName}});
   ASSERT_TRUE(e_packet->track_event().has_log_message());
   EXPECT_EQ(e_packet->track_event().log_message().body_iid(), 42u);
 }
@@ -1413,10 +1441,9 @@ TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOnBeginAndEnd) {
   EXPECT_EQ(e_packet->track_event().log_message().body_iid(), 42u);
 
   e_packet = producer_client()->GetFinalizedPacket(2);
-  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/2u,
+  ExpectTraceEvent(e_packet, /*category_iid=*/0u, /*name_iid=*/0u,
                    TRACE_EVENT_PHASE_END);
 
-  ExpectEventNames(e_packet, {{2u, kTraceEventEndName}});
   ASSERT_TRUE(e_packet->track_event().has_log_message());
   EXPECT_EQ(e_packet->track_event().log_message().body_iid(), 84u);
 }
@@ -1435,7 +1462,7 @@ TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOnInstant) {
 
   auto* e_packet = producer_client()->GetFinalizedPacket(1);
   ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/1u,
-                   TRACE_EVENT_PHASE_INSTANT);
+                   TRACE_EVENT_PHASE_INSTANT, TRACE_EVENT_SCOPE_THREAD);
 
   ExpectEventCategories(e_packet, {{1u, "browser"}});
   ExpectEventNames(e_packet, {{1u, "bar"}});
@@ -1469,10 +1496,9 @@ TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOnScoped) {
   EXPECT_EQ(e_packet->track_event().log_message().body_iid(), 42u);
 
   e_packet = producer_client()->GetFinalizedPacket(2);
-  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/2u,
+  ExpectTraceEvent(e_packet, /*category_iid=*/0u, /*name_iid=*/0u,
                    TRACE_EVENT_PHASE_END);
 
-  ExpectEventNames(e_packet, {{2u, kTraceEventEndName}});
   EXPECT_FALSE(e_packet->track_event().has_log_message());
 }
 
@@ -1502,10 +1528,9 @@ TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOnScopedCapture) {
   EXPECT_EQ(e_packet->track_event().log_message().body_iid(), 42u);
 
   e_packet = producer_client()->GetFinalizedPacket(2);
-  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/2u,
+  ExpectTraceEvent(e_packet, /*category_iid=*/0u, /*name_iid=*/0u,
                    TRACE_EVENT_PHASE_END);
 
-  ExpectEventNames(e_packet, {{2u, kTraceEventEndName}});
   EXPECT_FALSE(e_packet->track_event().has_log_message());
   EXPECT_TRUE(called);
 }
@@ -1546,15 +1571,14 @@ TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOnScopedMultipleEvents) {
 
   // The second TRACE_EVENT end.
   e_packet = producer_client()->GetFinalizedPacket(3);
-  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/2u,
+  ExpectTraceEvent(e_packet, /*category_iid=*/0u, /*name_iid=*/0u,
                    TRACE_EVENT_PHASE_END);
 
-  ExpectEventNames(e_packet, {{2u, kTraceEventEndName}});
   EXPECT_FALSE(e_packet->track_event().has_log_message());
 
   // The first TRACE_EVENT end.
   e_packet = producer_client()->GetFinalizedPacket(4);
-  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/2u,
+  ExpectTraceEvent(e_packet, /*category_iid=*/0u, /*name_iid=*/0u,
                    TRACE_EVENT_PHASE_END);
   EXPECT_FALSE(e_packet->track_event().has_log_message());
 }

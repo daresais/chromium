@@ -247,6 +247,8 @@ public abstract class ChromeFeatureList {
     public static final String EPHEMERAL_TAB_USING_BOTTOM_SHEET = "EphemeralTabUsingBottomSheet";
     public static final String EXPLICIT_LANGUAGE_ASK = "ExplicitLanguageAsk";
     public static final String EXPLORE_SITES = "ExploreSites";
+    public static final String FOCUS_OMNIBOX_IN_INCOGNITO_TAB_INTENTS =
+            "FocusOmniboxInIncognitoTabIntents";
     public static final String OFFLINE_HOME = "OfflineHome";
     public static final String GENERIC_SENSOR_EXTRA_CLASSES = "GenericSensorExtraClasses";
     public static final String GRANT_NOTIFICATIONS_TO_DSE = "GrantNotificationsToDSE";
@@ -327,6 +329,7 @@ public abstract class ChromeFeatureList {
     public static final String SHARED_CLIPBOARD_UI = "SharedClipboardUI";
     public static final String SHARING_QR_CODE_ANDROID = "SharingQrCodeAndroid";
     public static final String SHOPPING_ASSIST = "ShoppingAssist";
+    public static final String SYNC_ERROR_INFOBAR_ANDROID = "SyncErrorInfoBarAndroid";
     public static final String SHOW_TRUSTED_PUBLISHER_URL = "ShowTrustedPublisherURL";
     public static final String SPANNABLE_INLINE_AUTOCOMPLETE = "SpannableInlineAutocomplete";
     public static final String START_SURFACE_ANDROID = "StartSurfaceAndroid";

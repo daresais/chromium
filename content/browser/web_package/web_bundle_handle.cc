@@ -4,6 +4,10 @@
 
 #include "content/browser/web_package/web_bundle_handle.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
@@ -101,15 +105,14 @@ class PrimaryURLRedirectLoader final : public network::mojom::URLLoader {
                          const GURL& url) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK(client_.is_connected());
-    network::ResourceResponseHead response_head;
-    response_head.encoded_data_length = 0;
-    response_head.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+    auto response_head = network::mojom::URLResponseHead::New();
+    response_head->encoded_data_length = 0;
+    response_head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         net::HttpUtil::AssembleRawHeaders(
             base::StringPrintf("HTTP/1.1 %d %s\r\n", 303, "See Other")));
 
     net::RedirectInfo redirect_info = net::RedirectInfo::ComputeRedirectInfo(
-        "GET", resource_request.url, resource_request.request_initiator,
-        resource_request.site_for_cookies,
+        "GET", resource_request.url, resource_request.site_for_cookies,
         resource_request.update_first_party_url_on_redirect
             ? net::URLRequest::FirstPartyURLPolicy::
                   UPDATE_FIRST_PARTY_URL_ON_REDIRECT
@@ -119,7 +122,7 @@ class PrimaryURLRedirectLoader final : public network::mojom::URLLoader {
         url, /*referrer_policy_header=*/base::nullopt,
         /*insecure_scheme_was_upgraded=*/false, /*copy_fragment=*/true,
         /*is_signed_exchange_fallback_redirect=*/false);
-    client_->OnReceiveRedirect(redirect_info, response_head);
+    client_->OnReceiveRedirect(redirect_info, std::move(response_head));
   }
 
  private:
@@ -186,7 +189,7 @@ class InterceptorForFile final : public NavigationLoaderInterceptor {
 
   bool MaybeCreateLoaderForResponse(
       const network::ResourceRequest& request,
-      const network::ResourceResponseHead& response_head,
+      network::mojom::URLResponseHeadPtr* response_head,
       mojo::ScopedDataPipeConsumerHandle* response_body,
       mojo::PendingRemote<network::mojom::URLLoader>* loader,
       mojo::PendingReceiver<network::mojom::URLLoaderClient>* client_receiver,
@@ -194,8 +197,8 @@ class InterceptorForFile final : public NavigationLoaderInterceptor {
       bool* skip_other_interceptors,
       bool* will_return_unsafe_redirect) override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    DCHECK(web_bundle_utils::IsSupprtedFileScheme(request.url));
-    if (response_head.mime_type !=
+    DCHECK(web_bundle_utils::IsSupportedFileScheme(request.url));
+    if ((*response_head)->mime_type !=
         web_bundle_utils::kWebBundleFileMimeTypeWithoutParameters) {
       return false;
     }
@@ -444,7 +447,7 @@ class InterceptorForNetwork final : public NavigationLoaderInterceptor {
 
   bool MaybeCreateLoaderForResponse(
       const network::ResourceRequest& request,
-      const network::ResourceResponseHead& response_head,
+      network::mojom::URLResponseHeadPtr* response_head,
       mojo::ScopedDataPipeConsumerHandle* response_body,
       mojo::PendingRemote<network::mojom::URLLoader>* loader,
       mojo::PendingReceiver<network::mojom::URLLoaderClient>* client_receiver,
@@ -452,12 +455,13 @@ class InterceptorForNetwork final : public NavigationLoaderInterceptor {
       bool* skip_other_interceptors,
       bool* will_return_and_handle_unsafe_redirect) override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    if (response_head.mime_type !=
+    if ((*response_head)->mime_type !=
         web_bundle_utils::kWebBundleFileMimeTypeWithoutParameters) {
       return false;
     }
-    if (download_utils::MustDownload(request.url, response_head.headers.get(),
-                                     response_head.mime_type)) {
+    if (download_utils::MustDownload(request.url,
+                                     (*response_head)->headers.get(),
+                                     (*response_head)->mime_type)) {
       return false;
     }
 
@@ -473,7 +477,7 @@ class InterceptorForNetwork final : public NavigationLoaderInterceptor {
       return true;
     }
 
-    if (response_head.content_length <= 0) {
+    if ((*response_head)->content_length <= 0) {
       AddErrorMessageToConsole(
           frame_tree_node_id_,
           "Web Bundle response must have valid Content-Length header.");
@@ -488,7 +492,7 @@ class InterceptorForNetwork final : public NavigationLoaderInterceptor {
     // decided to require one for WBN navigation.
 
     reader_ = base::MakeRefCounted<WebBundleReader>(
-        std::move(source), response_head.content_length,
+        std::move(source), (*response_head)->content_length,
         std::move(*response_body), url_loader->Unbind(),
         BrowserContext::GetBlobStorageContext(browser_context_));
     reader_->ReadMetadata(

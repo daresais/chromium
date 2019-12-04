@@ -92,6 +92,14 @@ def android_builder(*, name, **kwargs):
   )
 
 android_builder(
+    name = 'android-asan',
+)
+
+android_builder(
+    name = 'android-bfcache-debug',
+)
+
+android_builder(
     name = 'android-binary-size',
     executable = luci.recipe(name = 'binary_size_trybot'),
     goma_jobs = goma.jobs.J150,
@@ -126,28 +134,11 @@ android_builder(
 )
 
 android_builder(
-    name = 'android-kitkat-arm-rel',
-    goma_jobs = goma.jobs.J150,
-    tryjob = tryjob(),
-)
-
-android_builder(
     name = 'android-marshmallow-arm64-coverage-rel',
     cores = 16,
     goma_jobs = goma.jobs.J300,
     ssd = True,
     use_java_coverage = True,
-    tryjob = tryjob(
-        experiment_percentage = 10,
-    ),
-)
-
-android_builder(
-    name = 'android-marshmallow-arm64-rel',
-    cores = 16,
-    goma_jobs = goma.jobs.J300,
-    ssd = True,
-    tryjob = tryjob(),
 )
 
 android_builder(
@@ -187,7 +178,7 @@ android_builder(
     goma_jobs = goma.jobs.J300,
     ssd = True,
     tryjob = tryjob(
-        experiment_percentage = 50,
+        experiment_percentage = 100,
     ),
 )
 
@@ -467,11 +458,13 @@ def chromiumos_builder(*, name, **kwargs):
   return try_builder(
       name = name,
       mastername = 'tryserver.chromium.chromiumos',
+      goma_backend = goma.backend.RBE_PROD,
       **kwargs
   )
 
 chromiumos_builder(
     name = 'chromeos-amd64-generic-dbg',
+    goma_enable_ats = True,
     tryjob = tryjob(
         location_regexp = [
             '.+/[+]/content/gpu/.+',
@@ -482,24 +475,23 @@ chromiumos_builder(
 
 chromiumos_builder(
     name = 'chromeos-amd64-generic-cfi-thin-lto-rel',
-)
-
-chromiumos_builder(
-    name = 'chromeos-amd64-generic-rel',
-    tryjob = tryjob(),
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-arm-generic-dbg',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-arm-generic-rel',
+    goma_enable_ats = True,
     tryjob = tryjob(),
 )
 
 chromiumos_builder(
     name = 'chromeos-kevin-compile-rel',
+    goma_enable_ats = True,
     tryjob = tryjob(
         location_regexp = [
             '.+/[+]/chromeos/CHROMEOS_LKGM',
@@ -509,6 +501,7 @@ chromiumos_builder(
 
 chromiumos_builder(
     name = 'chromeos-kevin-rel',
+    goma_enable_ats = True,
     tryjob = tryjob(
         location_regexp = [
             '.+/[+]/build/chromeos/.+',
@@ -519,21 +512,11 @@ chromiumos_builder(
 
 chromiumos_builder(
     name = 'linux-chromeos-compile-dbg',
-    goma_backend = goma.backend.RBE_PROD,
     tryjob = tryjob(),
 )
 
 chromiumos_builder(
     name = 'linux-chromeos-dbg',
-    goma_backend = goma.backend.RBE_PROD,
-)
-
-chromiumos_builder(
-    name = 'linux-chromeos-rel',
-    goma_backend = goma.backend.RBE_PROD,
-    goma_jobs = goma.jobs.J150,
-    tryjob = tryjob(),
-    use_clang_coverage = True,
 )
 
 
@@ -831,70 +814,6 @@ def gpu_mac_builder(*, name, **kwargs):
   )
 
 gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-amd-dqp',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-amd-pro-rel',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-amd-retina-dbg',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-amd-retina-exp',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-amd-retina-rel',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-asan',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-intel-dbg',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-intel-dqp',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-intel-exp',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-intel-rel',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-nvidia-retina-dbg',
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-nvidia-retina-exp',
-    # This bot has one machine backing its tests at the moment.
-    # If it gets more, the modified execution_timeout should be removed.
-    # See crbug.com/853307 for more context.
-    execution_timeout = 12 * time.hour,
-)
-
-gpu_mac_builder(
-    name = 'gpu-fyi-try-mac-nvidia-retina-rel',
-)
-
-gpu_mac_builder(
-    name = 'gpu-try-mac-amd-retina-dbg',
-)
-
-gpu_mac_builder(
-    name = 'gpu-try-mac-intel-dbg',
-)
-
-gpu_mac_builder(
     name = 'mac_optional_gpu_tests_rel',
     tryjob = tryjob(
         location_regexp = [
@@ -1108,6 +1027,10 @@ linux_builder(
 
 linux_builder(
     name = 'linux-annotator-rel',
+)
+
+linux_builder(
+    name = 'linux-bfcache-debug',
 )
 
 linux_builder(
@@ -1350,12 +1273,6 @@ mac_builder(
     ssd = True,
 )
 
-mac_builder(
-    name = 'mac-rel',
-    goma_jobs = goma.jobs.J150,
-    tryjob = tryjob(),
-)
-
 # NOTE: the following 3 trybots aren't sensitive to Mac version on which
 # they are built, hence no additional dimension is specified.
 # The 10.xx version translates to which bots will run isolated tests.
@@ -1450,11 +1367,6 @@ mac_ios_builder(
         # https://crbug.com/739556
         experiment_percentage = 10,
     ),
-)
-
-mac_ios_builder(
-    name = 'ios-simulator',
-    tryjob = tryjob(),
 )
 
 mac_ios_builder(
@@ -1631,14 +1543,6 @@ win_builder(
 win_builder(
     name = 'win10_chromium_x64_dbg_ng',
     os = os.WINDOWS_10,
-)
-
-win_builder(
-    name = 'win10_chromium_x64_rel_ng',
-    goma_jobs = goma.jobs.J150,
-    os = os.WINDOWS_10,
-    ssd = True,
-    tryjob = tryjob(),
 )
 
 win_builder(

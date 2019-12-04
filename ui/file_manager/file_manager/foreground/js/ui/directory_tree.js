@@ -176,13 +176,26 @@ directorytree.createRowElementContentFilesNG = (id, label) => {
 /**
  * An optional rowElement depth (indent) style handler where undefined uses the
  * default cr.ui.TreeItem indent styling.
- *
- * TODO(crbug.com/992819): add an implementation for the FILES_NG_ENABLED case,
- * where a rowElement child needs the indent, not the rowElement itself.
- *
  * @type {function(!cr.ui.TreeItem,number)|undefined}
  */
 directorytree.styleRowElementDepth = undefined;
+
+/**
+ * Custom tree row style handler: called when the item's |rowElement| should be
+ * styled to indent |depth| in the tree for FILES_NG_ENABLED case.
+ * @param {!cr.ui.TreeItem} item cr.ui.TreeItem.
+ * @param {number} depth Indent depth (>=0).
+ */
+directorytree.styleRowElementDepthFilesNG = (item, depth) => {
+  const fileRowElement = item.rowElement.firstElementChild;
+
+  const indent = depth * 22;
+  let style = 'padding-inline-start: ' + indent + 'px';
+  const width = indent + 60;
+  style += '; min-width: ' + width + 'px;';
+
+  fileRowElement.setAttribute('style', style);
+};
 
 /**
  * The iron-icon-set prefix for tree rows that have an .align-right-icon class
@@ -746,8 +759,13 @@ class DirectoryItem extends TreeItem {
     ejectButton.appendChild(ironIcon);
 
     // Add the eject button as the last element of the tree row content.
-    const parent = rowElement.querySelector('.label').parentElement;
-    assert(parent).appendChild(ejectButton);
+    const label = rowElement.querySelector('.label');
+    label.parentElement.appendChild(ejectButton);
+
+    // Ensure the eject icon shows when the directory tree is too narrow.
+    if (directorytree.FILES_NG_ENABLED) {
+      label.setAttribute('style', 'margin-inline-end: 2px; min-width: 0;');
+    }
   }
 
   /**
@@ -1111,19 +1129,19 @@ class VolumeItem extends DirectoryItem {
    */
   setupIcon_(icon, volumeInfo) {
     icon.classList.add('item-icon');
+
     const backgroundImage =
         util.iconSetToCSSBackgroundImageValue(volumeInfo.iconSet);
     if (backgroundImage !== 'none') {
-      // The icon div is not yet added to DOM, therefore it is impossible to
-      // use style.backgroundImage.
       icon.setAttribute('style', 'background-image: ' + backgroundImage);
     }
+
     icon.setAttribute('volume-type-icon', volumeInfo.volumeType);
+
     if (volumeInfo.volumeType === VolumeManagerCommon.VolumeType.MEDIA_VIEW) {
-      icon.setAttribute(
-          'volume-subtype',
-          VolumeManagerCommon.getMediaViewRootTypeFromVolumeId(
-              volumeInfo.volumeId));
+      const subtype = VolumeManagerCommon.getMediaViewRootTypeFromVolumeId(
+          volumeInfo.volumeId);
+      icon.setAttribute('volume-subtype', subtype);
     } else {
       icon.setAttribute('volume-subtype', volumeInfo.deviceType || '');
     }
@@ -1671,6 +1689,10 @@ class AndroidAppItem extends TreeItem {
       }
     }
 
+    if (directorytree.FILES_NG_ENABLED && !icon.hasAttribute('style')) {
+      icon.setAttribute('use-generic-provided-icon', '');
+    }
+
     // Create an external link icon. TODO(crbug.com/986169) does this icon
     // element need aria-label, role, tabindex, etc?
     const externalLinkIcon = document.createElement('span');
@@ -1682,9 +1704,14 @@ class AndroidAppItem extends TreeItem {
     ironIcon.setAttribute('icon', `${iconSet}:external-link`);
     externalLinkIcon.appendChild(ironIcon);
 
-    // Add the external link as the last element of the tree row content.
-    const parent = this.rowElement.querySelector('.label').parentElement;
-    assert(parent).appendChild(externalLinkIcon);
+    // Add the external-link as the last element of the tree row content.
+    const label = this.rowElement.querySelector('.label');
+    label.parentElement.appendChild(externalLinkIcon);
+
+    // Ensure the link icon shows when the directory tree is too narrow.
+    if (directorytree.FILES_NG_ENABLED) {
+      label.setAttribute('style', 'margin-inline-end: 2px; min-width: 0;');
+    }
   }
 
   /**
@@ -1820,6 +1847,9 @@ class DirectoryTree extends cr.ui.Tree {
   constructor() {
     super();
 
+    /** @type {Element} the containing DOM element */
+    this.container_ = null;
+
     /** @type {NavigationListModel} */
     this.dataModel_ = null;
 
@@ -1857,6 +1887,10 @@ class DirectoryTree extends cr.ui.Tree {
       directoryModel, volumeManager, metadataModel, fileOperationManager,
       fakeEntriesVisible) {
     cr.ui.Tree.prototype.decorate.call(this);
+
+    if (directorytree.FILES_NG_ENABLED) {
+      this.container_ = document.querySelector('.dialog-navigation-list');
+    }
 
     this.sequence_ = 0;
     this.directoryModel_ = directoryModel;
@@ -2265,10 +2299,25 @@ class DirectoryTree extends cr.ui.Tree {
   }
 
   /**
-   * Updates the UI after the layout has changed.
+   * Updates the UI after the layout has changed, due to splitter, or window
+   * resize. In the FILES_NG_ENABLED case, set tree clipped attribute state.
    */
   relayout() {
+    if (directorytree.FILES_NG_ENABLED) {
+      this.setTreeClippedAttributeState_();
+    }
+
     cr.dispatchSimpleEvent(this, 'relayout', true);
+  }
+
+  /**
+   * Sets the tree clipped attribute state from the this.container_ element's
+   * computed style width.
+   * @private
+   */
+  setTreeClippedAttributeState_() {
+    const width = parseFloat(getComputedStyle(this.container_).width);
+    this.toggleAttribute('clipped', width < 135);
   }
 
   // DirectoryTree is always expanded.

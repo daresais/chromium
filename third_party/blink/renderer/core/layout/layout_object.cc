@@ -865,7 +865,13 @@ static inline bool ObjectIsRelayoutBoundary(const LayoutObject* object) {
   if (object->IsTablePart())
     return false;
 
+  // OOF-positioned objects which rely on their static-position for placement
+  // cannot be relayout boundaries (their final position would be incorrect).
   const ComputedStyle* style = object->Style();
+  if (object->IsOutOfFlowPositioned() &&
+      (style->HasAutoLeftAndRight() || style->HasAutoTopAndBottom()))
+    return false;
+
   if (object->ShouldApplyLayoutContainment() &&
       object->ShouldApplySizeContainment())
     return true;
@@ -2934,7 +2940,7 @@ RespectImageOrientationEnum LayoutObject::ShouldRespectImageOrientation(
   if (layout_object->GetDocument().IsImageDocument())
     return kRespectImageOrientation;
 
-  if (!IsHTMLImageElement(layout_object->GetNode()))
+  if (!IsA<HTMLImageElement>(layout_object->GetNode()))
     return kDoNotRespectImageOrientation;
 
   if (layout_object->GetDocument().GetSettings() &&

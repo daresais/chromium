@@ -115,7 +115,11 @@ void GpuWatchdogThreadImplV2::OnForegrounded() {
 // Called from the gpu thread when gpu init has completed.
 void GpuWatchdogThreadImplV2::OnInitComplete() {
   DCHECK(watched_gpu_task_runner_->BelongsToCurrentThread());
-  in_gpu_initialization_ = false;
+
+  task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&GpuWatchdogThreadImplV2::UpdateInitializationFlag,
+                     base::Unretained(this)));
   Disarm();
 }
 
@@ -192,7 +196,8 @@ void GpuWatchdogThreadImplV2::ReportProgress() {
 }
 
 void GpuWatchdogThreadImplV2::WillProcessTask(
-    const base::PendingTask& pending_task) {
+    const base::PendingTask& pending_task,
+    bool was_blocked_or_low_priority) {
   DCHECK(watched_gpu_task_runner_->BelongsToCurrentThread());
 
   // The watchdog is armed at the beginning of the gpu process teardown.
@@ -313,6 +318,10 @@ void GpuWatchdogThreadImplV2::StopWatchdogTimeoutTask(
 
   // Revoke any pending watchdog timeout task
   weak_factory_.InvalidateWeakPtrs();
+}
+
+void GpuWatchdogThreadImplV2::UpdateInitializationFlag() {
+  in_gpu_initialization_ = false;
 }
 
 // Called from the gpu main thread.

@@ -40,20 +40,6 @@ HistoryBrowserTest.prototype = {
   },
 };
 
-function HistoryBrowserServiceTest() {}
-
-HistoryBrowserServiceTest.prototype = {
-  __proto__: HistoryBrowserTest.prototype,
-
-  extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
-    'browser_service_test.js',
-  ]),
-};
-
-TEST_F('HistoryBrowserServiceTest', 'All', function() {
-  mocha.run();
-});
-
 function HistoryDrawerTest() {}
 
 HistoryDrawerTest.prototype = {
@@ -102,6 +88,9 @@ HistoryListTest.prototype = {
   __proto__: HistoryBrowserTest.prototype,
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    '//ui/webui/resources/js/promise_resolver.js',
+    '../test_browser_proxy.js',
+    'test_browser_service.js',
     'history_list_test.js',
   ]),
 };
@@ -124,6 +113,9 @@ HistoryMetricsTest.prototype = {
   __proto__: HistoryBrowserTest.prototype,
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    '//ui/webui/resources/js/cr.js',
+    '../test_browser_proxy.js',
+    'test_browser_service.js',
     'history_metrics_test.js',
   ]),
 };
@@ -152,6 +144,8 @@ HistoryRoutingTest.prototype = {
   __proto__: HistoryBrowserTest.prototype,
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'test_browser_service.js',
     'history_routing_test.js',
   ]),
 };
@@ -200,6 +194,8 @@ HistorySyncedTabsTest.prototype = {
   __proto__: HistoryBrowserTest.prototype,
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'test_browser_service.js',
     'history_synced_tabs_test.js',
   ]),
 };
@@ -220,17 +216,19 @@ HistorySupervisedUserTest.prototype = {
   },
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'test_browser_service.js',
     'history_supervised_user_test.js',
   ]),
 };
 
 GEN('#if defined(OS_MACOSX)');
-GEN('#define MAYBE_AllTest DISABLED_AllTest');
+GEN('#define MAYBE_AllSupervised DISABLED_All');
 GEN('#else');
-GEN('#define MAYBE_AllTest AllTest');
+GEN('#define MAYBE_AllSupervised All');
 GEN('#endif');
 
-TEST_F('HistorySupervisedUserTest', 'MAYBE_AllTest', function() {
+TEST_F('HistorySupervisedUserTest', 'MAYBE_AllSupervised', function() {
   mocha.run();
 });
 
@@ -240,6 +238,8 @@ HistoryToolbarTest.prototype = {
   __proto__: HistoryBrowserTest.prototype,
 
   extraLibraries: HistoryBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'test_browser_service.js',
     'history_toolbar_test.js',
   ]),
 };

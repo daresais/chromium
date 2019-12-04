@@ -397,9 +397,6 @@ extern const char kEnableDesktopPWAsDescription[];
 extern const char kDesktopPWAsLocalUpdatingName[];
 extern const char kDesktopPWAsLocalUpdatingDescription[];
 
-extern const char kDesktopPWAsOmniboxInstallName[];
-extern const char kDesktopPWAsOmniboxInstallDescription[];
-
 extern const char kEnableSystemWebAppsName[];
 extern const char kEnableSystemWebAppsDescription[];
 
@@ -486,9 +483,6 @@ extern const char kDisableKeepaliveFetchDescription[];
 
 extern const char kVizDisplayCompositorName[];
 extern const char kVizDisplayCompositorDescription[];
-
-extern const char kVizHitTestName[];
-extern const char kVizHitTestDescription[];
 
 extern const char kMemlogName[];
 extern const char kMemlogDescription[];
@@ -1117,6 +1111,9 @@ extern const char kSharingUseDeviceInfoDescription[];
 extern const char kSharingDeriveVapidKeyName[];
 extern const char kSharingDeriveVapidKeyDescription[];
 
+extern const char kSharingDeviceExpirationName[];
+extern const char kSharingDeviceExpirationDescription[];
+
 extern const char kShelfHotseatName[];
 extern const char kShelfHotseatDescription[];
 
@@ -1345,6 +1342,9 @@ extern const char kWebrtcSrtpAesGcmDescription[];
 
 extern const char kWebrtcStunOriginName[];
 extern const char kWebrtcStunOriginDescription[];
+
+extern const char kWebrtcUseMinMaxVEADimensionsName[];
+extern const char kWebrtcUseMinMaxVEADimensionsDescription[];
 
 #if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
 extern const char kWebUITabStripName[];
@@ -1865,9 +1865,6 @@ extern const char kAggregatedMlAppRankingDescription[];
 extern const char kAggregatedMlSearchRankingName[];
 extern const char kAggregatedMlSearchRankingDescription[];
 
-extern const char kAllowAmbientEQName[];
-extern const char kAllowAmbientEQDescription[];
-
 extern const char kAllowDisableMouseAccelerationName[];
 extern const char kAllowDisableMouseAccelerationDescription[];
 
@@ -2152,6 +2149,9 @@ extern const char kHideArcMediaNotificationsDescription[];
 
 extern const char kImeInputLogicFstName[];
 extern const char kImeInputLogicFstDescription[];
+
+extern const char kImeInputLogicHmmName[];
+extern const char kImeInputLogicHmmDescription[];
 
 extern const char kImeNativeDecoderName[];
 extern const char kImeNativeDecoderDescription[];

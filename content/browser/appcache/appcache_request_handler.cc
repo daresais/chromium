@@ -433,7 +433,8 @@ void AppCacheRequestHandler::RunLoaderCallbackForMainResource(
               frame_tree_node->current_frame_host()->GetProcess()->GetID(),
               ContentBrowserClient::URLLoaderFactoryType::kNavigation,
               url::Origin(), &factory_receiver, nullptr /* header_client */,
-              nullptr /* bypass_redirect_checks */);
+              nullptr /* bypass_redirect_checks */,
+              nullptr /* factory_override */);
       if (use_proxy) {
         single_request_factory->Clone(std::move(factory_receiver));
         single_request_factory =
@@ -576,7 +577,7 @@ void AppCacheRequestHandler::MaybeCreateLoaderInternal(
 
 bool AppCacheRequestHandler::MaybeCreateLoaderForResponse(
     const network::ResourceRequest& request,
-    const network::ResourceResponseHead& response,
+    network::mojom::URLResponseHeadPtr* response,
     mojo::ScopedDataPipeConsumerHandle* response_body,
     mojo::PendingRemote<network::mojom::URLLoader>* loader,
     mojo::PendingReceiver<network::mojom::URLLoaderClient>* client_receiver,
@@ -603,7 +604,7 @@ bool AppCacheRequestHandler::MaybeCreateLoaderForResponse(
                                std::move(client));
       },
       *(request_->GetResourceRequest()), loader, client_receiver, &was_called);
-  request_->set_response(response);
+  request_->set_response(response->Clone());
   if (!MaybeLoadFallbackForResponse(nullptr)) {
     DCHECK(!was_called);
     loader_callback_.Reset();
@@ -650,12 +651,12 @@ void AppCacheRequestHandler::MaybeCreateSubresourceLoader(
 }
 
 void AppCacheRequestHandler::MaybeFallbackForSubresourceResponse(
-    const network::ResourceResponseHead& response,
+    network::mojom::URLResponseHeadPtr response,
     AppCacheLoaderCallback loader_callback) {
   DCHECK(!job_);
   DCHECK(!is_main_resource());
   loader_callback_ = std::move(loader_callback);
-  request_->set_response(response);
+  request_->set_response(std::move(response));
   MaybeLoadFallbackForResponse(nullptr);
   if (loader_callback_)
     std::move(loader_callback_).Run({});

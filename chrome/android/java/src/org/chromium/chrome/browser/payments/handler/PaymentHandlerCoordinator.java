@@ -72,7 +72,7 @@ public class PaymentHandlerCoordinator {
         webContents.addObserver(mediator);
 
         PaymentHandlerToolbarCoordinator toolbarCoordinator = new PaymentHandlerToolbarCoordinator(
-                activity, webContents, () -> { mHider.run(); });
+                activity, webContents, url, /*observer=*/mediator);
         PaymentHandlerView view = new PaymentHandlerView(
                 activity, webContents, webContentView, toolbarCoordinator.getView());
         assert toolbarCoordinator.getToolbarHeightPx() == view.getToolbarHeightPx();

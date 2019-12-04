@@ -61,7 +61,6 @@
 #include "chrome/browser/font_family_cache.h"
 #include "chrome/browser/gpu/chrome_browser_main_extra_parts_gpu.h"
 #include "chrome/browser/hid/chrome_hid_delegate.h"
-#include "chrome/browser/language/translate_frame_binder.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/lookalikes/lookalike_url_navigation_throttle.h"
 #include "chrome/browser/media/router/media_router_feature.h"
@@ -109,7 +108,6 @@
 #include "chrome/browser/profiling_host/chrome_browser_main_extra_parts_profiling.h"
 #include "chrome/browser/profiling_host/profiling_process_host.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
-#include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/renderer_host/pepper/chrome_browser_pepper_host_factory.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/resource_coordinator/background_tab_navigation_throttle.h"
@@ -398,7 +396,6 @@
 #include "chrome/browser/chrome_browser_main_android.h"
 #include "chrome/browser/download/android/available_offline_content_provider.h"
 #include "chrome/browser/download/android/intercept_oma_download_navigation_throttle.h"
-#include "chrome/browser/offline_pages/android/offline_page_auto_fetcher.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/common/chrome_descriptors.h"
 #include "components/crash/content/browser/child_exit_observer_android.h"
@@ -1375,7 +1372,6 @@ void ChromeContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
   int id = host->GetID();
   Profile* profile = Profile::FromBrowserContext(host->GetBrowserContext());
-  host->AddFilter(new ChromeRenderMessageFilter());
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   host->AddFilter(new cast::CastTransportHostFilter());
 #endif
@@ -3588,16 +3584,6 @@ base::string16 ChromeContentBrowserClient::GetAppContainerSidForSandboxType(
 
 bool ChromeContentBrowserClient::PreSpawnRenderer(sandbox::TargetPolicy* policy,
                                                   RendererSpawnFlags flags) {
-  // Allow the server side of a pipe restricted to the "chrome.nacl."
-  // namespace so that it cannot impersonate other system or other chrome
-  // service pipes. This is also done in nacl_broker_listener.cc.
-  sandbox::ResultCode result =
-      policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
-                      sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
-                      L"\\\\.\\pipe\\chrome.nacl.*");
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
-
 // Does not work under component build because all the component DLLs would need
 // to be manually added and maintained. Does not work under ASAN build because
 // ASAN has not yet fully initialized its instrumentation by the time the CIG
@@ -3617,7 +3603,7 @@ bool ChromeContentBrowserClient::PreSpawnRenderer(sandbox::TargetPolicy* policy,
 
   sandbox::MitigationFlags mitigations = policy->GetProcessMitigations();
   mitigations |= sandbox::MITIGATION_FORCE_MS_SIGNED_BINS;
-  result = policy->SetProcessMitigations(mitigations);
+  sandbox::ResultCode result = policy->SetProcessMitigations(mitigations);
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 
@@ -4106,18 +4092,6 @@ void ChromeContentBrowserClient::InitWebContextInterfaces() {
   frame_interfaces_ = std::make_unique<service_manager::BinderRegistry>();
   frame_interfaces_parameterized_ = std::make_unique<
       service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>>();
-  worker_interfaces_parameterized_ =
-      std::make_unique<service_manager::BinderRegistryWithArgs<
-          content::RenderProcessHost*, const url::Origin&>>();
-
-  // Register mojo ContentTranslateDriver interface only for main frame.
-  frame_interfaces_parameterized_->AddInterface(
-      base::BindRepeating(&language::BindContentTranslateDriver));
-
-#if defined(OS_ANDROID)
-  frame_interfaces_parameterized_->AddInterface(
-      base::BindRepeating(&offline_pages::OfflinePageAutoFetcher::Create));
-#endif
 }
 
 void ChromeContentBrowserClient::InitNetworkContextsParentDirectory() {
@@ -4509,7 +4483,8 @@ bool ChromeContentBrowserClient::WillCreateURLLoaderFactory(
     mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>*
         header_client,
-    bool* bypass_redirect_checks) {
+    bool* bypass_redirect_checks,
+    network::mojom::URLLoaderFactoryOverridePtr* factory_override) {
   bool use_proxy = false;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)

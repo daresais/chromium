@@ -150,8 +150,6 @@ GpuPreferences ParseGpuPreferences(const base::CommandLine* command_line) {
       command_line->HasSwitch(switches::kEnableGPUServiceTracing);
   gpu_preferences.use_passthrough_cmd_decoder =
       gpu::gles2::UsePassthroughCommandDecoder(command_line);
-  gpu_preferences.disable_gpu_driver_bug_workarounds =
-      command_line->HasSwitch(switches::kDisableGpuDriverBugWorkarounds);
   gpu_preferences.ignore_gpu_blacklist =
       command_line->HasSwitch(switches::kIgnoreGpuBlacklist);
   gpu_preferences.enable_webgpu =
@@ -208,6 +206,10 @@ GpuPreferences ParseGpuPreferences(const base::CommandLine* command_line) {
     // vulkan implementation will be used by default.
     gpu_preferences.use_vulkan = gpu::VulkanImplementationName::kNative;
   }
+
+  gpu_preferences.enable_gpu_blocked_time_metric =
+      command_line->HasSwitch(switches::kEnableGpuBlockedTime);
+
   return gpu_preferences;
 }
 

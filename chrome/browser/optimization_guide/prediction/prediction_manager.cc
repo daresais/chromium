@@ -8,9 +8,11 @@
 
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/sequenced_task_runner.h"
+#include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/time/default_clock.h"
 #include "chrome/browser/browser_process.h"
@@ -18,6 +20,7 @@
 #include "chrome/browser/optimization_guide/optimization_guide_navigation_data.h"
 #include "chrome/browser/optimization_guide/optimization_guide_permissions_util.h"
 #include "chrome/browser/optimization_guide/optimization_guide_session_statistic.h"
+#include "chrome/browser/optimization_guide/optimization_guide_util.h"
 #include "chrome/browser/optimization_guide/prediction/prediction_model.h"
 #include "chrome/browser/optimization_guide/prediction/prediction_model_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
@@ -307,9 +310,16 @@ OptimizationTargetDecision PredictionManager::ShouldTargetNavigation(
   base::flat_map<std::string, float> feature_map =
       BuildFeatureMap(navigation_handle, prediction_model->GetModelFeatures());
 
+  base::TimeTicks model_evaluation_start_time = base::TimeTicks::Now();
   double prediction_score = 0.0;
   optimization_guide::OptimizationTargetDecision target_decision =
       prediction_model->Predict(feature_map, &prediction_score);
+  if (target_decision != OptimizationTargetDecision::kUnknown) {
+    UmaHistogramTimes(
+        "OptimizationGuide.PredictionModelEvaluationLatency." +
+            GetStringNameForOptimizationTarget(optimization_target),
+        base::TimeTicks::Now() - model_evaluation_start_time);
+  }
 
   if (navigation_data) {
     navigation_data->SetModelVersionForOptimizationTarget(
@@ -422,9 +432,11 @@ void PredictionManager::OnModelsAndHostFeaturesFetched(
   // from the remote Optimization Guide Service is updated.
   UpdateHostModelFeatures((*get_models_response_data)->host_model_features());
 
-  // If no models were returned, no updates to the store are required.
-  if ((*get_models_response_data)->models_size() > 0)
-    UpdatePredictionModels((*get_models_response_data)->models());
+  if ((*get_models_response_data)->models_size() > 0) {
+    // Stash the response so the models can be stored once the host
+    // model features are stored.
+    get_models_response_data_to_store_ = std::move(*get_models_response_data);
+  }
 
   // TODO(crbug/1001194): After the models and host model features are stored
   // asynchronously, the timer will be set based on the update time provided
@@ -450,6 +462,7 @@ void PredictionManager::UpdateHostModelFeatures(
           host_model_features);
     }
   }
+
   model_and_features_store_->UpdateHostModelFeatures(
       std::move(host_model_features_update_data),
       base::BindOnce(&PredictionManager::OnHostModelFeaturesStored,
@@ -494,6 +507,14 @@ void PredictionManager::OnHostModelFeaturesStored() {
   SEQUENCE_CHECKER(sequence_checker_);
   LOCAL_HISTOGRAM_BOOLEAN(
       "OptimizationGuide.PredictionManager.HostModelFeaturesStored", true);
+
+  if (get_models_response_data_to_store_ &&
+      get_models_response_data_to_store_->models_size() > 0) {
+    UpdatePredictionModels(get_models_response_data_to_store_->models());
+  }
+  // Clear any data remaining in the stored get models response.
+  get_models_response_data_to_store_.reset();
+
   // TODO(crbug/1027596): Stopping the timer can be removed once the fetch
   // callback refactor is done. Otherwise, at the start of a fetch, a timer is
   // running to handle the cases that a fetch fails but the callback is not run.
@@ -650,7 +671,11 @@ void PredictionManager::MaybeScheduleModelAndHostModelFeaturesFetch() {
   if (optimization_guide::switches::
           ShouldOverrideFetchModelsAndFeaturesTimer()) {
     SetLastModelAndFeaturesFetchAttemptTime(clock_->Now());
-    FetchModelsAndHostModelFeatures();
+    // TODO(crbug/1030358): Remove delay during tests after adding network
+    // observer to the prediction model fetcher or adding the check for offline
+    // here.
+    fetch_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1), this,
+                       &PredictionManager::FetchModelsAndHostModelFeatures);
   } else {
     ScheduleModelsAndHostModelFeaturesFetch();
   }

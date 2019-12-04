@@ -395,6 +395,26 @@
             ]
         }
     ],
+    "AndroidInProductHelpQuietNotificationPrompts": [
+        {
+            "platforms": [
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "params": {
+                        "availability": "any",
+                        "event_trigger": "name:tabgroups_dummy;comparator:any;window:1;storage:1",
+                        "event_used": "name:tabgroups_dummy;comparator:any;window:1;storage:1"
+                    },
+                    "enable_features": [
+                        "IPH_QuietNotificationPrompts"
+                    ]
+                }
+            ]
+        }
+    ],
     "AndroidInlineUpdateFlowStudy": [
         {
             "platforms": [
@@ -1360,6 +1380,28 @@
             ]
         }
     ],
+    "BlinkSchedulerVeryHighPriorityForCompositingExperiments": [
+        {
+            "platforms": [
+                "android",
+                "chromeos",
+                "linux",
+                "mac",
+                "windows"
+            ],
+            "experiments": [
+                {
+                    "name": "VeryHighPriorityForCompositingAfterDelay100",
+                    "params": {
+                        "CompositingDelayLength": "100"
+                    },
+                    "enable_features": [
+                        "BlinkSchedulerVeryHighPriorityForCompositingAfterDelay"
+                    ]
+                }
+            ]
+        }
+    ],
     "BlockPromptsIfIgnoredOften": [
         {
             "platforms": [
@@ -1571,6 +1613,26 @@
             ]
         }
     ],
+    "ChromeStart": [
+        {
+            "platforms": [
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "params": {
+                        "start_surface_variation": "tasksonly",
+                        "tab_switcher_on_return_time_ms": "3600000"
+                    },
+                    "enable_features": [
+                        "StartSurfaceAndroid",
+                        "TabSwitcherOnReturn"
+                    ]
+                }
+            ]
+        }
+    ],
     "ChromeSuggestionsTuningForceTopSites": [
         {
             "platforms": [
@@ -1770,6 +1832,21 @@
                     },
                     "enable_features": [
                         "CrOSSystemAECDeactivatedGroups"
+                    ]
+                }
+            ]
+        }
+    ],
+    "CryptAuthV2Enrollment": [
+        {
+            "platforms": [
+                "chromeos"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "CryptAuthV2Enrollment"
                     ]
                 }
             ]
@@ -2478,7 +2555,8 @@
                 {
                     "name": "Enabled",
                     "enable_features": [
-                        "EphemeralTab"
+                        "EphemeralTab",
+                        "EphemeralTabUsingBottomSheet"
                     ]
                 }
             ]
@@ -2900,7 +2978,7 @@
             ]
         }
     ],
-    "HTTPReallyBadFinal": [
+    "HTTPDangerWarning": [
         {
             "platforms": [
                 "android",
@@ -2914,7 +2992,7 @@
                 {
                     "name": "enabled",
                     "params": {
-                        "treatment": "dangerous"
+                        "treatment": "danger-warning"
                     },
                     "enable_features": [
                         "MarkHttpAs"
@@ -4174,6 +4252,24 @@
                     "name": "Beta_OnDeviceHeadSuggest_Enabled",
                     "enable_features": [
                         "OmniboxOnDeviceHeadProvider"
+                    ]
+                }
+            ]
+        }
+    ],
+    "OmniboxSearchEngineLogoAndroid": [
+        {
+            "platforms": [
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "params": {
+                        "rounded_edges": "true"
+                    },
+                    "enable_features": [
+                        "OmniboxSearchEngineLogo"
                     ]
                 }
             ]

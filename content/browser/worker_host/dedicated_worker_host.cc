@@ -14,8 +14,8 @@
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/interface_provider_filtering.h"
-#include "content/browser/renderer_interface_binders.h"
 #include "content/browser/service_worker/service_worker_navigation_handle.h"
+#include "content/browser/service_worker/service_worker_object_host.h"
 #include "content/browser/storage_partition_impl.h"
 #include "content/browser/websockets/websocket_connector_impl.h"
 #include "content/browser/webtransport/quic_transport_connector_impl.h"
@@ -56,12 +56,6 @@ void DedicatedWorkerHost::GetInterface(
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  auto* worker_process_host = RenderProcessHost::FromID(worker_process_id_);
-  if (!worker_process_host)
-    return;
-
-  BindWorkerInterface(interface_name, std::move(interface_pipe),
-                      worker_process_host, origin_);
 }
 
 void DedicatedWorkerHost::BindBrowserInterfaceBrokerReceiver(
@@ -122,27 +116,8 @@ void DedicatedWorkerHost::StartScriptLoad(
     return;
   }
 
-  // Walk up the RenderFrameHostImpl::GetParent() chain to get to the top
-  // RenderFrameHostImpl, instead of using the frame tree node.
-  // If the root has already navigated to a different render frame host by
-  // the time that we get here, the old root render frame host should still
-  // be around in pending deletion state (i.e. running its unload handler)
-  // and reachable via this walk even though it's no longer the same as
-  // root()->current_frame_host(). The old root render frame host will still
-  // have its old origin in GetLastCommittedOrigin(). See crbug.com/986167
-  RenderFrameHostImpl* top_frame = nullptr;
-  for (RenderFrameHostImpl* frame = nearest_ancestor_render_frame_host; frame;
-       frame = frame->GetParent()) {
-    top_frame = frame;
-  }
-
-  // Compute the network isolation key using the old root's last committed
-  // origin as top-frame origin.
-  url::Origin top_frame_origin(top_frame->GetLastCommittedOrigin());
-  url::Origin current_frame_origin(
-      nearest_ancestor_render_frame_host->GetLastCommittedOrigin());
   network_isolation_key_ =
-      net::NetworkIsolationKey(top_frame_origin, current_frame_origin);
+      nearest_ancestor_render_frame_host->GetNetworkIsolationKey();
 
   // Get a storage domain.
   SiteInstance* site_instance =
@@ -320,12 +295,13 @@ DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
 
   mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>
       default_header_client;
+  network::mojom::URLLoaderFactoryOverridePtr factory_override;
   GetContentClient()->browser()->WillCreateURLLoaderFactory(
       storage_partition_impl->browser_context(),
       /*frame=*/nullptr, worker_process_id_,
       ContentBrowserClient::URLLoaderFactoryType::kWorkerSubResource, origin_,
-      &default_factory_receiver, &default_header_client,
-      bypass_redirect_checks);
+      &default_factory_receiver, &default_header_client, bypass_redirect_checks,
+      &factory_override);
 
   // TODO(nhiroki): Call devtools_instrumentation::WillCreateURLLoaderFactory()
   // here.
@@ -334,7 +310,8 @@ DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
       origin_, origin_,
       ancestor_render_frame_host->cross_origin_embedder_policy(),
       /*preferences=*/nullptr, network_isolation_key_,
-      std::move(default_header_client), std::move(default_factory_receiver));
+      std::move(default_header_client), std::move(default_factory_receiver),
+      std::move(factory_override));
 
   return pending_default_factory;
 }

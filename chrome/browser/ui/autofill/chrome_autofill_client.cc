@@ -82,9 +82,8 @@
 #include "ui/android/window_android.h"
 #else  // !OS_ANDROID
 #include "chrome/browser/ui/autofill/payments/save_card_bubble_controller_impl.h"
-#include "chrome/browser/ui/autofill/payments/verify_pending_dialog_controller_impl.h"
-#include "chrome/browser/ui/autofill/payments/verify_pending_dialog_view.h"
 #include "chrome/browser/ui/autofill/payments/webauthn_dialog_controller_impl.h"
+#include "chrome/browser/ui/autofill/payments/webauthn_dialog_state.h"
 #include "chrome/browser/ui/autofill/payments/webauthn_dialog_view.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -274,44 +273,44 @@ void ChromeAutofillClient::ShowLocalCardMigrationResults(
 
 #if !defined(OS_ANDROID)
 void ChromeAutofillClient::ShowWebauthnOfferDialog(
-    WebauthnOfferDialogCallback offer_dialog_callback) {
+    WebauthnDialogCallback offer_dialog_callback) {
   autofill::WebauthnDialogControllerImpl::CreateForWebContents(web_contents());
   autofill::WebauthnDialogControllerImpl::FromWebContents(web_contents())
       ->ShowOfferDialog(std::move(offer_dialog_callback));
+}
+
+void ChromeAutofillClient::ShowWebauthnVerifyPendingDialog(
+    WebauthnDialogCallback verify_pending_dialog_callback) {
+  autofill::WebauthnDialogControllerImpl::CreateForWebContents(web_contents());
+  autofill::WebauthnDialogControllerImpl::FromWebContents(web_contents())
+      ->ShowVerifyPendingDialog(std::move(verify_pending_dialog_callback));
 }
 
 void ChromeAutofillClient::UpdateWebauthnOfferDialogWithError() {
   WebauthnDialogControllerImpl* controller =
       autofill::WebauthnDialogControllerImpl::FromWebContents(web_contents());
   if (controller)
-    controller->UpdateDialogWithError();
+    controller->UpdateDialog(WebauthnDialogState::kOfferError);
 }
 
-bool ChromeAutofillClient::CloseWebauthnOfferDialog() {
+void ChromeAutofillClient::UpdateWebauthnVerifyPendingCancelButton(
+    bool should_be_enabled) {
+  WebauthnDialogControllerImpl* controller =
+      autofill::WebauthnDialogControllerImpl::FromWebContents(web_contents());
+  if (controller) {
+    controller->UpdateDialog(
+        should_be_enabled ? WebauthnDialogState::kVerifyPending
+                          : WebauthnDialogState::kVerifyPendingButtonDisabled);
+  }
+}
+
+bool ChromeAutofillClient::CloseWebauthnDialog() {
   WebauthnDialogControllerImpl* controller =
       autofill::WebauthnDialogControllerImpl::FromWebContents(web_contents());
   if (controller)
     return controller->CloseDialog();
 
   return false;
-}
-
-void ChromeAutofillClient::ShowWebauthnVerifyPendingDialog(
-    base::OnceClosure cancel_card_verification_callback) {
-  autofill::VerifyPendingDialogControllerImpl::CreateForWebContents(
-      web_contents());
-  autofill::VerifyPendingDialogControllerImpl::FromWebContents(web_contents())
-      ->ShowDialog(std::move(cancel_card_verification_callback));
-}
-
-void ChromeAutofillClient::CloseWebauthnVerifyPendingDialog() {
-  VerifyPendingDialogControllerImpl* controller =
-      autofill::VerifyPendingDialogControllerImpl::FromWebContents(
-          web_contents());
-  if (!controller)
-    return;
-
-  controller->OnCardVerificationCompleted();
 }
 #endif
 
@@ -511,14 +510,15 @@ bool ChromeAutofillClient::IsContextSecure() {
     return false;
 
   const auto security_level = helper->GetSecurityLevel();
+  content::NavigationEntry* entry =
+      web_contents()->GetController().GetVisibleEntry();
 
-  // Cases with mixed passive content are safe enough to allow autofill, so
-  // allow NONE in addition to the secure cases.
+  // Only dangerous security states should prevent autofill.
   //
-  // TODO(crbug.com/701018): Once passive mixed content is less common, just use
-  // IsSslCertificateValid().
-  return security_state::IsSslCertificateValid(security_level) ||
-         security_level == security_state::NONE;
+  // TODO(crbug.com/701018): Once passive mixed content and legacy TLS are less
+  // common, just use IsSslCertificateValid().
+  return entry && entry->GetURL().SchemeIsCryptographic() &&
+         security_level != security_state::DANGEROUS;
 }
 
 bool ChromeAutofillClient::ShouldShowSigninPromo() {
@@ -599,7 +599,7 @@ ChromeAutofillClient::ChromeAutofillClient(content::WebContents* web_contents)
           user_prefs::UserPrefs::Get(web_contents->GetBrowserContext()),
           Profile::FromBrowserContext(web_contents->GetBrowserContext())
               ->IsOffTheRecord()) {
-  if (::autofill::prefs::IsCreditCardAutofillEnabled(GetPrefs()))
+  if (::autofill::prefs::IsAutofillCreditCardEnabled(GetPrefs()))
     AutofillGstaticReader::GetInstance()->SetUp();
   // TODO(crbug.com/928595): Replace the closure with a callback to the renderer
   // that indicates if log messages should be sent from the renderer.

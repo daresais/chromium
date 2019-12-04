@@ -270,7 +270,7 @@
         android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
         android:exported="false"
         android:label="@string/preferences"
-        android:name="org.chromium.chrome.browser.settings.Preferences"
+        android:name="org.chromium.chrome.browser.settings.SettingsActivity"
         android:theme="@style/Theme.Chromium.Preferences"/>
     <activity
         android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
@@ -2030,6 +2030,7 @@
         <action android:name="android.support.customtabs.action.CustomTabsService"/>
         <category android:name="androidx.browser.customtabs.category.ColorSchemeCustomization"/>
         <category android:name="androidx.browser.customtabs.category.NavBarColorCustomization"/>
+        <category android:name="androidx.browser.trusted.category.ImmersiveMode"/>
         <category android:name="androidx.browser.trusted.category.TrustedWebActivities"/>
         <category
             android:name="androidx.browser.trusted.category.TrustedWebActivitySplashScreensV1"/>

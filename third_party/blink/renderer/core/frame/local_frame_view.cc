@@ -301,6 +301,7 @@ void LocalFrameView::Trace(blink::Visitor* visitor) {
   visitor->Trace(scrollbars_);
   visitor->Trace(viewport_scrollable_area_);
   visitor->Trace(anchoring_adjustment_queue_);
+  visitor->Trace(scroll_event_queue_);
   visitor->Trace(print_context_);
   visitor->Trace(paint_timing_detector_);
   visitor->Trace(lifecycle_observers_);
@@ -605,17 +606,14 @@ void LocalFrameView::PerformPreLayoutTasks() {
 
 void LocalFrameView::LayoutFromRootObject(LayoutObject& root) {
   LayoutState layout_state(root);
-  // Since we are starting layout from an arbitrary node, we need to notify all
-  // possible scroll anchors above us, as they aren't notified during layout.
-  for (auto* ancestor = root.Container(); ancestor;
-       ancestor = ancestor->Container()) {
-    if (ancestor->HasOverflowClip() && ancestor->IsLayoutBlock()) {
-      auto* scrollable_area =
-          ToLayoutBoxModelObject(ancestor)->GetScrollableArea();
-      DCHECK(scrollable_area);
-      scrollable_area->GetScrollAnchor()->NotifyBeforeLayout();
+  if (scrollable_areas_) {
+    for (auto& scrollable_area : *scrollable_areas_) {
+      if (scrollable_area->GetScrollAnchor() &&
+          scrollable_area->ShouldPerformScrollAnchoring())
+        scrollable_area->GetScrollAnchor()->NotifyBeforeLayout();
     }
   }
+
   root.UpdateLayout();
 }
 
@@ -1111,7 +1109,7 @@ void LocalFrameView::AddPartToUpdate(LayoutEmbeddedObject& object) {
   // Tell the DOM element that it needs a Plugin update.
   Node* node = object.GetNode();
   DCHECK(node);
-  if (IsHTMLObjectElement(*node) || IsHTMLEmbedElement(*node))
+  if (IsA<HTMLObjectElement>(*node) || IsHTMLEmbedElement(*node))
     ToHTMLPlugInElement(node)->SetNeedsPluginUpdate(true);
 
   part_update_set_.insert(&object);
@@ -2398,6 +2396,8 @@ bool LocalFrameView::RunStyleAndLayoutLifecyclePhases(
     frame_view.PerformScrollAnchoringAdjustments();
   });
 
+  EnqueueScrollEvents();
+
   frame_->GetPage()->GetValidationMessageClient().LayoutOverlay();
 
   if (target_state == DocumentLifecycle::kPaintClean) {
@@ -2582,6 +2582,12 @@ void LocalFrameView::DequeueScrollAnchoringAdjustment(
   anchoring_adjustment_queue_.erase(scrollable_area);
 }
 
+void LocalFrameView::SetNeedsEnqueueScrollEvent(
+    PaintLayerScrollableArea* scrollable_area) {
+  scroll_event_queue_.insert(scrollable_area);
+  GetPage()->Animator().ScheduleVisualUpdate(frame_.Get());
+}
+
 void LocalFrameView::PerformScrollAnchoringAdjustments() {
   // Adjust() will cause a scroll which could end up causing a layout and
   // reentering this method. Copy and clear the queue so we don't modify it
@@ -2595,6 +2601,17 @@ void LocalFrameView::PerformScrollAnchoringAdjustments() {
       scroller->GetScrollAnchor()->Adjust();
     }
   }
+}
+
+void LocalFrameView::EnqueueScrollEvents() {
+  ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+    for (WeakMember<PaintLayerScrollableArea>& scroller :
+         frame_view.scroll_event_queue_) {
+      if (scroller)
+        scroller->EnqueueScrollEventIfNeeded();
+    }
+    frame_view.scroll_event_queue_.clear();
+  });
 }
 
 template <typename MainLayerFunction, typename ContentsLayerFunction>
@@ -3587,14 +3604,14 @@ ScrollableArea* LocalFrameView::ScrollableAreaWithElementId(
   // composited scrolling layers per crbug.com/784053, so we don't have to worry
   // about them.)
   ScrollableArea* viewport = LayoutViewport();
-  if (id == viewport->GetCompositorElementId())
+  if (id == viewport->GetScrollElementId())
     return viewport;
 
   if (scrollable_areas_) {
     // This requires iterating over all scrollable areas. We may want to store a
     // map of ElementId to ScrollableArea if this is an issue for performance.
     for (ScrollableArea* scrollable_area : *scrollable_areas_) {
-      if (id == scrollable_area->GetCompositorElementId())
+      if (id == scrollable_area->GetScrollElementId())
         return scrollable_area;
     }
   }

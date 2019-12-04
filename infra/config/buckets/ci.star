@@ -316,14 +316,6 @@ android_builder(
 )
 
 android_builder(
-    name = 'android-kitkat-arm-rel',
-)
-
-android_builder(
-    name = 'android-marshmallow-arm64-rel',
-)
-
-android_builder(
     name = 'android-pie-arm64-dbg',
 )
 
@@ -358,11 +350,6 @@ android_fyi_builder(
 
 android_fyi_builder(
     name = 'android-pie-x86-fyi-rel',
-)
-
-android_fyi_builder(
-    name = 'Memory Infra Tester',
-    notifies = ['chrome-memory-sheriffs'],
 )
 
 
@@ -442,50 +429,55 @@ def chromiumos_builder(*, name, **kwargs):
   return builder(
       name = name,
       mastername = 'chromium.chromiumos',
+      goma_backend = goma.backend.RBE_PROD,
       **kwargs
   )
 
 chromiumos_builder(
     name = 'Linux ChromiumOS Full',
-    goma_backend = goma.backend.RBE_PROD,
 )
 
 chromiumos_builder(
     name = 'chromeos-amd64-generic-asan-rel',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-amd64-generic-cfi-thin-lto-rel',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-amd64-generic-dbg',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-amd64-generic-rel',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-arm-generic-dbg',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-arm-generic-rel',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'chromeos-kevin-rel',
+    goma_enable_ats = True,
 )
 
 chromiumos_builder(
     name = 'linux-chromeos-dbg',
-    goma_backend = goma.backend.RBE_PROD,
 )
 
 chromiumos_builder(
     name = 'linux-chromeos-rel',
-    goma_backend = goma.backend.RBE_PROD,
 )
 
 
@@ -1098,10 +1090,14 @@ fyi_builder(
 
 fyi_builder(
     name = 'chromeos-amd64-generic-rel-vm-tests',
+    goma_backend = goma.backend.RBE_PROD,
+    goma_enable_ats = True,
 )
 
 fyi_builder(
     name = 'chromeos-kevin-rel-hw-tests',
+    goma_backend = goma.backend.RBE_PROD,
+    goma_enable_ats = True,
 )
 
 fyi_builder(
@@ -1810,11 +1806,6 @@ def gpu_builder(*, name, **kwargs):
       mastername = 'chromium.gpu',
       **kwargs
   )
-
-gpu_builder(
-    name = 'Android Release (Nexus 5X)',
-    goma_backend = goma.backend.RBE_PROD,
-)
 
 gpu_builder(
     name = 'GPU Linux Builder (dbg)',

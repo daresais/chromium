@@ -85,7 +85,6 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/javascript_dialog_navigation_deferrer.h"
 #include "content/browser/web_contents/web_contents_view_child_frame.h"
-#include "content/browser/web_contents/web_contents_view_guest.h"
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/browser/webui/web_ui_impl.h"
 #include "content/common/browser_plugin/browser_plugin_constants.h"
@@ -123,8 +122,8 @@
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/system_connector.h"
-#include "content/public/browser/web_contents_binding_set.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_receiver_set.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/child_process_host.h"
@@ -634,8 +633,8 @@ WebContentsImpl::~WebContentsImpl() {
 
   rwh_input_event_router_.reset();
 
-  for (auto& entry : binding_sets_)
-    entry.second->CloseAllBindings();
+  for (auto& entry : receiver_sets_)
+    entry.second->CloseAllReceivers();
 
   WebContentsImpl* outermost = GetOutermostWebContents();
   if (this != outermost && ContainsOrIsFocusedWebContents()) {
@@ -1217,20 +1216,20 @@ void WebContentsImpl::UpdateZoomIfNecessary(const std::string& scheme,
 }
 #endif  // !defined(OS_ANDROID)
 
-base::OnceClosure WebContentsImpl::AddBindingSet(
+base::OnceClosure WebContentsImpl::AddReceiverSet(
     const std::string& interface_name,
-    WebContentsBindingSet* binding_set) {
+    WebContentsReceiverSet* receiver_set) {
   auto result =
-      binding_sets_.insert(std::make_pair(interface_name, binding_set));
+      receiver_sets_.insert(std::make_pair(interface_name, receiver_set));
   DCHECK(result.second);
-  return base::BindOnce(&WebContentsImpl::RemoveBindingSet,
+  return base::BindOnce(&WebContentsImpl::RemoveReceiverSet,
                         weak_factory_.GetWeakPtr(), interface_name);
 }
 
-WebContentsBindingSet* WebContentsImpl::GetBindingSet(
+WebContentsReceiverSet* WebContentsImpl::GetReceiverSet(
     const std::string& interface_name) {
-  auto it = binding_sets_.find(interface_name);
-  if (it == binding_sets_.end())
+  auto it = receiver_sets_.find(interface_name);
+  if (it == receiver_sets_.end())
     return nullptr;
   return it->second;
 }
@@ -1737,8 +1736,11 @@ bool WebContentsImpl::NeedToFireBeforeUnloadOrUnload() {
     if (!rfh->IsRenderFrameLive())
       continue;
 
-    if (rfh->GetSuddenTerminationDisablerState(blink::kBeforeUnloadHandler |
-                                               blink::kUnloadHandler)) {
+    if (rfh->GetSuddenTerminationDisablerState(
+            blink::mojom::SuddenTerminationDisablerType::
+                kBeforeUnloadHandler) ||
+        rfh->GetSuddenTerminationDisablerState(
+            blink::mojom::SuddenTerminationDisablerType::kUnloadHandler)) {
       return true;
     }
   }
@@ -2052,11 +2054,6 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
   } else {
     view_.reset(CreateWebContentsView(this, delegate,
                                       &render_view_host_delegate_view_));
-    if (browser_plugin_guest_) {
-      view_ = std::make_unique<WebContentsViewGuest>(
-          this, browser_plugin_guest_.get(), std::move(view_),
-          &render_view_host_delegate_view_);
-    }
   }
   CHECK(render_view_host_delegate_view_);
   CHECK(view_.get());
@@ -2396,13 +2393,8 @@ RenderWidgetHostImpl* WebContentsImpl::GetFocusedRenderWidgetHost(
 
   // If the focused WebContents is a guest WebContents, then get the focused
   // frame in the embedder WebContents instead.
-  FrameTreeNode* focused_frame = nullptr;
-  if (focused_contents->browser_plugin_guest_ &&
-      !GuestMode::IsCrossProcessFrameGuest(focused_contents)) {
-    focused_frame = frame_tree_.GetFocusedFrame();
-  } else {
-    focused_frame = GetFocusedWebContents()->frame_tree_.GetFocusedFrame();
-  }
+  FrameTreeNode* focused_frame =
+      GetFocusedWebContents()->frame_tree_.GetFocusedFrame();
 
   if (!focused_frame)
     return receiving_widget;
@@ -2424,13 +2416,6 @@ RenderWidgetHostImpl* WebContentsImpl::GetRenderWidgetHostWithPageFocus() {
   if (focused_web_contents->ShowingInterstitialPage()) {
     return static_cast<RenderFrameHostImpl*>(
                focused_web_contents->interstitial_page_->GetMainFrame())
-        ->GetRenderWidgetHost();
-  }
-  if (!GuestMode::IsCrossProcessFrameGuest(focused_web_contents) &&
-      focused_web_contents->browser_plugin_guest_) {
-    // If this is a guest, we need to be controlled by our embedder.
-    return focused_web_contents->GetOuterWebContents()
-        ->GetMainFrame()
         ->GetRenderWidgetHost();
   }
 
@@ -2909,7 +2894,7 @@ RenderFrameHostDelegate* WebContentsImpl::CreateNewWindow(
       // TODO(brettw): It seems bogus that we have to call this function on the
       // newly created object and give it one of its own member variables.
       RenderWidgetHostView* widget_view = new_view->CreateViewForWidget(
-          new_contents_impl->GetRenderViewHost()->GetWidget(), false);
+          new_contents_impl->GetRenderViewHost()->GetWidget());
       if (!renderer_started_hidden) {
         // RenderWidgets for frames always initialize as hidden. If the renderer
         // created this window as visible, then we show it here.
@@ -4666,7 +4651,7 @@ void WebContentsImpl::OnDidLoadResourceFromMemoryCache(
   if (url.is_valid() && url.SchemeIsHTTPOrHTTPS()) {
     StoragePartition* partition = source->GetProcess()->GetStoragePartition();
     partition->GetNetworkContext()->NotifyExternalCacheHit(
-        url, http_method, source->network_isolation_key());
+        url, http_method, source->GetNetworkIsolationKey());
   }
 }
 
@@ -4764,9 +4749,7 @@ void WebContentsImpl::ViewSource(RenderFrameHostImpl* frame) {
                                        std::string(":") +
                                        frame_entry->url().spec()));
 
-  navigation_entry->set_network_isolation_key(
-      net::NetworkIsolationKey(GetMainFrame()->GetLastCommittedOrigin(),
-                               frame->GetLastCommittedOrigin()));
+  navigation_entry->set_network_isolation_key(frame->GetNetworkIsolationKey());
 
   // Do not restore scroller position.
   // TODO(creis, lukasza, arthursonzogni): Do not reuse the original PageState,
@@ -5371,9 +5354,9 @@ void WebContentsImpl::OnAssociatedInterfaceRequest(
     RenderFrameHost* render_frame_host,
     const std::string& interface_name,
     mojo::ScopedInterfaceEndpointHandle handle) {
-  auto it = binding_sets_.find(interface_name);
-  if (it != binding_sets_.end())
-    it->second->OnRequestForFrame(render_frame_host, std::move(handle));
+  auto it = receiver_sets_.find(interface_name);
+  if (it != receiver_sets_.end())
+    it->second->OnReceiverForFrame(render_frame_host, std::move(handle));
 }
 
 void WebContentsImpl::OnInterfaceRequest(
@@ -5749,12 +5732,6 @@ RenderFrameHostImpl* WebContentsImpl::GetOuterWebContentsFrame() {
 }
 
 WebContentsImpl* WebContentsImpl::GetOuterWebContents() {
-  if (GuestMode::IsCrossProcessFrameGuest(this))
-    return node_.outer_web_contents();
-
-  if (browser_plugin_guest_)
-    return browser_plugin_guest_->embedder_web_contents();
-
   return node_.outer_web_contents();
 }
 
@@ -6250,9 +6227,6 @@ void WebContentsImpl::SetAsFocusedWebContentsIfNecessary() {
 
   GetOutermostWebContents()->node_.SetFocusedWebContents(this);
 
-  if (!GuestMode::IsCrossProcessFrameGuest(this) && browser_plugin_guest_)
-    return;
-
   // Send a page level blur to the old contents so that it displays inactive UI
   // and focus this contents to activate it.
   if (old_contents)
@@ -6419,11 +6393,6 @@ bool WebContentsImpl::ShouldIgnoreInputEvents() {
 
 void WebContentsImpl::FocusOwningWebContents(
     RenderWidgetHostImpl* render_widget_host) {
-  // The PDF plugin still runs as a BrowserPlugin and must go through the
-  // input redirection mechanism. It must not become focused direcly.
-  if (!GuestMode::IsCrossProcessFrameGuest(this) && browser_plugin_guest_)
-    return;
-
   RenderWidgetHostImpl* main_frame_widget_host =
       GetMainFrame()->GetRenderWidgetHost();
   RenderWidgetHostImpl* focused_widget =
@@ -6579,7 +6548,7 @@ InterstitialPageImpl* WebContentsImpl::GetInterstitialForRenderManager() {
 void WebContentsImpl::CreateRenderWidgetHostViewForRenderManager(
     RenderViewHost* render_view_host) {
   RenderWidgetHostViewBase* rwh_view =
-      view_->CreateViewForWidget(render_view_host->GetWidget(), false);
+      view_->CreateViewForWidget(render_view_host->GetWidget());
   rwh_view->SetSize(GetSizeForNewRenderView(true));
 }
 
@@ -7315,10 +7284,10 @@ void WebContentsImpl::SetJavaScriptDialogManagerForTesting(
   dialog_manager_ = dialog_manager;
 }
 
-void WebContentsImpl::RemoveBindingSet(const std::string& interface_name) {
-  auto it = binding_sets_.find(interface_name);
-  if (it != binding_sets_.end())
-    binding_sets_.erase(it);
+void WebContentsImpl::RemoveReceiverSet(const std::string& interface_name) {
+  auto it = receiver_sets_.find(interface_name);
+  if (it != receiver_sets_.end())
+    receiver_sets_.erase(it);
 }
 
 bool WebContentsImpl::AddDomainInfoToRapporSample(rappor::Sample* sample) {

@@ -26,6 +26,11 @@
       fakeIdentity);
 }
 
++ (void)forgetFakeIdentity:(FakeChromeIdentity*)fakeIdentity {
+  ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()
+      ->ForgetIdentity(fakeIdentity, nil);
+}
+
 + (NSString*)primaryAccountGaiaID {
   ios::ChromeBrowserState* browser_state =
       chrome_test_util::GetOriginalBrowserState();
@@ -48,6 +53,11 @@
   return grey_allOf(grey_accessibilityID(email),
                     grey_kindOfClass([IdentityChooserCell class]),
                     grey_sufficientlyVisible(), nil);
+}
+
++ (void)removeFakeIdentity:(FakeChromeIdentity*)fakeIdentity {
+  ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()
+      ->RemoveIdentity(fakeIdentity);
 }
 
 @end

@@ -130,6 +130,7 @@ PaintLayerScrollableArea::PaintLayerScrollableArea(PaintLayer& layer)
       had_resizer_before_relayout_(false),
       scroll_origin_changed_(false),
       scrollbar_manager_(*this),
+      has_last_committed_scroll_offset_(false),
       scroll_corner_(nullptr),
       resizer_(nullptr),
       scroll_anchor_(this),
@@ -147,6 +148,16 @@ PaintLayerScrollableArea::PaintLayerScrollableArea(PaintLayer& layer)
 
   GetLayoutBox()->GetDocument().GetSnapCoordinator().AddSnapContainer(
       *GetLayoutBox());
+
+  LocalFrame* frame = GetLayoutBox()->GetFrame();
+  if (!frame)
+    return;
+
+  LocalFrameView* frame_view = frame->View();
+  if (!frame_view)
+    return;
+
+  frame_view->AddScrollableArea(this);
 }
 
 PaintLayerScrollableArea::~PaintLayerScrollableArea() {
@@ -515,10 +526,20 @@ void PaintLayerScrollableArea::UpdateScrollOffset(
   // (see: PaintPropertyTreeBuilder::UpdateScrollAndScrollTranslation).
   GetLayoutBox()->SetNeedsPaintPropertyUpdate();
 
-  // Schedule the scroll DOM event.
-  if (GetLayoutBox()->GetNode()) {
-    GetLayoutBox()->GetNode()->GetDocument().EnqueueScrollEventForNode(
-        GetLayoutBox()->GetNode());
+  // Don't enqueue a scroll event yet for scroll reasons that are not about
+  // explicit changes to scroll. Instead, only do so at the time of the next
+  // lifecycle update, to avoid scroll events that are out of date or don't
+  // result in an actual scroll that is visible to the user. These scroll events
+  // will then be dispatched at the *subsequent* animation frame, because
+  // they happen after layout and therefore the next opportunity to fire the
+  // events is at the next lifecycle update (*).
+  //
+  // (*) https://html.spec.whatwg.org/#update-the-rendering steps
+  if (scroll_type == kClampingScroll || scroll_type == kAnchoringScroll) {
+    if (GetLayoutBox()->GetNode())
+      frame_view->SetNeedsEnqueueScrollEvent(this);
+  } else {
+    EnqueueScrollEventIfNeeded();
   }
 
   GetLayoutBox()->View()->ClearHitTestCache();
@@ -608,6 +629,21 @@ IntSize PaintLayerScrollableArea::ScrollOffsetInt() const {
 
 ScrollOffset PaintLayerScrollableArea::GetScrollOffset() const {
   return scroll_offset_;
+}
+
+void PaintLayerScrollableArea::EnqueueScrollEventIfNeeded() {
+  if (scroll_offset_ == last_committed_scroll_offset_ &&
+      has_last_committed_scroll_offset_)
+    return;
+  last_committed_scroll_offset_ = scroll_offset_;
+  has_last_committed_scroll_offset_ = true;
+  if (HasBeenDisposed())
+    return;
+  // Schedule the scroll DOM event.
+  if (GetLayoutBox()->GetNode()) {
+    GetLayoutBox()->GetNode()->GetDocument().EnqueueScrollEventForNode(
+        GetLayoutBox()->GetNode());
+  }
 }
 
 IntSize PaintLayerScrollableArea::MinimumScrollOffsetInt() const {
@@ -1690,6 +1726,18 @@ void PaintLayerScrollableArea::SetSnapContainerData(
   EnsureRareData().snap_container_data_ = data;
 }
 
+bool PaintLayerScrollableArea::SetTargetSnapAreaElementIds(
+    cc::TargetSnapAreaElementIds snap_target_ids) {
+  if (!RareData() || !RareData()->snap_container_data_)
+    return false;
+  if (RareData()->snap_container_data_.value().SetTargetSnapAreaElementIds(
+          snap_target_ids)) {
+    GetLayoutBox()->SetNeedsPaintPropertyUpdate();
+    return true;
+  }
+  return false;
+}
+
 base::Optional<FloatPoint>
 PaintLayerScrollableArea::GetSnapPositionAndSetTarget(
     const cc::SnapSelectionStrategy& strategy) {
@@ -2199,6 +2247,7 @@ void PaintLayerScrollableArea::UpdateScrollableAreaSet() {
         v_mode == ScrollbarMode::kAlwaysOff)
       has_overflow = false;
   }
+
   scrolls_overflow_ = has_overflow && is_visible_to_hit_test;
   if (did_scroll_overflow == ScrollsOverflow())
     return;
@@ -2236,13 +2285,6 @@ void PaintLayerScrollableArea::UpdateScrollableAreaSet() {
   // The scroll hit test display items paint in the background phase
   // (see: BoxPainter::PaintBoxDecorationBackground).
   GetLayoutBox()->SetBackgroundNeedsFullPaintInvalidation();
-
-  if (scrolls_overflow_) {
-    DCHECK(CanHaveOverflowScrollbars(*GetLayoutBox()));
-    frame_view->AddScrollableArea(this);
-  } else {
-    frame_view->RemoveScrollableArea(this);
-  }
 
   layer_->DidUpdateScrollsOverflow();
 }
@@ -2789,11 +2831,7 @@ static IntRect InvalidatePaintOfScrollbarIfNeeded(
   bool is_overlay = scrollbar && scrollbar->IsOverlayScrollbar();
 
   IntRect new_visual_rect;
-  // Calculate visual rect of the scrollbar, except overlay composited
-  // scrollbars because we invalidate the graphics layer only.
-  // TODO(wangxianzhu): Investigate how non-empty visual rect of composited
-  // scrollbar affects GPU texture memory (http://crbug.com/1011996).
-  if (scrollbar && !(graphics_layer && is_overlay))
+  if (scrollbar)
     new_visual_rect = scrollbar->FrameRect();
 
   if (needs_paint_invalidation && graphics_layer) {
@@ -2974,7 +3012,7 @@ void PaintLayerScrollableArea::DidScrollWithScrollbar(
   UseCounter::Count(document, scrollbar_use_uma);
 }
 
-CompositorElementId PaintLayerScrollableArea::GetCompositorElementId() const {
+CompositorElementId PaintLayerScrollableArea::GetScrollElementId() const {
   return CompositorElementIdFromUniqueObjectId(
       GetLayoutBox()->UniqueId(), CompositorElementIdNamespace::kScroll);
 }

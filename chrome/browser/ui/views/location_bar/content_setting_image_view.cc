@@ -63,6 +63,9 @@ base::Optional<ViewID> GetViewID(
   return base::nullopt;
 }
 
+// The preferred max width for the promo to be shown.
+const unsigned int promo_width = 240;
+
 }  // namespace
 
 ContentSettingImageView::ContentSettingImageView(
@@ -223,7 +226,7 @@ ContentSettingImageModel::ImageType ContentSettingImageView::GetTypeForTesting()
 
 void ContentSettingImageView::OnWidgetDestroying(views::Widget* widget) {
   if (indicator_promo_ && indicator_promo_->GetWidget() == widget) {
-    this->SetHighlighted(false);
+    GetInkDrop()->SetFocused(false);
     observer_.Remove(widget);
     indicator_promo_ = nullptr;
     // The highlighted icon needs to be recolored.
@@ -256,11 +259,10 @@ void ContentSettingImageView::AnimationEnded(const gfx::Animation* animation) {
     indicator_promo_ = FeaturePromoBubbleView::CreateOwned(
         this, views::BubbleBorder::TOP_RIGHT,
         FeaturePromoBubbleView::ActivationAction::ACTIVATE,
-        IDS_NOTIFICATIONS_QUIET_PERMISSION_NEW_REQUEST_PROMO, base::nullopt,
-        base::nullopt,
-        std::make_unique<FeaturePromoBubbleTimeout>(base::TimeDelta(),
-                                                    base::TimeDelta()));
-    this->SetHighlighted(true);
+        IDS_NOTIFICATIONS_QUIET_PERMISSION_NEW_REQUEST_PROMO, promo_width,
+        base::nullopt, base::nullopt);
+
+    GetInkDrop()->SetFocused(true);
     observer_.Add(indicator_promo_->GetWidget());
     SchedulePaint();
     content_setting_image_model_->SetPromoWasShown(web_contents);

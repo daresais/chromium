@@ -424,8 +424,8 @@ void RenderViewTest::SetUp() {
       mojom::DocumentScopedInterfaceBundle::New();
   render_thread_->PassInitialInterfaceProviderReceiverForFrame(
       view_params->main_frame_routing_id,
-      mojo::MakeRequest(
-          &view_params->main_frame_interface_bundle->interface_provider));
+      view_params->main_frame_interface_bundle->interface_provider
+          .InitWithNewPipeAndPassReceiver());
 
   mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>
       browser_interface_broker;
@@ -766,6 +766,10 @@ void RenderViewTest::OnSameDocumentNavigation(blink::WebLocalFrame* frame,
       is_new_navigation ? blink::kWebStandardCommit
                         : blink::kWebHistoryInertCommit,
       false /* content_initiated */);
+}
+
+void RenderViewTest::SetUseZoomForDSFEnabled(bool enabled) {
+  render_thread_->SetUseZoomForDSFEnabled(enabled);
 }
 
 blink::WebWidget* RenderViewTest::GetWebWidget() {
