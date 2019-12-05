@@ -5,8 +5,6 @@
 #include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 
-#include <iostream>
-
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
@@ -44,7 +42,6 @@ WebFeature GetWebFeature(
 void SubresourceIntegrityHelper::DoReport(
     ExecutionContext& execution_context,
     const SubresourceIntegrity::ReportInfo& report_info) {
-  std::cout << "Reporting integrity" << std::endl;
   for (auto feature : report_info.UseCounts()) {
     UseCounter::Count(&execution_context, GetWebFeature(feature));
   }
