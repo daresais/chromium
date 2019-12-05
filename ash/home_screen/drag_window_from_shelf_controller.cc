@@ -217,7 +217,7 @@ DragWindowFromShelfController::EndDrag(const gfx::Point& location_in_screen,
     DCHECK(!in_splitview);
     if (in_overview) {
       overview_controller->EndOverview(
-          OverviewSession::EnterExitOverviewType::kImmediateExit);
+          OverviewSession::EnterExitOverviewType::kFadeOutExit);
     }
     ScaleDownWindowAfterDrag();
     window_drag_result = ShelfWindowDragResult::kGoToHomeScreen;
@@ -229,7 +229,6 @@ DragWindowFromShelfController::EndDrag(const gfx::Point& location_in_screen,
     // dragged window to go to home screen.
     ScaleDownWindowAfterDrag();
     window_drag_result = ShelfWindowDragResult::kGoToHomeScreen;
-
   } else {
     window_drag_result = ShelfWindowDragResult::kGoToOverviewMode;
   }
@@ -350,7 +349,9 @@ void DragWindowFromShelfController::OnDragEnded(
                                              location_in_screen);
   }
 
-  Shell::Get()->home_screen_controller()->OnWindowDragEnded();
+  // Scale-in-to-show home screen if home screen should be shown after drag
+  // ends.
+  Shell::Get()->home_screen_controller()->OnWindowDragEnded(/*animate=*/true);
 
   // Clear the wallpaper dim and blur if not in overview after drag ends.
   // If in overview, the dim and blur will be cleared after overview ends.
@@ -599,6 +600,16 @@ void DragWindowFromShelfController::HideOverviewDuringDrag() {
 }
 
 void DragWindowFromShelfController::ScaleDownWindowAfterDrag() {
+  // Notify home screen controller that the home screen is about to be shown, so
+  // home screen and shelf start updating their state as the window is
+  // minimizing.
+  Shell::Get()
+      ->home_screen_controller()
+      ->delegate()
+      ->OnHomeLauncherPositionChanged(
+          /*percent_shown=*/100,
+          display::Screen::GetScreen()->GetPrimaryDisplay().id());
+
   // Do the scale-down transform for the entire transient tree.
   for (auto* window : GetTransientTreeIterator(window_)) {
     // self-destructed when window transform animation is done.
@@ -606,8 +617,22 @@ void DragWindowFromShelfController::ScaleDownWindowAfterDrag() {
         window, WindowScaleAnimation::WindowScaleType::kScaleDownToShelf,
         window == window_ ? base::make_optional(original_backdrop_mode_)
                           : base::nullopt,
-        base::NullCallback());
+        window == window_
+            ? base::BindOnce(
+                  &DragWindowFromShelfController::OnWindowScaledDownAfterDrag,
+                  weak_ptr_factory_.GetWeakPtr())
+            : base::NullCallback());
   }
+}
+
+void DragWindowFromShelfController::OnWindowScaledDownAfterDrag() {
+  HomeScreenController* home_screen_controller =
+      Shell::Get()->home_screen_controller();
+  if (!home_screen_controller || !home_screen_controller->delegate())
+    return;
+
+  home_screen_controller->delegate()->OnHomeLauncherAnimationComplete(
+      /*shown=*/true, display::Screen::GetScreen()->GetPrimaryDisplay().id());
 }
 
 void DragWindowFromShelfController::ScaleUpToRestoreWindowAfterDrag() {

@@ -7503,6 +7503,7 @@ Unknown properties are collapsed to zero. -->
   <int value="24" label="Unsupported rounded corner rect."/>
   <int value="25" label="Rounded rect doesn't match clip rect."/>
   <int value="26" label="Rounded rect doesn't have uniform corner radii."/>
+  <int value="27" label="Too many quads."/>
 </enum>
 
 <enum name="CanMakePaymentUsage">
@@ -18809,7 +18810,6 @@ Called by update_net_error_codes.py.-->
   <int value="575" label="BuiltinCertificateVerifierEnabled"/>
   <int value="576" label="CrostiniRootAccessAllowed"/>
   <int value="577" label="VmManagementCliAllowed"/>
-  <int value="578" label="SafeBrowsingRealTimeLookupEnabled"/>
   <int value="579" label="CACertificateManagementAllowed"/>
   <int value="580" label="PasswordLeakDetectionEnabled"/>
   <int value="581" label="LockScreenMediaPlaybackEnabled"/>
@@ -18883,6 +18883,7 @@ Called by update_net_error_codes.py.-->
   <int value="649" label="SyncTypesListDisabled"/>
   <int value="650" label="AmbientAuthenticationInPrivateModesEnabled"/>
   <int value="651" label="PaymentMethodQueryEnabled"/>
+  <int value="652" label="StricterMixedContentTreatmentEnabled"/>
 </enum>
 
 <enum name="EnterprisePolicyInvalidations">
@@ -21477,6 +21478,10 @@ Called by update_net_error_codes.py.-->
   <int value="1418" label="AUTOTESTPRIVATE_INSTALLPLUGINVM"/>
   <int value="1419" label="CRASHREPORTPRIVATE_REPORTERROR"/>
   <int value="1420" label="AUTOTESTPRIVATE_SETMETRICSENABLED"/>
+  <int value="1421" label="ENTERPRISEREPORTINGPRIVATE_GETPERSISTENTSECRET"/>
+  <int value="1422" label="ENTERPRISEREPORTINGPRIVATE_GETDEVICEDATA"/>
+  <int value="1423" label="ENTERPRISEREPORTINGPRIVATE_SETDEVICEDATA"/>
+  <int value="1424" label="ENTERPRISEREPORTINGPRIVATE_GETDEVICEINFO"/>
 </enum>
 
 <enum name="ExtensionIconState">
@@ -30844,6 +30849,18 @@ Called by update_gpu_driver_bug_workaround_entries.py.-->
   <int value="2" label="Dismissed"/>
 </enum>
 
+<enum name="HappinessTrackingSurveyShouldShowSurveyReasons">
+  <int value="0" label="Shown"/>
+  <int value="1" label="Offline"/>
+  <int value="2" label="Last session crashed"/>
+  <int value="3" label="Received survey in current milestone"/>
+  <int value="4" label="Profile too new"/>
+  <int value="5" label="Last survey too recent"/>
+  <int value="6" label="Below probability limit"/>
+  <int value="7" label="Trigger string mismatch"/>
+  <int value="8" label="Not regular browser"/>
+</enum>
+
 <enum name="HeapProfilingMode">
   <int value="0" label="None"/>
   <int value="1" label="Minimal"/>
@@ -34291,6 +34308,14 @@ Called by update_gpu_driver_bug_workaround_entries.py.-->
   <int value="7"
       label="Not blocked but the total size of URL and request headers
              exceeds 256kb"/>
+</enum>
+
+<enum name="KeepaliveRequestResult">
+  <int value="0" label="OK"/>
+  <int value="1" label="Mojo connection is lost before response arrival"/>
+  <int value="2" label="Mojo connection is lost after response arrival"/>
+  <int value="3" label="Error before response arrival"/>
+  <int value="4" label="Error after response arrival"/>
 </enum>
 
 <enum name="KerberosConfigErrorCode">
@@ -38462,6 +38487,7 @@ from previous Chrome versions.
   <int value="1155923106" label="NTPOfflinePages:enabled"/>
   <int value="1163255347" label="ash-enable-touch-view-touch-feedback"/>
   <int value="1164377197" label="SwipingFromLeftEdgeToGoBack:enabled"/>
+  <int value="1164460660" label="AutofillEnableVirtualCard:enabled"/>
   <int value="1165682330" label="AutofillSaveAndFillVPA:disabled"/>
   <int value="1166169237" label="disable-delay-agnostic-aec"/>
   <int value="1166789664" label="SyncPseudoUSSAppList:disabled"/>
@@ -39065,6 +39091,7 @@ from previous Chrome versions.
   <int value="1913263516" label="OculusVR:enabled"/>
   <int value="1913298816" label="OverlayScrollbar:enabled"/>
   <int value="1913926782" label="ChromeModernAlternateCardLayout:disabled"/>
+  <int value="1914347357" label="AutofillEnableVirtualCard:disabled"/>
   <int value="1915028326" label="BuiltInModuleKvStorage:disabled"/>
   <int value="1915178511" label="disable-blink-features"/>
   <int value="1918984253"
@@ -54877,6 +54904,12 @@ Called by update_net_trust_anchors.py.-->
   <int value="3" label="Last redirect in URL chain"/>
 </enum>
 
+<enum name="SafeBrowsingAllowlistAsyncMatch">
+  <int value="0" label="ASYNC"/>
+  <int value="1" label="MATCH"/>
+  <int value="2" label="NO_MATCH"/>
+</enum>
+
 <enum name="SafeBrowsingAppOptIn">
   <int value="0" label="No opt-in preference in manifest"/>
   <int value="1" label="Explicit opt-in via manifest"/>
@@ -61462,6 +61495,11 @@ would be helpful to identify which type is being sent.
     The ExamplePreprocessor returned an error other than, or in addition to, the
     kNoFeatureIndexFound error.
   </int>
+</enum>
+
+<enum name="TabPreviewCaptureType">
+  <int value="0" label="Copy from visible RenderWidgetHostView"/>
+  <int value="1" label="Streamed from background tab"/>
 </enum>
 
 <enum name="TabRendererCrashStatus">

@@ -24,6 +24,22 @@ import {TabData, TabsApiProxy} from './tabs_api_proxy.js';
  */
 const SCROLL_PADDING = 32;
 
+/** @type {boolean} */
+let scrollAnimationEnabled = true;
+
+/** @param {boolean} enabled */
+export function setScrollAnimationEnabledForTesting(enabled) {
+  scrollAnimationEnabled = enabled;
+}
+
+/**
+ * @enum {string}
+ */
+const LayoutVariable = {
+  VIEWPORT_WIDTH: '--tabstrip-viewport-width',
+  TAB_WIDTH: '--tabstrip-tab-thumbnail-width',
+};
+
 /**
  * @param {!Element} element
  * @return {boolean}
@@ -48,6 +64,13 @@ class TabListElement extends CustomElement {
      * @type {!Promise}
      */
     this.animationPromises = Promise.resolve();
+
+    /**
+     * The ID of the current animation frame that is in queue to update the
+     * scroll position.
+     * @private {?number}
+     */
+    this.currentScrollUpdateFrame_ = null;
 
     /** @private {!Function} */
     this.documentVisibilityChangeListener_ = () =>
@@ -75,6 +98,7 @@ class TabListElement extends CustomElement {
             entry.target.tab.id, entry.isIntersecting);
       }
     }, {
+      root: this,
       // The horizontal root margin is set to 100% to also track thumbnails that
       // are one standard finger swipe away.
       rootMargin: '0% 100%',
@@ -90,9 +114,6 @@ class TabListElement extends CustomElement {
     this.pinnedTabsContainerElement_ =
         /** @type {!Element} */ (
             this.shadowRoot.querySelector('#pinnedTabsContainer'));
-
-    /** @private {!Element} */
-    this.scrollingParent_ = document.documentElement;
 
     /** @private {!TabStripEmbedderProxy} */
     this.tabStripEmbedderProxy_ = TabStripEmbedderProxy.getInstance();
@@ -154,6 +175,50 @@ class TabListElement extends CustomElement {
   }
 
   /**
+   * @param {number} scrollBy
+   * @private
+   */
+  animateScrollPosition_(scrollBy) {
+    if (this.currentScrollUpdateFrame_) {
+      cancelAnimationFrame(this.currentScrollUpdateFrame_);
+      this.currentScrollUpdateFrame_ = null;
+    }
+
+    const prevScrollLeft = this.scrollLeft;
+    if (!scrollAnimationEnabled || !this.tabStripEmbedderProxy_.isVisible()) {
+      // Do not animate if tab strip is not visible.
+      this.scrollLeft = prevScrollLeft + scrollBy;
+      return;
+    }
+
+    const duration = 350;
+    let startTime;
+
+    const onAnimationFrame = (currentTime) => {
+      const startScroll = this.scrollLeft;
+      if (!startTime) {
+        startTime = currentTime;
+      }
+
+      const elapsedRatio = Math.min(1, (currentTime - startTime) / duration);
+
+      // The elapsed ratio should be decelerated such that the elapsed time
+      // of the animation gets less and less further apart as time goes on,
+      // giving the effect of an animation that slows down towards the end. When
+      // 0ms has passed, the decelerated ratio should be 0. When the full
+      // duration has passed, the ratio should be 1.
+      const deceleratedRatio =
+          1 - (1 - elapsedRatio) / Math.pow(2, 6 * elapsedRatio);
+
+      this.scrollLeft = prevScrollLeft + (scrollBy * deceleratedRatio);
+
+      this.currentScrollUpdateFrame_ =
+          deceleratedRatio < 1 ? requestAnimationFrame(onAnimationFrame) : null;
+    };
+    this.currentScrollUpdateFrame_ = requestAnimationFrame(onAnimationFrame);
+  }
+
+  /**
    * @param {!Object<string, string>} dictionary
    * @private
    */
@@ -172,7 +237,6 @@ class TabListElement extends CustomElement {
     this.tabsApi_.getTabs().then(tabs => {
       this.tabStripEmbedderProxy_.reportTabDataReceivedDuration(
           tabs.length, Date.now() - getTabsStartTimestamp);
-
       tabs.forEach(tab => this.onTabCreated_(tab));
       addWebUIListener('tab-created', tab => this.onTabCreated_(tab));
       addWebUIListener(
@@ -230,6 +294,14 @@ class TabListElement extends CustomElement {
   getActiveTab_() {
     return /** @type {?TabElement} */ (
         this.shadowRoot.querySelector('tabstrip-tab[active]'));
+  }
+
+  /**
+   * @param {!LayoutVariable} variable
+   * @return {number} in pixels
+   */
+  getLayoutVariable_(variable) {
+    return parseInt(this.style.getPropertyValue(variable), 10);
   }
 
   /**
@@ -374,6 +446,9 @@ class TabListElement extends CustomElement {
     if (newlyActiveTab) {
       newlyActiveTab.tab = /** @type {!TabData} */ (
           Object.assign({}, newlyActiveTab.tab, {active: true}));
+      if (!this.tabStripEmbedderProxy_.isVisible()) {
+        this.scrollToTab_(newlyActiveTab);
+      }
     }
   }
 
@@ -494,21 +569,31 @@ class TabListElement extends CustomElement {
    * @private
    */
   scrollToTab_(tabElement) {
-    const screenLeft = this.scrollingParent_.scrollLeft;
-    const screenRight = screenLeft + this.scrollingParent_.offsetWidth;
+    const tabElementLeft = tabElement.getBoundingClientRect().left;
 
-    if (screenLeft > tabElement.offsetLeft) {
+    let scrollBy = 0;
+    if (tabElementLeft === SCROLL_PADDING) {
+      // Perfectly aligned to the left.
+      return;
+    } else if (tabElementLeft < SCROLL_PADDING) {
       // If the element's left is to the left of the visible screen, scroll
-      // such that the element's left edge is aligned with the screen's edge
-      this.scrollingParent_.scrollLeft = tabElement.offsetLeft - SCROLL_PADDING;
-    } else if (screenRight < tabElement.offsetLeft + tabElement.offsetWidth) {
-      // If the element's right is to the right of the visible screen, scroll
-      // such that the element's right edge is aligned with the screen's right
-      // edge.
-      this.scrollingParent_.scrollLeft = tabElement.offsetLeft +
-          tabElement.offsetWidth - this.scrollingParent_.offsetWidth +
-          SCROLL_PADDING;
+      // such that the element's left edge is aligned with the screen's edge.
+      scrollBy = tabElementLeft - SCROLL_PADDING;
+    } else {
+      const tabElementWidth = this.getLayoutVariable_(LayoutVariable.TAB_WIDTH);
+      const tabElementRight = tabElementLeft + tabElementWidth;
+      const viewportWidth =
+          this.getLayoutVariable_(LayoutVariable.VIEWPORT_WIDTH);
+
+      if (tabElementRight + SCROLL_PADDING > viewportWidth) {
+        scrollBy = (tabElementRight + SCROLL_PADDING) - viewportWidth;
+      } else {
+        // Perfectly aligned to the right.
+        return;
+      }
     }
+
+    this.animateScrollPosition_(scrollBy);
   }
 
   /**

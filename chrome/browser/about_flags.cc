@@ -1313,13 +1313,15 @@ const FeatureEntry::FeatureVariation
 const FeatureEntry::FeatureParam
     kQuietNotificationPromptsWithAdaptiveActivation[] = {
         {QuietNotificationPermissionUiConfig::kEnableAdaptiveActivation,
+         "true"},
+        {QuietNotificationPermissionUiConfig::kEnableCrowdDenyTriggering,
          "true"}};
 
 // The default "Enabled" option has the semantics of showing the quiet UI
 // (animated location bar indicator on Desktop, and mini-infobars on Android),
 // but only when the user directly turns it on in Settings. In addition to that,
 // expose an option to also enable adaptively turning on the quiet UI after
-// three consecutive denies.
+// three consecutive denies or based on crowd deny verdicts.
 const FeatureEntry::FeatureVariation kQuietNotificationPromptsVariations[] = {
     {"(with adaptive activation)",
      kQuietNotificationPromptsWithAdaptiveActivation,
@@ -4471,13 +4473,6 @@ const FeatureEntry kFeatureEntries[] = {
      flag_descriptions::kPolicyAtomicGroupsEnabledDescription, kOsAll,
      FEATURE_VALUE_TYPE(policy::features::kPolicyAtomicGroup)},
 
-    {"enable-autofill-updated-card-unmask-prompt-ui",
-     flag_descriptions::kEnableAutofillUpdatedCardUnmaskPromptUiName,
-     flag_descriptions::kEnableAutofillUpdatedCardUnmaskPromptUiDescription,
-     kOsDesktop,
-     FEATURE_VALUE_TYPE(
-         autofill::features::kAutofillUpdatedCardUnmaskPromptUi)},
-
     {"decode-jpeg-images-to-yuv",
      flag_descriptions::kDecodeJpeg420ImagesToYUVName,
      flag_descriptions::kDecodeJpeg420ImagesToYUVDescription, kOsAll,
@@ -4754,6 +4749,11 @@ const FeatureEntry kFeatureEntries[] = {
      flag_descriptions::kPassiveMixedContentWarningName,
      flag_descriptions::kPassiveMixedContentWarningDescription, kOsAll,
      FEATURE_VALUE_TYPE(security_state::features::kPassiveMixedContentWarning)},
+
+    {"autofill-enable-virtual-card",
+     flag_descriptions::kAutofillEnableVirtualCardName,
+     flag_descriptions::kAutofillEnableVirtualCardDescription, kOsDesktop,
+     FEATURE_VALUE_TYPE(autofill::features::kAutofillEnableVirtualCard)},
 
     // NOTE: Adding a new flag requires adding a corresponding entry to enum
     // "LoginCustomFlags" in tools/metrics/histograms/enums.xml. See "Flag

@@ -391,6 +391,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       service_manager::BinderRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
   void RegisterBrowserInterfaceBindersForFrame(
+      content::RenderFrameHost* render_frame_host,
       service_manager::BinderMapWithContext<content::RenderFrameHost*>* map)
       override;
   void BindInterfaceRequestFromFrame(
@@ -475,6 +476,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       int render_process_id,
       URLLoaderFactoryType type,
       const url::Origin& request_initiator,
+      base::Optional<int64_t> navigation_id,
       mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
       mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>*
           header_client,
@@ -657,6 +659,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   static bool HandleWebUIReverse(GURL* url,
                                  content::BrowserContext* browser_context);
   virtual ui::NativeTheme* GetWebTheme() const;  // For testing.
+
+  // Used by subclasses (e.g. implemented by downstream embedders) to add
+  // their own extra part objects.
+  void AddExtraPart(ChromeContentBrowserClientParts* part) {
+    extra_parts_.push_back(part);
+  }
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;

@@ -151392,6 +151392,9 @@
    "css/cssom/OWNERS": [
     []
    ],
+   "css/cssom/border-shorthand-serialization-expected.txt": [
+    []
+   ],
    "css/cssom/cssstyledeclaration-properties-expected.txt": [
     []
    ],
@@ -180183,6 +180186,9 @@
    "web-animations/interfaces/KeyframeEffect/style-change-events-expected.txt": [
     []
    ],
+   "web-animations/interfaces/KeyframeEffect/target-expected.txt": [
+    []
+   ],
    "web-animations/resources/easing-tests.js": [
     []
    ],
@@ -180481,6 +180487,12 @@
     []
    ],
    "webauthn/helpers.js": [
+    []
+   ],
+   "webauthn/resources/common-inputs.js": [
+    []
+   ],
+   "webauthn/resources/utils.js": [
     []
    ],
    "webdriver/META.yml": [
@@ -226053,6 +226065,12 @@
    "css/cssom/at-namespace.html": [
     [
      "css/cssom/at-namespace.html",
+     {}
+    ]
+   ],
+   "css/cssom/border-shorthand-serialization.html": [
+    [
+     "css/cssom/border-shorthand-serialization.html",
      {}
     ]
    ],
@@ -317690,6 +317708,14 @@
     [
      "webauthn/securecontext.https.html",
      {}
+    ]
+   ],
+   "webauthn/webauthn-testdriver-basic.https.html": [
+    [
+     "webauthn/webauthn-testdriver-basic.https.html",
+     {
+      "testdriver": true
+     }
     ]
    ],
    "webdriver/tests/interface.html": [
@@ -429150,6 +429176,14 @@
    "04a8a2289aa67e05a359ece1d09d961539d82571",
    "testharness"
   ],
+  "css/cssom/border-shorthand-serialization-expected.txt": [
+   "11e3cbab5c713a3d4cdbede0f65f442df2bded53",
+   "support"
+  ],
+  "css/cssom/border-shorthand-serialization.html": [
+   "9b5821563c49c8874f7bbd8dc4ffb2f9813a789e",
+   "testharness"
+  ],
   "css/cssom/computed-style-001.html": [
    "d637b066b03a71283ad89315a5c346a1715900f1",
    "testharness"
@@ -508071,7 +508105,7 @@
    "support"
   ],
   "svg/META.yml": [
-   "ee0fff087c4f9a5723f53cc002e228a713e730da",
+   "a928f0c399126a5e463e1497c4a454dabe6f24fe",
    "support"
   ],
   "svg/OWNERS": [
@@ -521087,7 +521121,7 @@
    "testharness"
   ],
   "web-animations/interfaces/Animatable/animate-expected.txt": [
-   "081ee316bc5218162d9a54e98b96fe393e895e3c",
+   "c7b0ba38f76e1644bf778a0c51075ad149499eee",
    "support"
   ],
   "web-animations/interfaces/Animatable/animate-no-browsing-context-expected.txt": [
@@ -521099,7 +521133,7 @@
    "testharness"
   ],
   "web-animations/interfaces/Animatable/animate.html": [
-   "2d09cdf4545e8073786215169fd3f26c28a7e119",
+   "95d7db7bb3ba36fc9a0914ebe0d2c8e910e29cf1",
    "testharness"
   ],
   "web-animations/interfaces/Animatable/getAnimations-expected.txt": [
@@ -521270,8 +521304,12 @@
    "af53d2d5e141bf20a1f5e79aeaa5c87520f11e2d",
    "testharness"
   ],
+  "web-animations/interfaces/KeyframeEffect/target-expected.txt": [
+   "e7cfde5139acc1d676a7194e7e393c8667fd6190",
+   "support"
+  ],
   "web-animations/interfaces/KeyframeEffect/target.html": [
-   "10f42eea4e5b406c822802c1078fcc1295cb8a39",
+   "a9827d64d3d076185daee4787589832cc74f0ec0",
    "testharness"
   ],
   "web-animations/resources/easing-tests.js": [
@@ -522870,12 +522908,24 @@
    "ff0efcb656a740e9fdee2a3cc8dbfddda9b2a563",
    "testharness"
   ],
+  "webauthn/resources/common-inputs.js": [
+   "8370f7f079a014ea58dd3ce606b7fa48dcc88a3e",
+   "support"
+  ],
+  "webauthn/resources/utils.js": [
+   "f361a94d2e4f63b18bf1f7f2971db6322a30000f",
+   "support"
+  ],
   "webauthn/securecontext.http.html": [
    "52786950f383eb0454edcf9fad9b637dde956ca8",
    "testharness"
   ],
   "webauthn/securecontext.https.html": [
    "6c9aabd11ea3a51688962890dde29d5c41ec6c6f",
+   "testharness"
+  ],
+  "webauthn/webauthn-testdriver-basic.https.html": [
+   "7790f5d0d3fd7567df24a3aeebc4d7541c118e1a",
    "testharness"
   ],
   "webdriver/META.yml": [

@@ -2216,7 +2216,6 @@ bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
                         OnSetFrameOwnerProperties)
     IPC_MESSAGE_HANDLER(FrameMsg_AdvanceFocus, OnAdvanceFocus)
     IPC_MESSAGE_HANDLER(FrameMsg_AdvanceFocusInForm, OnAdvanceFocusInForm)
-    IPC_MESSAGE_HANDLER(FrameMsg_SetFocusedFrame, OnSetFocusedFrame)
     IPC_MESSAGE_HANDLER(FrameMsg_SetTextTrackSettings,
                         OnTextTrackSettingsChanged)
     IPC_MESSAGE_HANDLER(FrameMsg_GetSavableResourceLinks,
@@ -2792,12 +2791,6 @@ void RenderFrameImpl::OnAdvanceFocusInForm(blink::WebFocusType focus_type) {
   frame_->AdvanceFocusInForm(focus_type);
 }
 
-void RenderFrameImpl::OnSetFocusedFrame() {
-  // This uses focusDocumentView rather than setFocusedFrame so that focus/blur
-  // events are properly dispatched on any currently focused elements.
-  render_view_->webview()->FocusDocumentView(frame_);
-}
-
 void RenderFrameImpl::OnTextTrackSettingsChanged(
     const FrameMsg_TextTrackSettings_Params& params) {
   DCHECK(!frame_->Parent());
@@ -3227,7 +3220,7 @@ void RenderFrameImpl::CommitNavigation(
     network::mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle response_body,
     network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
         subresource_loader_factories,
     base::Optional<std::vector<mojom::TransferrableURLLoaderPtr>>
         subresource_overrides,
@@ -3258,7 +3251,7 @@ void RenderFrameImpl::CommitPerNavigationMojoInterfaceNavigation(
     network::mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle response_body,
     network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
         subresource_loader_factories,
     base::Optional<std::vector<mojom::TransferrableURLLoaderPtr>>
         subresource_overrides,
@@ -3287,7 +3280,7 @@ void RenderFrameImpl::CommitNavigationInternal(
     network::mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle response_body,
     network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
         subresource_loader_factories,
     base::Optional<std::vector<mojom::TransferrableURLLoaderPtr>>
         subresource_overrides,
@@ -3425,7 +3418,7 @@ bool RenderFrameImpl::ShouldIgnoreCommitNavigation(
 void RenderFrameImpl::CommitNavigationWithParams(
     mojom::CommonNavigationParamsPtr common_params,
     mojom::CommitNavigationParamsPtr commit_params,
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
         subresource_loader_factories,
     base::Optional<std::vector<mojom::TransferrableURLLoaderPtr>>
         subresource_overrides,
@@ -3549,7 +3542,7 @@ void RenderFrameImpl::CommitFailedNavigation(
     bool has_stale_copy_in_cache,
     int error_code,
     const base::Optional<std::string>& error_page_content,
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
         subresource_loader_factories,
     mojom::NavigationClient::CommitFailedNavigationCallback callback) {
   TRACE_EVENT1("navigation,benchmark,rail",
@@ -3796,7 +3789,7 @@ void RenderFrameImpl::HandleRendererDebugURL(const GURL& url) {
 }
 
 void RenderFrameImpl::UpdateSubresourceLoaderFactories(
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
         subresource_loader_factories) {
   DCHECK(loader_factories_);
   if (loader_factories_->IsHostChildURLLoaderFactoryBundle()) {
@@ -3858,9 +3851,9 @@ v8::Local<v8::Object> RenderFrameImpl::GetScriptableObject(
 }
 
 void RenderFrameImpl::UpdateSubresourceFactory(
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo> info) {
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle> info) {
   auto child_info =
-      std::make_unique<ChildURLLoaderFactoryBundleInfo>(std::move(info));
+      std::make_unique<ChildPendingURLLoaderFactoryBundle>(std::move(info));
   GetLoaderFactoryBundle()->Update(std::move(child_info));
 }
 
@@ -6406,8 +6399,8 @@ RenderFrameImpl::GetLoaderFactoryBundleFromCreator() {
   RenderFrameImpl* creator = RenderFrameImpl::FromWebFrame(
       frame_->Parent() ? frame_->Parent() : frame_->Opener());
   if (creator) {
-    auto bundle_info =
-        base::WrapUnique(static_cast<TrackedChildURLLoaderFactoryBundleInfo*>(
+    auto bundle_info = base::WrapUnique(
+        static_cast<TrackedChildPendingURLLoaderFactoryBundle*>(
             creator->GetLoaderFactoryBundle()->Clone().release()));
     return base::MakeRefCounted<TrackedChildURLLoaderFactoryBundle>(
         std::move(bundle_info));
@@ -6419,7 +6412,7 @@ RenderFrameImpl::GetLoaderFactoryBundleFromCreator() {
 
 scoped_refptr<ChildURLLoaderFactoryBundle>
 RenderFrameImpl::CreateLoaderFactoryBundle(
-    std::unique_ptr<blink::URLLoaderFactoryBundleInfo> info,
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle> info,
     base::Optional<std::vector<mojom::TransferrableURLLoaderPtr>>
         subresource_overrides,
     mojo::PendingRemote<network::mojom::URLLoaderFactory>
@@ -6442,7 +6435,7 @@ RenderFrameImpl::CreateLoaderFactoryBundle(
 
   if (info) {
     loader_factories->Update(
-        std::make_unique<ChildURLLoaderFactoryBundleInfo>(std::move(info)));
+        std::make_unique<ChildPendingURLLoaderFactoryBundle>(std::move(info)));
   }
   if (subresource_overrides) {
     loader_factories->UpdateSubresourceOverrides(&*subresource_overrides);

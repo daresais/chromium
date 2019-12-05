@@ -84,6 +84,83 @@ class EnterpriseReportingPrivateGetDeviceIdFunction : public ExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(EnterpriseReportingPrivateGetDeviceIdFunction);
 };
 
+class EnterpriseReportingPrivateGetPersistentSecretFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("enterprise.reportingPrivate.getPersistentSecret",
+                             ENTERPRISEREPORTINGPRIVATE_GETPERSISTENTSECRET)
+
+  EnterpriseReportingPrivateGetPersistentSecretFunction();
+
+ private:
+  ~EnterpriseReportingPrivateGetPersistentSecretFunction() override;
+
+  // ExtensionFunction
+  ExtensionFunction::ResponseAction Run() override;
+
+  // Callback once the data was retrieved from the file.
+  void OnDataRetrieved(const std::string& data, bool status);
+
+  DISALLOW_COPY_AND_ASSIGN(
+      EnterpriseReportingPrivateGetPersistentSecretFunction);
+};
+
+class EnterpriseReportingPrivateGetDeviceDataFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("enterprise.reportingPrivate.getDeviceData",
+                             ENTERPRISEREPORTINGPRIVATE_GETDEVICEDATA)
+
+  EnterpriseReportingPrivateGetDeviceDataFunction();
+
+ private:
+  ~EnterpriseReportingPrivateGetDeviceDataFunction() override;
+
+  // ExtensionFunction
+  ExtensionFunction::ResponseAction Run() override;
+
+  // Callback once the data was retrieved from the file.
+  void OnDataRetrieved(const std::string& data, bool status);
+
+  DISALLOW_COPY_AND_ASSIGN(EnterpriseReportingPrivateGetDeviceDataFunction);
+};
+
+class EnterpriseReportingPrivateSetDeviceDataFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("enterprise.reportingPrivate.setDeviceData",
+                             ENTERPRISEREPORTINGPRIVATE_SETDEVICEDATA)
+
+  EnterpriseReportingPrivateSetDeviceDataFunction();
+
+ private:
+  ~EnterpriseReportingPrivateSetDeviceDataFunction() override;
+
+  // ExtensionFunction
+  ExtensionFunction::ResponseAction Run() override;
+
+  // Callback once the data was stored to the file.
+  void OnDataStored(bool status);
+
+  DISALLOW_COPY_AND_ASSIGN(EnterpriseReportingPrivateSetDeviceDataFunction);
+};
+
+class EnterpriseReportingPrivateGetDeviceInfoFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("enterprise.reportingPrivate.getDeviceInfo",
+                             ENTERPRISEREPORTINGPRIVATE_GETDEVICEINFO)
+  EnterpriseReportingPrivateGetDeviceInfoFunction();
+
+  // ExtensionFunction
+  ExtensionFunction::ResponseAction Run() override;
+
+ private:
+  ~EnterpriseReportingPrivateGetDeviceInfoFunction() override;
+
+  DISALLOW_COPY_AND_ASSIGN(EnterpriseReportingPrivateGetDeviceInfoFunction);
+};
+
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_ENTERPRISE_REPORTING_PRIVATE_ENTERPRISE_REPORTING_PRIVATE_API_H_
