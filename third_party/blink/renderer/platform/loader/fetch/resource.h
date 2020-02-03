@@ -55,6 +55,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/core/script/script_element_base.h"
 
 namespace base {
 class Clock;
@@ -253,6 +254,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   // the cache entry file
   virtual void Finish(base::TimeTicks finish_time,
                       base::SingleThreadTaskRunner*);
+  virtual void Finish(base::TimeTicks finish_time,
+                      base::SingleThreadTaskRunner*,
+					  DetachableConsoleLogger& console_logger);
   void FinishForTest() { Finish(base::TimeTicks(), nullptr); }
 
   virtual scoped_refptr<const SharedBuffer> ResourceBuffer() const {

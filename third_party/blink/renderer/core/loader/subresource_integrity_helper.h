@@ -9,12 +9,14 @@
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/loader/fetch/console_logger.h"
 
 namespace blink {
 
 class ExecutionContext;
+class ConsoleMessage;
 
-class CORE_EXPORT SubresourceIntegrityHelper final {
+class CORE_EXPORT SubresourceIntegrityHelper : public ConsoleLogger {
   STATIC_ONLY(SubresourceIntegrityHelper);
 
  public:

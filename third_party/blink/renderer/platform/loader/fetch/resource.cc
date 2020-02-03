@@ -60,6 +60,10 @@
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
+#include "third_party/blink/renderer/core/script/script_element_base.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 
 namespace blink {
 
@@ -193,8 +197,9 @@ void Resource::SetLoader(ResourceLoader* loader) {
 void Resource::CheckResourceIntegrity() {
   // Skip the check and reuse the previous check result, especially on
   // successful revalidation.
-  if (IntegrityDisposition() != ResourceIntegrityDisposition::kNotChecked)
-    return;
+  if (IntegrityDisposition() != ResourceIntegrityDisposition::kNotChecked) {
+      return;
+  }
 
   // Loading error occurred? Then result is uncheckable.
   integrity_report_info_.Clear();
@@ -206,10 +211,18 @@ void Resource::CheckResourceIntegrity() {
 
   // No integrity attributes to check? Then we're passing.
   if (IntegrityMetadata().IsEmpty()) {
+	  if(GetType() == ResourceType::kScript || GetType() == ResourceType::kCSSStyleSheet){
+		  integrity_report_info_.AddConsoleInfoMessage(
+		          				"{\"url\": \"" + Url().ElidedString() +
+		          				"\", \"origin\": \"no integrity attribute\"}");
+	  } else if(GetType() == ResourceType::kFont){
+		  integrity_report_info_.AddConsoleInfoMessage(
+		  		          				"{\"url\": \"" + Url().ElidedString() +
+		  		          				"\", \"origin\": \"font embedded\"}");
+	  }
     integrity_disposition_ = ResourceIntegrityDisposition::kPassed;
     return;
   }
-
   const char* data = nullptr;
   size_t data_length = 0;
 
@@ -366,15 +379,34 @@ void Resource::FinishAsError(const ResourceError& error,
 }
 
 void Resource::Finish(base::TimeTicks load_response_end,
-                      base::SingleThreadTaskRunner* task_runner) {
-  DCHECK(!is_revalidating_);
-  load_response_end_ = load_response_end;
-  if (!ErrorOccurred())
-    status_ = ResourceStatus::kCached;
-  loader_ = nullptr;
-  CheckResourceIntegrity();
-  TriggerNotificationForFinishObservers(task_runner);
-  NotifyFinished();
+                      base::SingleThreadTaskRunner *task_runner,
+					  DetachableConsoleLogger& console_logger) {
+    DCHECK(!is_revalidating_);
+    load_response_end_ = load_response_end;
+    if (!ErrorOccurred())
+        status_ = ResourceStatus::kCached;
+    loader_ = nullptr;
+    CheckResourceIntegrity();
+	HeapVector<Member<ConsoleMessage>> messages;
+	SubresourceIntegrityHelper::GetConsoleMessages(integrity_report_info_, &messages);
+	for (const auto& message : messages) {
+		console_logger.AddConsoleMessage(message->Source(), message->Level(), message->Message());
+	}
+	integrity_report_info_.Clear();
+    TriggerNotificationForFinishObservers(task_runner);
+    NotifyFinished();
+}
+
+void Resource::Finish(base::TimeTicks load_response_end,
+                      base::SingleThreadTaskRunner *task_runner) {
+    DCHECK(!is_revalidating_);
+    load_response_end_ = load_response_end;
+    if (!ErrorOccurred())
+        status_ = ResourceStatus::kCached;
+    loader_ = nullptr;
+    CheckResourceIntegrity();
+    TriggerNotificationForFinishObservers(task_runner);
+    NotifyFinished();
 }
 
 AtomicString Resource::HttpContentType() const {

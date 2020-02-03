@@ -1328,6 +1328,11 @@ void ResourceFetcher::PrintPreloadWarning(Resource* resource,
     return;
 
   StringBuilder builder;
+  if(status == Resource::MatchStatus::kIntegrityMismatch){
+      builder.Append("{\"origin\": \"integrity preload error\", \"url\": \"");
+      builder.Append(resource->Url());
+      builder.Append("\", \"error\": \"");
+  }
   builder.Append("A preload for '");
   builder.Append(resource->Url());
   builder.Append("' is found, but is not used ");
@@ -1371,6 +1376,9 @@ void ResourceFetcher::PrintPreloadWarning(Resource* resource,
     case Resource::MatchStatus::kImagePlaceholder:
       builder.Append("due to different image placeholder policies.");
       break;
+  }
+  if(status == Resource::MatchStatus::kIntegrityMismatch){
+      builder.Append("\"}");
   }
   console_logger_->AddConsoleMessage(mojom::ConsoleMessageSource::kOther,
                                      mojom::ConsoleMessageLevel::kWarning,
@@ -1778,6 +1786,7 @@ void ResourceFetcher::HandleLoaderFinish(Resource* resource,
                                          base::TimeTicks response_end,
                                          LoaderFinishType type,
                                          uint32_t inflight_keepalive_bytes,
+                                         DetachableConsoleLogger& console_logger,
                                          bool should_report_corb_blocking) {
   DCHECK(resource);
 
@@ -1826,7 +1835,7 @@ void ResourceFetcher::HandleLoaderFinish(Resource* resource,
 
   resource->VirtualTimePauser().UnpauseVirtualTime();
   if (type == kDidFinishLoading) {
-    resource->Finish(response_end, task_runner_.get());
+    resource->Finish(response_end, task_runner_.get(), console_logger);
 
     // Since this resource came from the network stack we only schedule a stale
     // while revalidate request if the network asked us to. If we called

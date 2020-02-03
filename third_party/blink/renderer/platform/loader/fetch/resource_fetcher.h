@@ -209,6 +209,7 @@ class PLATFORM_EXPORT ResourceFetcher
                           base::TimeTicks finish_time,
                           LoaderFinishType,
                           uint32_t inflight_keepalive_bytes,
+                          DetachableConsoleLogger&,
                           bool should_report_corb_blocking);
   void HandleLoaderError(Resource*,
                          const ResourceError&,

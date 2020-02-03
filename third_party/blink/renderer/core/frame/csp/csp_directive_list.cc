@@ -428,11 +428,11 @@ bool CSPDirectiveList::CheckRequestWithoutIntegrityAndReportViolation(
   ReportViolation(ContentSecurityPolicy::GetDirectiveName(
                       ContentSecurityPolicy::DirectiveType::kRequireSRIFor),
                   ContentSecurityPolicy::DirectiveType::kRequireSRIFor,
-                  "Refused to load the " + resource_type + " '" +
-                      url.ElidedString() +
-                      "' because 'require-sri-for' directive requires "
-                      "integrity attribute be present for all " +
-                      resource_type + "s.",
+                  "{\"origin\": \"integrity CSP error\", \"url\": \"" + url.ElidedString() + "\",  \"error\": \"Refused to load the " + resource_type + " '" +
+                  url.ElidedString() +
+                  "' because 'require-sri-for' directive requires "
+                  "integrity attribute be present for all " +
+                  resource_type + "s.\"}",
                   url, redirect_status);
   return DenyIfEnforcingPolicy();
 }

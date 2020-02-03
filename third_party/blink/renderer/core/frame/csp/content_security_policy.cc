@@ -1257,9 +1257,9 @@ void ContentSecurityPolicy::ReportInvalidSandboxFlags(
 void ContentSecurityPolicy::ReportInvalidRequireSRIForTokens(
     const String& invalid_tokens) {
   LogToConsole(
-      "Error while parsing the 'require-sri-for' Content Security Policy "
+      "{\"origin\": \"integrity CSP parsing error\", \"error\": \"Error while parsing the 'require-sri-for' Content Security Policy "
       "directive: " +
-      invalid_tokens);
+      invalid_tokens + "\"}");
 }
 
 void ContentSecurityPolicy::ReportInvalidDirectiveValueCharacter(

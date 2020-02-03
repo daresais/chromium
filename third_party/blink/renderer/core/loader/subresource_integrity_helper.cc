@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
+#include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -55,6 +56,11 @@ void SubresourceIntegrityHelper::GetConsoleMessages(
     const SubresourceIntegrity::ReportInfo& report_info,
     HeapVector<Member<ConsoleMessage>>* messages) {
   DCHECK(messages);
+  for (const auto& message : report_info.ConsoleInfoMessages()) {
+      messages->push_back(
+          ConsoleMessage::Create(mojom::ConsoleMessageSource::kSecurity,
+                                 mojom::ConsoleMessageLevel::kInfo, message));
+  }
   for (const auto& message : report_info.ConsoleErrorMessages()) {
     messages->push_back(
         ConsoleMessage::Create(mojom::ConsoleMessageSource::kSecurity,

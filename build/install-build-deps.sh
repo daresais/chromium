@@ -114,8 +114,7 @@ if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
       "\tUbuntu 19.04 (disco)\n" \
       "\tUbuntu 19.10 (eoan)\n" \
       "\tDebian 8 (jessie) or later" >&2
-    exit 1
-  fi
+    fi
 
   if ! uname -m | egrep -q "i686|x86_64"; then
     echo "Only x86 architectures are currently supported" >&2

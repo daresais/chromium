@@ -363,8 +363,17 @@ bool ScriptLoader::PrepareScript(const TextPosition& script_start_position,
   // <spec step="12">If the script element has a nomodule content attribute and
   // the script's type is "classic", then return. The script is not
   // executed.</spec>
-  if (BlockForNoModule(script_type_, element_->NomoduleAttributeValue()))
-    return false;
+  if (BlockForNoModule(script_type_, element_->NomoduleAttributeValue())){
+	  if(element_->IntegrityAttributeValue()){
+		  KURL url = element_document.CompleteURL(StripLeadingAndTrailingHTMLSpaces(element_->SourceAttributeValue()));
+		  	  element_document.AddConsoleMessage(ConsoleMessage::Create(
+		  	          mojom::ConsoleMessageSource::kJavaScript,
+		  	          mojom::ConsoleMessageLevel::kInfo,
+		  			  "{\"url\": \"" + url.ElidedString() +
+		  			  			"\", \"origin\": \"integrity nomodule attribute\"}"));
+	  }
+	  return false;
+  }
 
   // TODO(csharrison): This logic only works if the tokenizer/parser was not
   // blocked waiting for scripts when the element was inserted. This usually

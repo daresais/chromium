@@ -164,9 +164,9 @@ class FetchManager::Loader final
             response_type_ != FetchResponseType::kCors &&
             response_type_ != FetchResponseType::kDefault) {
           report_info.AddConsoleErrorMessage(
-              "Subresource Integrity: The resource '" + url_.ElidedString() +
+        		  "{\"origin\": \"integrity resource loading error\", \"url\": \"" + url_.ElidedString() + "\", \"error\": \"Subresource Integrity: The resource '" + url_.ElidedString() +
               "' has an integrity attribute, but the response is not "
-              "eligible for integrity validation.");
+              "eligible for integrity validation.\"}");
           check_result = false;
         }
         if (check_result) {
